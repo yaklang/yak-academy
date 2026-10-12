@@ -35,7 +35,7 @@ func (r *Router) Handle(method, pattern string, required model.GlobalRole, h htt
 		if !ok {
 			return
 		}
-		if !r.authorize(w, req.Context(), user, required) {
+		if !r.authorize(w, req, user, required) {
 			return
 		}
 		ctx := context.WithValue(req.Context(), userKey, user)
@@ -77,14 +77,27 @@ func (r *Router) authenticate(w http.ResponseWriter, req *http.Request) (*model.
 }
 
 // authorize 双层角色判定：全局 → 课程级；admin 短路（rbac-model skill）。
+// 课程域从路径参数提取（Room/Topic 路由天然携带 topicSlug）。
 // 鉴权失败必须 403，禁止 404 掩盖。
-func (r *Router) authorize(w http.ResponseWriter, ctx context.Context, user *model.User, required model.GlobalRole) bool {
-	if required == "" || user.GlobalRole.Rank() >= required.Rank() {
-		return true
+func (r *Router) authorize(w http.ResponseWriter, req *http.Request, user *model.User, required model.GlobalRole) bool {
+	if required == "" {
+		return true // 仅需登录
 	}
-	// TODO(Phase2): 课程级角色（CheckRole with topicSlug）。
-	writeError(w, errForbidden)
-	return false
+	if user.GlobalRole.Rank() >= required.Rank() {
+		return true // 全局达标（admin 在此短路）
+	}
+	// 全局不足 → 查课程级角色（双层判定，rbac-model skill）。
+	topicSlug := req.PathValue("topicSlug")
+	ok, err := r.auth.CheckRole(req.Context(), user, required, topicSlug)
+	if err != nil {
+		writeError(w, &apiError{"INTERNAL", http.StatusInternalServerError, "role check failed"})
+		return false
+	}
+	if !ok {
+		writeError(w, errForbidden)
+		return false
+	}
+	return true
 }
 
 // UserFrom 从请求上下文取当前用户（handler 使用）。

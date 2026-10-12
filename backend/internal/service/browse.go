@@ -100,3 +100,21 @@ func (s *TopicService) GetRoomDetail(ctx context.Context, topicSlug, roomSlug st
 func (s *TopicService) FindChallengeByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error) {
 	return s.challenges.FindByRoomSlug(ctx, roomSlug)
 }
+
+// UpdateTopic 更新主题元数据（PUT /topics/{slug}，最低 teacher——课程级角色挂载点）。
+func (s *TopicService) UpdateTopic(ctx context.Context, topicSlug, title, summary string) (*model.Topic, error) {
+	topic, err := s.topics.FindBySlug(ctx, topicSlug)
+	if err != nil {
+		return nil, err
+	}
+	if title != "" {
+		topic.Title = title
+	}
+	if summary != "" {
+		topic.Summary = summary
+	}
+	if err := s.topics.Upsert(ctx, topic); err != nil {
+		return nil, err
+	}
+	return s.topics.FindBySlug(ctx, topicSlug)
+}

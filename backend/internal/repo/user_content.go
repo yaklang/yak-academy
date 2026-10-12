@@ -73,6 +73,11 @@ func (r *userRepo) ListCourseRoles(ctx context.Context, userID uint) ([]model.Co
 	return list, err
 }
 
+func (r *userRepo) DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error {
+	return r.db.WithContext(ctx).Where("user_id = ? AND topic_slug = ?", userID, topicSlug).
+		Delete(&model.CourseRole{}).Error
+}
+
 type contentPackageRepo struct{ db *gorm.DB }
 
 func NewContentPackageRepo(db *gorm.DB) ContentPackageRepo { return &contentPackageRepo{db} }

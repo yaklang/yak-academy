@@ -32,6 +32,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
 	r.Handle(http.MethodGet, "/api/v1/topics", "", h.listTopics)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}", "", h.getTopic)
+	r.Handle(http.MethodPut, "/api/v1/topics/{topicSlug}", "teacher", h.updateTopic)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}/rooms/{roomSlug}", "", h.getRoom)
 	r.Handle(http.MethodPost, "/api/v1/submissions", "", h.submitAnswer)
 	r.Handle(http.MethodGet, "/api/v1/submissions/{id}", "", h.getSubmission)
@@ -47,8 +48,10 @@ func (h *Handlers) Register(r *Router) {
 
 	// admin：发布与用户管理
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
+	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
+	r.Handle(http.MethodDelete, "/api/v1/admin/users/{id}/course-roles/{topicSlug}", "admin", h.deleteCourseRole)
 }
 
 func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
@@ -271,12 +274,93 @@ func (h *Handlers) publishPackage(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, pkg)
 }
 
+func (h *Handlers) updateTopic(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Title   string `json:"title"`
+		Summary string `json:"summary"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	topic, err := h.Topics.UpdateTopic(req.Context(), req.PathValue("topicSlug"), body.Title, body.Summary)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, topic)
+}
+
+func (h *Handlers) listUsers(w http.ResponseWriter, req *http.Request) {
+	page, pageSize := pageParams(req)
+	items, total, err := h.Auth.ListUsers(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
 func (h *Handlers) createUser(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "create user"})
+	var body struct {
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		GlobalRole string `json:"global_role"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user, err := h.Auth.CreateUser(req.Context(), body.Username, body.Password, model.GlobalRole(body.GlobalRole))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, user)
 }
 
 func (h *Handlers) updateRoles(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "update roles"})
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		GlobalRole  string `json:"global_role"`
+		CourseRoles []struct {
+			TopicSlug string `json:"topic_slug"`
+			Role      string `json:"role"`
+		} `json:"course_roles"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	courseRoles := make([]model.CourseRole, len(body.CourseRoles))
+	for i, cr := range body.CourseRoles {
+		courseRoles[i] = model.CourseRole{TopicSlug: cr.TopicSlug, Role: cr.Role}
+	}
+	user, err := h.Auth.UpdateRoles(req.Context(), uint(id), model.GlobalRole(body.GlobalRole), courseRoles)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *Handlers) deleteCourseRole(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Auth.DeleteCourseRole(req.Context(), uint(id), req.PathValue("topicSlug")); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func pageParams(req *http.Request) (page, pageSize int) {

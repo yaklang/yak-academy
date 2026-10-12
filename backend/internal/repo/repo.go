@@ -16,6 +16,7 @@ type UserRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
 	UpsertCourseRole(ctx context.Context, r *model.CourseRole) error
+	DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error
 	ListCourseRoles(ctx context.Context, userID uint) ([]model.CourseRole, error)
 }
 

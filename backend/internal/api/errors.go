@@ -57,6 +57,8 @@ func mapError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, service.ErrNotFound):
 		writeError(w, errNotFound)
+	case errors.Is(err, service.ErrValidation):
+		writeError(w, errValidation)
 	case service.IsNotImplemented(err):
 		w.WriteHeader(http.StatusNotImplemented)
 		_ = json.NewEncoder(w).Encode(struct {

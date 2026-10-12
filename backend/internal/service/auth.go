@@ -83,6 +83,67 @@ func (s *AuthService) CheckRole(ctx context.Context, user *model.User, required 
 	return false, nil
 }
 
+// CreateUser 管理端创建用户（bcrypt 哈希，业务逻辑在 service 层——project-conventions）。
+func (s *AuthService) CreateUser(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error) {
+	if username == "" || password == "" {
+		return nil, ErrValidation
+	}
+	if role == "" {
+		role = model.GlobalRoleStudent
+	}
+	if _, err := s.users.FindByUsername(ctx, username); err == nil {
+		return nil, ErrValidation // 用户名已存在
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	user := &model.User{Username: username, PasswordHash: string(hash), GlobalRole: role}
+	if err := s.users.Create(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateRoles 修改全局角色 + 课程级角色列表 upsert（admin 专属，路由声明）。
+func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole model.GlobalRole, courseRoles []model.CourseRole) (*model.User, error) {
+	if globalRole != "" {
+		if err := s.users.UpdateGlobalRole(ctx, userID, globalRole); err != nil {
+			return nil, err
+		}
+	}
+	for _, cr := range courseRoles {
+		if cr.TopicSlug == "" || cr.Role == "" {
+			return nil, ErrValidation
+		}
+		cr.UserID = userID
+		if err := s.users.UpsertCourseRole(ctx, &cr); err != nil {
+			return nil, err
+		}
+	}
+	return s.users.FindByID(ctx, userID)
+}
+
+// DeleteCourseRole 删除课程级角色（前端"增删行"的删）。
+func (s *AuthService) DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error {
+	if topicSlug == "" {
+		return ErrValidation
+	}
+	return s.users.DeleteCourseRole(ctx, userID, topicSlug)
+}
+
+// ListUsers 用户列表（分页）。
+func (s *AuthService) ListUsers(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
+	return s.users.List(ctx, offset, limit)
+}
+
+// ListCourseRolesOf 某用户的课程级角色（用户管理页展示）。
+func (s *AuthService) ListCourseRolesOf(ctx context.Context, userID uint) ([]model.CourseRole, error) {
+	return s.users.ListCourseRoles(ctx, userID)
+}
+
 // EnsureAdmin users 表为空时创建初始管理员。
 // 这是唯一的种子数据：只创建账号，不创建任何内容（content-package-spec skill）。
 func (s *AuthService) EnsureAdmin(ctx context.Context, username, password string) error {

@@ -24,6 +24,18 @@ export interface ContentPackage {
   error?: string
 }
 
+export interface CourseRole { topic_slug: string; role: string }
+
+export const adminApi = {
+  listUsers: (page = 1) => http.get<Paged<User>>(`/admin/users?page=${page}`),
+  createUser: (username: string, password: string, globalRole: string) =>
+    http.post<User>('/admin/users', { username, password, global_role: globalRole }),
+  updateRoles: (id: number, globalRole: string, courseRoles: CourseRole[]) =>
+    http.patch<User>(`/admin/users/${id}/roles`, { global_role: globalRole, course_roles: courseRoles }),
+  deleteCourseRole: (id: number, topicSlug: string) =>
+    http.del<{ deleted: boolean }>(`/admin/users/${id}/course-roles/${topicSlug}`),
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),

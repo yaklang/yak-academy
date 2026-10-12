@@ -193,6 +193,30 @@ paths:
               schema: { $ref: '#/components/schemas/Topic' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /topics/{topicSlug}:
+    put:
+      tags: [teacher]
+      summary: 更新主题元数据（最低 teacher；课程级 teacher 可操作本 Topic）
+      parameters:
+        - { name: topicSlug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                summary: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Topic' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /topics/{topicSlug}/rooms/{roomSlug}:
     get:
       tags: [student]
@@ -370,6 +394,24 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/users:
+    get:
+      tags: [admin]
+      summary: 用户列表（分页）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
     post:
       tags: [admin]
       summary: 创建用户
@@ -417,4 +459,22 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/users/{id}/course-roles/{topicSlug}:
+    delete:
+      tags: [admin]
+      summary: 删除课程级角色
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: topicSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
         '403': { $ref: '#/components/responses/ErrorResp' }
