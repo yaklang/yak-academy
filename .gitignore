@@ -1,6 +1,7 @@
 # Go
 backend/academy.db
 backend/academy-server
+backend/academy-server-bin*
 
 # Node
 frontend/node_modules/

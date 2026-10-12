@@ -4,7 +4,20 @@
 
 ## 快速开始
 
-### 后端（Go 1.22+）
+### 一键启动（推荐）
+
+```bash
+bash start.sh        # Git Bash / Linux / macOS
+```
+
+Windows 可直接**双击 `start.bat`**。脚本会自动：检查依赖（Go 1.22+ / Node 18+）→ 检查端口 → 编译并启动后端 `:8080` → 首次运行自动 `npm install` → 启动前端 `:5173`（`/api` 已代理到后端）。**Ctrl+C 一并停止**。
+
+- 浏览器访问：http://127.0.0.1:5173
+- 端口被占用或进程残留时：`bash stop.sh`
+
+### 手动分步启动
+
+#### 后端（Go 1.22+）
 
 ```bash
 cd backend
@@ -25,6 +38,7 @@ npm run build      # 类型检查 + 产物构建
 
 ```
 AGENTS.md            AI 协作入口（skill 加载规则）
+start.sh / start.bat / stop.sh   一键启动 / 停止
 .agents/skills/      6 个架构约束 skill（分层/内容包/教题一体/RBAC/事件溯源/API 契约）
 docs/
   architecture.md   架构设计（四层架构、模块设计、数据模型、演进路线）

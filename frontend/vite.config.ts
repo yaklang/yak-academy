@@ -5,6 +5,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
+    host: '127.0.0.1', // Windows 下 vite 默认仅监听 IPv6 localhost，显式指定
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8080',
