@@ -301,6 +301,24 @@ paths:
                       items: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' } }
 
   /content/packages:
+    get:
+      tags: [teacher]
+      summary: 内容包列表（分页）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/ContentPackage' } }
+        '401': { $ref: '#/components/responses/ErrorResp' }
     post:
       tags: [teacher]
       summary: 上传内容包（进入五步管线）

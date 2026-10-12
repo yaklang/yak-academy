@@ -84,3 +84,29 @@ func (r *contentPackageRepo) UpdateStatus(ctx context.Context, id uint, s model.
 func (r *contentPackageRepo) AddVersion(ctx context.Context, v *model.ContentVersion) error {
 	return r.db.WithContext(ctx).Create(v).Error
 }
+
+func (r *contentPackageRepo) FindLatestVersion(ctx context.Context, packageID uint) (*model.ContentVersion, error) {
+	var v model.ContentVersion
+	if err := r.db.WithContext(ctx).Where("package_id = ?", packageID).
+		Order("id DESC").First(&v).Error; err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r *contentPackageRepo) UpdateLatestVersion(ctx context.Context, id uint, version string) error {
+	return r.db.WithContext(ctx).Model(&model.ContentPackage{}).Where("id = ?", id).
+		Update("latest_version", version).Error
+}
+
+func (r *contentPackageRepo) List(ctx context.Context, offset, limit int) ([]model.ContentPackage, int64, error) {
+	var (
+		list  []model.ContentPackage
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.ContentPackage{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}

@@ -21,12 +21,14 @@ type TopicRepo interface {
 	Upsert(ctx context.Context, t *model.Topic) error
 	List(ctx context.Context, offset, limit int) ([]model.Topic, int64, error)
 	FindBySlug(ctx context.Context, slug string) (*model.Topic, error)
+	ExistsBySlug(ctx context.Context, slug string) (bool, error)
 }
 
 type RoomRepo interface {
 	Upsert(ctx context.Context, r *model.Room) error
 	FindBySlug(ctx context.Context, slug string) (*model.Room, error)
 	ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error)
+	ExistsBySlug(ctx context.Context, slug string) (bool, error)
 }
 
 type ChallengeRepo interface {
@@ -47,6 +49,9 @@ type ContentPackageRepo interface {
 	FindByName(ctx context.Context, name string) (*model.ContentPackage, error)
 	UpdateStatus(ctx context.Context, id uint, status model.PackageStatus) error
 	AddVersion(ctx context.Context, v *model.ContentVersion) error
+	FindLatestVersion(ctx context.Context, packageID uint) (*model.ContentVersion, error)
+	UpdateLatestVersion(ctx context.Context, id uint, version string) error
+	List(ctx context.Context, offset, limit int) ([]model.ContentPackage, int64, error)
 }
 
 type EventRepo interface {

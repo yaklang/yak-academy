@@ -48,6 +48,7 @@ export const progressApi = {
 }
 
 export const contentApi = {
+  list: (page = 1) => http.get<Paged<ContentPackage>>(`/content/packages?page=${page}`),
   upload: (file: File) => {
     const form = new FormData()
     form.append('package', file)

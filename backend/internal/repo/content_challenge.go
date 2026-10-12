@@ -39,6 +39,12 @@ func (r *topicRepo) FindBySlug(ctx context.Context, slug string) (*model.Topic, 
 	return &t, nil
 }
 
+func (r *topicRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Topic{}).Where("slug = ?", slug).Count(&n).Error
+	return n > 0, err
+}
+
 type roomRepo struct{ db *gorm.DB }
 
 func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
@@ -64,6 +70,12 @@ func (r *roomRepo) ListByTopic(ctx context.Context, topicSlug string) ([]model.R
 	return list, err
 }
 
+func (r *roomRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Room{}).Where("slug = ?", slug).Count(&n).Error
+	return n > 0, err
+}
+
 type challengeRepo struct{ db *gorm.DB }
 
 func NewChallengeRepo(db *gorm.DB) ChallengeRepo { return &challengeRepo{db} }
@@ -72,7 +84,7 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "room_slug"}},
-			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score"}),
 		}).Create(c).Error; err != nil {
 			return err
 		}

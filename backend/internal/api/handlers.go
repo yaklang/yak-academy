@@ -42,6 +42,7 @@ func (h *Handlers) Register(r *Router) {
 
 	// teacher：内容包上传与查询
 	r.Handle(http.MethodPost, "/api/v1/content/packages", "teacher", h.uploadPackage)
+	r.Handle(http.MethodGet, "/api/v1/content/packages", "teacher", h.listPackages)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "teacher", h.getPackage)
 
 	// admin：发布与用户管理
@@ -186,8 +187,30 @@ func (h *Handlers) uploadPackage(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, pkg)
 }
 
+func (h *Handlers) listPackages(w http.ResponseWriter, req *http.Request) {
+	page, pageSize := pageParams(req)
+	items, total, err := h.Content.ListPackages(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
 func (h *Handlers) getPackage(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get package"})
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	pkg, err := h.Content.GetPackage(req.Context(), uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pkg)
 }
 
 func (h *Handlers) publishPackage(w http.ResponseWriter, req *http.Request) {

@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"crypto/subtle"
 
+	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -15,6 +17,11 @@ type ChallengeService struct {
 
 func NewChallengeService(c repo.ChallengeRepo, s repo.SubmissionRepo) *ChallengeService {
 	return &ChallengeService{challenges: c, submissions: s}
+}
+
+// UpsertChallenge 内容发布时写入题目与判定答案/提示（content→challenge 白名单依赖）。
+func (s *ChallengeService) UpsertChallenge(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error {
+	return s.challenges.Upsert(ctx, c, flags, hints)
 }
 
 // compareFlag 恒时比较，防时序侧信道。

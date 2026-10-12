@@ -30,5 +30,7 @@ type ContentVersion struct {
 	Version   string    `gorm:"size:32"` // 语义化版本
 	Status    PackageStatus
 	Checksum  string `gorm:"size:64"` // zip sha256
+	// Payload 解析产物的 JSON 序列化（Upload 暂存，Publish 时从此写入内容表）。
+	Payload   string `gorm:"type:text"`
 	CreatedAt time.Time
 }
