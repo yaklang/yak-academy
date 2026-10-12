@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: yak-academy API
+  version: 0.1.0
+  description: |
+    yak-academy 安全实训平台 API 契约（唯一契约源）。
+    规则：改接口必须先改本文件，再改后端 handler，再改前端 src/api/。
+    统一错误信封：{"error":{"code","message"}}。
+    第一版所有接口允许 stub 返回 501，但路由必须注册。
+servers:
+  - url: http://localhost:8080/api/v1
+tags:
+  - name: auth
+  - name: student
+  - name: teacher
+  - name: admin
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, INTERNAL]
+            message: { type: string }
+    Page:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    TokenResponse:
+      type: object
+      properties:
+        token: { type: string }
+        expires_at: { type: string, format: date-time }
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        global_role: { type: string, enum: [student, teacher, admin] }
+    Topic:
+      type: object
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        room_count: { type: integer }
+    Room:
+      type: object
+      properties:
+        slug: { type: string }
+        topic_slug: { type: string }
+        title: { type: string }
+        difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+        lesson_md: { type: string, description: 教程正文 Markdown }
+        lab:
+          type: object
+          nullable: true
+          properties:
+            challenge_id: { type: integer }
+            title: { type: string }
+            score: { type: integer }
+            solved: { type: boolean, description: 当前用户是否已通关 }
+    SubmissionRequest:
+      type: object
+      required: [room_slug, answer]
+      properties:
+        room_slug: { type: string }
+        answer: { type: string }
+    Submission:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [pending, correct, incorrect] }
+        score: { type: integer, description: 判定通过后返回的得分 }
+    LearningPath:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              order: { type: integer }
+              room_slug: { type: string }
+              completed: { type: boolean }
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank: { type: integer }
+        username: { type: string }
+        score: { type: integer }
+        solved_count: { type: integer }
+    ContentPackage:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        latest_version: { type: string }
+        status: { type: string, enum: [draft, published, archived] }
+        error: { type: string, description: 管线失败原因 }
+
+  responses:
+    ErrorResp:
+      description: 统一错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: 登录换取 JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /me:
+    get:
+      tags: [auth]
+      summary: 当前用户信息
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /topics:
+    get:
+      tags: [student]
+      summary: 主题列表（仅 published）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Topic' } }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /topics/{topicSlug}:
+    get:
+      tags: [student]
+      summary: 主题详情（含 Room 列表）
+      parameters:
+        - { name: topicSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Topic' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /topics/{topicSlug}/rooms/{roomSlug}:
+    get:
+      tags: [student]
+      summary: Room 详情（教程正文 + 内嵌 Lab）
+      parameters:
+        - { name: topicSlug, in: path, required: true, schema: { type: string } }
+        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /submissions:
+    post:
+      tags: [student]
+      summary: 提交答案（异步判定，返回 pending）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmissionRequest' }
+      responses:
+        '202':
+          description: Accepted（已入队）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /submissions/{id}:
+    get:
+      tags: [student]
+      summary: 查询判定结果
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /learning-paths:
+    get:
+      tags: [student]
+      summary: 学习路径列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LearningPath' }
+
+  /learning-paths/{id}:
+    get:
+      tags: [student]
+      summary: 路径详情（含当前用户进度）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearningPath' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /progress:
+    get:
+      tags: [student]
+      summary: 个人进度（事件派生数据）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  xp: { type: integer }
+                  completed_rooms: { type: integer }
+                  in_progress_rooms: { type: integer }
+
+  /leaderboard:
+    get:
+      tags: [student]
+      summary: 排行榜（事件派生数据）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' } }
+
+  /content/packages:
+    post:
+      tags: [teacher]
+      summary: 上传内容包（进入五步管线）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                package:
+                  type: string
+                  format: binary
+                  description: 内容包 zip（结构见 content-package-spec skill）
+      responses:
+        '201':
+          description: Created（draft 状态）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentPackage' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /content/packages/{id}:
+    get:
+      tags: [teacher]
+      summary: 内容包状态与版本
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentPackage' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /content/packages/{id}/publish:
+    post:
+      tags: [admin]
+      summary: 发布内容包（draft → published）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentPackage' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/users:
+    post:
+      tags: [admin]
+      summary: 创建用户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LoginRequest'
+                - type: object
+                  properties:
+                    global_role: { type: string, enum: [student, teacher, admin], default: student }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /admin/users/{id}/roles:
+    patch:
+      tags: [admin]
+      summary: 修改全局角色 / 设置课程级角色
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                global_role: { type: string, enum: [student, teacher, admin] }
+                course_roles:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      topic_slug: { type: string }
+                      role: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/ErrorResp' }

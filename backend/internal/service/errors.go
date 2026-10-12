@@ -1,0 +1,21 @@
+package service
+
+import "errors"
+
+// errNotImplemented 第一版骨架的统一未实现错误。
+// handler 对返回该错误的调用统一回 501（api-contract skill：stub 允许 501，但路由必须注册）。
+func errNotImplemented(what string) error {
+	return &NotImplementedError{What: what}
+}
+
+type NotImplementedError struct{ What string }
+
+func (e *NotImplementedError) Error() string {
+	return "not implemented yet: " + e.What
+}
+
+// IsNotImplemented 判定 err 是否为骨架 stub 错误。
+func IsNotImplemented(err error) bool {
+	var nie *NotImplementedError
+	return errors.As(err, &nie)
+}
