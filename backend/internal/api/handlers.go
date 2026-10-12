@@ -6,20 +6,22 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
 // Handlers 持有全部 service 依赖。handler 只做参数解析 → 调 service → 统一响应。
 type Handlers struct {
-	Auth      *service.AuthService
-	Content   *service.ContentService
-	Judge     *service.JudgeService
-	Progress  *service.UserProgressService
+	Auth     *service.AuthService
+	Content  *service.ContentService
+	Judge    *service.JudgeService
+	Progress *service.UserProgressService
+	Topics   *service.TopicService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, judge *service.JudgeService, progress *service.UserProgressService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Judge: judge, Progress: progress}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Judge: judge, Progress: progress, Topics: topics}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -53,11 +55,11 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Username == "" {
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Username == "" || body.Password == "" {
 		writeError(w, errValidation)
 		return
 	}
-	token, expires, err := h.Auth.IssueToken(req.Context(), body.Username, body.Password)
+	token, expires, err := h.Auth.Login(req.Context(), body.Username, body.Password)
 	if err != nil {
 		writeError(w, errUnauthorized)
 		return
@@ -71,16 +73,46 @@ func (h *Handlers) me(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handlers) listTopics(w http.ResponseWriter, req *http.Request) {
-	// TODO(Phase2): 实现（service 暂缺 Topic 列表接口，避免跨 service 依赖）。
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "list topics"})
+	page, pageSize := pageParams(req)
+	items, total, err := h.Topics.ListTopics(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
 }
 
 func (h *Handlers) getTopic(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get topic"})
+	detail, err := h.Topics.GetTopic(req.Context(), req.PathValue("topicSlug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get room"})
+	detail, err := h.Topics.GetRoomDetail(req.Context(), req.PathValue("topicSlug"), req.PathValue("roomSlug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	type roomResp struct {
+		Slug       string           `json:"slug"`
+		TopicSlug  string           `json:"topic_slug"`
+		Title      string           `json:"title"`
+		Difficulty model.Difficulty `json:"difficulty"`
+		LessonMD   string           `json:"lesson_md"`
+		Lab        *model.Challenge `json:"lab"`
+	}
+	resp := roomResp{
+		Slug: detail.Room.Slug, TopicSlug: detail.Room.TopicSlug,
+		Title: detail.Room.Title, Difficulty: detail.Room.Difficulty,
+		LessonMD: detail.Room.LessonMD, Lab: detail.Challenge,
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) submitAnswer(w http.ResponseWriter, req *http.Request) {

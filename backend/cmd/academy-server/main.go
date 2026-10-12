@@ -48,15 +48,19 @@ func main() {
 
 	// service 装配（横向依赖仅白名单：judge→event、content→challenge）
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	if err := authSvc.EnsureAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+		log.Fatalf("ensure admin: %v", err)
+	}
 	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo)
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, eventRepo, bus)
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo)
+	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo)
 
 	// api 装配
 	router := api.NewRouter(authSvc)
-	api.NewHandlers(authSvc, contentSvc, judgeSvc, progressSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, judgeSvc, progressSvc, topicSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

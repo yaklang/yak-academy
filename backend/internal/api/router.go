@@ -67,9 +67,12 @@ func (r *Router) authenticate(w http.ResponseWriter, req *http.Request) (*model.
 		return nil, false
 	}
 	sub, _ := claims["sub"].(string)
-	role, _ := claims["role"].(string)
-	// TODO(Phase2): 通过 users.FindByUsername 加载真实用户与角色。
-	user := &model.User{Username: sub, GlobalRole: model.GlobalRole(role)}
+	// 从 DB 加载真实用户，保证 token 反映最新角色/状态。
+	user, err := r.auth.FindUser(req.Context(), sub)
+	if err != nil {
+		writeError(w, errUnauthorized)
+		return nil, false
+	}
 	return user, true
 }
 
