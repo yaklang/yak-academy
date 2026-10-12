@@ -45,6 +45,10 @@ func main() {
 	bus := eventbus.New()
 	deriver := service.NewDeriver(scoreRepo, progressRepo)
 	bus.Subscribe(deriver.Handle)
+	// 启动补偿：重放历史事件修复崩溃窗口丢失的派生（幂等，event-sourcing-rules skill）。
+	if err := deriver.Replay(ctx, eventRepo); err != nil {
+		log.Printf("deriver replay: %v", err)
+	}
 
 	// service 装配（横向依赖仅白名单：judge→event、content→challenge）
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
@@ -55,7 +59,7 @@ func main() {
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, eventRepo, bus)
 	judgeSvc.StartWorker(ctx)
-	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo)
+	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo)
 
 	// api 装配

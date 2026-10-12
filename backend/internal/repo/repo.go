@@ -12,6 +12,8 @@ type UserRepo interface {
 	Create(ctx context.Context, u *model.User) error
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	FindByID(ctx context.Context, id uint) (*model.User, error)
+	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
+	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
 	UpsertCourseRole(ctx context.Context, r *model.CourseRole) error
 	ListCourseRoles(ctx context.Context, userID uint) ([]model.CourseRole, error)
@@ -75,5 +77,7 @@ type ScoreRepo interface {
 type ProgressRepo interface {
 	// MarkCompleted 仅允许事件派生器调用。
 	MarkCompleted(ctx context.Context, userID uint, roomSlug string) error
+	// MarkInProgress 记录"开始学但未完成"（Room 首次浏览时创建 completed=false 行，幂等）。
+	MarkInProgress(ctx context.Context, userID uint, roomSlug string) error
 	Stats(ctx context.Context, userID uint) (completed int, inProgress int, err error)
 }

@@ -70,6 +70,12 @@ func (r *progressRepo) MarkCompleted(ctx context.Context, userID uint, roomSlug 
 		Assign(map[string]any{"completed": true}).FirstOrCreate(&p).Error
 }
 
+func (r *progressRepo) MarkInProgress(ctx context.Context, userID uint, roomSlug string) error {
+	var p model.Progress
+	return r.db.WithContext(ctx).Where(model.Progress{UserID: userID, RoomSlug: roomSlug}).
+		Assign(map[string]any{"completed": false}).FirstOrCreate(&p).Error
+}
+
 func (r *progressRepo) Stats(ctx context.Context, userID uint) (completed, inProgress int, err error) {
 	var row struct {
 		Completed   int64

@@ -34,6 +34,27 @@ func (r *userRepo) FindByID(ctx context.Context, id uint) (*model.User, error) {
 	return &u, nil
 }
 
+func (r *userRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.User
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&list).Error
+	return list, err
+}
+
+func (r *userRepo) List(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
+	var (
+		list  []model.User
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}
+
 func (r *userRepo) UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
 		Update("global_role", role).Error

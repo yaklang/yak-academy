@@ -132,6 +132,10 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		return
 	}
 	s.finish(ctx, sub, model.SubmissionCorrect, score)
+	// 首通：Room 通关事件（教题一体，teaching-integration skill）。
+	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil {
+		s.AppendRoomCompleted(ctx, sub.UserID, chal.RoomSlug)
+	}
 }
 
 // finish 写回判定结果 + submission.judged 事件。
@@ -144,6 +148,12 @@ func (s *JudgeService) finish(ctx context.Context, sub *model.Submission, status
 		"submission_id": sub.ID, "challenge_id": sub.ChallengeID,
 		"correct": status == model.SubmissionCorrect, "score": score,
 	})
+}
+
+// AppendRoomCompleted 判定首通（correct 且计分）后写 room.completed 事件
+// （教题一体：Room 通关即题目通关，teaching-integration skill）。
+func (s *JudgeService) AppendRoomCompleted(ctx context.Context, userID uint, roomSlug string) {
+	s.appendEvent(ctx, userID, model.EventRoomCompleted, map[string]any{"room_slug": roomSlug})
 }
 
 // matchAnyFlag 任一 flag 命中即通过。

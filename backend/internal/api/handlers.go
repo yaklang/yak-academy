@@ -100,6 +100,12 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	user := UserFrom(req.Context())
+	// 浏览即记录 in-progress（completed=false 行，幂等；进度是事件派生的物化视图）。
+	if err := h.Progress.MarkRoomViewed(req.Context(), user.ID, detail.Room.Slug); err != nil {
+		mapError(w, err)
+		return
+	}
 	type labResp struct {
 		ChallengeID uint   `json:"challenge_id"`
 		Title       string `json:"title"`
