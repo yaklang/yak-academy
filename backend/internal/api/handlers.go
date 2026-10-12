@@ -100,25 +100,59 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	type labResp struct {
+		ChallengeID uint   `json:"challenge_id"`
+		Title       string `json:"title"`
+		Score       int    `json:"score"`
+		Solved      bool   `json:"solved"`
+	}
+	var lab *labResp
+	if detail.Challenge != nil {
+		user := UserFrom(req.Context())
+		lab = &labResp{
+			ChallengeID: detail.Challenge.ID,
+			Title:       detail.Challenge.Title,
+			Score:       detail.Challenge.Score,
+			Solved:      h.Judge.IsSolved(req.Context(), user.ID, detail.Challenge.ID),
+		}
+	}
 	type roomResp struct {
 		Slug       string           `json:"slug"`
 		TopicSlug  string           `json:"topic_slug"`
 		Title      string           `json:"title"`
 		Difficulty model.Difficulty `json:"difficulty"`
 		LessonMD   string           `json:"lesson_md"`
-		Lab        *model.Challenge `json:"lab"`
+		Lab        *labResp         `json:"lab"`
 	}
 	resp := roomResp{
 		Slug: detail.Room.Slug, TopicSlug: detail.Room.TopicSlug,
 		Title: detail.Room.Title, Difficulty: detail.Room.Difficulty,
-		LessonMD: detail.Room.LessonMD, Lab: detail.Challenge,
+		LessonMD: detail.Room.LessonMD, Lab: lab,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) submitAnswer(w http.ResponseWriter, req *http.Request) {
-	// TODO(Phase2): room_slug → challengeID 解析后调 Judge.Submit。
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "submit answer"})
+	var body struct {
+		RoomSlug string `json:"room_slug"`
+		Answer   string `json:"answer"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.RoomSlug == "" || body.Answer == "" {
+		writeError(w, errValidation)
+		return
+	}
+	chal, err := h.Topics.FindChallengeByRoomSlug(req.Context(), body.RoomSlug)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	user := UserFrom(req.Context())
+	sub, err := h.Judge.Submit(req.Context(), user.ID, chal.ID, body.Answer)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, sub)
 }
 
 func (h *Handlers) getSubmission(w http.ResponseWriter, req *http.Request) {
@@ -127,9 +161,13 @@ func (h *Handlers) getSubmission(w http.ResponseWriter, req *http.Request) {
 		writeError(w, errValidation)
 		return
 	}
-	// TODO(Phase2): Judge.GetSubmission(ctx, id)。
-	_ = id
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get submission"})
+	user := UserFrom(req.Context())
+	sub, err := h.Judge.GetSubmission(req.Context(), user.ID, uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sub)
 }
 
 func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {

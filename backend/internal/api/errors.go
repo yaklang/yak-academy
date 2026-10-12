@@ -55,7 +55,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // stub 未实现 → 501（api-contract skill：stub 允许 501，但路由必须注册）。
 func mapError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, service.ErrNotFound):
 		writeError(w, errNotFound)
 	case service.IsNotImplemented(err):
 		w.WriteHeader(http.StatusNotImplemented)

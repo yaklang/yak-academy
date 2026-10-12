@@ -18,13 +18,17 @@ import (
 // 测试 zip 在测试代码中构造，不进生产路径（无内置内容原则）。
 func newContentTestService(t *testing.T) (*ContentService, *gorm.DB) {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	gdb, err := gorm.Open(sqlite.Open("file:contenttest?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := db.Migrate(gdb); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	t.Cleanup(func() {
+		dbg, _ := gdb.DB()
+		dbg.Close() // 关闭共享内存库，下个测试重建
+	})
 	svc := NewContentService(
 		repo.NewContentPackageRepo(gdb),
 		repo.NewTopicRepo(gdb),

@@ -88,7 +88,13 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 		}).Create(c).Error; err != nil {
 			return err
 		}
-		// 重建 flags/hints（版本化内容覆盖）
+		// 重建 flags/hints（版本化内容覆盖）。先回填 challenge_id（调用方不感知自增 ID）。
+		for i := range flags {
+			flags[i].ChallengeID = c.ID
+		}
+		for i := range hints {
+			hints[i].ChallengeID = c.ID
+		}
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Flag{}).Error; err != nil {
 			return err
 		}
@@ -115,6 +121,26 @@ func (r *challengeRepo) FindByRoomSlug(ctx context.Context, roomSlug string) (*m
 	return &c, nil
 }
 
+func (r *challengeRepo) FindByID(ctx context.Context, id uint) (*model.Challenge, error) {
+	var c model.Challenge
+	if err := r.db.WithContext(ctx).First(&c, id).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *challengeRepo) FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error) {
+	var list []model.Flag
+	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Find(&list).Error
+	return list, err
+}
+
+func (r *challengeRepo) FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error) {
+	var list []model.Hint
+	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Find(&list).Error
+	return list, err
+}
+
 func (r *challengeRepo) CountSolves(ctx context.Context, challengeID uint) (int64, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.Submission{}).
@@ -137,6 +163,14 @@ func (r *submissionRepo) FindByID(ctx context.Context, id uint) (*model.Submissi
 		return nil, err
 	}
 	return &s, nil
+}
+
+func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("user_id = ? AND challenge_id = ? AND status = ?", userID, challengeID, model.SubmissionCorrect).
+		Count(&n).Error
+	return n > 0, err
 }
 
 func (r *submissionRepo) UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error {

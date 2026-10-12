@@ -34,12 +34,17 @@ type RoomRepo interface {
 type ChallengeRepo interface {
 	Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error
 	FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error)
+	FindByID(ctx context.Context, id uint) (*model.Challenge, error)
+	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
+	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
 }
 
 type SubmissionRepo interface {
 	Create(ctx context.Context, s *model.Submission) error
 	FindByID(ctx context.Context, id uint) (*model.Submission, error)
+	// HasCorrect 判定"该用户该题是否已通过"（防重复计分）。
+	HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error)
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
 }
 

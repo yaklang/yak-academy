@@ -95,3 +95,8 @@ func (s *TopicService) GetRoomDetail(ctx context.Context, topicSlug, roomSlug st
 	}
 	return detail, nil
 }
+
+// FindChallengeByRoomSlug 提交答案时解析 room → 内嵌题目（教题一体：Lab 必属 Room）。
+func (s *TopicService) FindChallengeByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error) {
+	return s.challenges.FindByRoomSlug(ctx, roomSlug)
+}

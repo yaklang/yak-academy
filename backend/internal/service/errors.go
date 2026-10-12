@@ -19,3 +19,6 @@ func IsNotImplemented(err error) bool {
 	var nie *NotImplementedError
 	return errors.As(err, &nie)
 }
+
+// ErrNotFound 资源不存在或非本人资源（属主校验：对外不区分，统一 404）。
+var ErrNotFound = errors.New("not found")
