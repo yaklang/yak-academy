@@ -12,17 +12,18 @@ import (
 
 // Handlers 持有全部 service 依赖。handler 只做参数解析 → 调 service → 统一响应。
 type Handlers struct {
-	Auth     *service.AuthService
-	Content  *service.ContentService
-	Judge    *service.JudgeService
-	Progress *service.UserProgressService
-	Topics   *service.TopicService
-	Env      *service.EnvService
+	Auth      *service.AuthService
+	Content   *service.ContentService
+	Challenge *service.ChallengeService
+	Judge     *service.JudgeService
+	Progress  *service.UserProgressService
+	Topics    *service.TopicService
+	Env       *service.EnvService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Judge: judge, Progress: progress, Topics: topics, Env: env}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -37,10 +38,11 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}/rooms/{roomSlug}", "", h.getRoom)
 	r.Handle(http.MethodPost, "/api/v1/submissions", "", h.submitAnswer)
 	r.Handle(http.MethodGet, "/api/v1/submissions/{id}", "", h.getSubmission)
-	r.Handle(http.MethodPost, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.startInstance)
-	r.Handle(http.MethodGet, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.getInstance)
-	r.Handle(http.MethodDelete, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.destroyInstance)
+	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/instance", "", h.startInstance)
+	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/instance", "", h.getInstance)
+	r.Handle(http.MethodDelete, "/api/v1/challenges/{slug}/instance", "", h.destroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
+	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -52,10 +54,13 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "teacher", h.getPackage)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "teacher", h.listVersions)
 
-	// admin：发布/归档/回滚、容器管理与用户管理
+	// admin：发布/归档/回滚、题目管理、容器管理与用户管理
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/archive", "admin", h.archivePackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/rollback", "admin", h.rollbackPackage)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges", "teacher", h.adminListChallenges)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
+	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
 	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
@@ -119,23 +124,11 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
-	type labResp struct {
-		ChallengeID uint   `json:"challenge_id"`
-		Title       string `json:"title"`
-		Score       int    `json:"score"`
-		Solved      bool   `json:"solved"`
-		HasEnv      bool   `json:"has_env"`
-	}
-	var lab *labResp
+	// related_challenge_slug：题目独立资源，Room 只反查关联（tutorial_slug 指向本 Room）。
+	var related *string
 	if detail.Challenge != nil {
-		user := UserFrom(req.Context())
-		lab = &labResp{
-			ChallengeID: detail.Challenge.ID,
-			Title:       detail.Challenge.Title,
-			Score:       detail.Challenge.Score,
-			Solved:      h.Judge.IsSolved(req.Context(), user.ID, detail.Challenge.ID),
-			HasEnv:      detail.Challenge.Image != "",
-		}
+		slug := detail.Challenge.Slug
+		related = &slug
 	}
 	type roomResp struct {
 		Slug       string           `json:"slug"`
@@ -143,26 +136,29 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		Title      string           `json:"title"`
 		Difficulty model.Difficulty `json:"difficulty"`
 		LessonMD   string           `json:"lesson_md"`
-		Lab        *labResp         `json:"lab"`
+		VideoURL   string           `json:"video_url"`
+		// 可空：无关联题目时为 null（前端显示"前往题目"用）。
+		RelatedChallengeSlug *string `json:"related_challenge_slug"`
 	}
 	resp := roomResp{
 		Slug: detail.Room.Slug, TopicSlug: detail.Room.TopicSlug,
 		Title: detail.Room.Title, Difficulty: detail.Room.Difficulty,
-		LessonMD: detail.Room.LessonMD, Lab: lab,
+		LessonMD: detail.Room.LessonMD, VideoURL: detail.Room.VideoURL,
+		RelatedChallengeSlug: related,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) submitAnswer(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		RoomSlug string `json:"room_slug"`
-		Answer   string `json:"answer"`
+		ChallengeSlug string `json:"challenge_slug"`
+		Answer        string `json:"answer"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.RoomSlug == "" || body.Answer == "" {
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ChallengeSlug == "" || body.Answer == "" {
 		writeError(w, errValidation)
 		return
 	}
-	chal, err := h.Topics.FindChallengeByRoomSlug(req.Context(), body.RoomSlug)
+	chal, err := h.Topics.FindChallengeBySlug(req.Context(), body.ChallengeSlug)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -191,13 +187,13 @@ func (h *Handlers) getSubmission(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, sub)
 }
 
-// resolveRoomChallenge 实例操作前的公共解析：room → 内嵌 Lab（教题一体，Lab 必属 Room）。
-func (h *Handlers) resolveRoomChallenge(req *http.Request) (*model.Challenge, error) {
-	return h.Topics.FindChallengeByRoomSlug(req.Context(), req.PathValue("roomSlug"))
+// resolveChallenge 实例操作前的公共解析：按题目 slug 查（题目独立资源的主键入口）。
+func (h *Handlers) resolveChallenge(req *http.Request) (*model.Challenge, error) {
+	return h.Topics.FindChallengeBySlug(req.Context(), req.PathValue("slug"))
 }
 
 func (h *Handlers) startInstance(w http.ResponseWriter, req *http.Request) {
-	chal, err := h.resolveRoomChallenge(req)
+	chal, err := h.resolveChallenge(req)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -212,7 +208,7 @@ func (h *Handlers) startInstance(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handlers) getInstance(w http.ResponseWriter, req *http.Request) {
-	chal, err := h.resolveRoomChallenge(req)
+	chal, err := h.resolveChallenge(req)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -227,7 +223,7 @@ func (h *Handlers) getInstance(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handlers) destroyInstance(w http.ResponseWriter, req *http.Request) {
-	chal, err := h.resolveRoomChallenge(req)
+	chal, err := h.resolveChallenge(req)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -248,7 +244,7 @@ func (h *Handlers) getPath(w http.ResponseWriter, req *http.Request) {
 	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get learning path"})
 }
 
-// listChallenges 训练场列表（跨 Topic 全量题目，当前用户视角）。
+// listChallenges 训练场列表（跨分类全量题目，当前用户视角）。
 func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
 	page, pageSize := pageParams(req)
@@ -260,6 +256,54 @@ func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total": total, "page": page, "page_size": pageSize, "items": items,
 	})
+}
+
+// getChallenge 题目详情（描述 markdown + hints + 关联教程）。
+func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	detail, err := h.Topics.GetChallengeDetail(req.Context(), user.ID, req.PathValue("slug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// uploadChallenges 管理端：上传题目定义 JSON（单对象或数组，upsert）。
+func (h *Handlers) uploadChallenges(w http.ResponseWriter, req *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(req.Body, 4<<20)) // JSON 上限 4MB
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	imported, slugs, err := h.Content.UploadChallenges(req.Context(), raw)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
+}
+
+// adminListChallenges 管理端：题目全量列表（题目管理表格）。
+func (h *Handlers) adminListChallenges(w http.ResponseWriter, req *http.Request) {
+	page, pageSize := pageParams(req)
+	items, total, err := h.Challenge.AdminListChallenges(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
+// deleteChallenge 管理端：删除题目（级联 flags/hints）。
+func (h *Handlers) deleteChallenge(w http.ResponseWriter, req *http.Request) {
+	if err := h.Challenge.DeleteChallenge(req.Context(), req.PathValue("slug")); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 // listInstances 管理端：全部容器实例（分页）。

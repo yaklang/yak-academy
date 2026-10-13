@@ -49,8 +49,8 @@ type parsedPackage struct {
 	// Rooms 用 DTO 而非 model.Room：model.Room.LessonMD 是 json:"-"（详情接口单独返回），
 	// 直接序列化会丢正文。
 	Rooms []roomPayload `json:"rooms"`
-	// Labs: room slug → 题目定义（教题一体：Lab 必属某 Room）。
-	Labs map[string]labDef `json:"labs"`
+	// Labs 旧版本 Payload 兼容字段：题目独立后新包不再产出，回放旧版本时忽略。
+	Labs map[string]labDef `json:"labs,omitempty"`
 }
 
 // roomPayload Payload 中的 Room 序列化形态（补回 LessonMD）。
@@ -60,6 +60,7 @@ type roomPayload struct {
 	Title      string           `json:"title"`
 	Difficulty model.Difficulty `json:"difficulty"`
 	LessonMD   string           `json:"lesson_md"`
+	VideoURL   string           `json:"video_url,omitempty"` // 视频教程地址（可选）
 }
 
 type labDef struct {
@@ -86,29 +87,11 @@ type topicFront struct {
 }
 
 // lessonFront lesson.md 的 front matter（difficulty 三级枚举，teaching-integration skill）。
+// video 可选：视频教程地址（文字+视频教程）。
 type lessonFront struct {
 	Title     string           `yaml:"title"`
 	Difficulty model.Difficulty `yaml:"difficulty"`
-}
-
-// labYaml lab.yaml schema（content-package-spec skill：title/challenge.type/challenge.flag/score 必填）。
-type labYaml struct {
-	Title     string `yaml:"title"`
-	Challenge struct {
-		Type model.ChallengeType `yaml:"type"`
-		Flag string             `yaml:"flag"`
-	} `yaml:"challenge"`
-	Score int `yaml:"score"`
-	// Env 可选在线环境（容器驱动用）：image + port。
-	Env struct {
-		Image string `yaml:"image"`
-		Port  int    `yaml:"port"`
-	} `yaml:"env"`
-	Hints []struct {
-		Title   string `yaml:"title"`
-		Content string `yaml:"content"`
-		Cost    int    `yaml:"cost"`
-	} `yaml:"hints"`
+	Video     string           `yaml:"video"`
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -273,32 +256,10 @@ func (s *ContentService) parseRooms(topicSlug string, files map[string][]byte, p
 		rooms = append(rooms, roomPayload{
 			TopicSlug: topicSlug, Slug: slug,
 			Title: lf.Title, Difficulty: lf.Difficulty, LessonMD: string(body),
+			VideoURL: lf.Video,
 		})
-		// 可选 lab.yaml（至多一个内嵌 Lab，teaching-integration skill）。
-		if labRaw, ok := files[prefix+slug+"/lab.yaml"]; ok {
-			lab, err := parseLab(labRaw)
-			if err != nil {
-				return nil, fmt.Errorf("room %s: %w", slug, err)
-			}
-			def := labDef{
-				Title: lab.Title, Type: lab.Challenge.Type, Flag: lab.Challenge.Flag,
-				Score: lab.Score, Image: lab.Env.Image, Port: lab.Env.Port,
-			}
-			for _, h := range lab.Hints {
-				def.Hints = append(def.Hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
-			}
-			parsed.Labs[slug] = def
-		}
 	}
 	return rooms, nil
-}
-
-func parseLab(raw []byte) (*labYaml, error) {
-	var lab labYaml
-	if err := yaml.Unmarshal(raw, &lab); err != nil {
-		return nil, err
-	}
-	return &lab, nil
 }
 
 // splitFrontMatter 拆分 `---` yaml front matter 与 Markdown 正文。
@@ -367,37 +328,6 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		}
 		if exists && !s.ownedRooms[r.Slug] {
 			return fmt.Errorf("room slug %q already exists", r.Slug)
-		}
-	}
-	for slug, lab := range p.Labs {
-		if lab.Title == "" {
-			return fmt.Errorf("lab %s: title is required", slug)
-		}
-		switch lab.Type {
-		case model.ChallengeStatic:
-		case model.ChallengeRegex:
-			if _, err := regexp.Compile(lab.Flag); err != nil {
-				return fmt.Errorf("lab %s: invalid regex flag: %w", slug, err)
-			}
-		default:
-			return fmt.Errorf("lab %s: challenge type must be static or regex", slug)
-		}
-		if lab.Score < 0 {
-			return fmt.Errorf("lab %s: score must be non-negative", slug)
-		}
-		// env 段可选；出现则 image 必填、port 合法（1-65535）。
-		if lab.Image != "" || lab.Port != 0 {
-			if lab.Image == "" {
-				return fmt.Errorf("lab %s: env.image is required when env is present", slug)
-			}
-			if lab.Port < 1 || lab.Port > 65535 {
-				return fmt.Errorf("lab %s: env.port must be 1-65535", slug)
-			}
-		}
-		for _, h := range lab.Hints {
-			if h.Cost < 0 {
-				return fmt.Errorf("lab %s: hint cost must be non-negative", slug)
-			}
 		}
 	}
 	return nil
@@ -511,6 +441,7 @@ func (s *ContentService) ListVersions(ctx context.Context, packageID uint) ([]mo
 }
 
 // applyPayload 把版本 Payload 写入内容表（Publish 与 Rollback 共用的覆盖式写入）。
+// 题目已是独立资源：旧版本 Payload 中的 Labs 段忽略不写（兼容历史包回放）。
 func (s *ContentService) applyPayload(ctx context.Context, payload string) error {
 	var parsed parsedPackage
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
@@ -525,22 +456,8 @@ func (s *ContentService) applyPayload(ctx context.Context, payload string) error
 		rp := parsed.Rooms[i]
 		if err := s.rooms.Upsert(ctx, &model.Room{
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
-			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD,
+			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
 		}); err != nil {
-			return err
-		}
-	}
-	for roomSlug, lab := range parsed.Labs {
-		hints := lab.Hints
-		if hints == nil {
-			hints = []model.Hint{}
-		}
-		chal := &model.Challenge{
-			RoomSlug: roomSlug, Title: lab.Title, Type: lab.Type, Score: lab.Score,
-			Image: lab.Image, Port: lab.Port,
-		}
-		flags := []model.Flag{{Type: lab.Type, Value: lab.Flag}}
-		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 			return err
 		}
 	}
@@ -554,6 +471,136 @@ func readZipFile(f *zip.File) ([]byte, error) {
 	}
 	defer rc.Close()
 	return io.ReadAll(rc)
+}
+
+// challengeJSON 管理员上传的题目定义固定格式（单对象或对象数组）。
+type challengeJSON struct {
+	Slug          string           `json:"slug"`
+	Title         string           `json:"title"`
+	Category      string           `json:"category"`
+	Difficulty    model.Difficulty `json:"difficulty"`
+	DescriptionMD string           `json:"description_md"`
+	Score         int              `json:"score"`
+	Challenge     struct {
+		Type model.ChallengeType `json:"type"`
+		Flag string             `json:"flag"`
+	} `json:"challenge"`
+	Env struct {
+		Image string `json:"image"`
+		Port  int    `json:"port"`
+	} `json:"env"`
+	Hints []struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+		Cost    int    `json:"cost"`
+	} `json:"hints"`
+	TutorialSlug string `json:"tutorial_slug"`
+}
+
+// UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
+// 逐题校验、整体拒绝（单题失败全部不入库）；slug 冲突视为 upsert（重传更新）。
+func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (imported int, slugs []string, err error) {
+	var single challengeJSON
+	var batch []challengeJSON
+	if json.Unmarshal(raw, &single) == nil && single.Slug != "" {
+		batch = []challengeJSON{single}
+	} else if err := json.Unmarshal(raw, &batch); err != nil {
+		return 0, nil, fmt.Errorf("%w: body must be a challenge object or array", ErrValidation)
+	}
+	if len(batch) == 0 {
+		return 0, nil, fmt.Errorf("%w: empty challenge list", ErrValidation)
+	}
+	// 先整体校验，再逐题 upsert（失败前置，避免部分入库）。
+	seen := map[string]bool{}
+	for i, c := range batch {
+		if err := s.validateChallengeJSON(i, c, seen); err != nil {
+			return 0, nil, err
+		}
+	}
+	for _, c := range batch {
+		hints := make([]model.Hint, 0, len(c.Hints))
+		for _, h := range c.Hints {
+			hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
+		}
+		chal := &model.Challenge{
+			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
+			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
+			Image: c.Env.Image, Port: c.Env.Port, TutorialSlug: c.TutorialSlug,
+		}
+		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
+		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
+			return 0, nil, err
+		}
+		slugs = append(slugs, c.Slug)
+	}
+	return len(batch), slugs, nil
+}
+
+// validateChallengeJSON 单题字段校验（枚举/slug/flag/env 成对/hint cost）。
+func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[string]bool) error {
+	where := fmt.Sprintf("challenge[%d]", i)
+	if c.Slug == "" {
+		return fmt.Errorf("%w: %s: slug is required", ErrValidation, where)
+	}
+	if !slugPattern.MatchString(c.Slug) {
+		return fmt.Errorf("%w: %s: slug must match [a-z0-9-]+", ErrValidation, where)
+	}
+	if seen[c.Slug] {
+		return fmt.Errorf("%w: %s: duplicate slug %q", ErrValidation, where, c.Slug)
+	}
+	seen[c.Slug] = true
+	if c.Title == "" {
+		return fmt.Errorf("%w: %s: title is required", ErrValidation, where)
+	}
+	if c.Category == "" {
+		return fmt.Errorf("%w: %s: category is required", ErrValidation, where)
+	}
+	if !slugPattern.MatchString(c.Category) {
+		return fmt.Errorf("%w: %s: category must match [a-z0-9-]+", ErrValidation, where)
+	}
+	if err := validateDifficulty(c.Difficulty); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrValidation, where, err)
+	}
+	if c.Score < 0 {
+		return fmt.Errorf("%w: %s: score must be non-negative", ErrValidation, where)
+	}
+	switch c.Challenge.Type {
+	case model.ChallengeStatic:
+	case model.ChallengeRegex:
+		if _, err := regexp.Compile(c.Challenge.Flag); err != nil {
+			return fmt.Errorf("%w: %s: invalid regex flag: %v", ErrValidation, where, err)
+		}
+	default:
+		return fmt.Errorf("%w: %s: challenge.type must be static or regex", ErrValidation, where)
+	}
+	if c.Challenge.Flag == "" {
+		return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
+	}
+	// env 段可选；出现则 image 必填、port 合法（1-65535）——与教程包 env 规则一致。
+	if c.Env.Image != "" || c.Env.Port != 0 {
+		if c.Env.Image == "" {
+			return fmt.Errorf("%w: %s: env.image is required when env is present", ErrValidation, where)
+		}
+		if c.Env.Port < 1 || c.Env.Port > 65535 {
+			return fmt.Errorf("%w: %s: env.port must be 1-65535", ErrValidation, where)
+		}
+	}
+	for _, h := range c.Hints {
+		if h.Cost < 0 {
+			return fmt.Errorf("%w: %s: hint cost must be non-negative", ErrValidation, where)
+		}
+	}
+	return nil
+}
+
+// AdminListChallenges 题目全量列表（管理端题目管理表格，分页）。
+func (s *ChallengeService) AdminListChallenges(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error) {
+	return s.challenges.List(ctx, offset, limit)
+}
+
+// DeleteChallenge 删除题目（级联删 flags/hints）。
+func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) error {
+	return s.challenges.Delete(ctx, slug)
 }
 
 // normalizeZipEntries 条目路径规范化：

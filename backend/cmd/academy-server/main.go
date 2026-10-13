@@ -73,7 +73,7 @@ func main() {
 
 	// api 装配
 	router := api.NewRouter(authSvc)
-	api.NewHandlers(authSvc, contentSvc, judgeSvc, progressSvc, topicSvc, envSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

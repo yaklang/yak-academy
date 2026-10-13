@@ -69,20 +69,16 @@ components:
         title: { type: string }
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         lesson_md: { type: string, description: 教程正文 Markdown }
-        lab:
-          type: object
+        video_url: { type: string, description: 视频教程地址（可选，lesson.md front matter video 字段） }
+        related_challenge_slug:
+          type: string
           nullable: true
-          properties:
-            challenge_id: { type: integer }
-            title: { type: string }
-            score: { type: integer }
-            solved: { type: boolean, description: 当前用户是否已通关 }
-            has_env: { type: boolean, description: 该 Lab 是否定义容器环境（lab.yaml env 段） }
+          description: 关联题目 slug（题目 tutorial_slug 指向本 Room 时返回，可空）
     SubmissionRequest:
       type: object
-      required: [room_slug, answer]
+      required: [challenge_slug, answer]
       properties:
-        room_slug: { type: string }
+        challenge_slug: { type: string }
         answer: { type: string }
     Submission:
       type: object
@@ -136,17 +132,72 @@ components:
         created_at: { type: string }
     TrainingItem:
       type: object
-      description: 训练场题目条目（跨 Topic 的全量 Challenge 视角）
+      description: 训练场题目条目（独立 Challenge 资源，按 category 分组展示）
       properties:
         id: { type: integer, description: challenge_id }
-        room_slug: { type: string }
-        room_title: { type: string }
-        topic_slug: { type: string }
+        slug: { type: string }
         title: { type: string }
+        category: { type: string, description: 分类 slug（训练场分组键） }
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         score: { type: integer }
         solved: { type: boolean, description: 当前用户是否已通关 }
-        has_env: { type: boolean, description: 是否有容器环境（lab.yaml env 段） }
+        has_env: { type: boolean, description: 是否定义容器环境 }
+        tutorial_slug:
+          type: string
+          nullable: true
+          description: 关联教程 Room slug（可选）
+        tutorial_title:
+          type: string
+          nullable: true
+          description: 关联教程 Room 标题
+    ChallengeDetail:
+      type: object
+      description: 题目详情（训练场点入页）
+      allOf:
+        - $ref: '#/components/schemas/TrainingItem'
+        - type: object
+          properties:
+            description_md: { type: string, description: 题目描述 Markdown（背景/任务目标） }
+            hints:
+              type: array
+              items:
+                type: object
+                properties:
+                  title: { type: string }
+                  content: { type: string }
+                  cost: { type: integer }
+    ChallengeJSON:
+      type: object
+      description: 题目定义 JSON（管理员上传的固定格式，单对象或对象数组）
+      required: [slug, title, category, difficulty, score, challenge]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        category: { type: string }
+        difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+        description_md: { type: string }
+        score: { type: integer }
+        challenge:
+          type: object
+          required: [type, flag]
+          properties:
+            type: { type: string, enum: [static, regex] }
+            flag: { type: string }
+        env:
+          type: object
+          description: 容器环境（image/port 要么都填要么都不填）
+          properties:
+            image: { type: string }
+            port: { type: integer }
+        hints:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              content: { type: string }
+              cost: { type: integer }
+        tutorial_slug: { type: string, description: 关联教程 Room slug（可选） }
     AdminLabInstance:
       type: object
       description: 管理端容器实例条目（LabInstance + 用户/题目富化）
@@ -156,7 +207,7 @@ components:
         username: { type: string }
         challenge_id: { type: integer }
         challenge_title: { type: string }
-        room_slug: { type: string }
+        challenge_slug: { type: string }
         status: { type: string, enum: [creating, running, stopped, destroyed] }
         endpoint: { type: string }
         expire_at: { type: string }
@@ -276,12 +327,12 @@ paths:
               schema: { $ref: '#/components/schemas/Room' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
-  /rooms/{roomSlug}/lab/instance:
+  /challenges/{slug}/instance:
     post:
       tags: [student]
-      summary: 启动/获取本人在该 Room Lab 的环境实例（幂等）
+      summary: 启动/获取本人在该题目的环境实例（幂等）
       parameters:
-        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: OK（已存在则直接返回）
@@ -293,9 +344,9 @@ paths:
         '501': { $ref: '#/components/responses/ErrorResp' }
     get:
       tags: [student]
-      summary: 查询本人在该 Room Lab 的环境实例状态（无实例返回 null）
+      summary: 查询本人在该题目的环境实例状态（无实例返回 null）
       parameters:
-        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: OK
@@ -308,9 +359,9 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
     delete:
       tags: [student]
-      summary: 销毁本人在该 Room Lab 的环境实例
+      summary: 销毁本人在该题目的环境实例
       parameters:
-        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: OK
@@ -320,6 +371,20 @@ paths:
                 type: object
                 properties:
                   deleted: { type: boolean }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /challenges/{slug}:
+    get:
+      tags: [student]
+      summary: 题目详情（描述 markdown + hints + 关联教程）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeDetail' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
   /submissions:
@@ -557,6 +622,73 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges:
+    get:
+      tags: [teacher]
+      summary: 题目全量列表（管理端题目管理表格，分页）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/TrainingItem'
+                            - type: object
+                              properties:
+                                description_md: { type: string }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 上传题目定义 JSON（单个对象或对象数组，upsert 生效）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/ChallengeJSON'
+                - type: array
+                  items: { $ref: '#/components/schemas/ChallengeJSON' }
+      responses:
+        '200':
+          description: OK（返回导入数量与 slugs）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported: { type: integer }
+                  slugs: { type: array, items: { type: string } }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges/{slug}:
+    delete:
+      tags: [admin]
+      summary: 删除题目（级联删除 flags/hints）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/lab-instances:
     get:

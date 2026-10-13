@@ -52,7 +52,7 @@ func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
 func (r *roomRepo) Upsert(ctx context.Context, room *model.Room) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "slug"}},
-		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "requirements", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "video_url", "requirements", "updated_at"}),
 	}).Create(room).Error
 }
 
@@ -92,8 +92,10 @@ func NewChallengeRepo(db *gorm.DB) ChallengeRepo { return &challengeRepo{db} }
 func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "room_slug"}},
-			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score", "image", "port"}),
+			Columns: []clause.Column{{Name: "slug"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"title", "category", "difficulty", "description", "type", "score", "image", "port", "tutorial_slug",
+			}),
 		}).Create(c).Error; err != nil {
 			return err
 		}
@@ -122,9 +124,17 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 	})
 }
 
-func (r *challengeRepo) FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error) {
+func (r *challengeRepo) FindBySlug(ctx context.Context, slug string) (*model.Challenge, error) {
 	var c model.Challenge
-	if err := r.db.WithContext(ctx).Where("room_slug = ?", roomSlug).First(&c).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("slug = ?", slug).First(&c).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *challengeRepo) FindByTutorialSlug(ctx context.Context, tutorialSlug string) (*model.Challenge, error) {
+	var c model.Challenge
+	if err := r.db.WithContext(ctx).Where("tutorial_slug = ?", tutorialSlug).First(&c).Error; err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -177,6 +187,22 @@ func (r *challengeRepo) CountSolves(ctx context.Context, challengeID uint) (int6
 		Where("challenge_id = ? AND status = ?", challengeID, model.SubmissionCorrect).
 		Count(&n).Error
 	return n, err
+}
+
+func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var c model.Challenge
+		if err := tx.Where("slug = ?", slug).First(&c).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Flag{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Hint{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&c).Error
+	})
 }
 
 type submissionRepo struct{ db *gorm.DB }

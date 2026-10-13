@@ -12,7 +12,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
-// newTrainingTestService 内存库 + 两个 room（各带一题：一题有 env、一题无）+ 已解标记。
+// newTrainingTestService 内存库 + 两个 room + 两道独立题目（一题有 env 关联教程、一题无）。
 func newTrainingTestService(t *testing.T) (*TopicService, *gorm.DB) {
 	t.Helper()
 	gdb, err := gorm.Open(sqlite.Open("file:trainingtest?mode=memory&cache=shared"), &gorm.Config{})
@@ -33,20 +33,17 @@ func newTrainingTestService(t *testing.T) (*TopicService, *gorm.DB) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := roomRepo.Upsert(context.Background(), &model.Room{
-		Slug: "room-crypto", TopicSlug: "crypto-basics", Title: "密码学入门", Difficulty: model.DifficultyExpert,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// 有 env 的题（挂在 web-security）与无 env 的题（挂在 crypto-basics）。
+	// 有 env 且关联教程的题 与 无 env 无教程的题（分类不同，训练场分组用）。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-sqli", Title: "注入题", Type: model.ChallengeStatic, Score: 100,
-		Image: "nginx:alpine", Port: 80,
+		Slug: "sqli-basic", Title: "注入题", Category: "sql-injection",
+		Difficulty: model.DifficultyApprentice, Type: model.ChallengeStatic, Score: 100,
+		Image: "nginx:alpine", Port: 80, TutorialSlug: "room-sqli",
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{a}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-crypto", Title: "编码题", Type: model.ChallengeStatic, Score: 200,
+		Slug: "crypto-encode", Title: "编码题", Category: "cryptography",
+		Difficulty: model.DifficultyExpert, Type: model.ChallengeStatic, Score: 200,
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{b}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +53,7 @@ func newTrainingTestService(t *testing.T) (*TopicService, *gorm.DB) {
 	return svc, gdb
 }
 
-func TestListTrainingEnrichesRoomAndEnv(t *testing.T) {
+func TestListTrainingFields(t *testing.T) {
 	svc, _ := newTrainingTestService(t)
 	items, total, err := svc.ListTraining(context.Background(), 1, 0, 20)
 	if err != nil {
@@ -66,15 +63,19 @@ func TestListTrainingEnrichesRoomAndEnv(t *testing.T) {
 		t.Fatalf("total=%d len=%d, want 2/2", total, len(items))
 	}
 	sqli, crypto := items[0], items[1]
-	// 房间元数据与 env 标记拼装正确。
-	if sqli.RoomSlug != "room-sqli" || sqli.RoomTitle != "SQL 注入" ||
-		sqli.TopicSlug != "web-security" || sqli.Difficulty != model.DifficultyApprentice {
+	// 题目自身字段 + env 标记 + 关联教程富化。
+	if sqli.Slug != "sqli-basic" || sqli.Category != "sql-injection" ||
+		sqli.Difficulty != model.DifficultyApprentice {
 		t.Fatalf("sqli item = %+v", sqli)
 	}
 	if !sqli.HasEnv || sqli.Score != 100 {
 		t.Fatalf("sqli has_env/score = %v/%d, want true/100", sqli.HasEnv, sqli.Score)
 	}
-	if crypto.HasEnv || crypto.TopicSlug != "crypto-basics" || crypto.Difficulty != model.DifficultyExpert {
+	if sqli.TutorialSlug != "room-sqli" || sqli.TutorialTitle != "SQL 注入" {
+		t.Fatalf("sqli tutorial = %q/%q, want room-sqli/SQL 注入", sqli.TutorialSlug, sqli.TutorialTitle)
+	}
+	if crypto.HasEnv || crypto.Category != "cryptography" ||
+		crypto.Difficulty != model.DifficultyExpert || crypto.TutorialSlug != "" {
 		t.Fatalf("crypto item = %+v", crypto)
 	}
 	// 陌生用户：无解题记录 → solved 全 false。
@@ -83,12 +84,48 @@ func TestListTrainingEnrichesRoomAndEnv(t *testing.T) {
 	}
 }
 
+func TestGetChallengeDetail(t *testing.T) {
+	svc, gdb := newTrainingTestService(t)
+	ctx := context.Background()
+	detail, err := svc.GetChallengeDetail(ctx, 1, "sqli-basic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Title != "注入题" || detail.Difficulty != model.DifficultyApprentice || !detail.HasEnv {
+		t.Fatalf("detail = %+v", detail)
+	}
+	if detail.TutorialTitle != "SQL 注入" {
+		t.Fatalf("tutorial_title = %q", detail.TutorialTitle)
+	}
+	if len(detail.Hints) != 0 {
+		t.Fatalf("hints = %+v, want empty", detail.Hints)
+	}
+	// 已解用户视角。
+	if err := gdb.Create(&model.Submission{
+		UserID: 5, ChallengeID: detail.ID, Answer: "flag{a}",
+		Status: model.SubmissionCorrect,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	detail, err = svc.GetChallengeDetail(ctx, 5, "sqli-basic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Solved {
+		t.Fatal("user 5 should see solved=true")
+	}
+	// 不存在的题目 → gorm.ErrRecordNotFound（api 层映射 404）。
+	if _, err := svc.GetChallengeDetail(ctx, 1, "no-such-chal"); err != gorm.ErrRecordNotFound {
+		t.Fatalf("err = %v, want gorm.ErrRecordNotFound", err)
+	}
+}
+
 func TestListTrainingSolvedForUser(t *testing.T) {
 	svc, gdb := newTrainingTestService(t)
 	ctx := context.Background()
 	// 用户 5 直接落一条 correct 提交（绕过 judge，制造已解状态）。
 	var chal model.Challenge
-	if err := gdb.Where("room_slug = ?", "room-sqli").First(&chal).Error; err != nil {
+	if err := gdb.Where("slug = ?", "sqli-basic").First(&chal).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := gdb.Create(&model.Submission{
@@ -121,7 +158,7 @@ func TestListTrainingPagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 2 || len(items) != 1 || items[0].RoomSlug != "room-crypto" {
+	if total != 2 || len(items) != 1 || items[0].Slug != "crypto-encode" {
 		t.Fatalf("page 2 = %+v total=%d", items, total)
 	}
 }

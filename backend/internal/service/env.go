@@ -151,7 +151,7 @@ type AdminLabInstance struct {
 	model.LabInstance
 	Username        string `json:"username"`
 	ChallengeTitle  string `json:"challenge_title"`
-	RoomSlug        string `json:"room_slug"`
+	ChallengeSlug   string `json:"challenge_slug"`
 }
 
 // ListInstances 全量实例分页（管理端容器面板；批量富化用户名与题目名）。
@@ -187,7 +187,7 @@ func (s *EnvService) ListInstances(ctx context.Context, offset, limit int) ([]Ad
 		item := AdminLabInstance{LabInstance: inst, Username: userName[inst.UserID]}
 		if c, ok := chalTitle[inst.ChallengeID]; ok {
 			item.ChallengeTitle = c.Title
-			item.RoomSlug = c.RoomSlug
+			item.ChallengeSlug = c.Slug
 		}
 		out = append(out, item)
 	}

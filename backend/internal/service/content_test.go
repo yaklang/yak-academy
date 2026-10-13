@@ -59,7 +59,8 @@ func buildZip(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// validPackage 一个最小合法内容包（topic + 带 lab 的 room + 纯教程 room）。
+// validPackage 一个最小合法教程包（topic + 两个 room：文字教程 + 视频教程）。
+// 题目已独立（challenge.json 上传），包内不再有 lab.yaml。
 func validPackage() map[string]string {
 	return map[string]string{
 		"manifest.yaml": `
@@ -78,20 +79,10 @@ title: SQL 注入基础
 difficulty: apprentice
 ---
 SQL 注入是……`,
-		"topics/web-security/rooms/sqli-basics/lab.yaml": `
-title: 找出注入点
-challenge:
-  type: static
-  flag: flag{test-answer}
-score: 100
-hints:
-  - title: 提示一
-    content: 看 UNION
-    cost: 10
-`,
 		"topics/web-security/rooms/xss-intro/lesson.md": `---
 title: XSS 简介
 difficulty: apprentice
+video: https://cdn.example.com/xss-intro.mp4
 ---
 XSS 是……`,
 	}
@@ -183,16 +174,78 @@ func TestUploadSlugConflictWithDB(t *testing.T) {
 
 func TestUploadInvalidRegexFlag(t *testing.T) {
 	svc, _ := newContentTestService(t)
-	files := validPackage()
-	files["topics/web-security/rooms/sqli-basics/lab.yaml"] = `
-title: 找出注入点
-challenge:
-  type: regex
-  flag: "[unclosed"
-score: 100
-`
-	if _, err := svc.Upload(context.Background(), buildZip(t, files)); err == nil {
+	// 题目 JSON：regex flag 无法编译 → 整体拒绝。
+	raw := `{"slug":"re-1","title":"正则题","category":"web","difficulty":"apprentice",
+		"score":100,"challenge":{"type":"regex","flag":"[unclosed"}}`
+	if _, _, err := svc.UploadChallenges(context.Background(), []byte(raw)); err == nil {
 		t.Fatal("expected reject on invalid regex flag")
+	}
+}
+
+func TestUploadChallengesUpsertAndBatch(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	// 数组批量导入两题（一题带 env/hints/tutorial 关联）。
+	batch := `[{
+		"slug":"sqli-1","title":"注入题","category":"sql-injection","difficulty":"apprentice",
+		"description_md":"# 背景\n目标","score":100,
+		"challenge":{"type":"static","flag":"flag{a}"},
+		"env":{"image":"nginx:alpine","port":80},
+		"hints":[{"title":"提示","content":"看 WHERE","cost":10}],
+		"tutorial_slug":"sqli-basics"
+	},{
+		"slug":"xss-1","title":"XSS题","category":"cross-site-scripting","difficulty":"expert",
+		"score":200,"challenge":{"type":"static","flag":"flag{b}"}
+	}]`
+	imported, slugs, err := svc.UploadChallenges(ctx, []byte(batch))
+	if err != nil {
+		t.Fatalf("upload challenges: %v", err)
+	}
+	if imported != 2 || len(slugs) != 2 {
+		t.Fatalf("imported=%d slugs=%v", imported, slugs)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "sqli-1").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chal.Category != "sql-injection" || chal.Image != "nginx:alpine" ||
+		chal.TutorialSlug != "sqli-basics" || chal.Description == "" {
+		t.Fatalf("challenge fields wrong: %+v", chal)
+	}
+	var hints int64
+	gdb.Model(&model.Hint{}).Where("challenge_id = ?", chal.ID).Count(&hints)
+	if hints != 1 {
+		t.Fatalf("hints = %d, want 1", hints)
+	}
+	// 单题失败整体拒绝：数组中第二题 difficulty 非法 → 两题都不入库。
+	var before int64
+	gdb.Model(&model.Challenge{}).Count(&before)
+	badBatch := `[{"slug":"ok-1","title":"ok","category":"c","difficulty":"apprentice",
+		"score":1,"challenge":{"type":"static","flag":"f"}},
+		{"slug":"bad-1","title":"bad","category":"c","difficulty":"beginner",
+		"score":1,"challenge":{"type":"static","flag":"f"}}]`
+	if _, _, err := svc.UploadChallenges(ctx, []byte(badBatch)); err == nil {
+		t.Fatal("expected reject on invalid difficulty in batch")
+	}
+	var after int64
+	gdb.Model(&model.Challenge{}).Count(&after)
+	if after != before {
+		t.Fatalf("batch reject must not persist, before=%d after=%d", before, after)
+	}
+	// 重传同 slug = upsert 更新，不新增行。
+	update := `{"slug":"sqli-1","title":"注入题v2","category":"sql-injection","difficulty":"apprentice",
+		"score":150,"challenge":{"type":"static","flag":"flag{a}"}}`
+	if _, _, err := svc.UploadChallenges(ctx, []byte(update)); err != nil {
+		t.Fatalf("re-upload: %v", err)
+	}
+	gdb.Model(&model.Challenge{}).Count(&after)
+	if after != before {
+		t.Fatalf("upsert should not add rows, before=%d after=%d", before, after)
+	}
+	var title string
+	gdb.Model(&model.Challenge{}).Where("slug = ?", "sqli-1").Pluck("title", &title)
+	if title != "注入题v2" {
+		t.Fatalf("upsert title = %q", title)
 	}
 }
 
@@ -206,19 +259,17 @@ func TestPublishWritesContentTables(t *testing.T) {
 	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
+	// 教程包只写 Topic/Room（题目经 challenge.json 独立上传）。
 	var (
-		topics, rooms, challenges, flags, hints int64
+		topics, rooms, challenges int64
 	)
 	gdb.Model(&model.Topic{}).Count(&topics)
 	gdb.Model(&model.Room{}).Count(&rooms)
 	gdb.Model(&model.Challenge{}).Count(&challenges)
-	gdb.Model(&model.Flag{}).Count(&flags)
-	gdb.Model(&model.Hint{}).Count(&hints)
-	if topics != 1 || rooms != 2 || challenges != 1 || flags != 1 || hints != 1 {
-		t.Fatalf("topics=%d rooms=%d challenges=%d flags=%d hints=%d, want 1/2/1/1/1",
-			topics, rooms, challenges, flags, hints)
+	if topics != 1 || rooms != 2 || challenges != 0 {
+		t.Fatalf("topics=%d rooms=%d challenges=%d, want 1/2/0", topics, rooms, challenges)
 	}
-	// 教程正文与 flag 值正确写入。
+	// 教程正文与视频字段正确写入。
 	var room model.Room
 	if err := gdb.Where("slug = ?", "sqli-basics").First(&room).Error; err != nil {
 		t.Fatal(err)
@@ -226,12 +277,12 @@ func TestPublishWritesContentTables(t *testing.T) {
 	if room.LessonMD == "" || room.Title != "SQL 注入基础" {
 		t.Fatalf("room content wrong: %+v", room)
 	}
-	var flag model.Flag
-	if err := gdb.First(&flag).Error; err != nil {
+	var xssRoom model.Room
+	if err := gdb.Where("slug = ?", "xss-intro").First(&xssRoom).Error; err != nil {
 		t.Fatal(err)
 	}
-	if flag.Value != "flag{test-answer}" {
-		t.Fatalf("flag = %q", flag.Value)
+	if xssRoom.VideoURL != "https://cdn.example.com/xss-intro.mp4" {
+		t.Fatalf("video_url = %q", xssRoom.VideoURL)
 	}
 }
 
@@ -282,7 +333,7 @@ func TestUploadFlatStructureUntouched(t *testing.T) {
 	}
 }
 
-// versionTwoPackage 同名包第二版：改动教程正文与 flag（回滚前后可区分）。
+// versionTwoPackage 同名包第二版：改动教程正文（回滚前后可区分）。
 func versionTwoPackage() map[string]string {
 	files := validPackage()
 	files["manifest.yaml"] = `
@@ -297,13 +348,6 @@ title: SQL 注入基础
 difficulty: apprentice
 ---
 v2 重写后的正文`
-	files["topics/web-security/rooms/sqli-basics/lab.yaml"] = `
-title: 找出注入点
-challenge:
-  type: static
-  flag: flag{v2-answer}
-score: 100
-`
 	return files
 }
 
@@ -363,20 +407,13 @@ func TestRollbackRestoresOldContent(t *testing.T) {
 	if pkg.LatestVersion != "1.0.0" || pkg.Status != model.PackagePublished {
 		t.Fatalf("package after rollback = %+v", pkg)
 	}
-	// 内容表被 v1 Payload 覆盖：正文与 flag 回到 v1。
+	// 内容表被 v1 Payload 覆盖：正文回到 v1。
 	var room model.Room
 	if err := gdb.Where("slug = ?", "sqli-basics").First(&room).Error; err != nil {
 		t.Fatal(err)
 	}
 	if room.LessonMD != "SQL 注入是……" {
 		t.Fatalf("lesson_md = %q, want v1 content", room.LessonMD)
-	}
-	var flag model.Flag
-	if err := gdb.First(&flag).Error; err != nil {
-		t.Fatal(err)
-	}
-	if flag.Value != "flag{test-answer}" {
-		t.Fatalf("flag = %q, want v1 flag", flag.Value)
 	}
 	// 版本状态对调：v1 published，v2 archived。
 	after, err := svc.ListVersions(ctx, pkg.ID)

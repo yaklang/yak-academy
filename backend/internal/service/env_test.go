@@ -58,22 +58,22 @@ func newEnvTestService(t *testing.T, d InstanceDriver) (*EnvService, *gorm.DB, u
 	chalRepo := repo.NewChallengeRepo(gdb)
 	// 题目 A：带 env（镜像 + 端口）。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-env", Title: "容器题", Type: model.ChallengeStatic, Score: 100,
+		Slug: "chal-env", Title: "容器题", Type: model.ChallengeStatic, Score: 100,
 		Image: "nginx:alpine", Port: 80,
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{env}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// 题目 B：无 env。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-plain", Title: "纯 flag 题", Type: model.ChallengeStatic, Score: 100,
+		Slug: "chal-plain", Title: "纯 flag 题", Type: model.ChallengeStatic, Score: 100,
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{plain}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var chalA, chalB model.Challenge
-	if err := gdb.Where("room_slug = ?", "room-env").First(&chalA).Error; err != nil {
+	if err := gdb.Where("slug = ?", "chal-env").First(&chalA).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.Where("room_slug = ?", "room-plain").First(&chalB).Error; err != nil {
+	if err := gdb.Where("slug = ?", "chal-plain").First(&chalB).Error; err != nil {
 		t.Fatal(err)
 	}
 	env := NewEnvService(
@@ -151,7 +151,7 @@ func TestEnsureInstancePerUserLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 第三个活跃实例：换一个带 env 的题目触发上限。
-	chalC := model.Challenge{RoomSlug: "room-env-2", Title: "容器题2", Type: model.ChallengeStatic, Score: 100, Image: "nginx:alpine", Port: 80}
+	chalC := model.Challenge{Slug: "chal-env-2", Title: "容器题2", Type: model.ChallengeStatic, Score: 100, Image: "nginx:alpine", Port: 80}
 	if err := gdb.Create(&chalC).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestListInstancesEnrichesUserAndChallenge(t *testing.T) {
 		t.Fatalf("total=%d len=%d, want 1/1", total, len(items))
 	}
 	got := items[0]
-	if got.Username != "alice" || got.ChallengeTitle != "容器题" || got.RoomSlug != "room-env" {
+	if got.Username != "alice" || got.ChallengeTitle != "容器题" || got.ChallengeSlug != "chal-env" {
 		t.Fatalf("enriched = %+v", got)
 	}
 	if got.ID != inst.ID || got.Status != model.InstanceRunning {

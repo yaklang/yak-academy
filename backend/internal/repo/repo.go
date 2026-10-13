@@ -39,7 +39,10 @@ type RoomRepo interface {
 
 type ChallengeRepo interface {
 	Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error
-	FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error)
+	// FindBySlug 按题目 slug 查（详情/实例/提交解析的主键入口）。
+	FindBySlug(ctx context.Context, slug string) (*model.Challenge, error)
+	// FindByTutorialSlug 查关联到某教程 Room 的题目（Room 详情反查，无则 gorm.ErrRecordNotFound）。
+	FindByTutorialSlug(ctx context.Context, tutorialSlug string) (*model.Challenge, error)
 	FindByID(ctx context.Context, id uint) (*model.Challenge, error)
 	// FindByIDs 批量查题（管理端实例列表富化用）。
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error)
@@ -48,6 +51,8 @@ type ChallengeRepo interface {
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
+	// Delete 删除题目（级联删 flags/hints，事务内）。
+	Delete(ctx context.Context, slug string) error
 }
 
 type SubmissionRepo interface {

@@ -173,9 +173,10 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		return
 	}
 	s.finish(ctx, sub, model.SubmissionCorrect, score)
-	// 首通：Room 通关事件（教题一体，teaching-integration skill）。
-	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil {
-		s.AppendRoomCompleted(ctx, sub.UserID, chal.RoomSlug)
+	// 题目关联了教程 Room 时记 Room 通关事件（教程进度物化视图用；
+	// 纯题目不指向 Room，不产生 Room 侧进度）。
+	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil && chal.TutorialSlug != "" {
+		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
 }
 
