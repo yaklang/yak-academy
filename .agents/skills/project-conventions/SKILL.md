@@ -1,6 +1,6 @@
 ---
 name: project-conventions
-description: yak-academy 项目分层与目录约定。任何代码改动前必须阅读本 skill，防止破坏分层架构。适用于：新增/修改 Go 后端代码、调整目录结构、新增模块、依赖引入。
+description: yak-academy 项目分层与目录约定。任何代码改动前必须阅读本 skill，防止破坏分层架构。适用于：新增/修改 Go 后端代码、调整目录结构、新增模块、依赖引入、编写或修改测试。
 ---
 
 # 项目分层约定（强制）
@@ -40,3 +40,34 @@ api → service → repo → model
 ✅ 正确：`api/room.go` 的 handler 调用 `service.Room.Get(ctx, id)`，service 调用 `repo.Room.Find(ctx, id)`。
 ❌ 错误：handler 里 `db.Where("id = ?", id).First(&room)`。
 ❌ 错误：`service/content` import `service/judge`（不在白名单）。
+
+## 测试编写要点（CI 强制全绿）
+
+测试与被测代码同包（`xxx_test.go` 放在实现旁），走 `go vet ./... && go test -count=1 ./...` 与 GitHub Actions（`.github/workflows/ci.yml`）。
+
+### 数据库与 fixture
+
+- **纯 Go 内存 SQLite**：`gorm.Open(sqlite.Open("file:<testname>?mode=memory&cache=shared"), &gorm.Config{})`（glebarez 驱动，无 CGO）。每个测试文件一个独立的库名，**禁止**两个测试文件共用同一库名（cache=shared 会互相污染）。
+- **必做清理**：`t.Cleanup` 里 `sqlDB.Close()` 关闭共享内存库，否则下个测试撞表。
+- **fixture 工厂**：每包一个 `newXxxTestService(t) (被测 Service, *gorm.DB)`，内部 `db.Migrate(gdb)` + 构造真实 repo。**禁止** mock repo 接口——repo 本身就是抽象，测试用真实 SQLite 实现。
+- **造数走 model/repo 或 Raw SQL**：fixture 直接 `gdb.Create(&model.X{...})`；要构造"历史遗留结构"（model 已删的物理列），用 `ALTER TABLE ... ADD COLUMN` + Raw SQL（参考 `db/open_test.go` 的 legacyRow）。
+- **测试数据在测试代码中构造**（内存 zip / JSON 字符串），**禁止**向生产路径或仓库添加示例内容文件（无内置内容原则）。
+
+### 测试替身与纯函数
+
+- 外部依赖（Docker 等运行时）用**手写 fake**（如 `fakeDriver`）：结构体记录调用参数与次数，断言交互而非只断言返回值；错误注入用 `createErr/destroyErr` 字段，测试中置 nil 可模拟恢复重试。
+- 纯函数（解析、派生逻辑）抽出来直接表驱动测试（如 `parseHostPort`、`containerName`），不依赖任何环境。
+- 时钟注入：service 保留 `now func() time.Time` 字段，测试固定时间推进 TTL（参考 env_test 的 reaper 用例）。
+
+### 断言与用例设计
+
+- **错误断言用 `errors.Is(err, ErrValidation)` 等哨兵错误**，**禁止**断言错误字符串；DB 缺失行断言 `gorm.ErrRecordNotFound`（api 层负责映射 404，测试不测 HTTP 语义）。
+- **一个用例一个行为**，名字说清场景：`TestEnsureInstanceDriverFailureRollsBack`、`TestUploadChallengesUpsertAndBatch`。正向、拒绝、幂等、失败回滚四类都要覆盖。
+- **状态断言查库**，不信内存对象：关键路径后 `gdb.First(&after)` 断言落库结果（回滚、级联删除、事件写入都这样验）。
+- **事件溯源断言**（event-sourcing-rules skill）：只查 Event 表的 type/payload 计数，**禁止**在测试里直改派生表来"准备"进度或积分。
+- 边界条件必须显式：`go test -count=1` 防缓存是本地命令约定，**禁止**依赖测试执行顺序或共享状态。
+
+### GORM 陷阱（测试中反复踩过）
+
+- **禁止复用同一 struct 变量做多次 First/查询**：struct 里残留的旧主键 ID 会成为隐式条件，查不到或查错行。每查一次用新变量（`var room model.Room`）。
+- 共享内存库的表跨测试累积：断言**增量**（before/after 计数对比），不假设表为空。
