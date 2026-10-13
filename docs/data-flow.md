@@ -1,8 +1,8 @@
 # yak-academy 关键数据流
 
-本文档描述三条核心时序。参与方缩写：FE=前端、API=api 层、SVC=service 层、EB=eventbus、DB=SQLite。
+本文档描述核心时序。参与方缩写：FE=前端、API=api 层、SVC=service 层、EB=eventbus、DB=SQLite。
 
-## 1. 内容上传流（Content Pipeline）
+## 1. 教程上传流（Content Pipeline）
 
 ```
 FE(admin)          API                content SVC           repo            DB
@@ -11,7 +11,7 @@ FE(admin)          API                content SVC           repo            DB
    │                                  │ 1.Upload: 校验大小/MIME                  │
    │                                  │ 2.Parse: 解压→manifest→topics→rooms      │
    │                                  │   ├─ 解析失败 → 整体拒绝(422) ────────→│
-   │                                  │ 3.Validate: front matter/难度/flag/slug │
+   │                                  │ 3.Validate: front matter/难度/slug       │
    │                                  │ 4.Persist: Package+Version(draft) ───→ │
    │   201 {package_id, version, status:"draft"}             │               │
    │←─────────────────────────────────┤                      │               │
@@ -22,14 +22,32 @@ FE(admin)          API                content SVC           repo            DB
 ```
 
 要点：
-- 整体拒绝：任何一 Room/lab 解析或校验失败，整个包不入库（无部分发布）。
+- 教程包只含教程（文字 + 视频）；题目是独立资源，经 challenge.json 上传（见流 2）。
+- 整体拒绝：任何一 Room 解析或校验失败，整个包不入库（无部分发布）。
 - 同名包再上传 = 新 ContentVersion；发布后旧版本可回滚（archived）。
 
-## 2. 做题判定流（Event-Sourced Judging）
+## 2. 题目上传流（Challenge JSON Upsert）
+
+```
+FE(admin)          API                content/challenge SVC   repo            DB
+   │  POST /admin/challenges (JSON: 单对象或数组)             │               │
+   ├─────────────────────────────────→│ 解析 JSON → 逐题校验(slug/枚举/flag    │
+   │                                  │  regex/env 成对)                      │
+   │                                  │  ├─ 单题失败 → 整体拒绝(422) ────────→│
+   │                                  │ └─ UpsertChallenge(按 slug) ────────→│
+   │   200 {imported, slugs}           │  （upsert 即生效，无 draft/publish）   │
+   │←─────────────────────────────────┤                      │               │
+```
+
+要点：
+- slug 重复 = 更新（upsert），上传即对学生可见；版本化机制只属于教程包。
+- 删除（DELETE /admin/challenges/{slug}）级联删 flags/hints。
+
+## 3. 做题判定流（Event-Sourced Judging）
 
 ```
 FE(student)        API                judge SVC             EB              DB
-   │  POST /submissions {room_id, answer}                   │               │
+   │  POST /submissions {challenge_slug, answer}             │               │
    ├─────────────────────────────────→│ 写 submission(pending)               │
    │                                  ├─ Append(submission.created) ──────→│
    │   202 {submission_id, status:"pending"}                 │               │
@@ -39,6 +57,8 @@ FE(student)        API                judge SVC             EB              DB
    │                                  │  ├─ 动态计分 value=f(solve_count)      │
    │                                  │  ├─ submission → correct/incorrect    │
    │                                  │  └─ Append(submission.judged) ──────→│
+   │                                  │  └─ 题目关联教程(tutorial_slug)时       │
+   │                                  │     Append(room.completed) ─────────→│
    │                                  │                      │ 派生器消费:   │
    │                                  │                      │  ├─ ScoreRecord(积分)
    │                                  │                      │  ├─ Progress(进度)
@@ -51,8 +71,9 @@ FE(student)        API                judge SVC             EB              DB
 - 提交请求内**禁止**同步判定；恒时比较防时序侧信道。
 - 积分/进度/排行榜**只能**由派生器从事件更新，业务代码禁止直写。
 - Event 表只 INSERT；"修正"以新事件表达。
+- 纯题目（无 tutorial_slug）不产生 Room 侧进度事件。
 
-## 3. RBAC 鉴权流（双层角色）
+## 4. RBAC 鉴权流（双层角色）
 
 ```
 FE                API middleware                    handler            SVC
@@ -73,9 +94,9 @@ FE                API middleware                    handler            SVC
 - 判定顺序：全局角色 → 课程级角色；admin 短路。
 - 401（未登录/token 失效）与 403（角色不足）严格区分，统一错误信封 `{"error":{"code","message"}}`。
 
-## 4. Hint 解锁流（附加）
+## 5. Hint 解锁流（远期）
 
 ```
-POST /rooms/{id}/hints/{hintId}/unlock → 校验积分够扣 → 写 hint.unlocked 事件
+POST /challenges/{slug}/hints/{hintId}/unlock → 校验积分够扣 → 写 hint.unlocked 事件
 → 派生器扣减 ScoreRecord → 返回 hint 内容
 ```
