@@ -6,10 +6,13 @@ export interface ApiErrorEnvelope {
 export class ApiError extends Error {
   code: string
   status: number
-  constructor(status: number, code: string, message: string) {
+  // 错误信封外的附加数据（如 409 单容器冲突的 current：当前活跃实例）。
+  data: Record<string, unknown> | null
+  constructor(status: number, code: string, message: string, data: Record<string, unknown> | null = null) {
     super(message)
     this.status = status
     this.code = code
+    this.data = data
   }
 }
 
@@ -35,7 +38,15 @@ async function request<T>(method: string, path: string, body?: unknown, isForm =
   const data = text ? JSON.parse(text) : null
   if (!resp.ok) {
     const env = data as ApiErrorEnvelope | null
-    throw new ApiError(resp.status, env?.error?.code ?? 'UNKNOWN', env?.error?.message ?? resp.statusText)
+    // 信封外字段（current 等）原样透传，供调用方按 code 读取。
+    const extra: Record<string, unknown> = {}
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+        if (k !== 'error') extra[k] = v
+      }
+    }
+    throw new ApiError(resp.status, env?.error?.code ?? 'UNKNOWN', env?.error?.message ?? resp.statusText,
+      Object.keys(extra).length ? extra : null)
   }
   return data as T
 }

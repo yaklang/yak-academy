@@ -130,6 +130,27 @@ components:
         endpoint: { type: string, description: 实例访问地址 }
         expire_at: { type: string, description: TTL 过期时间（RFC3339，UTC） }
         created_at: { type: string }
+    InstanceConflict:
+      type: object
+      description: 单用户并发上限冲突（同时只允许一个活跃容器）
+      properties:
+        current: { $ref: '#/components/schemas/AdminLabInstance', description: 当前活跃实例（含题目信息，前端引导关闭） }
+    InstanceLog:
+      type: object
+      description: 容器实例生命周期日志条目（append-only）
+      properties:
+        id: { type: integer }
+        instance_id: { type: integer }
+        user_id: { type: integer }
+        username: { type: string }
+        challenge_id: { type: integer }
+        challenge_title: { type: string }
+        challenge_slug: { type: string }
+        action: { type: string, enum: [started, stopped], description: 生命周期动作 }
+        source: { type: string, description: 触发来源（owner/admin/reaper） }
+        status: { type: string, enum: [creating, running, stopped, destroyed], description: 动作时的实例状态 }
+        detail: { type: string, description: 失败原因/补充信息（如 "ttl expired"） }
+        created_at: { type: string }
     TrainingItem:
       type: object
       description: 训练场题目条目（独立 Challenge 资源，按 category 分组展示）
@@ -344,6 +365,15 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LabInstance' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+        '409':
+          description: 已有活跃容器（同时只允许一个，返回当前实例引导关闭）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { $ref: '#/components/schemas/Error' }
+                  current: { $ref: '#/components/schemas/AdminLabInstance' }
         '422': { $ref: '#/components/responses/ErrorResp' }
         '501': { $ref: '#/components/responses/ErrorResp' }
     get:
@@ -712,6 +742,41 @@ paths:
                   - type: object
                     properties:
                       items: { type: array, items: { $ref: '#/components/schemas/AdminLabInstance' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/lab-instances/active:
+    get:
+      tags: [admin]
+      summary: 当前活跃容器（creating/running，管理端概览卡片）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminLabInstance' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/lab-instances/logs:
+    get:
+      tags: [admin]
+      summary: 容器实例生命周期日志（started/stopped，分页，管理端日志表格）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/InstanceLog' } }
         '403': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/lab-instances/{id}:

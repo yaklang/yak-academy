@@ -64,11 +64,12 @@ func main() {
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo)
 	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
 	instanceRepo := repo.NewLabInstanceRepo(gdb)
+	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
 	var driver service.InstanceDriver = service.NoopDriver{}
 	if cfg.EnvDriver == "docker" {
 		driver = service.NewDockerDriver()
 	}
-	envSvc := service.NewEnvService(instanceRepo, challengeRepo, userRepo, eventRepo, bus, driver)
+	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver)
 	envSvc.StartReaper(ctx, time.Minute)
 
 	// api 装配

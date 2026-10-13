@@ -39,15 +39,6 @@ func (r *labInstanceRepo) FindActive(ctx context.Context, userID, challengeID ui
 	return &i, nil
 }
 
-func (r *labInstanceRepo) CountActive(ctx context.Context, userID uint) (int64, error) {
-	var n int64
-	err := r.db.WithContext(ctx).Model(&model.LabInstance{}).
-		Where("user_id = ? AND status IN ?", userID,
-			[]model.InstanceStatus{model.InstanceCreating, model.InstanceRunning}).
-		Count(&n).Error
-	return n, err
-}
-
 func (r *labInstanceRepo) UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.LabInstance{}).Where("id = ?", id).
 		Updates(map[string]any{
@@ -68,12 +59,55 @@ func (r *labInstanceRepo) ListExpired(ctx context.Context, now time.Time) ([]mod
 	return list, err
 }
 
+func (r *labInstanceRepo) FindActiveAny(ctx context.Context, userID uint) (*model.LabInstance, error) {
+	var i model.LabInstance
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND status IN ?", userID,
+			[]model.InstanceStatus{model.InstanceCreating, model.InstanceRunning}).
+		Order("id DESC").First(&i).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
 func (r *labInstanceRepo) List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error) {
 	var (
 		list  []model.LabInstance
 		total int64
 	)
 	if err := r.db.WithContext(ctx).Model(&model.LabInstance{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}
+
+func (r *labInstanceRepo) ListActive(ctx context.Context) ([]model.LabInstance, error) {
+	var list []model.LabInstance
+	err := r.db.WithContext(ctx).
+		Where("status IN ?", []model.InstanceStatus{model.InstanceCreating, model.InstanceRunning}).
+		Order("id DESC").Find(&list).Error
+	return list, err
+}
+
+type instanceLogRepo struct{ db *gorm.DB }
+
+func NewInstanceLogRepo(db *gorm.DB) InstanceLogRepo { return &instanceLogRepo{db: db} }
+
+func (r *instanceLogRepo) Create(ctx context.Context, l *model.InstanceLog) error {
+	return r.db.WithContext(ctx).Create(l).Error
+}
+
+func (r *instanceLogRepo) List(ctx context.Context, offset, limit int) ([]model.InstanceLog, int64, error) {
+	var (
+		list  []model.InstanceLog
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.InstanceLog{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	err := r.db.WithContext(ctx).Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error

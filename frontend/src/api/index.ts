@@ -67,6 +67,21 @@ export interface AdminLabInstance {
   expire_at: string
   created_at: string
 }
+// 容器生命周期日志条目（append-only，管理端容器日志表格）。
+export interface InstanceLog {
+  id: number
+  instance_id: number
+  user_id: number
+  username: string
+  challenge_id: number
+  challenge_title: string
+  challenge_slug: string
+  action: 'started' | 'stopped'
+  source: string
+  status: 'creating' | 'running' | 'stopped' | 'destroyed'
+  detail: string
+  created_at: string
+}
 export interface LeaderboardEntry { rank: number; username: string; score: number; solved_count: number }
 export interface ContentPackage {
   id: number
@@ -128,6 +143,9 @@ export const trainingApi = {
 
 export const adminInstanceApi = {
   list: (page = 1) => http.get<Paged<AdminLabInstance>>(`/admin/lab-instances?page=${page}`),
+  active: () => http.get<{ items: AdminLabInstance[] }>('/admin/lab-instances/active'),
+  logs: (page = 1, pageSize = 20) =>
+    http.get<Paged<InstanceLog>>(`/admin/lab-instances/logs?page=${page}&page_size=${pageSize}`),
   destroy: (id: number) => http.del<{ deleted: boolean }>(`/admin/lab-instances/${id}`),
 }
 

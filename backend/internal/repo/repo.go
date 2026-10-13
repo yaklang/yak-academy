@@ -106,8 +106,8 @@ type LabInstanceRepo interface {
 	FindByID(ctx context.Context, id uint) (*model.LabInstance, error)
 	// FindActive 查询 user×challenge 当前活跃（creating/running）实例，无则返回 nil。
 	FindActive(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error)
-	// CountActive 该用户活跃（creating/running）实例数（并发上限用）。
-	CountActive(ctx context.Context, userID uint) (int64, error)
+	// FindActiveAny 该用户任意题目的当前活跃实例（单容器约束用），无则 nil。
+	FindActiveAny(ctx context.Context, userID uint) (*model.LabInstance, error)
 	// UpdateRunning driver.Create 成功后回写 endpoint/expire_at 并置 running。
 	UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time) error
 	UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error
@@ -115,4 +115,12 @@ type LabInstanceRepo interface {
 	ListExpired(ctx context.Context, now time.Time) ([]model.LabInstance, error)
 	// List 全量实例分页（管理端容器面板用）。
 	List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error)
+	// ListActive 全部用户的活跃（creating/running）实例（管理端概览用）。
+	ListActive(ctx context.Context) ([]model.LabInstance, error)
+}
+
+// InstanceLogRepo 容器实例生命周期日志（append-only：只 Create 与分页查询）。
+type InstanceLogRepo interface {
+	Create(ctx context.Context, l *model.InstanceLog) error
+	List(ctx context.Context, offset, limit int) ([]model.InstanceLog, int64, error)
 }

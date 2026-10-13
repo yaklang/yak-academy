@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func newEnvTestService(t *testing.T, d InstanceDriver) (*EnvService, *gorm.DB, u
 		t.Fatal(err)
 	}
 	env := NewEnvService(
-		repo.NewLabInstanceRepo(gdb), chalRepo,
+		repo.NewLabInstanceRepo(gdb), repo.NewInstanceLogRepo(gdb), chalRepo,
 		repo.NewUserRepo(gdb),
 		repo.NewEventRepo(gdb), eventbus.New(), d,
 	)
@@ -135,32 +136,160 @@ func TestEnsureInstanceRequiresEnvDefinition(t *testing.T) {
 	}
 }
 
-func TestEnsureInstancePerUserLimit(t *testing.T) {
+func TestEnsureInstanceSingleContainerConflict(t *testing.T) {
 	driver := &fakeDriver{}
 	env, gdb, chalA, _ := newEnvTestService(t, driver)
 	ctx := context.Background()
-	// 用户 1 先起一个实例（上限 2 占 1）。
-	if _, err := env.EnsureInstance(ctx, 1, chalA); err != nil {
+	// 用户 1 在题目 A 起实例。
+	first, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// 直接落第二条活跃记录造满上限（绕过 service，模拟另一题已有实例）。
-	if err := gdb.Create(&model.LabInstance{
-		UserID: 1, ChallengeID: 99, Status: model.InstanceRunning,
-		ExpireAt: time.Now().Add(time.Hour),
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	// 第三个活跃实例：换一个带 env 的题目触发上限。
+	// 题目 C（带 env）：启动第二个 → 冲突，携带当前实例。
 	chalC := model.Challenge{Slug: "chal-env-2", Title: "容器题2", Type: model.ChallengeStatic, Score: 100, Image: "nginx:alpine", Port: 80}
 	if err := gdb.Create(&chalC).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.EnsureInstance(ctx, 1, chalC.ID); !errors.Is(err, ErrValidation) {
-		t.Fatalf("third instance should hit limit, got %v", err)
+	_, err = env.EnsureInstance(ctx, 1, chalC.ID)
+	var conflict *InstanceConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second challenge should conflict, got %v", err)
 	}
-	// 其他用户不受影响。
+	if conflict.Current == nil || conflict.Current.ID != first.ID || conflict.Current.ChallengeID != chalA {
+		t.Fatalf("conflict current = %+v, want instance %d of challenge %d", conflict.Current, first.ID, chalA)
+	}
+	// 同题目幂等：不冲突、不新建。
+	again, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatalf("same challenge must stay idempotent: %v", err)
+	}
+	if again.ID != first.ID || driver.created != 1 {
+		t.Fatalf("idempotent broken: again=%d created=%d", again.ID, driver.created)
+	}
+	// 其他用户不受单容器约束影响。
 	if _, err := env.EnsureInstance(ctx, 2, chalA); err != nil {
 		t.Fatalf("other user should not be limited: %v", err)
+	}
+}
+
+func TestInstanceLifecycleLogs(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	if _, err := env.EnsureInstance(ctx, 7, chalA); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.DestroyInstance(ctx, 7, chalA); err != nil {
+		t.Fatal(err)
+	}
+	var logs []model.InstanceLog
+	if err := gdb.Order("id ASC").Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("logs = %d, want 2 (started+stopped)", len(logs))
+	}
+	if logs[0].Action != model.InstanceActionStarted || logs[0].Source != "owner" ||
+		logs[0].Status != model.InstanceRunning || logs[0].Detail != "" {
+		t.Fatalf("started log = %+v", logs[0])
+	}
+	if logs[0].UserID != 7 || logs[0].ChallengeID != chalA || logs[0].InstanceID == 0 {
+		t.Fatalf("started log refs wrong: %+v", logs[0])
+	}
+	if logs[1].Action != model.InstanceActionStopped || logs[1].Source != "owner" ||
+		logs[1].Status != model.InstanceDestroyed {
+		t.Fatalf("stopped log = %+v", logs[1])
+	}
+}
+
+func TestDriverFailureLoggedWithDetail(t *testing.T) {
+	driver := &fakeDriver{createErr: errors.New("docker run: no such image")}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	if _, err := env.EnsureInstance(context.Background(), 1, chalA); err == nil {
+		t.Fatal("expected driver error")
+	}
+	var logs []model.InstanceLog
+	if err := gdb.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Action != model.InstanceActionStopped {
+		t.Fatalf("failure log = %+v", logs)
+	}
+	if !strings.Contains(logs[0].Detail, "no such image") {
+		t.Fatalf("detail should carry failure reason: %+v", logs[0])
+	}
+}
+
+func TestReaperLogsSource(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	inst, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.now = func() time.Time { return inst.ExpireAt.Add(time.Minute) }
+	env.reapExpired(ctx)
+	var logs []model.InstanceLog
+	if err := gdb.Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("logs = %d, want 2 (started + reaped)", len(logs))
+	}
+	last := logs[len(logs)-1]
+	if last.Source != "reaper" || last.Action != model.InstanceActionStopped ||
+		!strings.Contains(last.Detail, "ttl expired") {
+		t.Fatalf("reaper log = %+v", last)
+	}
+}
+
+func TestListActiveInstancesAndLogs(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	if err := gdb.Create(&model.User{Username: "alice", PasswordHash: "x", GlobalRole: model.GlobalRoleStudent}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var alice model.User
+	if err := gdb.Where("username = ?", "alice").First(&alice).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.EnsureInstance(ctx, alice.ID, chalA); err != nil {
+		t.Fatal(err)
+	}
+	// 活跃概览：一条，富化用户与题目。
+	active, err := env.ListActiveInstances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active = %d, want 1", len(active))
+	}
+	if active[0].Username != "alice" || active[0].ChallengeTitle != "容器题" || active[0].ChallengeSlug != "chal-env" {
+		t.Fatalf("active enriched = %+v", active[0])
+	}
+	// 销毁后活跃概览清空。
+	if err := env.DestroyInstance(ctx, alice.ID, chalA); err != nil {
+		t.Fatal(err)
+	}
+	active, err = env.ListActiveInstances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active after destroy = %d, want 0", len(active))
+	}
+	// 日志分页：两条（started/stopped），富化正确。
+	logs, total, err := env.ListLogs(ctx, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(logs) != 2 {
+		t.Fatalf("logs total=%d len=%d, want 2/2", total, len(logs))
+	}
+	if logs[0].Username != "alice" || logs[0].ChallengeSlug != "chal-env" {
+		t.Fatalf("log enriched = %+v", logs[0])
 	}
 }
 
@@ -274,7 +403,11 @@ func TestNoopDriverUnavailable(t *testing.T) {
 }
 
 func TestDockerParseHostPort(t *testing.T) {
-	// docker port 输出格式：<host:port> -> <containerPort[/proto]>
+	// docker port 实际输出：单字段 <host:port>。
+	if got := parseHostPort("127.0.0.1:36186\n"); got != "36186" {
+		t.Fatalf("parseHostPort single-field = %q, want 36186", got)
+	}
+	// 兼容 <host:port> -> <containerPort[/proto]> 形式。
 	if got := parseHostPort("127.0.0.1:32768 -> 80/tcp\n"); got != "32768" {
 		t.Fatalf("parseHostPort = %q, want 32768", got)
 	}

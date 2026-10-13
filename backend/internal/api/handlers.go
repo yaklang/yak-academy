@@ -62,6 +62,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
+	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/active", "admin", h.listActiveInstances)
+	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
 	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
@@ -310,6 +312,29 @@ func (h *Handlers) deleteChallenge(w http.ResponseWriter, req *http.Request) {
 func (h *Handlers) listInstances(w http.ResponseWriter, req *http.Request) {
 	page, pageSize := pageParams(req)
 	items, total, err := h.Env.ListInstances(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
+// listActiveInstances 管理端：当前活跃容器概览（creating/running，含题目信息，无分页）。
+func (h *Handlers) listActiveInstances(w http.ResponseWriter, req *http.Request) {
+	items, err := h.Env.ListActiveInstances(req.Context())
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// listInstanceLogs 管理端：容器生命周期日志（分页）。
+func (h *Handlers) listInstanceLogs(w http.ResponseWriter, req *http.Request) {
+	page, pageSize := pageParams(req)
+	items, total, err := h.Env.ListLogs(req.Context(), (page-1)*pageSize, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return

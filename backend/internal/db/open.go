@@ -23,7 +23,7 @@ func Migrate(db *gorm.DB) error {
 		&model.Challenge{}, &model.Flag{}, &model.Hint{}, &model.Submission{},
 		&model.LearningPath{}, &model.PathItem{},
 		&model.Event{}, &model.ScoreRecord{}, &model.Progress{},
-		&model.LabInstance{},
+		&model.LabInstance{}, &model.InstanceLog{},
 	); err != nil {
 		return err
 	}

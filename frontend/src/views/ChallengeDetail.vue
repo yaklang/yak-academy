@@ -2,14 +2,16 @@
 // 题目详情页（Burp lab 页风格）：描述 markdown、提示折叠、配套教程入口、
 // 容器环境生命周期与 flag 提交都集中在这里（列表页只做浏览）。
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { trainingApi, instanceApi, type ChallengeDetail, type LabInstance } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { trainingApi, instanceApi, type AdminLabInstance, type ChallengeDetail, type LabInstance } from '../api'
+import type { ApiError } from '../api/client'
 import { useSubmissionPoll } from '../composables/useSubmissionPoll'
 
 const route = useRoute()
+const router = useRouter()
 const challenge = ref<ChallengeDetail | null>(null)
 const loading = ref(true)
 const answer = ref('')
@@ -54,15 +56,36 @@ async function loadInstance() {
   }
 }
 
+// 单容器约束：409 时提示关闭上一个容器（显示其题目名并可跳转过去销毁）。
 async function startInstance() {
   instanceLoading.value = true
   try {
     instance.value = await instanceApi.start(slug())
   } catch (e) {
-    ElMessage.error(`环境启动失败：${(e as Error).message}`)
+    const err = e as ApiError
+    if (err.status === 409 && err.data?.current) {
+      promptInstanceConflict(err.data.current as AdminLabInstance)
+    } else {
+      ElMessage.error(`环境启动失败：${err.message}`)
+    }
   } finally {
     instanceLoading.value = false
   }
+}
+
+function promptInstanceConflict(current: AdminLabInstance) {
+  const challengeName = current.challenge_title || current.challenge_slug || `题目 #${current.challenge_id}`
+  ElMessageBox.confirm(
+    `同一时间只能启动一个容器。请先关闭你正在「${challengeName}」题目上运行的环境，再启动本题。`,
+    '已有运行中的容器',
+    { confirmButtonText: '前往关闭', cancelButtonText: '知道了', type: 'warning' },
+  )
+    .then(() => {
+      if (current.challenge_slug) {
+        router.push(`${roomBase}/training/${current.challenge_slug}`)
+      }
+    })
+    .catch(() => {})
 }
 
 async function destroyInstance() {

@@ -23,6 +23,20 @@ type InstanceSpec struct {
 	Port        int
 }
 
+// InstanceConflictError 单用户同时只允许一个活跃容器：启动第二个题目时返回，
+// 携带当前活跃实例及富化信息（api 层映射 409 并附 current 供前端引导关闭）。
+type InstanceConflictError struct {
+	Current        *model.LabInstance
+	Username       string
+	ChallengeTitle string
+	ChallengeSlug  string
+}
+
+func (e *InstanceConflictError) Error() string {
+	return fmt.Sprintf("user already has an active instance #%d (challenge %d)",
+		e.Current.ID, e.Current.ChallengeID)
+}
+
 // InstanceDriver 题目环境驱动接口：实现只与运行时（Docker 等）交互，
 // DB 状态由 EnvService 维护（project-conventions skill）。
 type InstanceDriver interface {
@@ -45,12 +59,11 @@ func (NoopDriver) Destroy(ctx context.Context, instanceID uint) error {
 const (
 	// instanceTTL 实例存活时长：超时由 reaper 回收。
 	instanceTTL = time.Hour
-	// maxInstancesPerUser 每用户活跃（creating/running）实例上限。
-	maxInstancesPerUser = 2
 )
 
 type EnvService struct {
 	instances  repo.LabInstanceRepo
+	logs       repo.InstanceLogRepo
 	challenges repo.ChallengeRepo
 	users      repo.UserRepo
 	events     repo.EventRepo
@@ -60,9 +73,9 @@ type EnvService struct {
 	now func() time.Time
 }
 
-func NewEnvService(instances repo.LabInstanceRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
+func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
 	return &EnvService{
-		instances: instances, challenges: challenges, users: users,
+		instances: instances, logs: logs, challenges: challenges, users: users,
 		events: events, bus: bus,
 		driver: d, now: time.Now,
 	}
@@ -77,19 +90,27 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	} else if inst != nil {
 		return inst, nil
 	}
+	// 单容器约束：该用户在其他题目还有活跃实例 → 409，携带当前实例供前端引导关闭。
+	if other, err := s.instances.FindActiveAny(ctx, userID); err != nil {
+		return nil, err
+	} else if other != nil {
+		userName, chals, err := s.lookupUsersAndChallenges(ctx, []model.LabInstance{*other})
+		if err != nil {
+			return nil, err
+		}
+		conflict := &InstanceConflictError{Current: other, Username: userName[userID]}
+		if c, ok := chals[other.ChallengeID]; ok {
+			conflict.ChallengeTitle = c.Title
+			conflict.ChallengeSlug = c.Slug
+		}
+		return nil, conflict
+	}
 	chal, err := s.challenges.FindByID(ctx, challengeID)
 	if err != nil {
 		return nil, err
 	}
 	if chal.Image == "" || chal.Port < 1 {
 		return nil, fmt.Errorf("%w: lab has no container environment", ErrValidation)
-	}
-	active, err := s.instances.CountActive(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if active >= maxInstancesPerUser {
-		return nil, fmt.Errorf("%w: active instance limit reached (%d)", ErrValidation, maxInstancesPerUser)
 	}
 	inst := &model.LabInstance{
 		UserID: userID, ChallengeID: challengeID,
@@ -104,16 +125,22 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	}
 	endpoint, err := s.driver.Create(ctx, spec)
 	if err != nil {
-		// 回滚：DB 记录标记 stopped，不留 creating 残留。
+		// 回滚：DB 记录标记 stopped，不留 creating 残留；失败详情落日志表。
+		log.Printf("env: instance %d create failed (user=%d challenge=%d image=%s): %v",
+			inst.ID, userID, challengeID, chal.Image, err)
 		if uerr := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceStopped); uerr != nil {
 			log.Printf("env: rollback instance %d: %v", inst.ID, uerr)
 		}
+		s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+			model.InstanceStopped, "create failed: "+err.Error())
 		return nil, err
 	}
 	expireAt := s.now().Add(instanceTTL)
 	if err := s.instances.UpdateRunning(ctx, inst.ID, endpoint, expireAt); err != nil {
 		return nil, err
 	}
+	s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStarted, "owner",
+		model.InstanceRunning, "")
 	s.appendEvent(ctx, userID, model.EventLabStarted, map[string]any{
 		"instance_id": inst.ID, "challenge_id": challengeID, "endpoint": endpoint,
 	})
@@ -130,11 +157,17 @@ func (s *EnvService) DestroyInstance(ctx context.Context, userID, challengeID ui
 		return ErrNotFound
 	}
 	if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+		log.Printf("env: instance %d destroy failed (user=%d challenge=%d): %v",
+			inst.ID, userID, challengeID, err)
+		s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+			inst.Status, "destroy failed: "+err.Error())
 		return err
 	}
 	if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
 		return err
 	}
+	s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+		model.InstanceDestroyed, "")
 	s.appendEvent(ctx, userID, model.EventLabStopped, map[string]any{
 		"instance_id": inst.ID, "challenge_id": challengeID,
 	})
@@ -149,9 +182,9 @@ func (s *EnvService) GetInstance(ctx context.Context, userID, challengeID uint) 
 // AdminLabInstance 管理端容器面板条目：LabInstance + 用户/题目富化。
 type AdminLabInstance struct {
 	model.LabInstance
-	Username        string `json:"username"`
-	ChallengeTitle  string `json:"challenge_title"`
-	ChallengeSlug   string `json:"challenge_slug"`
+	Username       string `json:"username"`
+	ChallengeTitle string `json:"challenge_title"`
+	ChallengeSlug  string `json:"challenge_slug"`
 }
 
 // ListInstances 全量实例分页（管理端容器面板；批量富化用户名与题目名）。
@@ -160,36 +193,13 @@ func (s *EnvService) ListInstances(ctx context.Context, offset, limit int) ([]Ad
 	if err != nil {
 		return nil, 0, err
 	}
-	userIDs := make([]uint, 0, len(list))
-	chalIDs := make([]uint, 0, len(list))
-	for _, inst := range list {
-		userIDs = append(userIDs, inst.UserID)
-		chalIDs = append(chalIDs, inst.ChallengeID)
-	}
-	users, err := s.users.FindByIDs(ctx, userIDs...)
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, list)
 	if err != nil {
 		return nil, 0, err
-	}
-	userName := make(map[uint]string, len(users))
-	for _, u := range users {
-		userName[u.ID] = u.Username
-	}
-	chals, err := s.challenges.FindByIDs(ctx, chalIDs...)
-	if err != nil {
-		return nil, 0, err
-	}
-	chalTitle := make(map[uint]model.Challenge, len(chals))
-	for _, c := range chals {
-		chalTitle[c.ID] = c
 	}
 	out := make([]AdminLabInstance, 0, len(list))
 	for _, inst := range list {
-		item := AdminLabInstance{LabInstance: inst, Username: userName[inst.UserID]}
-		if c, ok := chalTitle[inst.ChallengeID]; ok {
-			item.ChallengeTitle = c.Title
-			item.ChallengeSlug = c.Slug
-		}
-		out = append(out, item)
+		out = append(out, buildAdminLabInstance(inst, userName, chals))
 	}
 	return out, total, nil
 }
@@ -203,11 +213,16 @@ func (s *EnvService) AdminDestroyInstance(ctx context.Context, instanceID uint) 
 		return err
 	}
 	if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+		log.Printf("env: admin destroy instance %d failed: %v", inst.ID, err)
+		s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "admin",
+			inst.Status, "destroy failed: "+err.Error())
 		return err
 	}
 	if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
 		return err
 	}
+	s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "admin",
+		model.InstanceDestroyed, "")
 	s.appendEvent(ctx, inst.UserID, model.EventLabStopped, map[string]any{
 		"instance_id": inst.ID, "challenge_id": inst.ChallengeID, "source": "admin",
 	})
@@ -246,7 +261,117 @@ func (s *EnvService) reapExpired(ctx context.Context) {
 		}
 		if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
 			log.Printf("env: mark destroyed %d: %v", inst.ID, err)
+			continue
 		}
+		s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "reaper",
+			model.InstanceDestroyed, "ttl expired")
+	}
+}
+
+// AdminInstanceLog 管理端容器日志条目：InstanceLog + 用户/题目富化。
+type AdminInstanceLog struct {
+	model.InstanceLog
+	Username       string `json:"username"`
+	ChallengeTitle string `json:"challenge_title"`
+	ChallengeSlug  string `json:"challenge_slug"`
+}
+
+// ListActiveInstances 当前全部活跃容器（creating/running，管理端概览；无分页）。
+func (s *EnvService) ListActiveInstances(ctx context.Context) ([]AdminLabInstance, error) {
+	list, err := s.instances.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdminLabInstance, 0, len(list))
+	for _, inst := range list {
+		out = append(out, buildAdminLabInstance(inst, userName, chals))
+	}
+	return out, nil
+}
+
+// ListLogs 容器生命周期日志分页（管理端容器日志表格；批量富化用户名与题目）。
+func (s *EnvService) ListLogs(ctx context.Context, offset, limit int) ([]AdminInstanceLog, int64, error) {
+	list, total, err := s.logs.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	instances := make([]model.LabInstance, 0, len(list))
+	for _, l := range list {
+		instances = append(instances, model.LabInstance{UserID: l.UserID, ChallengeID: l.ChallengeID})
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, instances)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]AdminInstanceLog, 0, len(list))
+	for _, l := range list {
+		item := AdminInstanceLog{InstanceLog: l, Username: userName[l.UserID]}
+		if c, ok := chals[l.ChallengeID]; ok {
+			item.ChallengeTitle = c.Title
+			item.ChallengeSlug = c.Slug
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+// lookupUsersAndChallenges 批量取用户名与题目信息（富化用；空列表安全）。
+func (s *EnvService) lookupUsersAndChallenges(ctx context.Context, list []model.LabInstance) (map[uint]string, map[uint]model.Challenge, error) {
+	userIDSet := make(map[uint]struct{})
+	chalIDSet := make(map[uint]struct{})
+	for _, inst := range list {
+		userIDSet[inst.UserID] = struct{}{}
+		chalIDSet[inst.ChallengeID] = struct{}{}
+	}
+	userIDs := make([]uint, 0, len(userIDSet))
+	for id := range userIDSet {
+		userIDs = append(userIDs, id)
+	}
+	chalIDs := make([]uint, 0, len(chalIDSet))
+	for id := range chalIDSet {
+		chalIDs = append(chalIDs, id)
+	}
+	users, err := s.users.FindByIDs(ctx, userIDs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	userName := make(map[uint]string, len(users))
+	for _, u := range users {
+		userName[u.ID] = u.Username
+	}
+	chals, err := s.challenges.FindByIDs(ctx, chalIDs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	chalMap := make(map[uint]model.Challenge, len(chals))
+	for _, c := range chals {
+		chalMap[c.ID] = c
+	}
+	return userName, chalMap, nil
+}
+
+// buildAdminLabInstance 单条活跃实例条目富化。
+func buildAdminLabInstance(inst model.LabInstance, userName map[uint]string, chals map[uint]model.Challenge) AdminLabInstance {
+	item := AdminLabInstance{LabInstance: inst, Username: userName[inst.UserID]}
+	if c, ok := chals[inst.ChallengeID]; ok {
+		item.ChallengeTitle = c.Title
+		item.ChallengeSlug = c.Slug
+	}
+	return item
+}
+
+// appendLog 写容器生命周期日志（append-only，失败只记服务端日志不影响主流程）。
+func (s *EnvService) appendLog(ctx context.Context, instanceID, userID, challengeID uint, action model.InstanceAction, source string, status model.InstanceStatus, detail string) {
+	l := &model.InstanceLog{
+		InstanceID: instanceID, UserID: userID, ChallengeID: challengeID,
+		Action: action, Source: source, Status: status, Detail: detail,
+	}
+	if err := s.logs.Create(ctx, l); err != nil {
+		log.Printf("env: append instance log (instance=%d action=%s): %v", instanceID, action, err)
 	}
 }
 
@@ -296,17 +421,20 @@ func (DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, erro
 	return "http://127.0.0.1:" + hostPort, nil
 }
 
-// parseHostPort 解析 docker port 输出行（如 "127.0.0.1:32768 -> 80/tcp"），纯函数便于测试。
+// parseHostPort 解析 docker port 输出行，纯函数便于测试。
+// 实际输出是单字段 "127.0.0.1:36186"；兼容 "host:port -> 80/tcp" 形式
+// （docker ps 风格），两种都取首字段的端口。
 func parseHostPort(out string) string {
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 3 {
-			addr := fields[0] // host:port
-			if i := strings.LastIndex(addr, ":"); i >= 0 {
-				port := addr[i+1:]
-				if port != "" && port != "0" {
-					return port
-				}
+		if len(fields) == 0 {
+			continue
+		}
+		addr := fields[0] // host:port
+		if i := strings.LastIndex(addr, ":"); i >= 0 {
+			port := addr[i+1:]
+			if port != "" && port != "0" {
+				return port
 			}
 		}
 	}

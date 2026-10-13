@@ -23,6 +23,10 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 
 每个事件必带：`user_id / type / payload(JSON) / created_at`。
 
+> 容器生命周期另有 `instance_logs` 表（append-only 审计视图，含失败原因 detail），
+> 与 Event 表是**双写而非主从**：Event 服务全局事件溯源，instance_logs 是 env 域
+> 管理端展示视图。改容器状态时两张表都要写，禁止只写一张。
+
 ## 判题数据流（唯一合法路径）
 
 ```
