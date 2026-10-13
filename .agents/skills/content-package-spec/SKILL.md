@@ -37,7 +37,7 @@ package.zip
 
 题目是独立资源，admin 上传后 **upsert 即生效**（无 draft/publish）。两种上传形态：
 
-### A. CTFd 风格题目包 zip（推荐，有容器时强制此形态的文件约束）
+### A. 标准题目包 zip（推荐；有容器时强制文件约束）
 
 `POST /admin/challenges/package`（multipart 字段 `package`）：
 
@@ -46,19 +46,24 @@ package.zip
 ├── challenge.yml          # 必填（或 challenge.yaml）
 ├── Dockerfile             # 声明 image 时必填
 ├── docker-compose.yml     # 声明 image 时必填（或 compose.yml）
-└── src/…                  # 可选
+└── src/…                  # 可选（构建上下文）
 ```
 
-`challenge.yml` 关键字段（对齐 [CTFd ctfcli](https://docs.ctfd.io/tutorials/ctfcli/challenge-structure/)，yak-academy 扩展）：
+`challenge.yml` 关键字段（实训常用运行时约定）：
 
 | 字段 | 说明 |
 |---|---|
 | `slug` / `name` | slug 必填；title 取 `title` 或 `name` |
 | `category` / `difficulty` / `value`（或 `score`） | difficulty 三级枚举 |
 | `description` | Markdown 描述 |
-| `type` + `flags` | flag 类型 static/regex；取首个 flag |
-| `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` |
+| `type` + `flags` | flag 匹配类型 static/regex；取首个 flag |
+| `flag_mode` | `shared`（默认，题目级共享）/ `instance`（每实例唯一，模板含 `{token}`） |
+| `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` 且**上传时 docker build** |
 | `hints` / `tutorial_slug` | 可选 |
+
+- `flag_mode: instance` **必须**同时声明容器（image/port）；模板示例：`flag{lab-{token}}`。
+- `image: .`：平台解压构建上下文并 `docker build -t yak-academy/<slug>:latest`；Docker 不可用 → 422，禁止悬空 tag。
+- 远程镜像（非 `.`）不构建，仍要求包内含 Dockerfile + compose（文档/本地复现用）。
 
 参考样例（不自动加载）：`examples/challenges/vulinbox-xss-reflected/`。
 
@@ -74,6 +79,7 @@ package.zip
   "difficulty": "apprentice",
   "description_md": "# 背景\n任务目标……",
   "score": 100,
+  "flag_mode": "shared",
   "challenge": { "type": "static", "flag": "flag{answer}" },
   "env": { "image": "vulnapp:1.0", "port": 80 },
   "hints": [ { "title": "提示一", "content": "看 UNION", "cost": 10 } ],
@@ -81,8 +87,9 @@ package.zip
 }
 ```
 
-- 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug` 可选。
+- 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug`/`flag_mode` 可选。
 - `challenge.type`：`static`（明文 flag）/ `regex`（可编译正则）。
+- `flag_mode`：`shared`|`instance`；`instance` 时 flag 为含 `{token}` 的模板，且必须有 env。
 - `env` 整段可选；**要么都填要么都不填**。image 非空即 `has_env: true`。
 - `hints[].cost` 非负；解锁走 `hint.unlocked` 事件扣分（见 event-sourcing-rules）。
 - 批量数组逐题校验、**单题失败整体不入库**；slug 重复 = 更新（upsert）。

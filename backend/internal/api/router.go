@@ -76,28 +76,19 @@ func (r *Router) authenticate(w http.ResponseWriter, req *http.Request) (*model.
 	return user, true
 }
 
-// authorize 双层角色判定：全局 → 课程级；admin 短路（rbac-model skill）。
-// 课程域从路径参数提取（Room/Topic 路由天然携带 topicSlug）。
-// 鉴权失败必须 403，禁止 404 掩盖。
+// authorize 两档角色判定：普通人(student) / 管理员(admin)。
+// required 为空 = 仅需登录；否则比较 Rank（admin 短路）。鉴权失败 403。
 func (r *Router) authorize(w http.ResponseWriter, req *http.Request, user *model.User, required model.GlobalRole) bool {
 	if required == "" {
-		return true // 仅需登录
+		return true
 	}
-	if user.GlobalRole.Rank() >= required.Rank() {
-		return true // 全局达标（admin 在此短路）
+	// 历史 teacher 等值经 Normalize 后按普通人处理。
+	role := user.GlobalRole.Normalize()
+	if role.Rank() >= required.Normalize().Rank() {
+		return true
 	}
-	// 全局不足 → 查课程级角色（双层判定，rbac-model skill）。
-	topicSlug := req.PathValue("topicSlug")
-	ok, err := r.auth.CheckRole(req.Context(), user, required, topicSlug)
-	if err != nil {
-		writeError(w, &apiError{"INTERNAL", http.StatusInternalServerError, "role check failed"})
-		return false
-	}
-	if !ok {
-		writeError(w, errForbidden)
-		return false
-	}
-	return true
+	writeError(w, errForbidden)
+	return false
 }
 
 // UserFrom 从请求上下文取当前用户（handler 使用）。

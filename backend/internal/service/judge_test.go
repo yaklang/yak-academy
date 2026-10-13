@@ -39,7 +39,7 @@ func newJudgeTestEnv(t *testing.T) *judgeEnv {
 	subRepo := repo.NewSubmissionRepo(gdb)
 	evRepo := repo.NewEventRepo(gdb)
 	bus := eventbus.New()
-	judge := NewJudgeService(subRepo, chalRepo, evRepo, bus)
+	judge := NewJudgeService(subRepo, chalRepo, repo.NewLabInstanceRepo(gdb), evRepo, bus)
 	// 造两道题：static（100 分）与 regex（200 分）。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
 		Slug: "chal-static", Title: "静态题", Type: model.ChallengeStatic, Score: 100,
@@ -292,5 +292,63 @@ func TestJudgeIdempotentGuardOnDoubleDelivery(t *testing.T) {
 	}
 	if s := env.sub(t, sub.ID); s.Status != model.SubmissionCorrect || s.Score != 100 {
 		t.Fatalf("submission = %s/%d, want correct/100", s.Status, s.Score)
+	}
+}
+
+func TestJudgeInstanceFlagRequiresRunning(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	chalRepo := repo.NewChallengeRepo(env.gdb)
+	if err := chalRepo.Upsert(ctx, &model.Challenge{
+		Slug: "chal-dyn", Title: "动态 flag", Type: model.ChallengeStatic, Score: 100,
+		FlagMode: model.FlagModeInstance, Image: "nginx:alpine", Port: 80,
+	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{lab-{token}}"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	chalID := env.chalID(t, "chal-dyn")
+	env.judge.StartWorker(ctx)
+
+	// 无实例：提交模板或任意值均 incorrect。
+	sub, err := env.judge.Submit(ctx, 1, chalID, "flag{lab-abc}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionIncorrect {
+		t.Fatalf("no instance: status=%s, want incorrect", got)
+	}
+
+	// 写入 running 实例 FlagValue。
+	inst := &model.LabInstance{
+		UserID: 1, ChallengeID: chalID, Status: model.InstanceRunning,
+		Endpoint: "http://127.0.0.1:1", FlagValue: "flag{lab-deadbeef}",
+	}
+	if err := env.gdb.Create(inst).Error; err != nil {
+		t.Fatal(err)
+	}
+	ok, err := env.judge.Submit(ctx, 1, chalID, "flag{lab-deadbeef}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.waitStatus(t, ok.ID); got != model.SubmissionCorrect {
+		t.Fatalf("running instance: status=%s, want correct", got)
+	}
+	wrong, err := env.judge.Submit(ctx, 1, chalID, "flag{lab-wrong}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.waitStatus(t, wrong.ID); got != model.SubmissionIncorrect {
+		t.Fatalf("wrong flag: status=%s, want incorrect", got)
+	}
+
+	// 销毁后不可再交动态 flag。
+	if err := env.gdb.Model(inst).Update("status", model.InstanceDestroyed).Error; err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.judge.Submit(ctx, 1, chalID, "flag{lab-deadbeef}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.waitStatus(t, after.ID); got != model.SubmissionIncorrect {
+		t.Fatalf("destroyed: status=%s, want incorrect", got)
 	}
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 普通端布局：导航只有 教程 | 训练 两个板块；头部右侧为 XP、排行榜次级链接与用户区。
-// teacher/admin 显示"进入管理端"入口。
+// 普通端布局：导航只有 教程 | 训练；头部右侧 XP、排行榜与用户区。
+// 仅管理员显示「进入管理端」；普通人完全看不到管理入口。
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -10,7 +10,8 @@ const auth = useAuthStore()
 const router = useRouter()
 const displayName = computed(() => auth.user?.username ?? '')
 const role = computed(() => auth.user?.global_role ?? '')
-const canAdmin = computed(() => role.value === 'teacher' || role.value === 'admin')
+const roleLabel = computed(() => (role.value === 'admin' ? '管理员' : '普通人'))
+const canAdmin = computed(() => role.value === 'admin')
 const xp = ref<number | null>(null)
 
 onMounted(async () => {
@@ -45,7 +46,7 @@ function logout() {
       <span v-if="xp !== null" class="xp">XP: {{ xp }}</span>
       <router-link v-if="canAdmin" to="/admin" class="admin-entry">进入管理端</router-link>
       <router-link to="/leaderboard" class="secondary">排行榜</router-link>
-      <span v-if="displayName" class="user">{{ displayName }}（{{ role }}）</span>
+      <span v-if="displayName" class="user">{{ displayName }}（{{ roleLabel }}）</span>
       <el-button v-if="auth.token" link @click="logout">登出</el-button>
     </el-header>
     <el-main>

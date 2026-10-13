@@ -18,7 +18,7 @@ api → service → repo → model
 
 ## 禁止事项
 
-- 禁止 service 之间横向 import（白名单除外：`judge` 依赖 `event`、`content` 依赖 `challenge`）。
+- 禁止 service 之间横向 import（白名单除外：`judge` 依赖 `event`、`content` 依赖 `challenge`、`content` 依赖 `ImageBuilder`（题目包 `image: .` 构建））。
 - 禁止 handler 里散落权限判断（见 rbac-model skill：统一中间件）。
 - 禁止绕过 repo 直接开 DB 连接。
 - 禁止引入 Casbin / Redis / Kafka 等中间件（第一版自实现 + 进程内广播，见 docs/architecture.md）。
@@ -28,7 +28,7 @@ api → service → repo → model
 | 目录 | 职责 |
 |---|---|
 | `backend/internal/api` | handler、中间件、路由注册 |
-| `backend/internal/service` | 业务逻辑（auth/content/challenge/judge/env/userprogress） |
+| `backend/internal/service` | 业务逻辑（auth/content/challenge/judge/env/userprogress）；env 含 InstanceDriver + ImageBuilder |
 | `backend/internal/repo` | 数据访问接口及 SQLite 实现 |
 | `backend/internal/model` | gorm 实体 |
 | `backend/internal/eventbus` | 进程内事件总线 |

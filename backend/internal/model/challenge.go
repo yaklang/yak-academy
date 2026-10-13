@@ -10,7 +10,15 @@ const (
 	ChallengeRegex  ChallengeType = "regex"  // 正则 flag
 )
 
-// Challenge 独立题目资源（管理员经 challenge.json 上传）。
+// FlagMode flag 作用域：shared=题目级共享；instance=每容器实例唯一。
+type FlagMode string
+
+const (
+	FlagModeShared   FlagMode = "shared"
+	FlagModeInstance FlagMode = "instance"
+)
+
+// Challenge 独立题目资源（管理员经 challenge.json / challenge.yml 上传）。
 // tutorial_slug 可选关联教程 Room；不关联的纯题目也合法。
 type Challenge struct {
 	ID       uint          `gorm:"primaryKey" json:"id"`
@@ -22,6 +30,8 @@ type Challenge struct {
 	Description string `gorm:"type:text" json:"description_md"`
 	Type      ChallengeType `gorm:"size:16" json:"type"`
 	Score     int           `json:"score"` // 初始分值，动态计分基于 solve_count 派生
+	// FlagMode shared|instance；instance 时 Flag.Value 为含 {token} 的模板。
+	FlagMode FlagMode `gorm:"size:16;default:shared" json:"flag_mode"`
 	// 容器环境定义（challenge.json env 段，可选）。Image 非空表示该题有容器环境。
 	Image string `gorm:"size:256" json:"image"`
 	Port  int    `json:"port"`

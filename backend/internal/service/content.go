@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -27,6 +29,7 @@ type ContentService struct {
 	topics    repo.TopicRepo
 	rooms     repo.RoomRepo
 	challenge *ChallengeService
+	builder   ImageBuilder // 题目包 image: . 时构建；可为 NoopDriver
 	// ownedTopics/ownedRooms 同名包既有版本的 slug 集合（validate 时视为自有，
 	// 不判冲突；仅 Upload 重传路径填充）。
 	ownedTopics map[string]bool
@@ -37,8 +40,11 @@ func (s *ContentService) setOwnedSlugs(topics, rooms map[string]bool) {
 	s.ownedTopics, s.ownedRooms = topics, rooms
 }
 
-func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService) *ContentService {
-	return &ContentService{packages: p, topics: t, rooms: r, challenge: c}
+func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService, builder ImageBuilder) *ContentService {
+	if builder == nil {
+		builder = NoopDriver{}
+	}
+	return &ContentService{packages: p, topics: t, rooms: r, challenge: c, builder: builder}
 }
 
 // parsedPackage 管线 Parse 步骤的内存中间产物，序列化后存 ContentVersion.Payload。
@@ -481,6 +487,7 @@ type challengeJSON struct {
 	Difficulty    model.Difficulty `json:"difficulty"`
 	DescriptionMD string           `json:"description_md"`
 	Score         int              `json:"score"`
+	FlagMode      model.FlagMode   `json:"flag_mode"`
 	Challenge     struct {
 		Type model.ChallengeType `json:"type"`
 		Flag string             `json:"flag"`
@@ -525,7 +532,8 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 		chal := &model.Challenge{
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
 			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
-			Image: c.Env.Image, Port: c.Env.Port, TutorialSlug: c.TutorialSlug,
+			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
+			TutorialSlug: c.TutorialSlug,
 		}
 		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
@@ -576,6 +584,10 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	if c.Challenge.Flag == "" {
 		return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
 	}
+	mode := resolveFlagMode(c.FlagMode)
+	if c.FlagMode != "" && mode != model.FlagModeShared && mode != model.FlagModeInstance {
+		return fmt.Errorf("%w: %s: flag_mode must be shared or instance", ErrValidation, where)
+	}
 	// env 段可选；出现则 image 必填、port 合法（1-65535）——与教程包 env 规则一致。
 	if c.Env.Image != "" || c.Env.Port != 0 {
 		if c.Env.Image == "" {
@@ -583,6 +595,14 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 		}
 		if c.Env.Port < 1 || c.Env.Port > 65535 {
 			return fmt.Errorf("%w: %s: env.port must be 1-65535", ErrValidation, where)
+		}
+	}
+	if mode == model.FlagModeInstance {
+		if c.Env.Image == "" || c.Env.Port < 1 {
+			return fmt.Errorf("%w: %s: flag_mode=instance requires env.image and env.port", ErrValidation, where)
+		}
+		if !strings.Contains(c.Challenge.Flag, "{token}") {
+			return fmt.Errorf("%w: %s: instance flag template must contain {token}", ErrValidation, where)
 		}
 	}
 	for _, h := range c.Hints {
@@ -593,12 +613,19 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	return nil
 }
 
+func resolveFlagMode(m model.FlagMode) model.FlagMode {
+	if m == "" {
+		return model.FlagModeShared
+	}
+	return m
+}
+
 // DeleteChallenge 删除题目（级联删 flags/hints）。
 func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) error {
 	return s.challenges.Delete(ctx, slug)
 }
 
-// challengeYML CTFd 风格 challenge.yml（yak-academy 扩展 difficulty/port/tutorial_slug/slug）。
+// challengeYML 实训常用 challenge.yml（扩展 difficulty/port/tutorial_slug/slug/flag_mode）。
 // 容器题必须同时提供 Dockerfile 与 docker-compose.yml（或 compose.yml）。
 type challengeYML struct {
 	Slug          string           `yaml:"slug"`
@@ -611,6 +638,7 @@ type challengeYML struct {
 	Value         int              `yaml:"value"`
 	Score         int              `yaml:"score"`
 	Type          string           `yaml:"type"` // static | regex（flag 类型）
+	FlagMode      model.FlagMode   `yaml:"flag_mode"`
 	Image         string           `yaml:"image"`
 	Port          int              `yaml:"port"`
 	Protocol      string           `yaml:"protocol"`
@@ -650,8 +678,9 @@ func (f *challengeYMLFlag) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// UploadChallengePackage 解析 CTFd 风格题目包 zip：必含 challenge.yml；
-// 声明容器（image 非空）时必含 Dockerfile + docker-compose.yml（或 compose.yml）。
+// UploadChallengePackage 解析实训常用题目包 zip：必含 challenge.yml；
+// 声明容器（image 非空）时必含 Dockerfile + docker-compose.yml（或 compose.yml）；
+// image: . 时先构建镜像再 upsert（构建失败 422，禁止悬空 tag）。
 func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []byte) (imported int, slugs []string, err error) {
 	files, err := unzipToMap(zipBytes)
 	if err != nil {
@@ -676,7 +705,8 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	if err != nil {
 		return 0, nil, err
 	}
-	// 容器题：标准 CTFd 布局要求 Dockerfile + compose。
+	buildLocal := false
+	// 容器题：要求 Dockerfile + compose。
 	if cj.Env.Image != "" {
 		if _, hasDocker := files["Dockerfile"]; !hasDocker {
 			return 0, nil, fmt.Errorf("%w: Dockerfile is required when challenge declares a container image", ErrValidation)
@@ -690,12 +720,18 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		}
 		// image: . → 本地构建约定，落库为 yak-academy/<slug>:latest（env 驱动按 tag 拉起）。
 		if cj.Env.Image == "." {
+			buildLocal = true
 			cj.Env.Image = "yak-academy/" + cj.Slug + ":latest"
 		}
 	}
 	seen := map[string]bool{}
 	if err := s.validateChallengeJSON(0, cj, seen); err != nil {
 		return 0, nil, err
+	}
+	if buildLocal {
+		if err := s.buildChallengeImage(ctx, cj.Env.Image, files); err != nil {
+			return 0, nil, err
+		}
 	}
 	hints := make([]model.Hint, 0, len(cj.Hints))
 	for _, h := range cj.Hints {
@@ -704,13 +740,36 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	chal := &model.Challenge{
 		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
 		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
-		Image: cj.Env.Image, Port: cj.Env.Port, TutorialSlug: cj.TutorialSlug,
+		FlagMode: resolveFlagMode(cj.FlagMode), Image: cj.Env.Image, Port: cj.Env.Port,
+		TutorialSlug: cj.TutorialSlug,
 	}
 	flags := []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
 	if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 		return 0, nil, err
 	}
 	return 1, []string{cj.Slug}, nil
+}
+
+// buildChallengeImage 将包内文件写到临时目录后调用 ImageBuilder。
+func (s *ContentService) buildChallengeImage(ctx context.Context, tag string, files map[string][]byte) error {
+	dir, err := os.MkdirTemp("", "yak-chal-build-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	for name, content := range files {
+		dest := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, content, 0o644); err != nil {
+			return err
+		}
+	}
+	if err := s.builder.Build(ctx, tag, dir); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	return nil
 }
 
 func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
@@ -730,6 +789,7 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 	if out.Score == 0 {
 		out.Score = y.Value
 	}
+	out.FlagMode = y.FlagMode
 	out.TutorialSlug = y.TutorialSlug
 	flagType := model.ChallengeType(y.Type)
 	if flagType == "" {

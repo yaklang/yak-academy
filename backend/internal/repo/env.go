@@ -39,11 +39,17 @@ func (r *labInstanceRepo) FindActive(ctx context.Context, userID, challengeID ui
 	return &i, nil
 }
 
-func (r *labInstanceRepo) UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time) error {
+func (r *labInstanceRepo) UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time, flagValue string) error {
 	return r.db.WithContext(ctx).Model(&model.LabInstance{}).Where("id = ?", id).
 		Updates(map[string]any{
 			"status": model.InstanceRunning, "endpoint": endpoint, "expire_at": expireAt,
+			"flag_value": flagValue,
 		}).Error
+}
+
+func (r *labInstanceRepo) UpdateExpireAt(ctx context.Context, id uint, expireAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.LabInstance{}).Where("id = ?", id).
+		Update("expire_at", expireAt).Error
 }
 
 func (r *labInstanceRepo) UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error {

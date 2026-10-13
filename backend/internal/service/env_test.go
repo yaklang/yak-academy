@@ -459,6 +459,62 @@ func TestListInstancesEnrichesUserAndChallenge(t *testing.T) {
 	}
 }
 
+func TestEnsureInstanceInjectsDynamicFlag(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, _, _ := newEnvTestService(t, driver)
+	chalRepo := repo.NewChallengeRepo(gdb)
+	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
+		Slug: "chal-inst-flag", Title: "实例 flag", Type: model.ChallengeStatic, Score: 100,
+		FlagMode: model.FlagModeInstance, Image: "nginx:alpine", Port: 80,
+	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{lab-{token}}"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "chal-inst-flag").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+	inst, err := env.EnsureInstance(context.Background(), 1, chal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.FlagValue == "" || !strings.HasPrefix(inst.FlagValue, "flag{lab-") || strings.Contains(inst.FlagValue, "{token}") {
+		t.Fatalf("flag_value = %q", inst.FlagValue)
+	}
+	if len(driver.specs) != 1 || driver.specs[0].Env["FLAG"] != inst.FlagValue {
+		t.Fatalf("spec.env = %+v, want FLAG=%s", driver.specs[0].Env, inst.FlagValue)
+	}
+}
+
+func TestExtendInstanceBumpsExpireAt(t *testing.T) {
+	driver := &fakeDriver{}
+	env, _, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	fixed := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	env.now = func() time.Time { return fixed }
+	inst, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.ExpireAt.Unix() != fixed.Add(time.Hour).Unix() {
+		t.Fatalf("expire_at = %v, want %v", inst.ExpireAt, fixed.Add(time.Hour))
+	}
+	env.now = func() time.Time { return fixed.Add(30 * time.Minute) }
+	extended, err := env.ExtendInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want2 := fixed.Add(90 * time.Minute)
+	if extended.ExpireAt.Unix() != want2.Unix() {
+		t.Fatalf("extended expire_at = %v, want %v", extended.ExpireAt, want2)
+	}
+	if err := env.DestroyInstance(ctx, 1, chalA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.ExtendInstance(ctx, 1, chalA); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("extend destroyed: %v", err)
+	}
+}
+
 func TestAdminDestroyInstance(t *testing.T) {
 	driver := &fakeDriver{}
 	env, gdb, chalA, _ := newEnvTestService(t, driver)

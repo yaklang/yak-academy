@@ -57,20 +57,23 @@ func main() {
 		log.Fatalf("ensure admin: %v", err)
 	}
 	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo, eventRepo, scoreRepo, bus)
-	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc)
-	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, eventRepo, bus)
+	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
+	instanceRepo := repo.NewLabInstanceRepo(gdb)
+	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
+	var driver service.InstanceDriver = service.NoopDriver{}
+	var builder service.ImageBuilder = service.NoopDriver{}
+	if cfg.EnvDriver == "docker" {
+		dd := service.NewDockerDriver()
+		driver = dd
+		builder = dd
+	}
+	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder)
+	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, instanceRepo, eventRepo, bus)
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)
 	pathRepo := repo.NewPathRepo(gdb)
 	pathSvc := service.NewPathService(pathRepo, roomRepo, progressRepo)
-	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
-	instanceRepo := repo.NewLabInstanceRepo(gdb)
-	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
-	var driver service.InstanceDriver = service.NoopDriver{}
-	if cfg.EnvDriver == "docker" {
-		driver = service.NewDockerDriver()
-	}
 	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver)
 	envSvc.StartReaper(ctx, time.Minute)
 

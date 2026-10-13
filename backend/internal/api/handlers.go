@@ -35,13 +35,14 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
 	r.Handle(http.MethodGet, "/api/v1/topics", "", h.listTopics)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}", "", h.getTopic)
-	r.Handle(http.MethodPut, "/api/v1/topics/{topicSlug}", "teacher", h.updateTopic)
+	r.Handle(http.MethodPut, "/api/v1/topics/{topicSlug}", "admin", h.updateTopic)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}/rooms/{roomSlug}", "", h.getRoom)
 	r.Handle(http.MethodPost, "/api/v1/submissions", "", h.submitAnswer)
 	r.Handle(http.MethodGet, "/api/v1/submissions/{id}", "", h.getSubmission)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/instance", "", h.startInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/instance", "", h.getInstance)
 	r.Handle(http.MethodDelete, "/api/v1/challenges/{slug}/instance", "", h.destroyInstance)
+	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/instance/extend", "", h.extendInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
@@ -50,17 +51,15 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
 	r.Handle(http.MethodGet, "/api/v1/leaderboard", "", h.leaderboard)
 
-	// teacher：内容包上传与查询
-	r.Handle(http.MethodPost, "/api/v1/content/packages", "teacher", h.uploadPackage)
-	r.Handle(http.MethodGet, "/api/v1/content/packages", "teacher", h.listPackages)
-	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "teacher", h.getPackage)
-	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "teacher", h.listVersions)
-
-	// admin：发布/归档/回滚、题目管理、容器管理与用户管理
+	// admin：内容包、题目、路径、容器、用户（普通人无管理端能力）
+	r.Handle(http.MethodPost, "/api/v1/content/packages", "admin", h.uploadPackage)
+	r.Handle(http.MethodGet, "/api/v1/content/packages", "admin", h.listPackages)
+	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "admin", h.getPackage)
+	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "admin", h.listVersions)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/archive", "admin", h.archivePackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/rollback", "admin", h.rollbackPackage)
-	r.Handle(http.MethodGet, "/api/v1/admin/challenges", "teacher", h.adminListChallenges)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges", "admin", h.adminListChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
@@ -87,7 +86,8 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 	}
 	token, expires, err := h.Auth.Login(req.Context(), body.Username, body.Password)
 	if err != nil {
-		writeError(w, errUnauthorized)
+		// 登录失败与缺 token 区分文案，避免前端误报「invalid or missing token」。
+		writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized, "invalid username or password"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
@@ -243,6 +243,21 @@ func (h *Handlers) destroyInstance(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
+func (h *Handlers) extendInstance(w http.ResponseWriter, req *http.Request) {
+	chal, err := h.resolveChallenge(req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	user := UserFrom(req.Context())
+	inst, err := h.Env.ExtendInstance(req.Context(), user.ID, chal.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inst)
+}
+
 func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
 	items, err := h.Paths.List(req.Context(), user.ID)
@@ -353,7 +368,7 @@ func (h *Handlers) uploadChallenges(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
 }
 
-// uploadChallengePackage 管理端：上传 CTFd 风格题目包 zip（challenge.yml + 容器文件）。
+// uploadChallengePackage 管理端：上传实训常用题目包 zip（challenge.yml + 容器文件）。
 func (h *Handlers) uploadChallengePackage(w http.ResponseWriter, req *http.Request) {
 	if err := req.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, errValidation)

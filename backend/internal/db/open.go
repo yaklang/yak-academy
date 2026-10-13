@@ -27,7 +27,27 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return migrateChallengeSlug(db)
+	if err := migrateChallengeSlug(db); err != nil {
+		return err
+	}
+	return migrateTwoRoleModel(db)
+}
+
+// migrateTwoRoleModel 收敛为普通人(student)/管理员(admin)：
+// 历史 teacher 全局角色降为 student；清空课程级角色（不再参与鉴权）。
+func migrateTwoRoleModel(db *gorm.DB) error {
+	res := db.Exec(`UPDATE users SET global_role = ? WHERE global_role = ?`,
+		model.GlobalRoleStudent, model.GlobalRoleTeacher)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("migrate roles: demoted %d teacher → student", res.RowsAffected)
+	}
+	if err := db.Exec(`DELETE FROM course_roles`).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateChallengeSlug 一次性迁移：教题一体时代的旧行没有 slug，

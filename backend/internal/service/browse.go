@@ -254,7 +254,7 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 	return detail, nil
 }
 
-// UpdateTopic 更新主题元数据（PUT /topics/{slug}，最低 teacher——课程级角色挂载点）。
+// UpdateTopic 更新主题元数据（PUT /topics/{slug}，仅管理员）。
 func (s *TopicService) UpdateTopic(ctx context.Context, topicSlug, title, summary string) (*model.Topic, error) {
 	topic, err := s.topics.FindBySlug(ctx, topicSlug)
 	if err != nil {

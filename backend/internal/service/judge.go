@@ -26,6 +26,7 @@ const (
 type JudgeService struct {
 	submissions repo.SubmissionRepo
 	challenges  repo.ChallengeRepo
+	instances   repo.LabInstanceRepo // flag_mode=instance 时读运行中实例 FlagValue
 	events      repo.EventRepo
 	bus         *eventbus.Bus
 	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
@@ -33,10 +34,11 @@ type JudgeService struct {
 	queue chan uint
 }
 
-func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, ev repo.EventRepo, bus *eventbus.Bus) *JudgeService {
+func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances repo.LabInstanceRepo, ev repo.EventRepo, bus *eventbus.Bus) *JudgeService {
 	return &JudgeService{
 		submissions: sub,
 		challenges:  chal,
+		instances:   instances,
 		events:      ev,
 		bus:         bus,
 		queue:       make(chan uint, 256),
@@ -136,7 +138,7 @@ func (s *JudgeService) requeuePending(ctx context.Context) {
 // judge 判定流程：
 //  0. 幂等护栏：重读 submission，status != pending 直接跳过（双投递/并发判定防护，
 //     保证 submission.judged 事件与计分只发生一次）
-//  1. 读 submission 与 challenge flags
+//  1. 读 challenge：flag_mode=instance 比对运行中实例 FlagValue；shared 读 Flag 表
 //  2. static 恒时比较（compareFlag）；regex 用 MatchString（恒时要求仅适用 static）
 //  3. 动态计分 value = max(initial - decay*n, minimum)
 //  4. UpdateStatus + appendEvent(submission.judged)
@@ -149,12 +151,16 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	if sub.Status != model.SubmissionPending {
 		return // 已判定：幂等跳过
 	}
-	flags, err := s.challenges.FindFlags(ctx, sub.ChallengeID)
+	chal, err := s.challenges.FindByID(ctx, sub.ChallengeID)
 	if err != nil {
-		log.Printf("judge: load flags: %v", err)
+		log.Printf("judge: load challenge: %v", err)
 		return
 	}
-	correct := matchAnyFlag(flags, sub.Answer)
+	correct, err := s.matchAnswer(ctx, sub, chal)
+	if err != nil {
+		log.Printf("judge: match answer: %v", err)
+		return
+	}
 	// 同一用户同一题已 correct → 不重复计分（score=0），派生器跳过零分。
 	if correct {
 		if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID); err == nil && solved {
@@ -175,9 +181,32 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	s.finish(ctx, sub, model.SubmissionCorrect, score)
 	// 题目关联了教程 Room 时记 Room 通关事件（教程进度物化视图用；
 	// 纯题目不指向 Room，不产生 Room 侧进度）。
-	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil && chal.TutorialSlug != "" {
+	if chal.TutorialSlug != "" {
 		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
+}
+
+// matchAnswer shared 读 Flag 表；instance 仅对 running 实例 FlagValue 恒时比较（销毁后需重启）。
+func (s *JudgeService) matchAnswer(ctx context.Context, sub *model.Submission, chal *model.Challenge) (bool, error) {
+	mode := chal.FlagMode
+	if mode == "" {
+		mode = model.FlagModeShared
+	}
+	if mode == model.FlagModeInstance {
+		inst, err := s.instances.FindActive(ctx, sub.UserID, sub.ChallengeID)
+		if err != nil {
+			return false, err
+		}
+		if inst == nil || inst.Status != model.InstanceRunning || inst.FlagValue == "" {
+			return false, nil
+		}
+		return compareFlag(sub.Answer, inst.FlagValue), nil
+	}
+	flags, err := s.challenges.FindFlags(ctx, sub.ChallengeID)
+	if err != nil {
+		return false, err
+	}
+	return matchAnyFlag(flags, sub.Answer), nil
 }
 
 // finish 写回判定结果 + submission.judged 事件。

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,6 +23,12 @@ type InstanceSpec struct {
 	UserID      uint
 	Image       string
 	Port        int
+	Env         map[string]string // 注入容器环境变量（如 FLAG）
+}
+
+// ImageBuilder 题目包镜像构建（content 上传 image: . 时调用）。
+type ImageBuilder interface {
+	Build(ctx context.Context, tag, contextDir string) error
 }
 
 // InstanceConflictError 单用户同时只允许一个活跃容器：启动第二个题目时返回，
@@ -54,6 +62,9 @@ func (NoopDriver) Create(ctx context.Context, spec InstanceSpec) (string, error)
 }
 func (NoopDriver) Destroy(ctx context.Context, instanceID uint) error {
 	return errNotImplemented("env driver destroy")
+}
+func (NoopDriver) Build(ctx context.Context, tag, contextDir string) error {
+	return fmt.Errorf("%w: docker unavailable: cannot build image %s", ErrValidation, tag)
 }
 
 const (
@@ -112,6 +123,10 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	if chal.Image == "" || chal.Port < 1 {
 		return nil, fmt.Errorf("%w: lab has no container environment", ErrValidation)
 	}
+	flagValue, envVars, err := s.prepareInstanceFlag(ctx, chal)
+	if err != nil {
+		return nil, err
+	}
 	inst := &model.LabInstance{
 		UserID: userID, ChallengeID: challengeID,
 		Status: model.InstanceCreating,
@@ -121,7 +136,7 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	}
 	spec := InstanceSpec{
 		InstanceID: inst.ID, ChallengeID: challengeID, UserID: userID,
-		Image: chal.Image, Port: chal.Port,
+		Image: chal.Image, Port: chal.Port, Env: envVars,
 	}
 	endpoint, err := s.driver.Create(ctx, spec)
 	if err != nil {
@@ -136,7 +151,7 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 		return nil, err
 	}
 	expireAt := s.now().Add(instanceTTL)
-	if err := s.instances.UpdateRunning(ctx, inst.ID, endpoint, expireAt); err != nil {
+	if err := s.instances.UpdateRunning(ctx, inst.ID, endpoint, expireAt, flagValue); err != nil {
 		return nil, err
 	}
 	s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStarted, "owner",
@@ -177,6 +192,57 @@ func (s *EnvService) DestroyInstance(ctx context.Context, userID, challengeID ui
 // GetInstance 查询本人实例状态（无实例返回 nil，不报错）。
 func (s *EnvService) GetInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
 	return s.instances.FindActive(ctx, userID, challengeID)
+}
+
+// ExtendInstance 续期 running 实例 TTL（不重建容器；expire_at = now+1h）。
+func (s *EnvService) ExtendInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
+	inst, err := s.instances.FindActive(ctx, userID, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if inst == nil {
+		return nil, ErrNotFound
+	}
+	if inst.Status != model.InstanceRunning {
+		return nil, fmt.Errorf("%w: only running instances can be extended", ErrValidation)
+	}
+	expireAt := s.now().Add(instanceTTL)
+	if err := s.instances.UpdateExpireAt(ctx, inst.ID, expireAt); err != nil {
+		return nil, err
+	}
+	return s.instances.FindByID(ctx, inst.ID)
+}
+
+// prepareInstanceFlag flag_mode=instance 时生成唯一 flag 并准备 FLAG 环境变量。
+func (s *EnvService) prepareInstanceFlag(ctx context.Context, chal *model.Challenge) (flagValue string, env map[string]string, err error) {
+	mode := chal.FlagMode
+	if mode == "" {
+		mode = model.FlagModeShared
+	}
+	if mode != model.FlagModeInstance {
+		return "", nil, nil
+	}
+	flags, err := s.challenges.FindFlags(ctx, chal.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(flags) == 0 {
+		return "", nil, fmt.Errorf("%w: instance flag_mode requires a flag template", ErrValidation)
+	}
+	token, err := randomToken(16)
+	if err != nil {
+		return "", nil, err
+	}
+	flagValue = strings.ReplaceAll(flags[0].Value, "{token}", token)
+	return flagValue, map[string]string{"FLAG": flagValue}, nil
+}
+
+func randomToken(nBytes int) (string, error) {
+	b := make([]byte, nBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // AdminLabInstance 管理端容器面板条目：LabInstance + 用户/题目富化。
@@ -396,14 +462,15 @@ func containerName(instanceID uint) string {
 	return fmt.Sprintf("yak-lab-%d", instanceID)
 }
 
-// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，读回实际端口生成 endpoint。
+// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，可选 -e 环境变量，读回实际端口生成 endpoint。
 func (DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
 	name := containerName(spec.InstanceID)
-	if out, err := exec.CommandContext(ctx, "docker", "run", "-d",
-		"--name", name,
-		"-p", fmt.Sprintf("127.0.0.1::%d", spec.Port),
-		spec.Image,
-	).CombinedOutput(); err != nil {
+	args := []string{"run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1::%d", spec.Port)}
+	for k, v := range spec.Env {
+		args = append(args, "-e", k+"="+v)
+	}
+	args = append(args, spec.Image)
+	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("docker run %s: %v: %s", spec.Image, err, strings.TrimSpace(string(out)))
 	}
 	// docker port 读回映射（格式 <hostPort> -> <containerPort>）。
@@ -449,6 +516,15 @@ func (DockerDriver) Destroy(ctx context.Context, instanceID uint) error {
 			return nil
 		}
 		return fmt.Errorf("docker rm: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Build 在 contextDir 执行 docker build -t tag（题目包 image: .）。
+func (DockerDriver) Build(ctx context.Context, tag, contextDir string) error {
+	out, err := exec.CommandContext(ctx, "docker", "build", "-t", tag, contextDir).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker build %s: %v: %s", tag, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

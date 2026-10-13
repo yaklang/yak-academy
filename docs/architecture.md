@@ -10,7 +10,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 | 参考对象 | 借鉴点 | 不借鉴点 |
 |---|---|---|
 | PortSwigger Web Security Academy | 训练场按分类分组展示题目；题目详情页承载描述/提示/环境/提交；路径只引用不复制；服务端自动判定（远期）；徽章/认证分层激励 | 商业变现部分 |
-| CTFd | challenges/flags/hints/submissions 数据模型；恒时比较；动态计分衰减函数 | Flask 插件体系、比赛制 teams 模式（第一版） |
+| 实训常用判题约定 | challenges/flags/hints/submissions 数据模型；恒时比较；动态计分衰减函数 | 比赛制 teams 模式、第三方插件体系（第一版） |
 | TryHackMe | 教题关联：教程与题目互指而非互嵌；Path→Room→Lesson；XP 游戏化 | 靶机常驻 IaaS 成本模型；教题强制同库耦合 |
 | CTFtime | 排行榜按赛季切片；题目页聚合题解（远期） | 纯 UGC 聚合模式（无判定） |
 
@@ -18,7 +18,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 1. **教程与题目两类独立资源**：教程包只含教程（文字+视频），题目用固定格式 challenge.json 单独上传；题目可选 `tutorial_slug` 关联配套教程（双向入口），不关联的纯题目也合法（`.agents/skills/teaching-integration`）。
 2. **内容只来源于管理员上传**：内容包 zip + 五步上传管线，禁止内置内容（`.agents/skills/content-package-spec`）。
-3. **双层 RBAC**：全局角色 + 课程级角色，声明式中间件鉴权（`.agents/skills/rbac-model`）。
+3. **两档角色**：普通人(`student`) / 管理员(`admin`)，声明式中间件鉴权（`.agents/skills/rbac-model`）。
 4. **事件溯源**：积分/进度/排行榜从 append-only 事件派生，判题异步（`.agents/skills/event-sourcing-rules`）。
 5. **契约先行**：openapi.yaml 是接口唯一契约源（`.agents/skills/api-contract`）。
 6. **分层单向依赖**：api → service → repo → model（`.agents/skills/project-conventions`）。
@@ -34,7 +34,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │           容器监控                                             │
 ├────────────────────────────────────────────────────────────┤
 │ 服务层  backend/internal/api  REST + JWT + RBAC 中间件        │
-│   ├─ auth        登录 / JWT / 双层 RBAC                       │
+│   ├─ auth        登录 / JWT / 两档角色 RBAC                    │
 │   ├─ content     教程包上传→解析→校验→入库→发布（五步管线）    │
 │   ├─ challenge   Challenge/Flag/Hint 业务（题目独立资源）      │
 │   ├─ judge       异步判题 worker（恒时比较、动态计分）          │
@@ -56,8 +56,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 ### 3.1 auth — 认证与权限
 
 - 登录换取 JWT（HS256），中间件解析并注入请求上下文。
-- 双层角色模型：全局 `student/teacher/admin` + 课程级角色（CourseRole，scoped 到 Topic/课程域）。
-- 路由注册时声明 `RequireRole(...)`，中间件统一执行；属主规则（"只看自己班级"）在 service 层。
+- 两档角色：`student`（普通人，仅学习端）/ `admin`（管理员，管理端全部能力）；普通人前端不显示管理入口。
+- 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
 
 ### 3.2 content — 教程包管线
 
@@ -73,7 +73,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 ### 3.3 challenge — 题目域（独立资源）
 
-- 题目以自有 `slug` 为主键入口，管理员经 CTFd 风格题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
+- 题目以自有 `slug` 为主键入口，管理员经实训常用题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
 - `category` 为自由分类 slug（训练场分组键）；`description_md` 承载背景与任务目标。
 - Challenge 多态 `type` 列（v1：static / regex flag）。
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
@@ -86,17 +86,12 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 动态计分：`value = f(solve_count)`，linear / logarithmic 衰减，下限 minimum。
 - 远期：服务端自动判定（环境内检测点回调，参考 PortSwigger）。
 
-### 3.5 env — Lab 环境（v1 仅接口）
+### 3.5 env — Lab 环境
 
-```go
-type InstanceDriver interface {
-    Create(ctx context.Context, chal ChallengeID, user UserID) (Instance, error)
-    Destroy(ctx context.Context, id InstanceID) error
-    Health(ctx context.Context, id InstanceID) (Status, error)
-}
-```
-
-v1 提供 noop stub；Phase 3 实现 Docker 驱动（模板镜像 + 30 分钟空闲回收 + 预热池）。
+- `InstanceDriver`：Create（可注入 `FLAG` 等环境变量）/ Destroy；`ImageBuilder`：题目包 `image: .` 时 `docker build`。
+- 单用户同时仅一个活跃容器；TTL 默认 1h，`POST .../instance/extend` 续期不重建。
+- `flag_mode=instance`：启动时生成唯一 flag 写入 `LabInstance.flag_value` 并注入容器；判题只接受 running 实例上的值。
+- Docker 驱动实现；未配置 daemon 时 noop（启动/构建返回明确错误）。
 
 ### 3.6 userprogress — 路径与进度
 
@@ -112,8 +107,7 @@ v1 提供 noop stub；Phase 3 实现 Docker 驱动（模板镜像 + 30 分钟空
 ## 4. 数据模型（ER 概览）
 
 ```
-User ─┬─ Role(global: student|teacher|admin)
-      ├─ CourseRole(user, course/topic scope)
+User ─┬─ Role(global: student|admin)
       ├─ Submission ─→ Challenge
       └─ Progress(派生) ─→ Room
 
@@ -135,10 +129,10 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 
 三条主时序（带泳景图见 `docs/data-flow.md`）：
 
-1. **教程上传流**：teacher 上传教程 zip → content 管线五步 → draft → admin 发布 → 对学生可见；
+1. **教程上传流**：admin 上传教程 zip → content 管线五步 → draft → admin 发布 → 对学生可见；
 2. **题目上传流**：admin 上传 challenge.json → 校验 → upsert 即生效（无 draft/publish）；
 3. **做题判定流**：student 在题目详情页提交 → 入队 pending → worker 恒时比较 → `submission.judged` 事件 → 派生器更新积分/进度/排行榜（题目关联教程时同步发 Room 通关事件）；
-4. **鉴权流**：请求 → JWT 解析 → 角色中间件（全局→课程级）→ handler。
+4. **鉴权流**：请求 → JWT 解析 → 角色中间件（student/admin）→ handler。
 
 ## 6. API 契约总览
 
@@ -159,13 +153,13 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 | `GET /learning-paths` / `GET /learning-paths/{id}` | student | 路径列表/详情（含进度） |
 | `GET /progress` | student | 个人进度 |
 | `GET /leaderboard` | student | 排行榜（派生数据） |
-| `POST /content/packages` | teacher | 上传教程包（进入管线） |
-| `GET /content/packages/{id}` | teacher | 包状态与版本 |
+| `POST /content/packages` | admin | 上传教程包（进入管线） |
+| `GET /content/packages/{id}` | admin | 包状态与版本 |
 | `POST /content/packages/{id}/publish` | admin | 发布 |
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
-| `GET /admin/challenges` | teacher | 题目管理表格 |
+| `GET /admin/challenges` | admin | 题目管理表格 |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
-| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户与角色管理 |
+| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户与角色（student/admin） |
 
 ## 7. 技术选型
 
