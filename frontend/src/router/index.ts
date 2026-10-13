@@ -25,6 +25,7 @@ const router = createRouter({
         { path: 'topics/:topicSlug/rooms/:roomSlug', name: 'room', component: () => import('../views/RoomDetail.vue') },
         // 训练板块
         { path: 'training', name: 'training', component: () => import('../views/Training.vue') },
+        { path: 'training/:challengeSlug', name: 'challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
         // 次级页面（不进主导航）
         { path: 'paths', name: 'paths', component: () => import('../views/LearningPaths.vue') },
         { path: 'leaderboard', name: 'leaderboard', component: () => import('../views/Leaderboard.vue') },
@@ -42,9 +43,11 @@ const router = createRouter({
         { path: 'tutorials/:topicSlug/rooms/:roomSlug', name: 'admin-room', component: () => import('../views/RoomDetail.vue') },
         // 训练板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
-        // 管理面板
-        { path: 'panel', redirect: '/admin/panel/packages' },
-        { path: 'panel/packages', name: 'admin-packages', component: () => import('../views/admin/ContentPackages.vue') },
+        { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
+        // 资源管理（教程管理 / 题目管理 + 容器、用户）
+        { path: 'panel', redirect: '/admin/panel/tutorials' },
+        { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
+        { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
         { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
       ],

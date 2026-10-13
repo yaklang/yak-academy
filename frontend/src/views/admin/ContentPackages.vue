@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 管理面板：教程 / 题目上传（内容包管理，五步管线入口）+ 版本回滚/归档。
-// 附标准内容包格式规范（可折叠）：教程与题目走同一个 zip 包（教题一体）。
+// 教程管理：教程内容包（zip）上传与版本管理（draft → publish / 归档 / 回滚）。
+// 包内只有教程（文字 + 视频）；题目是独立资源，经"题目管理"用 challenge.json 上传。
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { contentApi, type ContentPackage, type ContentVersion } from '../../api'
@@ -105,8 +105,8 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>教程 / 题目上传</h2>
-  <p class="hint">教程与题目通过同一个标准内容包（zip）上传——教题一体：每个 Room 是一篇教程，至多内嵌一个题目。</p>
+  <h2>教程管理</h2>
+  <p class="hint">教程以内容包（zip）上传：文字教程 + 配套视频，走版本化管线（draft → 发布 → 归档/回滚）。题目是独立资源，请到"题目管理"用 JSON 上传。</p>
   <div class="toolbar">
     <el-upload
       :show-file-list="false"
@@ -123,7 +123,7 @@ onMounted(load)
 
   <el-collapse-transition>
     <el-card v-show="specVisible" class="spec">
-      <h3>标准内容包格式</h3>
+      <h3>教程内容包格式</h3>
       <p>zip 根目录（或唯一一层包裹目录）下：</p>
       <pre class="tree">package.zip
 ├── manifest.yaml        # 包元数据（必填）
@@ -132,8 +132,7 @@ onMounted(load)
         ├── topic.md     # topic 首页（front matter 必填）
         └── rooms/
             └── &lt;room-slug&gt;/
-                ├── lesson.md   # 教程正文（front matter 必填）
-                └── lab.yaml    # 内嵌题目定义（Room 可选有一个）</pre>
+                └── lesson.md   # 教程正文（front matter 必填，可含 video）</pre>
 
       <h4>manifest.yaml（必填）</h4>
       <pre class="yaml">name: my-course        # 包名（同名再传 = 升级出新版本）
@@ -146,23 +145,10 @@ topics:
       <pre class="yaml">---
 title: SQL 注入基础
 difficulty: apprentice   # apprentice / practitioner / expert 三级
+video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed 的页面
 ---
 正文为 Markdown……</pre>
-
-      <h4>lab.yaml（题目定义；title/challenge/score 必填）</h4>
-      <pre class="yaml">title: 找出注入点
-challenge:
-  type: static          # static（明文 flag）/ regex（正则匹配）
-  flag: flag{answer}
-score: 100              # 初始分值（动态计分按通过人数衰减）
-env:                    # 可选：容器环境（开启容器后部署题目）
-  image: nginx:alpine   # 与 port 要么都填要么都不填
-  port: 80
-hints:                  # 可选：扣分解锁的提示列表
-  - title: 提示一
-    content: 看 UNION
-    cost: 10</pre>
-      <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。</p>
+      <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。题目（flag、容器环境、提示）不经教程包——用"题目管理"的 challenge.json 定义。</p>
     </el-card>
   </el-collapse-transition>
   <el-table :data="packages" v-loading="loading">

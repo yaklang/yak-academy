@@ -80,7 +80,7 @@ onMounted(load)
     <el-table-column prop="id" label="ID" width="70" />
     <el-table-column prop="username" label="用户" width="120" />
     <el-table-column prop="challenge_title" label="题目" />
-    <el-table-column prop="room_slug" label="Room" width="140" show-overflow-tooltip />
+    <el-table-column prop="challenge_slug" label="题目 Slug" width="160" show-overflow-tooltip />
     <el-table-column label="状态" width="100">
       <template #default="{ row }">
         <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>

@@ -4,14 +4,14 @@ import { http } from './client'
 export interface TokenResponse { token: string; expires_at: string }
 export interface User { id: number; username: string; global_role: 'student' | 'teacher' | 'admin' }
 export interface Topic { slug: string; title: string; summary: string; room_count: number }
-export interface Lab { challenge_id: number; title: string; score: number; solved: boolean; has_env: boolean }
 export interface Room {
   slug: string
   topic_slug: string
   title: string
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   lesson_md?: string
-  lab: Lab | null
+  video_url?: string
+  related_challenge_slug?: string | null
 }
 export interface Submission { id: number; status: 'pending' | 'correct' | 'incorrect'; score: number }
 export interface LabInstance {
@@ -26,14 +26,34 @@ export interface RoomSummary { slug: string; title: string; difficulty: 'apprent
 export interface TopicDetail extends Topic { rooms: RoomSummary[] }
 export interface TrainingItem {
   id: number
-  room_slug: string
-  room_title: string
-  topic_slug: string
+  slug: string
   title: string
+  category: string
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   score: number
   solved: boolean
   has_env: boolean
+  tutorial_slug?: string
+  tutorial_title?: string
+  tutorial_topic_slug?: string
+}
+export interface Hint { id?: number; title: string; content: string; cost: number }
+export interface ChallengeDetail extends TrainingItem {
+  description_md: string
+  hints: Hint[]
+}
+// 题目定义固定格式（challenge.json，管理员上传：单对象或数组）。
+export interface ChallengeJSON {
+  slug: string
+  title: string
+  category: string
+  difficulty: 'apprentice' | 'practitioner' | 'expert'
+  description_md?: string
+  score: number
+  challenge: { type: 'static' | 'regex'; flag: string }
+  env?: { image: string; port: number }
+  hints?: Hint[]
+  tutorial_slug?: string
 }
 export interface AdminLabInstance {
   id: number
@@ -41,7 +61,7 @@ export interface AdminLabInstance {
   username: string
   challenge_id: number
   challenge_title: string
-  room_slug: string
+  challenge_slug: string
   status: 'creating' | 'running' | 'stopped' | 'destroyed'
   endpoint: string
   expire_at: string
@@ -89,18 +109,21 @@ export const topicApi = {
 }
 
 export const submissionApi = {
-  submit: (roomSlug: string, answer: string) => http.post<Submission>('/submissions', { room_slug: roomSlug, answer }),
+  submit: (challengeSlug: string, answer: string) =>
+    http.post<Submission>('/submissions', { challenge_slug: challengeSlug, answer }),
   get: (id: number) => http.get<Submission>(`/submissions/${id}`),
 }
 
+// 题目容器环境（题目独立资源，slug 键）。
 export const instanceApi = {
-  start: (roomSlug: string) => http.post<LabInstance>(`/rooms/${roomSlug}/lab/instance`),
-  get: (roomSlug: string) => http.get<LabInstance | null>(`/rooms/${roomSlug}/lab/instance`),
-  destroy: (roomSlug: string) => http.del<{ deleted: boolean }>(`/rooms/${roomSlug}/lab/instance`),
+  start: (challengeSlug: string) => http.post<LabInstance>(`/challenges/${challengeSlug}/instance`),
+  get: (challengeSlug: string) => http.get<LabInstance | null>(`/challenges/${challengeSlug}/instance`),
+  destroy: (challengeSlug: string) => http.del<{ deleted: boolean }>(`/challenges/${challengeSlug}/instance`),
 }
 
 export const trainingApi = {
-  list: (page = 1) => http.get<Paged<TrainingItem>>(`/challenges?page=${page}`),
+  list: (page = 1, pageSize = 20) => http.get<Paged<TrainingItem>>(`/challenges?page=${page}&page_size=${pageSize}`),
+  detail: (challengeSlug: string) => http.get<ChallengeDetail>(`/challenges/${challengeSlug}`),
 }
 
 export const adminInstanceApi = {
@@ -126,4 +149,12 @@ export const contentApi = {
   archive: (id: number) => http.post<ContentPackage>(`/content/packages/${id}/archive`),
   rollback: (id: number, versionId: number) =>
     http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
+}
+
+// 题目管理（challenge.json 上传 / 表格 / 删除）。
+export const adminChallengeApi = {
+  upload: (challenges: ChallengeJSON[]) =>
+    http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
+  list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
+  remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),
 }
