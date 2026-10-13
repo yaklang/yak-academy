@@ -2,9 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 // 信息架构：两个端。
-//   普通端 /（教程 / 训练）—— 所有登录用户。
-//   管理端 /admin（教程 / 训练 / 管理面板）—— teacher 及以上（rbac 前端预检，
-//   最终以后端中间件为准——前端只做体验性拦截）。
+//   普通端 /（教程 / 训练）—— 普通人与管理员均可。
+//   管理端 /admin —— 仅管理员（global_role === admin）；普通人无入口且路由守卫拦截。
 // 两端复用同一组视图组件（Topics/TopicDetail/RoomDetail/Training）。
 const router = createRouter({
   history: createWebHistory(),
@@ -69,7 +68,7 @@ router.beforeEach(async (to) => {
         return { name: 'login', query: { redirect: to.fullPath } }
       }
     }
-    if (auth.user?.global_role !== 'admin' && auth.user?.global_role !== 'teacher') {
+    if (auth.user?.global_role !== 'admin') {
       return { name: 'topics' }
     }
   }

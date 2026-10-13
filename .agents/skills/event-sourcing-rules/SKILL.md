@@ -35,6 +35,16 @@ worker 消费 → flag 比对（恒时比较，禁止 == 比较）→ 写 submis
 派生器消费事件 → 更新 ScoreRecord/Progress → 广播排行榜变更
 ```
 
+### Flag 比对来源（flag_mode）
+
+| flag_mode | 比对目标 |
+|---|---|
+| `shared`（默认） | Challenge 级 Flag 表 |
+| `instance` | 当前用户该题 **running** 实例的 `LabInstance.flag_value`（销毁后须重新启动） |
+
+- 实例 Flag 在 `EnsureInstance` 生成并注入容器环境变量 `FLAG`，**不经 Event 表**（属实例运营态）。
+- TTL 续期只更新 `LabInstance.expire_at`，**不写 Event**（非积分/进度派生）。
+
 ## 动态计分
 
 `value = f(solve_count)`，内置 linear / logarithmic 衰减，下限 minimum。计分结果只通过 `submission.judged` 事件进入派生表。

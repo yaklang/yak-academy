@@ -42,6 +42,16 @@ FE(admin)          API                content/challenge SVC   repo            DB
 要点：
 - slug 重复 = 更新（upsert），上传即对学生可见；版本化机制只属于教程包。
 - 删除（DELETE /admin/challenges/{slug}）级联删 flags/hints。
+- 题目包 zip 且 `image: .`：上传时 docker build 打 tag，失败则 422 不入库。
+- `flag_mode=instance`：须有 env；flag 为含 `{token}` 的模板。
+
+## 2b. 实例生命周期与续期
+
+```
+POST /challenges/{slug}/instance → creating → driver.Create(-e FLAG) → running + expire_at
+POST /challenges/{slug}/instance/extend → 仅 running：expire_at = now+1h（不写 Event）
+DELETE → destroy；reaper 按 expire_at 回收
+```
 
 ## 3. 做题判定流（Event-Sourced Judging）
 
@@ -73,25 +83,23 @@ FE(student)        API                judge SVC             EB              DB
 - Event 表只 INSERT；"修正"以新事件表达。
 - 纯题目（无 tutorial_slug）不产生 Room 侧进度事件。
 
-## 4. RBAC 鉴权流（双层角色）
+## 4. RBAC 鉴权流（两档角色）
 
 ```
 FE                API middleware                    handler            SVC
  │  GET /admin/users (Bearer JWT)                                      │
- ├────────────────→│ 1.解析 JWT → user_id/全局角色                        │
+ ├────────────────→│ 1.解析 JWT → user_id / 全局角色                      │
  │                 │ 2.路由元数据 RequireRole("admin")                    │
- │                 │   ├─ 全局 admin → 短路通过                            │
- │                 │   ├─ 全局不足 → 查课程级角色(CourseRole)               │
- │                 │   └─ 均不足 → 403 FORBIDDEN（禁止404掩盖）            │
+ │                 │   ├─ admin → 通过                                    │
+ │                 │   └─ student（普通人）→ 403 FORBIDDEN                 │
  │                 ├───────────────────────────────────────────────────→ │
- │                 │                    3.属主规则(如"自己班级")在 SVC 内检查 │
  │   200 [users]   │                                                    │
  │←────────────────┤                                                    │
 ```
 
 要点：
-- 角色声明只在路由注册处（`RequireRole(...)`），handler 内禁止散落权限判断。
-- 判定顺序：全局角色 → 课程级角色；admin 短路。
+- 仅 `student`（普通人）与 `admin`（管理员）；普通人前端不渲染管理入口。
+- 角色声明只在路由注册处，handler 内禁止散落权限判断。
 - 401（未登录/token 失效）与 403（角色不足）严格区分，统一错误信封 `{"error":{"code","message"}}`。
 
 ## 5. Hint 解锁流

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 题目管理：CTFd 风格 zip 包（challenge.yml + 容器文件）优先；
+// 题目管理：实训常用 zip 包（challenge.yml + 容器文件）优先；
 // 兼容 challenge.json 批量导入。upsert 即生效。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -93,7 +93,7 @@ onMounted(load)
 <template>
   <h2>题目管理</h2>
   <p class="hint">
-    推荐上传 CTFd 风格题目包 zip（必含 <code>challenge.yml</code>；有容器时还必含
+    推荐上传题目包 zip（必含 <code>challenge.yml</code>；有容器时还必含
     <code>Dockerfile</code> + <code>docker-compose.yml</code>）。也兼容 challenge.json 批量导入。
     样例见仓库 <code>examples/challenges/vulinbox-xss-reflected</code>。
   </p>

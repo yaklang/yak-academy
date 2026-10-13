@@ -12,7 +12,6 @@ servers:
 tags:
   - name: auth
   - name: student
-  - name: teacher
   - name: admin
 
 components:
@@ -53,7 +52,7 @@ components:
       properties:
         id: { type: integer }
         username: { type: string }
-        global_role: { type: string, enum: [student, teacher, admin] }
+        global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
     Topic:
       type: object
       properties:
@@ -217,12 +216,17 @@ components:
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         description_md: { type: string }
         score: { type: integer }
+        flag_mode:
+          type: string
+          enum: [shared, instance]
+          default: shared
+          description: shared=题目级共享 flag；instance=每容器实例唯一（模板含 {token}，须有 env）
         challenge:
           type: object
           required: [type, flag]
           properties:
             type: { type: string, enum: [static, regex] }
-            flag: { type: string }
+            flag: { type: string, description: instance 模式下为含 {token} 的模板 }
         env:
           type: object
           description: 容器环境（image/port 要么都填要么都不填）
@@ -241,7 +245,7 @@ components:
     ChallengePackageUpload:
       type: object
       description: |
-        CTFd 风格题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
+        实训常用题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
         详见 content-package-spec skill。
     AdminLabInstance:
       type: object
@@ -335,8 +339,8 @@ paths:
 
   /topics/{topicSlug}:
     put:
-      tags: [teacher]
-      summary: 更新主题元数据（最低 teacher；课程级 teacher 可操作本 Topic）
+      tags: [admin]
+      summary: 更新主题元数据（仅管理员）
       parameters:
         - { name: topicSlug, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -375,7 +379,7 @@ paths:
   /challenges/{slug}/instance:
     post:
       tags: [student]
-      summary: 启动/获取本人在该题目的环境实例（幂等）
+      summary: 启动/获取本人在该题目的环境实例（幂等；instance flag_mode 时注入唯一 FLAG）
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
@@ -426,6 +430,21 @@ paths:
                 properties:
                   deleted: { type: boolean }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /challenges/{slug}/instance/extend:
+    post:
+      tags: [student]
+      summary: 续期本人在该题目的运行中实例 TTL（不重建容器；expire_at = now+1h）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabInstance' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /challenges/{slug}:
     get:
@@ -620,7 +639,7 @@ paths:
 
   /content/packages:
     get:
-      tags: [teacher]
+      tags: [admin]
       summary: 内容包列表（分页）
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
@@ -638,7 +657,7 @@ paths:
                       items: { type: array, items: { $ref: '#/components/schemas/ContentPackage' } }
         '401': { $ref: '#/components/responses/ErrorResp' }
     post:
-      tags: [teacher]
+      tags: [admin]
       summary: 上传内容包（进入五步管线）
       requestBody:
         required: true
@@ -661,7 +680,7 @@ paths:
 
   /content/packages/{id}:
     get:
-      tags: [teacher]
+      tags: [admin]
       summary: 内容包状态与版本
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -689,7 +708,7 @@ paths:
 
   /content/packages/{id}/versions:
     get:
-      tags: [teacher]
+      tags: [admin]
       summary: 内容包版本列表（含各版本状态）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -745,7 +764,7 @@ paths:
 
   /admin/challenges:
     get:
-      tags: [teacher]
+      tags: [admin]
       summary: 题目全量列表（管理端题目管理表格，分页）
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
@@ -796,7 +815,7 @@ paths:
   /admin/challenges/package:
     post:
       tags: [admin]
-      summary: 上传 CTFd 风格题目包 zip（必含 challenge.yml；有容器时必含 Dockerfile + docker-compose.yml）
+      summary: 上传实训常用题目包 zip（必含 challenge.yml；有容器时必含 Dockerfile + docker-compose.yml）
       requestBody:
         required: true
         content:
@@ -942,7 +961,7 @@ paths:
                 - $ref: '#/components/schemas/LoginRequest'
                 - type: object
                   properties:
-                    global_role: { type: string, enum: [student, teacher, admin], default: student }
+                    global_role: { type: string, enum: [student, admin], default: student, description: student=普通人，admin=管理员 }
       responses:
         '201':
           description: Created
@@ -953,7 +972,7 @@ paths:
   /admin/users/{id}/roles:
     patch:
       tags: [admin]
-      summary: 修改全局角色 / 设置课程级角色
+      summary: 修改全局角色（student=普通人 / admin=管理员）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -963,7 +982,7 @@ paths:
             schema:
               type: object
               properties:
-                global_role: { type: string, enum: [student, teacher, admin] }
+                global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
                 course_roles:
                   type: array
                   items:
@@ -982,7 +1001,8 @@ paths:
   /admin/users/{id}/course-roles/{topicSlug}:
     delete:
       tags: [admin]
-      summary: 删除课程级角色
+      deprecated: true
+      summary: （已废弃）删除课程级角色；两档模型下无效果依赖
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: topicSlug, in: path, required: true, schema: { type: string } }

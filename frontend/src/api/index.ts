@@ -2,7 +2,8 @@
 import { http } from './client'
 
 export interface TokenResponse { token: string; expires_at: string }
-export interface User { id: number; username: string; global_role: 'student' | 'teacher' | 'admin' }
+export interface User { id: number; username: string; global_role: 'student' | 'admin' }
+
 export interface Topic { slug: string; title: string; summary: string; room_count: number }
 export interface Room {
   slug: string
@@ -117,16 +118,12 @@ export interface ContentVersion {
   created_at: string
 }
 
-export interface CourseRole { topic_slug: string; role: string }
-
 export const adminApi = {
   listUsers: (page = 1) => http.get<Paged<User>>(`/admin/users?page=${page}`),
   createUser: (username: string, password: string, globalRole: string) =>
     http.post<User>('/admin/users', { username, password, global_role: globalRole }),
-  updateRoles: (id: number, globalRole: string, courseRoles: CourseRole[]) =>
-    http.patch<User>(`/admin/users/${id}/roles`, { global_role: globalRole, course_roles: courseRoles }),
-  deleteCourseRole: (id: number, topicSlug: string) =>
-    http.del<{ deleted: boolean }>(`/admin/users/${id}/course-roles/${topicSlug}`),
+  updateRoles: (id: number, globalRole: string) =>
+    http.patch<User>(`/admin/users/${id}/roles`, { global_role: globalRole }),
 }
 
 export const authApi = {
@@ -153,6 +150,7 @@ export const instanceApi = {
   start: (challengeSlug: string) => http.post<LabInstance>(`/challenges/${challengeSlug}/instance`),
   get: (challengeSlug: string) => http.get<LabInstance | null>(`/challenges/${challengeSlug}/instance`),
   destroy: (challengeSlug: string) => http.del<{ deleted: boolean }>(`/challenges/${challengeSlug}/instance`),
+  extend: (challengeSlug: string) => http.post<LabInstance>(`/challenges/${challengeSlug}/instance/extend`),
 }
 
 export const trainingApi = {
@@ -195,7 +193,7 @@ export const contentApi = {
     http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
 }
 
-// 题目管理（challenge.json / CTFd 风格 zip 包上传 / 表格 / 删除）。
+// 题目管理（challenge.json / 题目包 zip 上传 / 表格 / 删除）。
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),

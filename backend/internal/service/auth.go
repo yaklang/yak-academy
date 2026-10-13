@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -62,34 +63,22 @@ func (s *AuthService) FindUser(ctx context.Context, username string) (*model.Use
 	return s.users.FindByUsername(ctx, username)
 }
 
-// CheckRole 双层角色判定：全局角色 Rank 达标即通过；不足时查课程级角色。
-// 属主规则（如"自己班级"）不在此处，放各 service 内（rbac-model skill）。
-func (s *AuthService) CheckRole(ctx context.Context, user *model.User, required model.GlobalRole, topicSlug string) (bool, error) {
-	if user.GlobalRole.Rank() >= required.Rank() {
-		return true, nil // 全局达标（admin 在此短路）
-	}
-	if topicSlug == "" {
-		return false, nil
-	}
-	roles, err := s.users.ListCourseRoles(ctx, user.ID)
-	if err != nil {
-		return false, err
-	}
-	for _, cr := range roles {
-		if cr.TopicSlug == topicSlug && cr.Role == string(required) {
-			return true, nil
-		}
-	}
-	return false, nil
+// CheckRole 两档角色判定：仅比较全局 Rank（admin 短路）。topicSlug 保留参数签名兼容，已忽略。
+func (s *AuthService) CheckRole(_ context.Context, user *model.User, required model.GlobalRole, _ string) (bool, error) {
+	return user.GlobalRole.Normalize().Rank() >= required.Normalize().Rank(), nil
 }
 
-// CreateUser 管理端创建用户（bcrypt 哈希，业务逻辑在 service 层——project-conventions）。
+// CreateUser 管理端创建用户（bcrypt 哈希）。角色只允许 student / admin。
 func (s *AuthService) CreateUser(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error) {
 	if username == "" || password == "" {
 		return nil, ErrValidation
 	}
 	if role == "" {
 		role = model.GlobalRoleStudent
+	}
+	role = role.Normalize()
+	if role != model.GlobalRoleStudent && role != model.GlobalRoleAdmin {
+		return nil, fmt.Errorf("%w: global_role must be student or admin", ErrValidation)
 	}
 	if _, err := s.users.FindByUsername(ctx, username); err == nil {
 		return nil, ErrValidation // 用户名已存在
@@ -107,19 +96,14 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password string,
 	return user, nil
 }
 
-// UpdateRoles 修改全局角色 + 课程级角色列表 upsert（admin 专属，路由声明）。
-func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole model.GlobalRole, courseRoles []model.CourseRole) (*model.User, error) {
+// UpdateRoles 修改全局角色（仅 student / admin）。courseRoles 参数忽略（课程级角色已废弃）。
+func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole model.GlobalRole, _ []model.CourseRole) (*model.User, error) {
 	if globalRole != "" {
-		if err := s.users.UpdateGlobalRole(ctx, userID, globalRole); err != nil {
-			return nil, err
+		role := globalRole.Normalize()
+		if role != model.GlobalRoleStudent && role != model.GlobalRoleAdmin {
+			return nil, fmt.Errorf("%w: global_role must be student or admin", ErrValidation)
 		}
-	}
-	for _, cr := range courseRoles {
-		if cr.TopicSlug == "" || cr.Role == "" {
-			return nil, ErrValidation
-		}
-		cr.UserID = userID
-		if err := s.users.UpsertCourseRole(ctx, &cr); err != nil {
+		if err := s.users.UpdateGlobalRole(ctx, userID, role); err != nil {
 			return nil, err
 		}
 	}

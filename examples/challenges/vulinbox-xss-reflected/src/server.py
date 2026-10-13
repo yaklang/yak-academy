@@ -1,8 +1,13 @@
-"""Minimal reflected-XSS lab inspired by Yaklang Vulinbox /xss/echo."""
+"""Minimal reflected-XSS lab inspired by Yaklang Vulinbox /xss/echo.
+
+Flag is injected via FLAG env (flag_mode=instance). Falls back to a static
+placeholder only when FLAG is unset (local docker compose without platform).
+"""
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-FLAG = "flag{vulinbox-xss-reflected}"
+FLAG = os.environ.get("FLAG", "flag{unset-start-via-platform}")
 
 
 class Handler(BaseHTTPRequestHandler):

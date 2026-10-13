@@ -20,8 +20,10 @@ type LabInstance struct {
 	Status      InstanceStatus `gorm:"size:16;index" json:"status"`
 	Endpoint    string         `json:"endpoint"`               // 实例访问地址
 	ExpireAt    time.Time      `gorm:"index" json:"expire_at"` // TTL 回收时间
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	// FlagValue 实例唯一 flag（flag_mode=instance 时写入；禁止出现在 API JSON）。
+	FlagValue string    `gorm:"size:512" json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InstanceAction 实例生命周期动作（日志表）。

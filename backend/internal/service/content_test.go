@@ -15,9 +15,26 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
+// fakeImageBuilder 记录 Build 调用；可注入 buildErr。
+type fakeImageBuilder struct {
+	tags []string
+	dirs []string
+	err  error
+}
+
+func (f *fakeImageBuilder) Build(ctx context.Context, tag, contextDir string) error {
+	f.tags = append(f.tags, tag)
+	f.dirs = append(f.dirs, contextDir)
+	return f.err
+}
+
 // newContentTestService 进程内 SQLite + 真实 repo，构造被测 ContentService。
 // 测试 zip 在测试代码中构造，不进生产路径（无内置内容原则）。
 func newContentTestService(t *testing.T) (*ContentService, *gorm.DB) {
+	return newContentTestServiceWithBuilder(t, &fakeImageBuilder{})
+}
+
+func newContentTestServiceWithBuilder(t *testing.T, builder ImageBuilder) (*ContentService, *gorm.DB) {
 	t.Helper()
 	gdb, err := gorm.Open(sqlite.Open("file:contenttest?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -35,6 +52,7 @@ func newContentTestService(t *testing.T) (*ContentService, *gorm.DB) {
 		repo.NewTopicRepo(gdb),
 		repo.NewRoomRepo(gdb),
 		NewChallengeService(repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb), repo.NewEventRepo(gdb), repo.NewScoreRepo(gdb), nil),
+		builder,
 	)
 	return svc, gdb
 }
@@ -471,7 +489,7 @@ func TestArchiveFreezesPackage(t *testing.T) {
 	}
 }
 
-// vulinboxChallengePackageFiles 内存构造 CTFd 风格题目包（对齐 examples/challenges/vulinbox-xss-reflected，
+// vulinboxChallengePackageFiles 内存构造题目包（对齐 examples/challenges/vulinbox-xss-reflected，
 // 测试不读仓库文件，避免无内置内容原则与样例耦合）。
 func vulinboxChallengePackageFiles() map[string]string {
 	return map[string]string{
@@ -484,8 +502,9 @@ description: |
   向 name 参数注入脚本，拿到页面中的 flag。
 value: 100
 type: static
+flag_mode: instance
 flags:
-  - flag{vulinbox-xss-reflected}
+  - "flag{lab-{token}}"
 image: .
 port: 8787
 protocol: http
@@ -509,10 +528,11 @@ CMD ["python", "server.py"]
     ports:
       - "8787:8787"
 `,
-		"vulinbox-xss-reflected/src/server.py": `from http.server import BaseHTTPRequestHandler, HTTPServer
+		"vulinbox-xss-reflected/src/server.py": `import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
-FLAG = "flag{vulinbox-xss-reflected}"
+FLAG = os.environ.get("FLAG", "flag{unset}")
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -533,7 +553,8 @@ HTTPServer(("0.0.0.0", 8787), H).serve_forever()
 }
 
 func TestUploadChallengePackageVulinboxSample(t *testing.T) {
-	svc, gdb := newContentTestService(t)
+	builder := &fakeImageBuilder{}
+	svc, gdb := newContentTestServiceWithBuilder(t, builder)
 	ctx := context.Background()
 	imported, slugs, err := svc.UploadChallengePackage(ctx, buildZip(t, vulinboxChallengePackageFiles()))
 	if err != nil {
@@ -542,12 +563,18 @@ func TestUploadChallengePackageVulinboxSample(t *testing.T) {
 	if imported != 1 || len(slugs) != 1 || slugs[0] != "vulinbox-xss-reflected" {
 		t.Fatalf("imported=%d slugs=%v", imported, slugs)
 	}
+	if len(builder.tags) != 1 || builder.tags[0] != "yak-academy/vulinbox-xss-reflected:latest" {
+		t.Fatalf("builder tags = %v", builder.tags)
+	}
 	var chal model.Challenge
 	if err := gdb.Where("slug = ?", "vulinbox-xss-reflected").First(&chal).Error; err != nil {
 		t.Fatal(err)
 	}
 	if chal.Image != "yak-academy/vulinbox-xss-reflected:latest" || chal.Port != 8787 {
 		t.Fatalf("env = %s:%d", chal.Image, chal.Port)
+	}
+	if chal.FlagMode != model.FlagModeInstance {
+		t.Fatalf("flag_mode = %s, want instance", chal.FlagMode)
 	}
 	if chal.Category != "xss" || chal.Difficulty != model.DifficultyApprentice || chal.Score != 100 {
 		t.Fatalf("meta = %+v", chal)
@@ -557,10 +584,20 @@ func TestUploadChallengePackageVulinboxSample(t *testing.T) {
 	if hints != 2 {
 		t.Fatalf("hints=%d, want 2", hints)
 	}
-	var flags int64
-	gdb.Model(&model.Flag{}).Where("challenge_id = ?", chal.ID).Count(&flags)
-	if flags != 1 {
-		t.Fatalf("flags=%d, want 1", flags)
+	var flag model.Flag
+	if err := gdb.Where("challenge_id = ?", chal.ID).First(&flag).Error; err != nil {
+		t.Fatal(err)
+	}
+	if flag.Value != "flag{lab-{token}}" {
+		t.Fatalf("flag template = %q", flag.Value)
+	}
+}
+
+func TestUploadChallengePackageBuildRequired(t *testing.T) {
+	svc, _ := newContentTestServiceWithBuilder(t, NoopDriver{})
+	_, _, err := svc.UploadChallengePackage(context.Background(), buildZip(t, vulinboxChallengePackageFiles()))
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("noop builder should get ErrValidation, got %v", err)
 	}
 }
 

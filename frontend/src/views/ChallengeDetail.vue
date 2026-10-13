@@ -100,6 +100,18 @@ async function destroyInstance() {
   }
 }
 
+async function extendInstance() {
+  instanceLoading.value = true
+  try {
+    instance.value = await instanceApi.extend(slug())
+    ElMessage.success('已续期 1 小时')
+  } catch (e) {
+    ElMessage.error(`续期失败：${(e as Error).message}`)
+  } finally {
+    instanceLoading.value = false
+  }
+}
+
 function submit() {
   if (!challenge.value || !answer.value) return
   submitPoll(challenge.value.slug, answer.value)
@@ -189,6 +201,12 @@ onMounted(load)
           <span v-if="instance!.expire_at" class="expire">
             到期 {{ new Date(instance!.expire_at).toLocaleTimeString() }}
           </span>
+          <el-button
+            v-if="instance!.status === 'running'"
+            size="small"
+            :loading="instanceLoading"
+            @click="extendInstance"
+          >续期</el-button>
           <el-button size="small" :loading="instanceLoading" @click="destroyInstance">销毁环境</el-button>
         </template>
         <el-button v-else type="primary" size="small" :loading="instanceLoading" @click="startInstance">

@@ -94,7 +94,7 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "slug"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"title", "category", "difficulty", "description", "type", "score", "image", "port", "tutorial_slug",
+				"title", "category", "difficulty", "description", "type", "score", "flag_mode", "image", "port", "tutorial_slug",
 			}),
 		}).Create(c).Error; err != nil {
 			return err
