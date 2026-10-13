@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/api"
 	"github.com/yaklang/yak-academy/backend/internal/config"
@@ -61,6 +62,11 @@ func main() {
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo)
+	// env 实例生命周期。KNOWN_LIMITATION：NoopDriver 驱动不可用（真实 Docker 驱动为后续计划），
+	// 实例接口一律 501；TTL reaper 照常装配（无实例时为空转）。
+	instanceRepo := repo.NewLabInstanceRepo(gdb)
+	envSvc := service.NewEnvService(instanceRepo, service.NoopDriver{})
+	envSvc.StartReaper(ctx, time.Minute)
 
 	// api 装配
 	router := api.NewRouter(authSvc)

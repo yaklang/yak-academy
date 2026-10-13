@@ -12,13 +12,14 @@ const (
 	InstanceDestroyed InstanceStatus = "destroyed"
 )
 
-// LabInstance 题目环境实例：user × challenge 维度，Phase 3 由 Docker 驱动管理生命周期。
+// LabInstance 题目环境实例：user × challenge 维度，生命周期由 EnvService + 驱动管理。
 type LabInstance struct {
-	ID          uint           `gorm:"primaryKey"`
-	UserID      uint           `gorm:"index"`
-	ChallengeID uint           `gorm:"index"`
-	Status      InstanceStatus `gorm:"size:16"`
-	Endpoint    string         // 实例访问地址（Phase 3）
-	ExpireAt    time.Time      // 空闲回收时间（Phase 3）
-	CreatedAt   time.Time
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	UserID      uint           `gorm:"index" json:"user_id"`
+	ChallengeID uint           `gorm:"index" json:"challenge_id"`
+	Status      InstanceStatus `gorm:"size:16;index" json:"status"`
+	Endpoint    string         `json:"endpoint"`            // 实例访问地址
+	ExpireAt    time.Time      `gorm:"index" json:"expire_at"` // TTL 回收时间
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
