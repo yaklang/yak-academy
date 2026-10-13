@@ -37,10 +37,29 @@ export interface TrainingItem {
   tutorial_title?: string
   tutorial_topic_slug?: string
 }
-export interface Hint { id?: number; title: string; content: string; cost: number }
+export interface Hint {
+  id: number
+  title: string
+  content: string
+  cost: number
+  unlocked: boolean
+}
+export interface HintUnlockResponse extends Hint {
+  score: number
+}
 export interface ChallengeDetail extends TrainingItem {
   description_md: string
   hints: Hint[]
+}
+export interface LearningPathItem {
+  order: number
+  room_slug: string
+  completed: boolean
+}
+export interface LearningPath {
+  id: number
+  title: string
+  items: LearningPathItem[]
 }
 // 题目定义固定格式（challenge.json，管理员上传：单对象或数组）。
 export interface ChallengeJSON {
@@ -139,6 +158,13 @@ export const instanceApi = {
 export const trainingApi = {
   list: (page = 1, pageSize = 20) => http.get<Paged<TrainingItem>>(`/challenges?page=${page}&page_size=${pageSize}`),
   detail: (challengeSlug: string) => http.get<ChallengeDetail>(`/challenges/${challengeSlug}`),
+  unlockHint: (challengeSlug: string, hintId: number) =>
+    http.post<HintUnlockResponse>(`/challenges/${challengeSlug}/hints/${hintId}/unlock`),
+}
+
+export const pathApi = {
+  list: () => http.get<LearningPath[]>('/learning-paths'),
+  get: (id: number) => http.get<LearningPath>(`/learning-paths/${id}`),
 }
 
 export const adminInstanceApi = {
@@ -169,10 +195,15 @@ export const contentApi = {
     http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
 }
 
-// 题目管理（challenge.json 上传 / 表格 / 删除）。
+// 题目管理（challenge.json / CTFd 风格 zip 包上传 / 表格 / 删除）。
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
+  uploadPackage: (file: File) => {
+    const form = new FormData()
+    form.append('package', file)
+    return http.upload<{ imported: number; slugs: string[] }>('/admin/challenges/package', form)
+  },
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
   remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),
 }

@@ -14,8 +14,9 @@ description: yak-academy 教程与题目两类资源的内容模型约束。涉�
 
 ## 学习路径（LearningPath）
 
-- **Path 只引用 Room ID**（PathItem = path_id + room_id + order），**禁止**在 Path 中复制/内联 Room 内容字段——内容归属 Room，路径只是有序视图（参考 PortSwigger：路径引用而非复制）。
+- **Path 只引用 Room**（PathItem = path_id + room_slug + order），**禁止**改为引用 Challenge，也禁止复制/内联 Room 内容字段——内容归属 Room，路径只是有序视图（参考 PortSwigger：路径引用而非复制）。资源分离后题目已独立，但学习路径语义仍是「教程进度序列」，不是训练场题单。
 - Path 的排序字段 `order` 必须在 path 内唯一，调整顺序只能改 order，不能动 Room。
+- 管理端 `POST /admin/learning-paths` 创建；学生端 `GET /learning-paths` 返回节点完成态（Progress 派生）。
 
 ## 难度分级（唯一枚举）
 

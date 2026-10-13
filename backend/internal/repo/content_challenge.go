@@ -177,8 +177,16 @@ func (r *challengeRepo) FindFlags(ctx context.Context, challengeID uint) ([]mode
 
 func (r *challengeRepo) FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error) {
 	var list []model.Hint
-	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Find(&list).Error
+	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Order("id").Find(&list).Error
 	return list, err
+}
+
+func (r *challengeRepo) FindHint(ctx context.Context, hintID uint) (*model.Hint, error) {
+	var h model.Hint
+	if err := r.db.WithContext(ctx).First(&h, hintID).Error; err != nil {
+		return nil, err
+	}
+	return &h, nil
 }
 
 func (r *challengeRepo) CountSolves(ctx context.Context, challengeID uint) (int64, error) {

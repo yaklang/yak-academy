@@ -56,12 +56,14 @@ func main() {
 	if err := authSvc.EnsureAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Fatalf("ensure admin: %v", err)
 	}
-	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo)
+	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo, eventRepo, scoreRepo, bus)
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, eventRepo, bus)
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
-	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo)
+	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)
+	pathRepo := repo.NewPathRepo(gdb)
+	pathSvc := service.NewPathService(pathRepo, roomRepo, progressRepo)
 	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
 	instanceRepo := repo.NewLabInstanceRepo(gdb)
 	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
@@ -74,7 +76,7 @@ func main() {
 
 	// api 装配
 	router := api.NewRouter(authSvc)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, pathSvc, envSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

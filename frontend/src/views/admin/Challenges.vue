@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 题目管理：challenge.json（固定格式）上传（单对象或数组，upsert 即生效）+
-// 题目表格 + 删除。附格式规范折叠面板。
+// 题目管理：CTFd 风格 zip 包（challenge.yml + 容器文件）优先；
+// 兼容 challenge.json 批量导入。upsert 即生效。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminChallengeApi, type TrainingItem } from '../../api'
@@ -27,6 +27,20 @@ async function load() {
   }
 }
 
+async function onUploadPackage(file: File) {
+  uploading.value = true
+  try {
+    const resp = await adminChallengeApi.uploadPackage(file)
+    ElMessage.success(`已导入题目包：${resp.slugs.join(', ')}`)
+    await load()
+  } catch (e) {
+    ElMessage.error(`题目包上传失败：${(e as Error).message}`)
+  } finally {
+    uploading.value = false
+  }
+  return false
+}
+
 // el-upload before-upload：读文件文本，尝试解析 JSON（单对象或数组）后上传。
 async function onUpload(file: File) {
   uploading.value = true
@@ -39,7 +53,7 @@ async function onUpload(file: File) {
       throw new Error('不是合法的 JSON 文件')
     }
     const list = Array.isArray(parsed) ? parsed : [parsed]
-    const resp = await adminChallengeApi.upload(list)
+    const resp = await adminChallengeApi.upload(list as never[])
     ElMessage.success(`已导入 ${resp.imported} 个题目：${resp.slugs.join(', ')}`)
     await load()
   } catch (e) {
@@ -78,45 +92,54 @@ onMounted(load)
 
 <template>
   <h2>题目管理</h2>
-  <p class="hint">题目通过固定格式 JSON（challenge.json）上传：单对象或对象数组，slug 重复 = 更新，上传即生效（无 draft / publish 流程）。</p>
+  <p class="hint">
+    推荐上传 CTFd 风格题目包 zip（必含 <code>challenge.yml</code>；有容器时还必含
+    <code>Dockerfile</code> + <code>docker-compose.yml</code>）。也兼容 challenge.json 批量导入。
+    样例见仓库 <code>examples/challenges/vulinbox-xss-reflected</code>。
+  </p>
   <div class="toolbar">
+    <el-upload
+      :show-file-list="false"
+      accept=".zip,application/zip"
+      :before-upload="onUploadPackage"
+      :disabled="uploading"
+    >
+      <el-button type="primary" :loading="uploading">上传题目包 zip</el-button>
+    </el-upload>
     <el-upload
       :show-file-list="false"
       accept=".json,application/json"
       :before-upload="onUpload"
       :disabled="uploading"
     >
-      <el-button type="primary" :loading="uploading">上传题目 JSON</el-button>
+      <el-button :loading="uploading">上传 JSON（兼容）</el-button>
     </el-upload>
     <el-button @click="specVisible = !specVisible">
-      {{ specVisible ? '收起格式规范' : '查看 JSON 格式规范' }}
+      {{ specVisible ? '收起格式规范' : '查看格式规范' }}
     </el-button>
   </div>
 
   <el-collapse-transition>
     <el-card v-show="specVisible" class="spec">
-      <h3>challenge.json 固定格式</h3>
+      <h3>challenge.yml 题目包（推荐）</h3>
+      <pre class="json">challenge.yml          # 必填
+Dockerfile             # 有 image 时必填
+docker-compose.yml     # 有 image 时必填
+src/…                  # 可选源码</pre>
+      <p class="dim">接口：POST /admin/challenges/package（字段名 package）。<code>image: .</code> 落库为 yak-academy/&lt;slug&gt;:latest。</p>
+      <h3>challenge.json（兼容）</h3>
       <pre class="json">{
-  "slug": "sqli-login-bypass",       // 全局唯一，重复上传 = 更新
+  "slug": "sqli-login-bypass",
   "title": "SQL 注入登录绕过",
-  "category": "sql-injection",      // 训练场分组键
-  "difficulty": "apprentice",        // apprentice / practitioner / expert
-  "description_md": "# 背景\n任务目标……（Markdown）",
+  "category": "sql-injection",
+  "difficulty": "apprentice",
+  "description_md": "# 背景\n任务目标……",
   "score": 100,
-  "challenge": {
-    "type": "static",                // static（明文）/ regex（正则匹配）
-    "flag": "flag{answer}"
-  },
-  "env": {                           // 可选：容器环境，image/port 成对出现
-    "image": "vulnapp:1.0",
-    "port": 80
-  },
-  "hints": [                         // 可选：提示列表
-    { "title": "提示一", "content": "看 UNION", "cost": 10 }
-  ],
-  "tutorial_slug": "sqli-basics"     // 可选：关联教程 Room slug
+  "challenge": { "type": "static", "flag": "flag{answer}" },
+  "env": { "image": "vulnapp:1.0", "port": 80 },
+  "hints": [ { "title": "提示一", "content": "看 UNION", "cost": 10 } ],
+  "tutorial_slug": "sqli-basics"
 }</pre>
-      <p class="dim">支持 JSON 数组批量导入；逐题校验，单题失败整体不入库。description_md 展示在题目详情页；容器环境由学生在题目详情页自行启动。</p>
     </el-card>
   </el-collapse-transition>
 

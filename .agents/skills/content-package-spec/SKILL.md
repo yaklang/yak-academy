@@ -9,7 +9,7 @@ description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内�
 
 - **禁止任何内置/硬编码教程内容**。所有教程与题目都来自管理员上传（教程 zip 包 / 题目 challenge.json）。代码里不得出现示例课程数据、demo 文章常量。
 - 唯一例外：数据库迁移可以创建初始管理员账号，但**不得**创建任何 Topic/Room/Challenge 初始数据。
-- **教程包只含教程**（文字 + 视频）；题目不经教程包上传——旧 lab.yaml 模式已废弃（解析代码仅为旧版本 Payload 回放兼容保留，apply 时忽略），新题目一律走 challenge.json。
+- **教程包只含教程**（文字 + 视频）；题目不经教程包上传——旧 lab.yaml 模式已废弃（解析代码仅为旧版本 Payload 回放兼容保留，apply 时忽略），新题目走 challenge.yml 包 zip 或兼容 challenge.json。
 
 ## 教程包结构（zip）
 
@@ -33,9 +33,38 @@ package.zip
 - 必填：`title`、`difficulty`（apprentice/practitioner/expert 三级，禁止其他值）。
 - 可选：`video`（视频 URL：mp4/webm 直链前端用 video 标签播放，其余 URL 用 iframe embed）。
 
-## 题目定义（challenge.json，固定格式）
+## 题目定义
 
-单对象或对象数组上传（`POST /admin/challenges`，admin，upsert 即生效，无 draft/publish 流程）：
+题目是独立资源，admin 上传后 **upsert 即生效**（无 draft/publish）。两种上传形态：
+
+### A. CTFd 风格题目包 zip（推荐，有容器时强制此形态的文件约束）
+
+`POST /admin/challenges/package`（multipart 字段 `package`）：
+
+```
+<challenge>/
+├── challenge.yml          # 必填（或 challenge.yaml）
+├── Dockerfile             # 声明 image 时必填
+├── docker-compose.yml     # 声明 image 时必填（或 compose.yml）
+└── src/…                  # 可选
+```
+
+`challenge.yml` 关键字段（对齐 [CTFd ctfcli](https://docs.ctfd.io/tutorials/ctfcli/challenge-structure/)，yak-academy 扩展）：
+
+| 字段 | 说明 |
+|---|---|
+| `slug` / `name` | slug 必填；title 取 `title` 或 `name` |
+| `category` / `difficulty` / `value`（或 `score`） | difficulty 三级枚举 |
+| `description` | Markdown 描述 |
+| `type` + `flags` | flag 类型 static/regex；取首个 flag |
+| `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` |
+| `hints` / `tutorial_slug` | 可选 |
+
+参考样例（不自动加载）：`examples/challenges/vulinbox-xss-reflected/`。
+
+### B. challenge.json（兼容批量导入）
+
+`POST /admin/challenges`（单对象或对象数组）：
 
 ```json
 {
@@ -54,8 +83,8 @@ package.zip
 
 - 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug` 可选。
 - `challenge.type`：`static`（明文 flag）/ `regex`（可编译正则）。
-- `env` 整段可选；**要么都填要么都不填**（只填其一 = 校验失败整体拒绝）。image 非空即 `has_env: true`，学生在题目详情页启动容器；无 env 的题目调实例接口返回 422。
-- `hints[].cost` 非负；`tutorial_slug` 可选指向教程 Room（关联入口见 teaching-integration skill）。
+- `env` 整段可选；**要么都填要么都不填**。image 非空即 `has_env: true`。
+- `hints[].cost` 非负；解锁走 `hint.unlocked` 事件扣分（见 event-sourcing-rules）。
 - 批量数组逐题校验、**单题失败整体不入库**；slug 重复 = 更新（upsert）。
 - 题目难度枚举与教程一致（apprentice/practitioner/expert），禁止其他值。
 

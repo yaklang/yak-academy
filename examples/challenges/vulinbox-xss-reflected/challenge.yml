@@ -1,0 +1,27 @@
+# yak-academy 题目包（CTFd challenge.yml 风格）。
+# 参考：https://docs.ctfd.io/tutorials/ctfcli/challenge-structure/
+# 场景对标 Yaklang Vulinbox xss/echo（默认端口 8787）。
+slug: vulinbox-xss-reflected
+name: Vulinbox 反射型 XSS
+category: xss
+difficulty: apprentice
+description: |
+  参考 Yaklang Vulinbox 靶场的反射型 XSS 场景（`/xss/echo?name=`）。
+
+  启动容器后访问题目 endpoint，向 `name` 参数注入脚本载荷，
+  从响应页面中取出 flag（本样例 flag 嵌在 HTML 注释中，便于联调上传管线）。
+value: 100
+type: static
+flags:
+  - flag{vulinbox-xss-reflected}
+# image: . 表示由同目录 Dockerfile 构建；平台落库为 yak-academy/<slug>:latest
+image: .
+port: 8787
+protocol: http
+hints:
+  - title: 参数入口
+    content: 关注 /xss/echo?name= 这一类反射点
+    cost: 10
+  - title: 载荷
+    content: 试试经典脚本标签注入，再查看响应源码
+    cost: 20

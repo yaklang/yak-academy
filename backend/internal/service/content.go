@@ -598,6 +598,200 @@ func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) err
 	return s.challenges.Delete(ctx, slug)
 }
 
+// challengeYML CTFd 风格 challenge.yml（yak-academy 扩展 difficulty/port/tutorial_slug/slug）。
+// 容器题必须同时提供 Dockerfile 与 docker-compose.yml（或 compose.yml）。
+type challengeYML struct {
+	Slug          string           `yaml:"slug"`
+	Name          string           `yaml:"name"`
+	Title         string           `yaml:"title"` // 兼容 name/title
+	Category      string           `yaml:"category"`
+	Difficulty    model.Difficulty `yaml:"difficulty"`
+	Description   string           `yaml:"description"`
+	DescriptionMD string           `yaml:"description_md"`
+	Value         int              `yaml:"value"`
+	Score         int              `yaml:"score"`
+	Type          string           `yaml:"type"` // static | regex（flag 类型）
+	Image         string           `yaml:"image"`
+	Port          int              `yaml:"port"`
+	Protocol      string           `yaml:"protocol"`
+	Flags         []challengeYMLFlag `yaml:"flags"`
+	Hints         []struct {
+		Title   string `yaml:"title"`
+		Content string `yaml:"content"`
+		Cost    int    `yaml:"cost"`
+	} `yaml:"hints"`
+	TutorialSlug string `yaml:"tutorial_slug"`
+}
+
+type challengeYMLFlag struct {
+	Type    string // 解析时填充
+	Content string
+}
+
+func (f *challengeYMLFlag) UnmarshalYAML(n *yaml.Node) error {
+	var s string
+	if err := n.Decode(&s); err == nil {
+		f.Type = string(model.ChallengeStatic)
+		f.Content = s
+		return nil
+	}
+	var obj struct {
+		Type    string `yaml:"type"`
+		Content string `yaml:"content"`
+	}
+	if err := n.Decode(&obj); err != nil {
+		return err
+	}
+	f.Type = obj.Type
+	if f.Type == "" {
+		f.Type = string(model.ChallengeStatic)
+	}
+	f.Content = obj.Content
+	return nil
+}
+
+// UploadChallengePackage 解析 CTFd 风格题目包 zip：必含 challenge.yml；
+// 声明容器（image 非空）时必含 Dockerfile + docker-compose.yml（或 compose.yml）。
+func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []byte) (imported int, slugs []string, err error) {
+	files, err := unzipToMap(zipBytes)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	files, err = normalizeZipEntries(files)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	ymlRaw, ok := files["challenge.yml"]
+	if !ok {
+		ymlRaw, ok = files["challenge.yaml"]
+	}
+	if !ok {
+		return 0, nil, fmt.Errorf("%w: challenge.yml is required in package", ErrValidation)
+	}
+	var yml challengeYML
+	if err := yaml.Unmarshal(ymlRaw, &yml); err != nil {
+		return 0, nil, fmt.Errorf("%w: invalid challenge.yml: %v", ErrValidation, err)
+	}
+	cj, err := challengeYMLToJSON(yml)
+	if err != nil {
+		return 0, nil, err
+	}
+	// 容器题：标准 CTFd 布局要求 Dockerfile + compose。
+	if cj.Env.Image != "" {
+		if _, hasDocker := files["Dockerfile"]; !hasDocker {
+			return 0, nil, fmt.Errorf("%w: Dockerfile is required when challenge declares a container image", ErrValidation)
+		}
+		_, hasCompose := files["docker-compose.yml"]
+		if !hasCompose {
+			_, hasCompose = files["compose.yml"]
+		}
+		if !hasCompose {
+			return 0, nil, fmt.Errorf("%w: docker-compose.yml (or compose.yml) is required when challenge declares a container image", ErrValidation)
+		}
+		// image: . → 本地构建约定，落库为 yak-academy/<slug>:latest（env 驱动按 tag 拉起）。
+		if cj.Env.Image == "." {
+			cj.Env.Image = "yak-academy/" + cj.Slug + ":latest"
+		}
+	}
+	seen := map[string]bool{}
+	if err := s.validateChallengeJSON(0, cj, seen); err != nil {
+		return 0, nil, err
+	}
+	hints := make([]model.Hint, 0, len(cj.Hints))
+	for _, h := range cj.Hints {
+		hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
+	}
+	chal := &model.Challenge{
+		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
+		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
+		Image: cj.Env.Image, Port: cj.Env.Port, TutorialSlug: cj.TutorialSlug,
+	}
+	flags := []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
+	if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
+		return 0, nil, err
+	}
+	return 1, []string{cj.Slug}, nil
+}
+
+func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
+	var out challengeJSON
+	out.Slug = y.Slug
+	out.Title = y.Title
+	if out.Title == "" {
+		out.Title = y.Name
+	}
+	out.Category = y.Category
+	out.Difficulty = y.Difficulty
+	out.DescriptionMD = y.DescriptionMD
+	if out.DescriptionMD == "" {
+		out.DescriptionMD = y.Description
+	}
+	out.Score = y.Score
+	if out.Score == 0 {
+		out.Score = y.Value
+	}
+	out.TutorialSlug = y.TutorialSlug
+	flagType := model.ChallengeType(y.Type)
+	if flagType == "" {
+		flagType = model.ChallengeStatic
+	}
+	if len(y.Flags) == 0 {
+		return out, fmt.Errorf("%w: flags required in challenge.yml", ErrValidation)
+	}
+	// 首个 flag 作为判定答案（v1 单 flag）。
+	f := y.Flags[0]
+	if f.Type != "" {
+		flagType = model.ChallengeType(f.Type)
+	}
+	out.Challenge.Type = flagType
+	out.Challenge.Flag = f.Content
+	if y.Image != "" && y.Image != "null" {
+		out.Env.Image = y.Image
+		out.Env.Port = y.Port
+		if out.Env.Port == 0 {
+			out.Env.Port = 80
+		}
+	}
+	for _, h := range y.Hints {
+		content := h.Content
+		title := h.Title
+		if title == "" {
+			title = "提示"
+		}
+		out.Hints = append(out.Hints, struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+			Cost    int    `json:"cost"`
+		}{Title: title, Content: content, Cost: h.Cost})
+	}
+	return out, nil
+}
+
+// unzipToMap 解压 zip 为 path→content（与教程包共用条目规范化）。
+func unzipToMap(zipBytes []byte) (map[string][]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string][]byte, len(zr.File))
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, 8<<20))
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		files[f.Name] = data
+	}
+	return files, nil
+}
+
 // normalizeZipEntries 条目路径规范化：
 //   - 分隔符统一 `\` → `/`，剥 `./` 前缀与首部 `/`；
 //   - 忽略 `__MACOSX/` 垃圾条目（Mac 打包工具产物）；

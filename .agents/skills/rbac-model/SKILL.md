@@ -24,7 +24,7 @@ description: yak-academy 双层 RBAC 权限模型约束。涉及用户、角色�
 |---|---|
 | 浏览已发布教程与训练场题目、提交答案、查看自己进度 | student |
 | 上传教程包、查看题目管理列表 | teacher |
-| 上传/删除题目 JSON、发布内容、管理用户/角色 | admin |
+| 上传/删除题目（JSON 或 challenge.yml 包）、创建学习路径、发布内容、管理用户/角色 | admin |
 
 - 鉴权失败统一返回 403 + 错误码（见 api-contract skill），**禁止**返回 404 掩盖权限问题。
 
