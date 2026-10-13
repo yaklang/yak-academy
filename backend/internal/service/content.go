@@ -149,13 +149,8 @@ func (s *ContentService) parseZip(data []byte) (*parsedPackage, error) {
 		return nil, fmt.Errorf("open zip: %w", err)
 	}
 	// 全部条目读入内存（先整体解析，失败不入库）。
-	files := map[string][]byte{}
+	rawFiles := map[string][]byte{}
 	for _, f := range zr.File {
-		// 防路径穿越（zip slip）。
-		name := path.Clean(strings.TrimPrefix(f.Name, "./"))
-		if strings.HasPrefix(name, "../") || path.IsAbs(f.Name) {
-			return nil, fmt.Errorf("illegal entry path: %s", f.Name)
-		}
 		if f.FileInfo().IsDir() {
 			continue
 		}
@@ -163,7 +158,11 @@ func (s *ContentService) parseZip(data []byte) (*parsedPackage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.Name, err)
 		}
-		files[name] = content
+		rawFiles[f.Name] = content
+	}
+	files, err := normalizeZipEntries(rawFiles)
+	if err != nil {
+		return nil, err
 	}
 	raw, ok := files["manifest.yaml"]
 	if !ok {
@@ -434,4 +433,51 @@ func readZipFile(f *zip.File) ([]byte, error) {
 	}
 	defer rc.Close()
 	return io.ReadAll(rc)
+}
+
+// normalizeZipEntries 条目路径规范化：
+//   - 分隔符统一 `\` → `/`，剥 `./` 前缀与首部 `/`；
+//   - 忽略 `__MACOSX/` 垃圾条目（Mac 打包工具产物）；
+//   - 全部条目共享唯一首段时视为顶层包裹目录，整体剥掉
+//     （多顶层 = 平铺结构，不剥）；
+//   - 结果中禁止 `..` 与绝对路径（zip slip 防护）。
+func normalizeZipEntries(raw map[string][]byte) (map[string][]byte, error) {
+	cleaned := make(map[string][]byte, len(raw))
+	firsts := map[string]bool{}
+	for name, content := range raw {
+		p := strings.TrimPrefix(strings.ReplaceAll(name, "\\", "/"), "/")
+		p = strings.TrimPrefix(p, "./")
+		if p == "" || strings.HasPrefix(p, "__MACOSX/") || strings.HasPrefix(p, "__MACOSX") {
+			continue
+		}
+		cleaned[p] = content
+		if seg := strings.SplitN(p, "/", 2)[0]; seg != "" {
+			firsts[seg] = true
+		}
+	}
+	prefix := ""
+	if len(firsts) == 1 {
+		// 唯一首段且非已知内容根（manifest/topics），判定为包裹目录。
+		for seg := range firsts {
+			if seg != "topics" {
+				prefix = seg + "/"
+			}
+		}
+	}
+	files := make(map[string][]byte, len(cleaned))
+	for p, content := range cleaned {
+		name := p
+		if prefix != "" && strings.HasPrefix(p, prefix) {
+			name = strings.TrimPrefix(p, prefix)
+		}
+		if name == "" {
+			continue
+		}
+		// 防路径穿越（zip slip）。
+		if strings.HasPrefix(name, "../") || path.IsAbs(name) {
+			return nil, fmt.Errorf("illegal entry path: %s", p)
+		}
+		files[name] = content
+	}
+	return files, nil
 }

@@ -209,6 +209,8 @@ func (h *Handlers) leaderboard(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+const maxPackageSize = 50 << 20 // 内容包 zip 上限 50MB
+
 func (h *Handlers) uploadPackage(w http.ResponseWriter, req *http.Request) {
 	// TODO(Phase2): multipart 解析 zip → Content.Upload 五步管线。
 	if err := req.ParseMultipartForm(32 << 20); err != nil {
@@ -221,9 +223,14 @@ func (h *Handlers) uploadPackage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(file)
+	// LimitReader：超过 50MB 直接拒绝，避免把大文件整个读进内存。
+	data, err := io.ReadAll(io.LimitReader(file, maxPackageSize+1))
 	if err != nil {
 		mapError(w, err)
+		return
+	}
+	if len(data) > maxPackageSize {
+		writeError(w, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity, "package exceeds 50MB limit"})
 		return
 	}
 	pkg, err := h.Content.Upload(req.Context(), data)

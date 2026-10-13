@@ -239,12 +239,44 @@ func TestPublishRejectsNonDraft(t *testing.T) {
 	ctx := context.Background()
 	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("upload: %v", err)
 	}
 	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publish: %v", err)
 	}
 	if _, err := svc.Publish(ctx, pkg.ID); err == nil {
 		t.Fatal("expected reject on published → published")
+	}
+}
+
+// wrappedPackage 把合法包整体包进一层顶层目录（常见打包工具行为），
+// 并混入 Mac 打包垃圾条目与反斜杠路径。
+func wrappedPackage() map[string]string {
+	wrapped := map[string]string{}
+	for name, content := range validPackage() {
+		wrapped["pkg-root/"+name] = content
+	}
+	wrapped["__MACOSX/pkg-root/manifest.yaml"] = "garbage"
+	wrapped["pkg-root\\topics\\web-security\\extra.txt"] = "win-style path"
+	return wrapped
+}
+
+func TestUploadStripsWrapperDirectory(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	// 顶层包裹目录被剥掉 + __MACOSX 忽略 + 反斜杠归一 → 解析成功。
+	pkg, err := svc.Upload(context.Background(), buildZip(t, wrappedPackage()))
+	if err != nil {
+		t.Fatalf("upload wrapped package: %v", err)
+	}
+	if pkg.Name != "test-package" || pkg.Status != model.PackageDraft {
+		t.Fatalf("unexpected package: %+v", pkg)
+	}
+}
+
+func TestUploadFlatStructureUntouched(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	// 平铺结构（首段直接是 manifest/topics）：唯一首段是 "topics" 与 "manifest.yaml" 共两个 → 不剥。
+	if _, err := svc.Upload(context.Background(), buildZip(t, validPackage())); err != nil {
+		t.Fatalf("flat package should parse unchanged: %v", err)
 	}
 }
