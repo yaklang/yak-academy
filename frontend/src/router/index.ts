@@ -1,7 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
-// 学生端 / 管理端两套布局（layouts/）。
+// 信息架构：两个端。
+//   普通端 /（教程 / 训练）—— 所有登录用户。
+//   管理端 /admin（教程 / 训练 / 管理面板）—— teacher 及以上（rbac 前端预检，
+//   最终以后端中间件为准——前端只做体验性拦截）。
+// 两端复用同一组视图组件（Topics/TopicDetail/RoomDetail/Training）。
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -15,8 +19,13 @@ const router = createRouter({
       component: () => import('../layouts/StudentLayout.vue'),
       meta: { requiresAuth: true },
       children: [
+        // 教程板块
         { path: '', name: 'topics', component: () => import('../views/Topics.vue') },
+        { path: 'topics/:topicSlug', name: 'topic-detail', component: () => import('../views/TopicDetail.vue') },
         { path: 'topics/:topicSlug/rooms/:roomSlug', name: 'room', component: () => import('../views/RoomDetail.vue') },
+        // 训练板块
+        { path: 'training', name: 'training', component: () => import('../views/Training.vue') },
+        // 次级页面（不进主导航）
         { path: 'paths', name: 'paths', component: () => import('../views/LearningPaths.vue') },
         { path: 'leaderboard', name: 'leaderboard', component: () => import('../views/Leaderboard.vue') },
       ],
@@ -26,15 +35,23 @@ const router = createRouter({
       component: () => import('../layouts/AdminLayout.vue'),
       meta: { requiresAuth: true, requiresAdmin: true },
       children: [
-        { path: 'packages', name: 'admin-packages', component: () => import('../views/admin/ContentPackages.vue') },
-        { path: 'users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
+        { path: '', redirect: '/admin/tutorials' },
+        // 教程板块（预览视角，复用普通端视图）
+        { path: 'tutorials', name: 'admin-tutorials', component: () => import('../views/Topics.vue') },
+        { path: 'tutorials/:topicSlug', name: 'admin-topic-detail', component: () => import('../views/TopicDetail.vue') },
+        { path: 'tutorials/:topicSlug/rooms/:roomSlug', name: 'admin-room', component: () => import('../views/RoomDetail.vue') },
+        // 训练板块（预览视角）
+        { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
+        // 管理面板
+        { path: 'panel', redirect: '/admin/panel/packages' },
+        { path: 'panel/packages', name: 'admin-packages', component: () => import('../views/admin/ContentPackages.vue') },
+        { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
+        { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
       ],
     },
   ],
 })
 
-// 全局守卫：未登录跳 /login（带 redirect）；admin 区域校验角色（rbac 语义前端预检，
-// 最终以后端中间件为准——前端只做体验性拦截）。
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.name === 'login') return true

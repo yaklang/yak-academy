@@ -22,6 +22,31 @@ export interface LabInstance {
   created_at: string
 }
 export interface Paged<T> { total: number; page: number; page_size: number; items: T[] }
+export interface RoomSummary { slug: string; title: string; difficulty: 'apprentice' | 'practitioner' | 'expert' }
+export interface TopicDetail extends Topic { rooms: RoomSummary[] }
+export interface TrainingItem {
+  id: number
+  room_slug: string
+  room_title: string
+  topic_slug: string
+  title: string
+  difficulty: 'apprentice' | 'practitioner' | 'expert'
+  score: number
+  solved: boolean
+  has_env: boolean
+}
+export interface AdminLabInstance {
+  id: number
+  user_id: number
+  username: string
+  challenge_id: number
+  challenge_title: string
+  room_slug: string
+  status: 'creating' | 'running' | 'stopped' | 'destroyed'
+  endpoint: string
+  expire_at: string
+  created_at: string
+}
 export interface LeaderboardEntry { rank: number; username: string; score: number; solved_count: number }
 export interface ContentPackage {
   id: number
@@ -58,7 +83,7 @@ export const authApi = {
 
 export const topicApi = {
   list: (page = 1) => http.get<Paged<Topic>>(`/topics?page=${page}`),
-  rooms: (topicSlug: string) => http.get<Topic>(`/topics/${topicSlug}`),
+  rooms: (topicSlug: string) => http.get<TopicDetail>(`/topics/${topicSlug}`),
   room: (topicSlug: string, roomSlug: string) =>
     http.get<Room>(`/topics/${topicSlug}/rooms/${roomSlug}`),
 }
@@ -72,6 +97,15 @@ export const instanceApi = {
   start: (roomSlug: string) => http.post<LabInstance>(`/rooms/${roomSlug}/lab/instance`),
   get: (roomSlug: string) => http.get<LabInstance | null>(`/rooms/${roomSlug}/lab/instance`),
   destroy: (roomSlug: string) => http.del<{ deleted: boolean }>(`/rooms/${roomSlug}/lab/instance`),
+}
+
+export const trainingApi = {
+  list: (page = 1) => http.get<Paged<TrainingItem>>(`/challenges?page=${page}`),
+}
+
+export const adminInstanceApi = {
+  list: (page = 1) => http.get<Paged<AdminLabInstance>>(`/admin/lab-instances?page=${page}`),
+  destroy: (id: number) => http.del<{ deleted: boolean }>(`/admin/lab-instances/${id}`),
 }
 
 export const progressApi = {
