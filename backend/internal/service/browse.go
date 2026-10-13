@@ -115,6 +115,8 @@ type TrainingItem struct {
 	HasEnv        bool             `json:"has_env"`
 	TutorialSlug  string           `json:"tutorial_slug"`
 	TutorialTitle string           `json:"tutorial_title"`
+	// TutorialTopicSlug 关联教程所属 topic（前端 Room 详情路由需要 topic 段）。
+	TutorialTopicSlug string `json:"tutorial_topic_slug"`
 }
 
 // ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints。
@@ -137,11 +139,14 @@ func (s *TopicService) enrichTutorial(ctx context.Context, items []TrainingItem)
 		return err
 	}
 	titleBySlug := make(map[string]string, len(rooms))
+	topicBySlug := make(map[string]string, len(rooms))
 	for _, r := range rooms {
 		titleBySlug[r.Slug] = r.Title
+		topicBySlug[r.Slug] = r.TopicSlug
 	}
 	for i := range items {
 		items[i].TutorialTitle = titleBySlug[items[i].TutorialSlug]
+		items[i].TutorialTopicSlug = topicBySlug[items[i].TutorialSlug]
 	}
 	return nil
 }

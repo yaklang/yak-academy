@@ -74,6 +74,9 @@ func TestListTrainingFields(t *testing.T) {
 	if sqli.TutorialSlug != "room-sqli" || sqli.TutorialTitle != "SQL 注入" {
 		t.Fatalf("sqli tutorial = %q/%q, want room-sqli/SQL 注入", sqli.TutorialSlug, sqli.TutorialTitle)
 	}
+	if sqli.TutorialTopicSlug != "web-security" {
+		t.Fatalf("tutorial_topic_slug = %q, want web-security", sqli.TutorialTopicSlug)
+	}
 	if crypto.HasEnv || crypto.Category != "cryptography" ||
 		crypto.Difficulty != model.DifficultyExpert || crypto.TutorialSlug != "" {
 		t.Fatalf("crypto item = %+v", crypto)

@@ -150,6 +150,10 @@ components:
           type: string
           nullable: true
           description: 关联教程 Room 标题
+        tutorial_topic_slug:
+          type: string
+          nullable: true
+          description: 关联教程所属 topic slug（前端跳转 Room 详情路由用）
     ChallengeDetail:
       type: object
       description: 题目详情（训练场点入页）
