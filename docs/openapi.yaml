@@ -117,6 +117,14 @@ components:
         latest_version: { type: string }
         status: { type: string, enum: [draft, published, archived] }
         error: { type: string, description: 管线失败原因 }
+    LabInstance:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [creating, running, stopped, destroyed] }
+        endpoint: { type: string, description: 实例访问地址 }
+        expire_at: { type: string, description: TTL 过期时间（RFC3339，UTC） }
+        created_at: { type: string }
 
   responses:
     ErrorResp:
@@ -230,6 +238,52 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Room' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /rooms/{roomSlug}/lab/instance:
+    post:
+      tags: [student]
+      summary: 启动/获取本人在该 Room Lab 的环境实例（幂等）
+      parameters:
+        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK（已存在则直接返回）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabInstance' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '501': { $ref: '#/components/responses/ErrorResp' }
+    get:
+      tags: [student]
+      summary: 查询本人在该 Room Lab 的环境实例状态（无实例返回 null）
+      parameters:
+        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/LabInstance'
+                  - nullable: true
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [student]
+      summary: 销毁本人在该 Room Lab 的环境实例
+      parameters:
+        - { name: roomSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
   /submissions:

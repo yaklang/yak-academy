@@ -14,6 +14,13 @@ export interface Room {
   lab: Lab | null
 }
 export interface Submission { id: number; status: 'pending' | 'correct' | 'incorrect'; score: number }
+export interface LabInstance {
+  id: number
+  status: 'creating' | 'running' | 'stopped' | 'destroyed'
+  endpoint: string
+  expire_at: string
+  created_at: string
+}
 export interface Paged<T> { total: number; page: number; page_size: number; items: T[] }
 export interface LeaderboardEntry { rank: number; username: string; score: number; solved_count: number }
 export interface ContentPackage {
@@ -52,6 +59,12 @@ export const topicApi = {
 export const submissionApi = {
   submit: (roomSlug: string, answer: string) => http.post<Submission>('/submissions', { room_slug: roomSlug, answer }),
   get: (id: number) => http.get<Submission>(`/submissions/${id}`),
+}
+
+export const instanceApi = {
+  start: (roomSlug: string) => http.post<LabInstance>(`/rooms/${roomSlug}/lab/instance`),
+  get: (roomSlug: string) => http.get<LabInstance | null>(`/rooms/${roomSlug}/lab/instance`),
+  destroy: (roomSlug: string) => http.del<{ deleted: boolean }>(`/rooms/${roomSlug}/lab/instance`),
 }
 
 export const progressApi = {

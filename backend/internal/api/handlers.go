@@ -17,11 +17,12 @@ type Handlers struct {
 	Judge    *service.JudgeService
 	Progress *service.UserProgressService
 	Topics   *service.TopicService
+	Env      *service.EnvService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Judge: judge, Progress: progress, Topics: topics}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Judge: judge, Progress: progress, Topics: topics, Env: env}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -36,6 +37,9 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}/rooms/{roomSlug}", "", h.getRoom)
 	r.Handle(http.MethodPost, "/api/v1/submissions", "", h.submitAnswer)
 	r.Handle(http.MethodGet, "/api/v1/submissions/{id}", "", h.getSubmission)
+	r.Handle(http.MethodPost, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.startInstance)
+	r.Handle(http.MethodGet, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.getInstance)
+	r.Handle(http.MethodDelete, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.destroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -177,6 +181,55 @@ func (h *Handlers) getSubmission(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sub)
+}
+
+// resolveRoomChallenge 实例操作前的公共解析：room → 内嵌 Lab（教题一体，Lab 必属 Room）。
+func (h *Handlers) resolveRoomChallenge(req *http.Request) (*model.Challenge, error) {
+	return h.Topics.FindChallengeByRoomSlug(req.Context(), req.PathValue("roomSlug"))
+}
+
+func (h *Handlers) startInstance(w http.ResponseWriter, req *http.Request) {
+	chal, err := h.resolveRoomChallenge(req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	user := UserFrom(req.Context())
+	inst, err := h.Env.EnsureInstance(req.Context(), user.ID, chal.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inst)
+}
+
+func (h *Handlers) getInstance(w http.ResponseWriter, req *http.Request) {
+	chal, err := h.resolveRoomChallenge(req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	user := UserFrom(req.Context())
+	inst, err := h.Env.GetInstance(req.Context(), user.ID, chal.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inst) // 无实例时为 null（契约 nullable）
+}
+
+func (h *Handlers) destroyInstance(w http.ResponseWriter, req *http.Request) {
+	chal, err := h.resolveRoomChallenge(req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	user := UserFrom(req.Context())
+	if err := h.Env.DestroyInstance(req.Context(), user.ID, chal.ID); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {

@@ -5,7 +5,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { topicApi, submissionApi, type Room } from '../api'
+import { topicApi, submissionApi, instanceApi, type Room, type LabInstance } from '../api'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
@@ -14,6 +14,8 @@ const submitting = ref(false)
 const polling = ref(false)
 const pollCount = ref(0)
 const result = ref<{ status: string; score: number } | null>(null)
+const instance = ref<LabInstance | null>(null)
+const instanceLoading = ref(false)
 
 const renderedLesson = computed(() =>
   DOMPurify.sanitize(marked.parse(room.value?.lesson_md ?? '') as string),
@@ -23,8 +25,43 @@ async function load() {
   const { topicSlug, roomSlug } = route.params as { topicSlug: string; roomSlug: string }
   try {
     room.value = await topicApi.room(topicSlug, roomSlug)
+    if (room.value.lab) loadInstance()
   } catch (e) {
     ElMessage.error((e as Error).message)
+  }
+}
+
+async function loadInstance() {
+  if (!room.value?.lab) return
+  try {
+    instance.value = await instanceApi.get(room.value.slug)
+  } catch {
+    instance.value = null // 无实例（含 501 驱动未配置）静默处理
+  }
+}
+
+async function startInstance() {
+  if (!room.value?.lab) return
+  instanceLoading.value = true
+  try {
+    instance.value = await instanceApi.start(room.value.slug)
+  } catch (e) {
+    ElMessage.error(`环境启动失败：${(e as Error).message}`)
+  } finally {
+    instanceLoading.value = false
+  }
+}
+
+async function destroyInstance() {
+  if (!room.value?.lab) return
+  instanceLoading.value = true
+  try {
+    await instanceApi.destroy(room.value.slug)
+    instance.value = null
+  } catch (e) {
+    ElMessage.error(`环境销毁失败：${(e as Error).message}`)
+  } finally {
+    instanceLoading.value = false
   }
 }
 
@@ -89,6 +126,19 @@ onMounted(load)
         </span>
       </template>
       <p class="score">分值：{{ room.lab.score }}</p>
+
+      <!-- Lab 环境实例：启动/销毁/状态（幂等启动，TTL 自动回收） -->
+      <div class="instance-row">
+        <template v-if="instance && instance.status !== 'destroyed' && instance.status !== 'stopped'">
+          <el-tag :type="instance.status === 'running' ? 'success' : 'warning'" size="small">
+            环境{{ instance.status === 'running' ? '运行中' : '启动中' }}
+          </el-tag>
+          <code v-if="instance.endpoint" class="endpoint">{{ instance.endpoint }}</code>
+          <el-button size="small" :loading="instanceLoading" @click="destroyInstance">销毁环境</el-button>
+        </template>
+        <el-button v-else size="small" :loading="instanceLoading" @click="startInstance">启动环境</el-button>
+      </div>
+
       <div class="submit-row">
         <el-input
           v-model="answer"
@@ -119,6 +169,8 @@ onMounted(load)
 .lesson :deep(pre) { background: #f5f7fa; padding: 0.8rem; border-radius: 4px; overflow: auto; }
 .lab { max-width: 640px; }
 .score { color: #666; margin: 0 0 0.8rem; }
+.instance-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; }
+.endpoint { background: #f5f7fa; padding: 0.1rem 0.4rem; border-radius: 3px; }
 .submit-row { display: flex; gap: 0.5rem; }
 .result { margin-top: 1rem; }
 </style>
