@@ -40,11 +40,11 @@ type Flag struct {
 
 // Hint 提示，扣分解锁（解锁写 hint.unlocked 事件）。
 type Hint struct {
-	ID          uint   `gorm:"primaryKey"`
-	ChallengeID uint   `gorm:"index"`
-	Title       string `gorm:"size:128"`
-	Content     string
-	Cost        int // 扣减积分
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ChallengeID uint   `gorm:"index" json:"challenge_id"`
+	Title       string `gorm:"size:128" json:"title"`
+	Content     string `json:"content"`
+	Cost        int    `json:"cost"` // 扣减积分
 }
 
 // SubmissionStatus 提交状态：pending → correct/incorrect（异步判定）。
