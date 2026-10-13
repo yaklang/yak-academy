@@ -16,7 +16,7 @@ function logout() {
 <template>
   <el-container class="layout">
     <el-aside width="220px" class="side">
-      <div class="brand">yak-academy 管理端</div>
+      <div class="brand"><span class="prompt">#</span> yak-academy 管理端</div>
       <nav>
         <router-link to="/admin/tutorials">教程</router-link>
         <router-link to="/admin/training">训练</router-link>
@@ -38,13 +38,25 @@ function logout() {
 
 <style scoped>
 .layout { min-height: 100vh; }
-.side { display: flex; flex-direction: column; border-right: 1px solid #eee; }
-.brand { font-weight: 700; padding: 1rem; }
+.side {
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--el-border-color);
+  background: var(--el-bg-color);
+}
+.brand { font-weight: 700; padding: 1rem; font-family: Consolas, monospace; color: var(--el-text-color-primary); }
+.brand .prompt { color: var(--el-color-primary); }
 nav { display: flex; flex-direction: column; padding: 0 1rem; gap: 0.5rem; flex: 1; }
-nav a { color: #333; text-decoration: none; }
-nav a.router-link-active { color: #409eff; }
-nav .sub { padding-left: 1rem; font-size: 0.92rem; color: #555; }
-.group-title { margin-top: 0.5rem; font-size: 0.8rem; color: #999; }
+nav a { color: var(--el-text-color-regular); text-decoration: none; padding: 2px 6px; border-radius: 3px; }
+nav a.router-link-active {
+  color: var(--el-color-primary); background: rgba(0, 230, 118, 0.08);
+}
+nav .sub { padding-left: 1rem; font-size: 0.92rem; color: var(--el-text-color-secondary); }
+nav .sub.router-link-active { color: var(--el-color-primary); }
+.group-title {
+  margin-top: 0.5rem; font-size: 0.75rem; color: var(--el-text-color-secondary);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-family: Consolas, monospace;
+}
 .side-footer { display: flex; align-items: center; justify-content: space-between; padding: 1rem; }
-.back { color: #e6a23c; text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+.back { color: var(--el-color-warning); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
 </style>

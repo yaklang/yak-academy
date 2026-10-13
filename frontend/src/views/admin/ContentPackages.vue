@@ -227,11 +227,11 @@ hints:                  # 可选：扣分解锁的提示列表
 </template>
 
 <style scoped>
-.hint { color: #666; font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
 .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
 .spec h3 { margin-top: 0; }
-.spec pre { background: #f5f7fa; padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
+.spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
 .spec .tree { line-height: 1.5; }
 .spec .yaml { line-height: 1.6; }
-.dim { color: #999; font-size: 0.85rem; }
+.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

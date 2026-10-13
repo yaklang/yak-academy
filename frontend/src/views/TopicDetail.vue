@@ -51,9 +51,9 @@ onMounted(async () => {
 
 <style scoped>
 .head { margin-bottom: 1.2rem; }
-.summary { color: #666; margin: 0.3rem 0 0; }
+.summary { color: var(--el-text-color-secondary); margin: 0.3rem 0 0; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
 .card-link { text-decoration: none; color: inherit; }
 .room-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-.enter { color: #409eff; font-size: 0.85rem; }
+.enter { color: var(--el-color-primary); font-size: 0.85rem; }
 </style>

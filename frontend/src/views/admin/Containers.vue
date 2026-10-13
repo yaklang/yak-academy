@@ -122,8 +122,8 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: #666; font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
 .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-.dim { color: #ccc; }
+.dim { color: var(--el-text-color-placeholder); }
 .pager { margin-top: 1rem; }
 </style>

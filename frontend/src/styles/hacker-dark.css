@@ -1,0 +1,96 @@
+/*
+ * hacker-dark：终端绿暗色主题调色板（GitHub Dark 背景 + 荧光绿主色）。
+ * 必须在 element-plus/theme-chalk/dark/css-vars.css 之后导入。
+ * 暗色下 primary 的 light-N 色阶不会自动派生，需手动指定。
+ */
+html.dark {
+  color-scheme: dark;
+
+  /* GitHub Dark 背景系 */
+  --el-bg-color-page: #0a0e14;
+  --el-bg-color: #0d1117;
+  --el-bg-color-overlay: #161b22;
+
+  /* 边框系 */
+  --el-border-color: #30363d;
+  --el-border-color-light: #262c36;
+  --el-border-color-lighter: #21262d;
+  --el-border-color-extra-light: #1c2128;
+
+  /* 文字系 */
+  --el-text-color-primary: #e6edf3;
+  --el-text-color-regular: #c9d1d9;
+  --el-text-color-secondary: #8b949e;
+  --el-text-color-placeholder: #6e7681;
+  --el-text-color-disabled: #484f58;
+
+  /* 填充系 */
+  --el-fill-color: #21262d;
+  --el-fill-color-light: #1c2128;
+  --el-fill-color-lighter: #171b21;
+  --el-fill-color-blank: #0d1117;
+
+  /* 荧光绿主色及手挑色阶（暗色下向黑混合） */
+  --el-color-primary: #00e676;
+  --el-color-primary-light-3: #00b35e;
+  --el-color-primary-light-5: #008a48;
+  --el-color-primary-light-7: #006033;
+  --el-color-primary-light-8: #004b29;
+  --el-color-primary-light-9: #00351c;
+  --el-color-primary-dark-2: #33eb91;
+
+  /* el-table 官方暗色覆盖不全，显式指定 */
+  --el-table-bg-color: #0d1117;
+  --el-table-tr-bg-color: #0d1117;
+  --el-table-header-bg-color: #161b22;
+  --el-table-header-text-color: #e6edf3;
+  --el-table-row-hover-bg-color: #1c2128;
+  --el-table-border-color: #21262d;
+
+  /* 输入框 focus 阴影减淡，避免荧光绿大面积晕染 */
+  --el-box-shadow-lighter: 0 0 0 1px rgba(0, 230, 118, 0.25);
+}
+
+/* 主色按钮：荧光绿底配深色文字保证对比度 */
+html.dark .el-button--primary {
+  --el-button-text-color: #0a0e14;
+  --el-button-hover-text-color: #0a0e14;
+  --el-button-active-text-color: #0a0e14;
+}
+
+/* 代码块：等宽字体 + 暗底细边框 */
+pre,
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+}
+pre {
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+/* 滚动条暗色化 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
+}
+
+/* 文本选中：绿色半透明 */
+::selection {
+  background: rgba(0, 230, 118, 0.3);
+}
+
+body {
+  background: var(--el-bg-color-page);
+  color: var(--el-text-color-regular);
+  margin: 0;
+}

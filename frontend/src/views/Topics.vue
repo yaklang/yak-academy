@@ -47,5 +47,5 @@ onMounted(async () => {
 <style scoped>
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
 .card-link { text-decoration: none; color: inherit; }
-.count { color: #999; font-size: 0.85rem; }
+.count { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

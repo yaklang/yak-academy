@@ -36,6 +36,7 @@ async function submit() {
 
 <template>
   <div class="login">
+    <div class="terminal-line"><span class="prompt">$</span> ssh user@yak-academy <span class="cursor">▊</span></div>
     <el-form @submit.prevent="submit">
       <h2>yak-academy 登录</h2>
       <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
@@ -47,4 +48,18 @@ async function submit() {
 
 <style scoped>
 .login { max-width: 360px; margin: 10vh auto; }
+.terminal-line {
+  font-family: Consolas, monospace; font-size: 0.85rem;
+  color: var(--el-text-color-secondary); margin-bottom: 0.8rem;
+}
+.terminal-line .prompt { color: var(--el-color-primary); font-weight: 700; }
+.terminal-line .cursor { color: var(--el-color-primary); animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.login :deep(.el-form) {
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 2rem;
+}
+.login h2 { margin: 0 0 1.2rem; font-family: Consolas, monospace; }
 </style>

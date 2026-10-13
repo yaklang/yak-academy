@@ -174,13 +174,13 @@ onMounted(load)
 <style scoped>
 .chal-card { margin-bottom: 1rem; max-width: 720px; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-.title { font-size: 1.05rem; font-weight: 600; color: #303133; text-decoration: none; }
-.title:hover { color: #409eff; }
+.title { font-size: 1.05rem; font-weight: 600; color: var(--el-text-color-primary); text-decoration: none; }
+.title:hover { color: var(--el-color-primary); }
 .tags { display: flex; gap: 0.4rem; }
-.meta { color: #666; font-size: 0.88rem; margin: 0.4rem 0 0.8rem; }
+.meta { color: var(--el-text-color-secondary); font-size: 0.88rem; margin: 0.4rem 0 0.8rem; }
 .env-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; }
-.endpoint { background: #f5f7fa; padding: 0.1rem 0.4rem; border-radius: 3px; }
-.expire { color: #999; font-size: 0.8rem; }
+.endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }
+.expire { color: var(--el-text-color-secondary); font-size: 0.8rem; }
 .submit-row { display: flex; gap: 0.5rem; }
 .result { margin-top: 0.8rem; }
 .pager { margin-top: 1rem; }

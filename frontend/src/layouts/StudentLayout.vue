@@ -36,7 +36,7 @@ function logout() {
 <template>
   <el-container class="layout">
     <el-header class="nav">
-      <span class="brand">yak-academy</span>
+      <span class="brand"><span class="prompt">$</span> yak-academy</span>
       <nav>
         <router-link to="/">教程</router-link>
         <router-link to="/training">训练</router-link>
@@ -56,14 +56,22 @@ function logout() {
 
 <style scoped>
 .layout { min-height: 100vh; }
-.nav { display: flex; align-items: center; gap: 2rem; border-bottom: 1px solid #eee; }
-.brand { font-weight: 700; }
+.nav {
+  display: flex; align-items: center; gap: 2rem;
+  border-bottom: 1px solid var(--el-border-color);
+  background: var(--el-bg-color);
+}
+.brand { font-weight: 700; font-family: Consolas, monospace; color: var(--el-text-color-primary); }
+.brand .prompt { color: var(--el-color-primary); }
 nav { display: flex; gap: 1.5rem; }
-nav a { color: #333; text-decoration: none; }
-nav a.router-link-active { color: #409eff; }
+nav a {
+  color: var(--el-text-color-regular); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 2px solid transparent;
+}
+nav a.router-link-active { color: var(--el-color-primary); border-bottom-color: var(--el-color-primary); }
 .spacer { flex: 1; }
-.xp { color: #409eff; font-weight: 600; }
-.admin-entry { color: #e6a23c; text-decoration: none; font-weight: 600; }
-.secondary { color: #999; text-decoration: none; font-size: 0.9rem; }
-.user { color: #666; font-size: 0.9rem; }
+.xp { color: var(--el-color-primary); font-weight: 600; font-family: Consolas, monospace; }
+.admin-entry { color: var(--el-color-warning); text-decoration: none; font-weight: 600; }
+.secondary { color: var(--el-text-color-secondary); text-decoration: none; font-size: 0.9rem; }
+.user { color: var(--el-text-color-secondary); font-size: 0.9rem; }
 </style>
