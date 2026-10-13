@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"regexp"
 
@@ -57,12 +56,13 @@ func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint
 	s.appendEvent(ctx, userID, model.EventSubmissionCreated, map[string]any{
 		"submission_id": sub.ID, "challenge_id": challengeID,
 	})
+	// 队列满不报错：submission 已落库，保持 pending，由 worker 启动时的
+	// pending 扫描补偿判定（与 deriver.Replay 同思路）。
 	select {
 	case s.queue <- sub.ID:
-		return sub, nil
 	default:
-		return nil, fmt.Errorf("judge queue is full")
 	}
+	return sub, nil
 }
 
 // GetSubmission 查询判定结果（属主校验：仅本人可查，他人 404）。
@@ -84,7 +84,10 @@ func (s *JudgeService) IsSolved(ctx context.Context, userID, challengeID uint) b
 }
 
 // StartWorker 启动异步判题 worker。判定结果只通过 submission.judged 事件进入派生表。
+// 启动时先补偿扫描：把滞留 pending（队列满/崩溃窗口丢失）的 submission 重新入队。
+// judge 幂等：重复判定只覆盖同样的结果，不产生重复计分（HasCorrect 短路 score=0）。
 func (s *JudgeService) StartWorker(ctx context.Context) {
+	s.recoverPending(ctx)
 	go func() {
 		for {
 			select {
@@ -95,6 +98,22 @@ func (s *JudgeService) StartWorker(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// recoverPending 扫描全部 pending submission 重新入队（worker 空闲时逐条处理）。
+func (s *JudgeService) recoverPending(ctx context.Context) {
+	pending, err := s.submissions.ListPending(ctx)
+	if err != nil {
+		log.Printf("judge: recover pending: %v", err)
+		return
+	}
+	for _, id := range pending {
+		select {
+		case s.queue <- id:
+		default:
+			return // 队列满则停止，下次重启再补偿
+		}
+	}
 }
 
 // judge 判定流程：

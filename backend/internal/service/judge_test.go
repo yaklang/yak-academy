@@ -218,3 +218,39 @@ func TestJudgeSubmitIsAsync(t *testing.T) {
 		t.Fatalf("submit without worker must stay pending, got %s", sub.Status)
 	}
 }
+
+func TestJudgeQueueFullStillAccepted(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 容量 1 的队列：塞满后 Submit 不再报错，submission 落库保持 pending。
+	env.judge.queue = make(chan uint, 1)
+	env.judge.queue <- 1 // 占满
+	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "room-static"), "flag{static}")
+	if err != nil {
+		t.Fatalf("queue full should still accept: %v", err)
+	}
+	if sub.Status != model.SubmissionPending {
+		t.Fatalf("status = %s, want pending", sub.Status)
+	}
+	// 排空队列启动 worker：补偿扫描应把滞留记录判定完结。
+	env.judge.queue = make(chan uint, 256)
+	env.judge.StartWorker(ctx)
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("recovered status = %s, want correct", got)
+	}
+}
+
+func TestJudgeWorkerRecoversStrandedPending(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 模拟崩溃窗口：不启动 worker 直接提交，产生滞留 pending。
+	sub, err := env.judge.Submit(ctx, 5, env.chalID(t, "room-static"), "flag{static}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 重启 worker：recoverPending 扫描入队并判定。
+	env.judge.StartWorker(ctx)
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("status = %s, want correct", got)
+	}
+}

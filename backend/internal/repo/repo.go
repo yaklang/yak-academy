@@ -46,6 +46,8 @@ type ChallengeRepo interface {
 type SubmissionRepo interface {
 	Create(ctx context.Context, s *model.Submission) error
 	FindByID(ctx context.Context, id uint) (*model.Submission, error)
+	// ListPending 扫描滞留 pending 的提交（worker 启动补偿用）。
+	ListPending(ctx context.Context) ([]uint, error)
 	// HasCorrect 判定"该用户该题是否已通过"（防重复计分）。
 	HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error)
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error

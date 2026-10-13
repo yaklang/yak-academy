@@ -165,6 +165,14 @@ func (r *submissionRepo) FindByID(ctx context.Context, id uint) (*model.Submissi
 	return &s, nil
 }
 
+func (r *submissionRepo) ListPending(ctx context.Context) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("status = ?", model.SubmissionPending).
+		Order("id").Pluck("id", &ids).Error
+	return ids, err
+}
+
 func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.Submission{}).
