@@ -61,4 +61,10 @@ Upload → Parse → Validate → Persist → Publish
 
 ## 状态机（唯一合法迁移）
 
-`draft → published → archived`；`published → draft` 仅允许内容回滚场景。**禁止**从 draft 直接跳 archived。
+包级：`draft → published → archived`。**禁止** draft 直接跳 archived；archived 为终态（包冻结，拒绝再发布/回滚）。
+
+版本级（ContentVersion.Status，与包级同枚举）：
+
+- Publish：目标版本 → published，包内其余版本 → archived（同时至多一个 published 版本）；
+- Rollback（admin，`POST /content/packages/{id}/rollback`）：published 包回滚到某个 archived 版本——目标版本 Payload 覆盖重写内容表，目标 → published、当前 → archived，`latest_version` 更新，包级保持 published。禁止回滚当前版本/draft 版本；
+- 同名包重传新版本：既有版本 Payload 中的 slug 视为自有，不判 slug 冲突（他包占用的 slug 仍拒绝）。

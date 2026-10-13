@@ -120,6 +120,33 @@ func (r *contentPackageRepo) FindLatestVersion(ctx context.Context, packageID ui
 	return &v, nil
 }
 
+func (r *contentPackageRepo) FindVersionByID(ctx context.Context, id uint) (*model.ContentVersion, error) {
+	var v model.ContentVersion
+	if err := r.db.WithContext(ctx).First(&v, id).Error; err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r *contentPackageRepo) ListVersions(ctx context.Context, packageID uint) ([]model.ContentVersion, error) {
+	var list []model.ContentVersion
+	err := r.db.WithContext(ctx).Where("package_id = ?", packageID).
+		Order("id DESC").Find(&list).Error
+	return list, err
+}
+
+func (r *contentPackageRepo) UpdateVersionStatus(ctx context.Context, id uint, s model.PackageStatus) error {
+	return r.db.WithContext(ctx).Model(&model.ContentVersion{}).Where("id = ?", id).
+		Update("status", s).Error
+}
+
+// ArchiveOtherVersions 将包内除 exceptID 外的版本置 archived（版本级状态机维护）。
+func (r *contentPackageRepo) ArchiveOtherVersions(ctx context.Context, packageID, exceptID uint) error {
+	return r.db.WithContext(ctx).Model(&model.ContentVersion{}).
+		Where("package_id = ? AND id <> ?", packageID, exceptID).
+		Update("status", model.PackageArchived).Error
+}
+
 func (r *contentPackageRepo) UpdateLatestVersion(ctx context.Context, id uint, version string) error {
 	return r.db.WithContext(ctx).Model(&model.ContentPackage{}).Where("id = ?", id).
 		Update("latest_version", version).Error

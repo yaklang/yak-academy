@@ -49,9 +49,12 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/content/packages", "teacher", h.uploadPackage)
 	r.Handle(http.MethodGet, "/api/v1/content/packages", "teacher", h.listPackages)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "teacher", h.getPackage)
+	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "teacher", h.listVersions)
 
-	// admin：发布与用户管理
+	// admin：发布/归档/回滚与用户管理
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
+	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/archive", "admin", h.archivePackage)
+	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/rollback", "admin", h.rollbackPackage)
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
@@ -329,6 +332,55 @@ func (h *Handlers) publishPackage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	pkg, err := h.Content.Publish(req.Context(), uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pkg)
+}
+
+func (h *Handlers) listVersions(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	versions, err := h.Content.ListVersions(req.Context(), uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, versions)
+}
+
+func (h *Handlers) archivePackage(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	pkg, err := h.Content.Archive(req.Context(), uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pkg)
+}
+
+func (h *Handlers) rollbackPackage(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		VersionID uint `json:"version_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.VersionID == 0 {
+		writeError(w, errValidation)
+		return
+	}
+	pkg, err := h.Content.Rollback(req.Context(), uint(id), body.VersionID)
 	if err != nil {
 		mapError(w, err)
 		return

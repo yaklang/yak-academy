@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -278,5 +279,157 @@ func TestUploadFlatStructureUntouched(t *testing.T) {
 	// 平铺结构（首段直接是 manifest/topics）：唯一首段是 "topics" 与 "manifest.yaml" 共两个 → 不剥。
 	if _, err := svc.Upload(context.Background(), buildZip(t, validPackage())); err != nil {
 		t.Fatalf("flat package should parse unchanged: %v", err)
+	}
+}
+
+// versionTwoPackage 同名包第二版：改动教程正文与 flag（回滚前后可区分）。
+func versionTwoPackage() map[string]string {
+	files := validPackage()
+	files["manifest.yaml"] = `
+name: test-package
+version: 2.0.0
+language: zh
+topics:
+  - web-security
+`
+	files["topics/web-security/rooms/sqli-basics/lesson.md"] = `---
+title: SQL 注入基础
+difficulty: apprentice
+---
+v2 重写后的正文`
+	files["topics/web-security/rooms/sqli-basics/lab.yaml"] = `
+title: 找出注入点
+challenge:
+  type: static
+  flag: flag{v2-answer}
+score: 100
+`
+	return files
+}
+
+// publishTwoVersions 发布 v1 再上传并发布 v2，返回包与两版 ContentVersion。
+func publishTwoVersions(t *testing.T, svc *ContentService) (*model.ContentPackage, []model.ContentVersion) {
+	t.Helper()
+	ctx := context.Background()
+	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload v1: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
+		t.Fatalf("publish v1: %v", err)
+	}
+	pkg, err = svc.Upload(ctx, buildZip(t, versionTwoPackage()))
+	if err != nil {
+		t.Fatalf("re-upload v2 after publish: %v", err)
+	}
+	pkg, err = svc.Publish(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+	versions, err := svc.ListVersions(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	return pkg, versions
+}
+
+func TestPublishArchivesOldVersions(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	pkg, versions := publishTwoVersions(t, svc)
+	if len(versions) != 2 {
+		t.Fatalf("versions = %d, want 2", len(versions))
+	}
+	// id DESC：第一条是 v2（published），第二条是 v1（archived）。
+	if versions[0].Version != "2.0.0" || versions[0].Status != model.PackagePublished {
+		t.Fatalf("v2 = %+v, want published 2.0.0", versions[0])
+	}
+	if versions[1].Version != "1.0.0" || versions[1].Status != model.PackageArchived {
+		t.Fatalf("v1 = %+v, want archived 1.0.0", versions[1])
+	}
+	if pkg.LatestVersion != "2.0.0" || pkg.Status != model.PackagePublished {
+		t.Fatalf("package = %+v", pkg)
+	}
+}
+
+func TestRollbackRestoresOldContent(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	pkg, versions := publishTwoVersions(t, svc)
+	// 回滚到 v1（archived）。
+	pkg, err := svc.Rollback(ctx, pkg.ID, versions[1].ID)
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if pkg.LatestVersion != "1.0.0" || pkg.Status != model.PackagePublished {
+		t.Fatalf("package after rollback = %+v", pkg)
+	}
+	// 内容表被 v1 Payload 覆盖：正文与 flag 回到 v1。
+	var room model.Room
+	if err := gdb.Where("slug = ?", "sqli-basics").First(&room).Error; err != nil {
+		t.Fatal(err)
+	}
+	if room.LessonMD != "SQL 注入是……" {
+		t.Fatalf("lesson_md = %q, want v1 content", room.LessonMD)
+	}
+	var flag model.Flag
+	if err := gdb.First(&flag).Error; err != nil {
+		t.Fatal(err)
+	}
+	if flag.Value != "flag{test-answer}" {
+		t.Fatalf("flag = %q, want v1 flag", flag.Value)
+	}
+	// 版本状态对调：v1 published，v2 archived。
+	after, err := svc.ListVersions(ctx, pkg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after[0].Version != "2.0.0" || after[0].Status != model.PackageArchived {
+		t.Fatalf("v2 after rollback = %+v, want archived", after[0])
+	}
+	if after[1].Version != "1.0.0" || after[1].Status != model.PackagePublished {
+		t.Fatalf("v1 after rollback = %+v, want published", after[1])
+	}
+}
+
+func TestRollbackRejectsCurrentVersion(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	ctx := context.Background()
+	pkg, versions := publishTwoVersions(t, svc)
+	// versions[0] 是当前 published 版本。
+	if _, err := svc.Rollback(ctx, pkg.ID, versions[0].ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("rollback to current should get ErrValidation, got %v", err)
+	}
+}
+
+func TestArchiveRejectsDraft(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	ctx := context.Background()
+	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	// 状态机禁止 draft → archived。
+	if _, err := svc.Archive(ctx, pkg.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("archive draft should get ErrValidation, got %v", err)
+	}
+}
+
+func TestArchiveFreezesPackage(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	ctx := context.Background()
+	pkg, versions := publishTwoVersions(t, svc)
+	pkg, err := svc.Archive(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if pkg.Status != model.PackageArchived {
+		t.Fatalf("status = %s, want archived", pkg.Status)
+	}
+	// 冻结后：发布与回滚均拒绝。
+	if _, err := svc.Publish(ctx, pkg.ID); err == nil {
+		t.Fatal("publish after archive should be rejected")
+	}
+	if _, err := svc.Rollback(ctx, pkg.ID, versions[1].ID); err == nil {
+		t.Fatal("rollback after archive should be rejected")
 	}
 }

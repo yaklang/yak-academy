@@ -61,6 +61,10 @@ type ContentPackageRepo interface {
 	UpdateStatus(ctx context.Context, id uint, status model.PackageStatus) error
 	AddVersion(ctx context.Context, v *model.ContentVersion) error
 	FindLatestVersion(ctx context.Context, packageID uint) (*model.ContentVersion, error)
+	FindVersionByID(ctx context.Context, id uint) (*model.ContentVersion, error)
+	ListVersions(ctx context.Context, packageID uint) ([]model.ContentVersion, error)
+	UpdateVersionStatus(ctx context.Context, id uint, status model.PackageStatus) error
+	ArchiveOtherVersions(ctx context.Context, packageID, exceptID uint) error
 	UpdateLatestVersion(ctx context.Context, id uint, version string) error
 	List(ctx context.Context, offset, limit int) ([]model.ContentPackage, int64, error)
 }

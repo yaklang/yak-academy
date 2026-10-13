@@ -30,6 +30,13 @@ export interface ContentPackage {
   status: 'draft' | 'published' | 'archived'
   error?: string
 }
+export interface ContentVersion {
+  id: number
+  version: string
+  status: 'draft' | 'published' | 'archived'
+  checksum: string
+  created_at: string
+}
 
 export interface CourseRole { topic_slug: string; role: string }
 
@@ -81,4 +88,8 @@ export const contentApi = {
   },
   get: (id: number) => http.get<ContentPackage>(`/content/packages/${id}`),
   publish: (id: number) => http.post<ContentPackage>(`/content/packages/${id}/publish`),
+  versions: (id: number) => http.get<ContentVersion[]>(`/content/packages/${id}/versions`),
+  archive: (id: number) => http.post<ContentPackage>(`/content/packages/${id}/archive`),
+  rollback: (id: number, versionId: number) =>
+    http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
 }

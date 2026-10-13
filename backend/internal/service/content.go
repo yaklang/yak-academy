@@ -27,6 +27,14 @@ type ContentService struct {
 	topics    repo.TopicRepo
 	rooms     repo.RoomRepo
 	challenge *ChallengeService
+	// ownedTopics/ownedRooms 同名包既有版本的 slug 集合（validate 时视为自有，
+	// 不判冲突；仅 Upload 重传路径填充）。
+	ownedTopics map[string]bool
+	ownedRooms  map[string]bool
+}
+
+func (s *ContentService) setOwnedSlugs(topics, rooms map[string]bool) {
+	s.ownedTopics, s.ownedRooms = topics, rooms
 }
 
 func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService) *ContentService {
@@ -112,6 +120,25 @@ func (s *ContentService) Upload(ctx context.Context, data []byte) (*model.Conten
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	// 同名包重传时，本包既有版本拥有的 slug 视为自有（重传/升级合法，
+	// 发布后按 Upsert 覆盖）；只有他包/裸库内容占用的 slug 才算冲突。
+	var ownedTopics, ownedRooms map[string]bool
+	if pkg, err := s.packages.FindByName(ctx, parsed.Name); err == nil {
+		if v, err := s.packages.FindLatestVersion(ctx, pkg.ID); err == nil {
+			var prev parsedPackage
+			if json.Unmarshal([]byte(v.Payload), &prev) == nil {
+				ownedTopics, ownedRooms = map[string]bool{}, map[string]bool{}
+				for _, t := range prev.Topics {
+					ownedTopics[t.Slug] = true
+				}
+				for _, r := range prev.Rooms {
+					ownedRooms[r.Slug] = true
+				}
+			}
+		}
+	}
+	s.setOwnedSlugs(ownedTopics, ownedRooms)
+	defer s.setOwnedSlugs(nil, nil) // 复原，避免泄漏到下次调用
 	if err := s.validate(ctx, parsed); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
@@ -315,7 +342,7 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if err != nil {
 			return err
 		}
-		if exists {
+		if exists && !s.ownedTopics[t.Slug] {
 			return fmt.Errorf("topic slug %q already exists", t.Slug)
 		}
 	}
@@ -338,7 +365,7 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if err != nil {
 			return err
 		}
-		if exists {
+		if exists && !s.ownedRooms[r.Slug] {
 			return fmt.Errorf("room slug %q already exists", r.Slug)
 		}
 	}
@@ -396,6 +423,7 @@ func (s *ContentService) GetPackage(ctx context.Context, id uint) (*model.Conten
 
 // Publish 管线第 5 步：draft → published，发布时才把内容写入 Topic/Room/Challenge。
 // 顺序：先写内容表，成功后才改状态——失败保持 draft 可重试。
+// 版本级状态机：目标版本 → published，包内其余版本 → archived。
 func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.ContentPackage, error) {
 	pkg, err := s.packages.FindByID(ctx, packageID)
 	if err != nil {
@@ -408,13 +436,89 @@ func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.Co
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyPayload(ctx, v.Payload); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateVersionStatus(ctx, v.ID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	if err := s.packages.ArchiveOtherVersions(ctx, packageID, v.ID); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateStatus(ctx, packageID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// Archive 归档：published → archived（包级冻结，内容表不动；学生侧继续可见）。
+func (s *ContentService) Archive(ctx context.Context, packageID uint) (*model.ContentPackage, error) {
+	pkg, err := s.packages.FindByID(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Status != model.PackagePublished {
+		return nil, fmt.Errorf("%w: archive requires published package, got %s", ErrValidation, pkg.Status)
+	}
+	if err := s.packages.UpdateStatus(ctx, packageID, model.PackageArchived); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// Rollback 回滚：published 包回退到包内某个 archived 版本——目标版本 Payload
+// 重写内容表（覆盖式，复用发布写入逻辑），目标 → published、当前 → archived，
+// LatestVersion 更新。禁止回滚到当前版本；draft 新版本应走发布而非回滚。
+func (s *ContentService) Rollback(ctx context.Context, packageID, versionID uint) (*model.ContentPackage, error) {
+	pkg, err := s.packages.FindByID(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Status != model.PackagePublished {
+		return nil, fmt.Errorf("%w: rollback requires published package, got %s", ErrValidation, pkg.Status)
+	}
+	target, err := s.packages.FindVersionByID(ctx, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if target.PackageID != packageID {
+		return nil, fmt.Errorf("%w: version %d does not belong to package %d", ErrNotFound, versionID, packageID)
+	}
+	if target.Status != model.PackageArchived {
+		return nil, fmt.Errorf("%w: rollback target must be an archived version, got %s", ErrValidation, target.Status)
+	}
+	if err := s.applyPayload(ctx, target.Payload); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateVersionStatus(ctx, target.ID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	if err := s.packages.ArchiveOtherVersions(ctx, packageID, target.ID); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateLatestVersion(ctx, packageID, target.Version); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// ListVersions 包的版本列表（含各版本状态，回滚选择用）。
+func (s *ContentService) ListVersions(ctx context.Context, packageID uint) ([]model.ContentVersion, error) {
+	if _, err := s.packages.FindByID(ctx, packageID); err != nil {
+		return nil, err
+	}
+	return s.packages.ListVersions(ctx, packageID)
+}
+
+// applyPayload 把版本 Payload 写入内容表（Publish 与 Rollback 共用的覆盖式写入）。
+func (s *ContentService) applyPayload(ctx context.Context, payload string) error {
 	var parsed parsedPackage
-	if err := json.Unmarshal([]byte(v.Payload), &parsed); err != nil {
-		return nil, fmt.Errorf("payload: %w", err)
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		return fmt.Errorf("payload: %w", err)
 	}
 	for i := range parsed.Topics {
 		if err := s.topics.Upsert(ctx, &parsed.Topics[i]); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for i := range parsed.Rooms {
@@ -423,7 +527,7 @@ func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.Co
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
 			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD,
 		}); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for roomSlug, lab := range parsed.Labs {
@@ -437,13 +541,10 @@ func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.Co
 		}
 		flags := []model.Flag{{Type: lab.Type, Value: lab.Flag}}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if err := s.packages.UpdateStatus(ctx, packageID, model.PackagePublished); err != nil {
-		return nil, err
-	}
-	return s.packages.FindByID(ctx, packageID)
+	return nil
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {
