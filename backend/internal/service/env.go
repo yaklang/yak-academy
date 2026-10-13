@@ -2,31 +2,453 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os/exec"
+	"strings"
+	"time"
 
+	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
-// EnvService 题目环境生命周期。第一版仅 InstanceDriver 接口 + noop 实现
-// （架构文档 §3.5：Phase 3 实现 Docker 驱动）。
-type InstanceDriver interface {
-	Create(ctx context.Context, challengeID uint, userID uint) (*model.LabInstance, error)
-	Destroy(ctx context.Context, instanceID uint) error
-	Health(ctx context.Context, instanceID uint) (model.InstanceStatus, error)
+// InstanceSpec 驱动创建实例所需的全部信息（驱动实现不感知 DB）。
+type InstanceSpec struct {
+	InstanceID  uint
+	ChallengeID uint
+	UserID      uint
+	Image       string
+	Port        int
 }
 
-// NoopDriver 第一版占位驱动。
+// InstanceConflictError 单用户同时只允许一个活跃容器：启动第二个题目时返回，
+// 携带当前活跃实例及富化信息（api 层映射 409 并附 current 供前端引导关闭）。
+type InstanceConflictError struct {
+	Current        *model.LabInstance
+	Username       string
+	ChallengeTitle string
+	ChallengeSlug  string
+}
+
+func (e *InstanceConflictError) Error() string {
+	return fmt.Sprintf("user already has an active instance #%d (challenge %d)",
+		e.Current.ID, e.Current.ChallengeID)
+}
+
+// InstanceDriver 题目环境驱动接口：实现只与运行时（Docker 等）交互，
+// DB 状态由 EnvService 维护（project-conventions skill）。
+type InstanceDriver interface {
+	// Create 按 spec 启动实例并返回访问地址。
+	Create(ctx context.Context, spec InstanceSpec) (endpoint string, err error)
+	// Destroy 按 InstanceID 销毁实例（幂等：实例不存在视为成功）。
+	Destroy(ctx context.Context, instanceID uint) error
+}
+
+// NoopDriver 占位驱动：未配置容器运行时的 stub，调用一律报错。
 type NoopDriver struct{}
 
-func (NoopDriver) Create(ctx context.Context, challengeID, userID uint) (*model.LabInstance, error) {
-	return nil, errNotImplemented("env driver create")
+func (NoopDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
+	return "", errNotImplemented("env driver create")
 }
 func (NoopDriver) Destroy(ctx context.Context, instanceID uint) error {
 	return errNotImplemented("env driver destroy")
 }
-func (NoopDriver) Health(ctx context.Context, instanceID uint) (model.InstanceStatus, error) {
-	return "", errNotImplemented("env driver health")
+
+const (
+	// instanceTTL 实例存活时长：超时由 reaper 回收。
+	instanceTTL = time.Hour
+)
+
+type EnvService struct {
+	instances  repo.LabInstanceRepo
+	logs       repo.InstanceLogRepo
+	challenges repo.ChallengeRepo
+	users      repo.UserRepo
+	events     repo.EventRepo
+	bus        *eventbus.Bus
+	driver     InstanceDriver
+	// now 时钟注入，测试可固定时间；生产用 time.Now。
+	now func() time.Time
 }
 
-type EnvService struct{ Driver InstanceDriver }
+func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
+	return &EnvService{
+		instances: instances, logs: logs, challenges: challenges, users: users,
+		events: events, bus: bus,
+		driver: d, now: time.Now,
+	}
+}
 
-func NewEnvService(d InstanceDriver) *EnvService { return &EnvService{Driver: d} }
+// EnsureInstance 幂等启动：已有 running 实例直接返回；
+// 无则按题目 env 定义创建（并发上限校验 → DB 落 creating → driver.Create → 回写 running）。
+// driver 失败回滚 DB 记录（status→stopped），不留半成品。
+func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
+	if inst, err := s.instances.FindActive(ctx, userID, challengeID); err != nil {
+		return nil, err
+	} else if inst != nil {
+		return inst, nil
+	}
+	// 单容器约束：该用户在其他题目还有活跃实例 → 409，携带当前实例供前端引导关闭。
+	if other, err := s.instances.FindActiveAny(ctx, userID); err != nil {
+		return nil, err
+	} else if other != nil {
+		userName, chals, err := s.lookupUsersAndChallenges(ctx, []model.LabInstance{*other})
+		if err != nil {
+			return nil, err
+		}
+		conflict := &InstanceConflictError{Current: other, Username: userName[userID]}
+		if c, ok := chals[other.ChallengeID]; ok {
+			conflict.ChallengeTitle = c.Title
+			conflict.ChallengeSlug = c.Slug
+		}
+		return nil, conflict
+	}
+	chal, err := s.challenges.FindByID(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if chal.Image == "" || chal.Port < 1 {
+		return nil, fmt.Errorf("%w: lab has no container environment", ErrValidation)
+	}
+	inst := &model.LabInstance{
+		UserID: userID, ChallengeID: challengeID,
+		Status: model.InstanceCreating,
+	}
+	if err := s.instances.Create(ctx, inst); err != nil {
+		return nil, err
+	}
+	spec := InstanceSpec{
+		InstanceID: inst.ID, ChallengeID: challengeID, UserID: userID,
+		Image: chal.Image, Port: chal.Port,
+	}
+	endpoint, err := s.driver.Create(ctx, spec)
+	if err != nil {
+		// 回滚：DB 记录标记 stopped，不留 creating 残留；失败详情落日志表。
+		log.Printf("env: instance %d create failed (user=%d challenge=%d image=%s): %v",
+			inst.ID, userID, challengeID, chal.Image, err)
+		if uerr := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceStopped); uerr != nil {
+			log.Printf("env: rollback instance %d: %v", inst.ID, uerr)
+		}
+		s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+			model.InstanceStopped, "create failed: "+err.Error())
+		return nil, err
+	}
+	expireAt := s.now().Add(instanceTTL)
+	if err := s.instances.UpdateRunning(ctx, inst.ID, endpoint, expireAt); err != nil {
+		return nil, err
+	}
+	s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStarted, "owner",
+		model.InstanceRunning, "")
+	s.appendEvent(ctx, userID, model.EventLabStarted, map[string]any{
+		"instance_id": inst.ID, "challenge_id": challengeID, "endpoint": endpoint,
+	})
+	return s.instances.FindByID(ctx, inst.ID)
+}
+
+// DestroyInstance 销毁实例（属主校验）。driver 失败保留记录，由 reaper 兜底回收。
+func (s *EnvService) DestroyInstance(ctx context.Context, userID, challengeID uint) error {
+	inst, err := s.instances.FindActive(ctx, userID, challengeID)
+	if err != nil {
+		return err
+	}
+	if inst == nil {
+		return ErrNotFound
+	}
+	if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+		log.Printf("env: instance %d destroy failed (user=%d challenge=%d): %v",
+			inst.ID, userID, challengeID, err)
+		s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+			inst.Status, "destroy failed: "+err.Error())
+		return err
+	}
+	if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
+		return err
+	}
+	s.appendLog(ctx, inst.ID, userID, challengeID, model.InstanceActionStopped, "owner",
+		model.InstanceDestroyed, "")
+	s.appendEvent(ctx, userID, model.EventLabStopped, map[string]any{
+		"instance_id": inst.ID, "challenge_id": challengeID,
+	})
+	return nil
+}
+
+// GetInstance 查询本人实例状态（无实例返回 nil，不报错）。
+func (s *EnvService) GetInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
+	return s.instances.FindActive(ctx, userID, challengeID)
+}
+
+// AdminLabInstance 管理端容器面板条目：LabInstance + 用户/题目富化。
+type AdminLabInstance struct {
+	model.LabInstance
+	Username       string `json:"username"`
+	ChallengeTitle string `json:"challenge_title"`
+	ChallengeSlug  string `json:"challenge_slug"`
+}
+
+// ListInstances 全量实例分页（管理端容器面板；批量富化用户名与题目名）。
+func (s *EnvService) ListInstances(ctx context.Context, offset, limit int) ([]AdminLabInstance, int64, error) {
+	list, total, err := s.instances.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, list)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]AdminLabInstance, 0, len(list))
+	for _, inst := range list {
+		out = append(out, buildAdminLabInstance(inst, userName, chals))
+	}
+	return out, total, nil
+}
+
+// AdminDestroyInstance 管理员强制销毁任意实例（管理端容器面板）。
+// 与属主销毁同语义：driver.Destroy → destroyed → lab.instance.stopped 事件
+// （payload 加 source=admin 区分，event-sourcing-rules skill：append-only）。
+func (s *EnvService) AdminDestroyInstance(ctx context.Context, instanceID uint) error {
+	inst, err := s.instances.FindByID(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+		log.Printf("env: admin destroy instance %d failed: %v", inst.ID, err)
+		s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "admin",
+			inst.Status, "destroy failed: "+err.Error())
+		return err
+	}
+	if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
+		return err
+	}
+	s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "admin",
+		model.InstanceDestroyed, "")
+	s.appendEvent(ctx, inst.UserID, model.EventLabStopped, map[string]any{
+		"instance_id": inst.ID, "challenge_id": inst.ChallengeID, "source": "admin",
+	})
+	return nil
+}
+
+// StartReaper 后台回收循环：定时清理过期 running 实例。
+// 单实例部署（第一版约束），进程内循环即可，无需分布式锁。
+func (s *EnvService) StartReaper(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.reapExpired(ctx)
+			}
+		}
+	}()
+}
+
+// reapExpired 回收 ExpireAt 过期的 running 实例：先销毁驱动资源，成功才改 destroyed；
+// 驱动失败保留记录（下轮重试）。
+func (s *EnvService) reapExpired(ctx context.Context) {
+	expired, err := s.instances.ListExpired(ctx, s.now())
+	if err != nil {
+		log.Printf("env: list expired: %v", err)
+		return
+	}
+	for _, inst := range expired {
+		if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+			log.Printf("env: reap instance %d: %v", inst.ID, err)
+			continue
+		}
+		if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
+			log.Printf("env: mark destroyed %d: %v", inst.ID, err)
+			continue
+		}
+		s.appendLog(ctx, inst.ID, inst.UserID, inst.ChallengeID, model.InstanceActionStopped, "reaper",
+			model.InstanceDestroyed, "ttl expired")
+	}
+}
+
+// AdminInstanceLog 管理端容器日志条目：InstanceLog + 用户/题目富化。
+type AdminInstanceLog struct {
+	model.InstanceLog
+	Username       string `json:"username"`
+	ChallengeTitle string `json:"challenge_title"`
+	ChallengeSlug  string `json:"challenge_slug"`
+}
+
+// ListActiveInstances 当前全部活跃容器（creating/running，管理端概览；无分页）。
+func (s *EnvService) ListActiveInstances(ctx context.Context) ([]AdminLabInstance, error) {
+	list, err := s.instances.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdminLabInstance, 0, len(list))
+	for _, inst := range list {
+		out = append(out, buildAdminLabInstance(inst, userName, chals))
+	}
+	return out, nil
+}
+
+// ListLogs 容器生命周期日志分页（管理端容器日志表格；批量富化用户名与题目）。
+func (s *EnvService) ListLogs(ctx context.Context, offset, limit int) ([]AdminInstanceLog, int64, error) {
+	list, total, err := s.logs.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	instances := make([]model.LabInstance, 0, len(list))
+	for _, l := range list {
+		instances = append(instances, model.LabInstance{UserID: l.UserID, ChallengeID: l.ChallengeID})
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, instances)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]AdminInstanceLog, 0, len(list))
+	for _, l := range list {
+		item := AdminInstanceLog{InstanceLog: l, Username: userName[l.UserID]}
+		if c, ok := chals[l.ChallengeID]; ok {
+			item.ChallengeTitle = c.Title
+			item.ChallengeSlug = c.Slug
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+// lookupUsersAndChallenges 批量取用户名与题目信息（富化用；空列表安全）。
+func (s *EnvService) lookupUsersAndChallenges(ctx context.Context, list []model.LabInstance) (map[uint]string, map[uint]model.Challenge, error) {
+	userIDSet := make(map[uint]struct{})
+	chalIDSet := make(map[uint]struct{})
+	for _, inst := range list {
+		userIDSet[inst.UserID] = struct{}{}
+		chalIDSet[inst.ChallengeID] = struct{}{}
+	}
+	userIDs := make([]uint, 0, len(userIDSet))
+	for id := range userIDSet {
+		userIDs = append(userIDs, id)
+	}
+	chalIDs := make([]uint, 0, len(chalIDSet))
+	for id := range chalIDSet {
+		chalIDs = append(chalIDs, id)
+	}
+	users, err := s.users.FindByIDs(ctx, userIDs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	userName := make(map[uint]string, len(users))
+	for _, u := range users {
+		userName[u.ID] = u.Username
+	}
+	chals, err := s.challenges.FindByIDs(ctx, chalIDs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	chalMap := make(map[uint]model.Challenge, len(chals))
+	for _, c := range chals {
+		chalMap[c.ID] = c
+	}
+	return userName, chalMap, nil
+}
+
+// buildAdminLabInstance 单条活跃实例条目富化。
+func buildAdminLabInstance(inst model.LabInstance, userName map[uint]string, chals map[uint]model.Challenge) AdminLabInstance {
+	item := AdminLabInstance{LabInstance: inst, Username: userName[inst.UserID]}
+	if c, ok := chals[inst.ChallengeID]; ok {
+		item.ChallengeTitle = c.Title
+		item.ChallengeSlug = c.Slug
+	}
+	return item
+}
+
+// appendLog 写容器生命周期日志（append-only，失败只记服务端日志不影响主流程）。
+func (s *EnvService) appendLog(ctx context.Context, instanceID, userID, challengeID uint, action model.InstanceAction, source string, status model.InstanceStatus, detail string) {
+	l := &model.InstanceLog{
+		InstanceID: instanceID, UserID: userID, ChallengeID: challengeID,
+		Action: action, Source: source, Status: status, Detail: detail,
+	}
+	if err := s.logs.Create(ctx, l); err != nil {
+		log.Printf("env: append instance log (instance=%d action=%s): %v", instanceID, action, err)
+	}
+}
+
+// appendEvent 写事件表（append-only）并广播。
+func (s *EnvService) appendEvent(ctx context.Context, userID uint, t model.EventType, payload map[string]any) {
+	raw, _ := json.Marshal(payload)
+	ev := model.Event{UserID: userID, Type: t, Payload: string(raw)}
+	if err := s.events.Append(ctx, &ev); err != nil {
+		log.Printf("env: append event %s: %v", t, err)
+		return
+	}
+	s.bus.Publish(ctx, ev)
+}
+
+// DockerDriver 通过 docker CLI 管理容器（无 SDK 依赖；接口已隔离实现）。
+type DockerDriver struct{}
+
+func NewDockerDriver() *DockerDriver { return &DockerDriver{} }
+
+// containerName 实例容器命名（纯函数便于测试）。
+func containerName(instanceID uint) string {
+	return fmt.Sprintf("yak-lab-%d", instanceID)
+}
+
+// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，读回实际端口生成 endpoint。
+func (DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
+	name := containerName(spec.InstanceID)
+	if out, err := exec.CommandContext(ctx, "docker", "run", "-d",
+		"--name", name,
+		"-p", fmt.Sprintf("127.0.0.1::%d", spec.Port),
+		spec.Image,
+	).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("docker run %s: %v: %s", spec.Image, err, strings.TrimSpace(string(out)))
+	}
+	// docker port 读回映射（格式 <hostPort> -> <containerPort>）。
+	out, err := exec.CommandContext(ctx, "docker", "port", name, fmt.Sprint(spec.Port)).CombinedOutput()
+	if err != nil {
+		// 映射查询失败则清理刚起的容器，不留半成品。
+		_, _ = exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+		return "", fmt.Errorf("docker port: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	hostPort := parseHostPort(string(out))
+	if hostPort == "" {
+		_, _ = exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+		return "", fmt.Errorf("docker port: no mapping for port %d", spec.Port)
+	}
+	return "http://127.0.0.1:" + hostPort, nil
+}
+
+// parseHostPort 解析 docker port 输出行，纯函数便于测试。
+// 实际输出是单字段 "127.0.0.1:36186"；兼容 "host:port -> 80/tcp" 形式
+// （docker ps 风格），两种都取首字段的端口。
+func parseHostPort(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) == 0 {
+			continue
+		}
+		addr := fields[0] // host:port
+		if i := strings.LastIndex(addr, ":"); i >= 0 {
+			port := addr[i+1:]
+			if port != "" && port != "0" {
+				return port
+			}
+		}
+	}
+	return ""
+}
+
+// Destroy 删除容器（幂等：No such container 视为成功）。
+func (DockerDriver) Destroy(ctx context.Context, instanceID uint) error {
+	out, err := exec.CommandContext(ctx, "docker", "rm", "-f", containerName(instanceID)).CombinedOutput()
+	if err != nil {
+		if strings.Contains(strings.ToLower(string(out)), "no such container") {
+			return nil
+		}
+		return fmt.Errorf("docker rm: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

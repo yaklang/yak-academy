@@ -8,5 +8,5 @@
 </template>
 
 <style scoped>
-.placeholder { color: #999; }
+.placeholder { color: var(--el-text-color-secondary); }
 </style>

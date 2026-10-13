@@ -1,0 +1,64 @@
+# yak-academy CI：后端 Go（vet + test）与前端 Node（typecheck + build）两个 job。
+# 契约先行（api-contract skill）：openapi.yaml 变更时顺带校验 YAML 可解析。
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 ./...
+
+  frontend:
+    name: Frontend (Node)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check + build
+        run: npm run build
+
+  contract:
+    name: API contract (openapi.yaml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse openapi.yaml
+        run: python3 -c "import yaml,sys; yaml.safe_load(open('docs/openapi.yaml', encoding='utf-8')); print('openapi.yaml parsed ok')"
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'

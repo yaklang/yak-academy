@@ -27,6 +27,14 @@ type ContentService struct {
 	topics    repo.TopicRepo
 	rooms     repo.RoomRepo
 	challenge *ChallengeService
+	// ownedTopics/ownedRooms 同名包既有版本的 slug 集合（validate 时视为自有，
+	// 不判冲突；仅 Upload 重传路径填充）。
+	ownedTopics map[string]bool
+	ownedRooms  map[string]bool
+}
+
+func (s *ContentService) setOwnedSlugs(topics, rooms map[string]bool) {
+	s.ownedTopics, s.ownedRooms = topics, rooms
 }
 
 func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService) *ContentService {
@@ -41,8 +49,8 @@ type parsedPackage struct {
 	// Rooms 用 DTO 而非 model.Room：model.Room.LessonMD 是 json:"-"（详情接口单独返回），
 	// 直接序列化会丢正文。
 	Rooms []roomPayload `json:"rooms"`
-	// Labs: room slug → 题目定义（教题一体：Lab 必属某 Room）。
-	Labs map[string]labDef `json:"labs"`
+	// Labs 旧版本 Payload 兼容字段：题目独立后新包不再产出，回放旧版本时忽略。
+	Labs map[string]labDef `json:"labs,omitempty"`
 }
 
 // roomPayload Payload 中的 Room 序列化形态（补回 LessonMD）。
@@ -52,6 +60,7 @@ type roomPayload struct {
 	Title      string           `json:"title"`
 	Difficulty model.Difficulty `json:"difficulty"`
 	LessonMD   string           `json:"lesson_md"`
+	VideoURL   string           `json:"video_url,omitempty"` // 视频教程地址（可选）
 }
 
 type labDef struct {
@@ -59,6 +68,8 @@ type labDef struct {
 	Type  model.ChallengeType `json:"type"`
 	Flag  string          `json:"flag"`
 	Score int             `json:"score"`
+	Image string          `json:"image,omitempty"` // lab.yaml env 段（可选）：容器镜像
+	Port  int             `json:"port,omitempty"`  // 容器端口
 	Hints []model.Hint    `json:"hints"`
 }
 
@@ -76,24 +87,11 @@ type topicFront struct {
 }
 
 // lessonFront lesson.md 的 front matter（difficulty 三级枚举，teaching-integration skill）。
+// video 可选：视频教程地址（文字+视频教程）。
 type lessonFront struct {
 	Title     string           `yaml:"title"`
 	Difficulty model.Difficulty `yaml:"difficulty"`
-}
-
-// labYaml lab.yaml schema（content-package-spec skill：title/challenge.type/challenge.flag/score 必填）。
-type labYaml struct {
-	Title     string `yaml:"title"`
-	Challenge struct {
-		Type model.ChallengeType `yaml:"type"`
-		Flag string             `yaml:"flag"`
-	} `yaml:"challenge"`
-	Score int `yaml:"score"`
-	Hints []struct {
-		Title   string `yaml:"title"`
-		Content string `yaml:"content"`
-		Cost    int    `yaml:"cost"`
-	} `yaml:"hints"`
+	Video     string           `yaml:"video"`
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -105,6 +103,25 @@ func (s *ContentService) Upload(ctx context.Context, data []byte) (*model.Conten
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	// 同名包重传时，本包既有版本拥有的 slug 视为自有（重传/升级合法，
+	// 发布后按 Upsert 覆盖）；只有他包/裸库内容占用的 slug 才算冲突。
+	var ownedTopics, ownedRooms map[string]bool
+	if pkg, err := s.packages.FindByName(ctx, parsed.Name); err == nil {
+		if v, err := s.packages.FindLatestVersion(ctx, pkg.ID); err == nil {
+			var prev parsedPackage
+			if json.Unmarshal([]byte(v.Payload), &prev) == nil {
+				ownedTopics, ownedRooms = map[string]bool{}, map[string]bool{}
+				for _, t := range prev.Topics {
+					ownedTopics[t.Slug] = true
+				}
+				for _, r := range prev.Rooms {
+					ownedRooms[r.Slug] = true
+				}
+			}
+		}
+	}
+	s.setOwnedSlugs(ownedTopics, ownedRooms)
+	defer s.setOwnedSlugs(nil, nil) // 复原，避免泄漏到下次调用
 	if err := s.validate(ctx, parsed); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
@@ -149,13 +166,8 @@ func (s *ContentService) parseZip(data []byte) (*parsedPackage, error) {
 		return nil, fmt.Errorf("open zip: %w", err)
 	}
 	// 全部条目读入内存（先整体解析，失败不入库）。
-	files := map[string][]byte{}
+	rawFiles := map[string][]byte{}
 	for _, f := range zr.File {
-		// 防路径穿越（zip slip）。
-		name := path.Clean(strings.TrimPrefix(f.Name, "./"))
-		if strings.HasPrefix(name, "../") || path.IsAbs(f.Name) {
-			return nil, fmt.Errorf("illegal entry path: %s", f.Name)
-		}
 		if f.FileInfo().IsDir() {
 			continue
 		}
@@ -163,7 +175,11 @@ func (s *ContentService) parseZip(data []byte) (*parsedPackage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.Name, err)
 		}
-		files[name] = content
+		rawFiles[f.Name] = content
+	}
+	files, err := normalizeZipEntries(rawFiles)
+	if err != nil {
+		return nil, err
 	}
 	raw, ok := files["manifest.yaml"]
 	if !ok {
@@ -240,29 +256,10 @@ func (s *ContentService) parseRooms(topicSlug string, files map[string][]byte, p
 		rooms = append(rooms, roomPayload{
 			TopicSlug: topicSlug, Slug: slug,
 			Title: lf.Title, Difficulty: lf.Difficulty, LessonMD: string(body),
+			VideoURL: lf.Video,
 		})
-		// 可选 lab.yaml（至多一个内嵌 Lab，teaching-integration skill）。
-		if labRaw, ok := files[prefix+slug+"/lab.yaml"]; ok {
-			lab, err := parseLab(labRaw)
-			if err != nil {
-				return nil, fmt.Errorf("room %s: %w", slug, err)
-			}
-			def := labDef{Title: lab.Title, Type: lab.Challenge.Type, Flag: lab.Challenge.Flag, Score: lab.Score}
-			for _, h := range lab.Hints {
-				def.Hints = append(def.Hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
-			}
-			parsed.Labs[slug] = def
-		}
 	}
 	return rooms, nil
-}
-
-func parseLab(raw []byte) (*labYaml, error) {
-	var lab labYaml
-	if err := yaml.Unmarshal(raw, &lab); err != nil {
-		return nil, err
-	}
-	return &lab, nil
 }
 
 // splitFrontMatter 拆分 `---` yaml front matter 与 Markdown 正文。
@@ -306,7 +303,7 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if err != nil {
 			return err
 		}
-		if exists {
+		if exists && !s.ownedTopics[t.Slug] {
 			return fmt.Errorf("topic slug %q already exists", t.Slug)
 		}
 	}
@@ -329,30 +326,8 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if err != nil {
 			return err
 		}
-		if exists {
+		if exists && !s.ownedRooms[r.Slug] {
 			return fmt.Errorf("room slug %q already exists", r.Slug)
-		}
-	}
-	for slug, lab := range p.Labs {
-		if lab.Title == "" {
-			return fmt.Errorf("lab %s: title is required", slug)
-		}
-		switch lab.Type {
-		case model.ChallengeStatic:
-		case model.ChallengeRegex:
-			if _, err := regexp.Compile(lab.Flag); err != nil {
-				return fmt.Errorf("lab %s: invalid regex flag: %w", slug, err)
-			}
-		default:
-			return fmt.Errorf("lab %s: challenge type must be static or regex", slug)
-		}
-		if lab.Score < 0 {
-			return fmt.Errorf("lab %s: score must be non-negative", slug)
-		}
-		for _, h := range lab.Hints {
-			if h.Cost < 0 {
-				return fmt.Errorf("lab %s: hint cost must be non-negative", slug)
-			}
 		}
 	}
 	return nil
@@ -378,6 +353,7 @@ func (s *ContentService) GetPackage(ctx context.Context, id uint) (*model.Conten
 
 // Publish 管线第 5 步：draft → published，发布时才把内容写入 Topic/Room/Challenge。
 // 顺序：先写内容表，成功后才改状态——失败保持 draft 可重试。
+// 版本级状态机：目标版本 → published，包内其余版本 → archived。
 func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.ContentPackage, error) {
 	pkg, err := s.packages.FindByID(ctx, packageID)
 	if err != nil {
@@ -390,41 +366,102 @@ func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.Co
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyPayload(ctx, v.Payload); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateVersionStatus(ctx, v.ID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	if err := s.packages.ArchiveOtherVersions(ctx, packageID, v.ID); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateStatus(ctx, packageID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// Archive 归档：published → archived（包级冻结，内容表不动；学生侧继续可见）。
+func (s *ContentService) Archive(ctx context.Context, packageID uint) (*model.ContentPackage, error) {
+	pkg, err := s.packages.FindByID(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Status != model.PackagePublished {
+		return nil, fmt.Errorf("%w: archive requires published package, got %s", ErrValidation, pkg.Status)
+	}
+	if err := s.packages.UpdateStatus(ctx, packageID, model.PackageArchived); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// Rollback 回滚：published 包回退到包内某个 archived 版本——目标版本 Payload
+// 重写内容表（覆盖式，复用发布写入逻辑），目标 → published、当前 → archived，
+// LatestVersion 更新。禁止回滚到当前版本；draft 新版本应走发布而非回滚。
+func (s *ContentService) Rollback(ctx context.Context, packageID, versionID uint) (*model.ContentPackage, error) {
+	pkg, err := s.packages.FindByID(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Status != model.PackagePublished {
+		return nil, fmt.Errorf("%w: rollback requires published package, got %s", ErrValidation, pkg.Status)
+	}
+	target, err := s.packages.FindVersionByID(ctx, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if target.PackageID != packageID {
+		return nil, fmt.Errorf("%w: version %d does not belong to package %d", ErrNotFound, versionID, packageID)
+	}
+	if target.Status != model.PackageArchived {
+		return nil, fmt.Errorf("%w: rollback target must be an archived version, got %s", ErrValidation, target.Status)
+	}
+	if err := s.applyPayload(ctx, target.Payload); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateVersionStatus(ctx, target.ID, model.PackagePublished); err != nil {
+		return nil, err
+	}
+	if err := s.packages.ArchiveOtherVersions(ctx, packageID, target.ID); err != nil {
+		return nil, err
+	}
+	if err := s.packages.UpdateLatestVersion(ctx, packageID, target.Version); err != nil {
+		return nil, err
+	}
+	return s.packages.FindByID(ctx, packageID)
+}
+
+// ListVersions 包的版本列表（含各版本状态，回滚选择用）。
+func (s *ContentService) ListVersions(ctx context.Context, packageID uint) ([]model.ContentVersion, error) {
+	if _, err := s.packages.FindByID(ctx, packageID); err != nil {
+		return nil, err
+	}
+	return s.packages.ListVersions(ctx, packageID)
+}
+
+// applyPayload 把版本 Payload 写入内容表（Publish 与 Rollback 共用的覆盖式写入）。
+// 题目已是独立资源：旧版本 Payload 中的 Labs 段忽略不写（兼容历史包回放）。
+func (s *ContentService) applyPayload(ctx context.Context, payload string) error {
 	var parsed parsedPackage
-	if err := json.Unmarshal([]byte(v.Payload), &parsed); err != nil {
-		return nil, fmt.Errorf("payload: %w", err)
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		return fmt.Errorf("payload: %w", err)
 	}
 	for i := range parsed.Topics {
 		if err := s.topics.Upsert(ctx, &parsed.Topics[i]); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for i := range parsed.Rooms {
 		rp := parsed.Rooms[i]
 		if err := s.rooms.Upsert(ctx, &model.Room{
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
-			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD,
+			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
 		}); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	for roomSlug, lab := range parsed.Labs {
-		hints := lab.Hints
-		if hints == nil {
-			hints = []model.Hint{}
-		}
-		chal := &model.Challenge{
-			RoomSlug: roomSlug, Title: lab.Title, Type: lab.Type, Score: lab.Score,
-		}
-		flags := []model.Flag{{Type: lab.Type, Value: lab.Flag}}
-		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.packages.UpdateStatus(ctx, packageID, model.PackagePublished); err != nil {
-		return nil, err
-	}
-	return s.packages.FindByID(ctx, packageID)
+	return nil
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {
@@ -434,4 +471,176 @@ func readZipFile(f *zip.File) ([]byte, error) {
 	}
 	defer rc.Close()
 	return io.ReadAll(rc)
+}
+
+// challengeJSON 管理员上传的题目定义固定格式（单对象或对象数组）。
+type challengeJSON struct {
+	Slug          string           `json:"slug"`
+	Title         string           `json:"title"`
+	Category      string           `json:"category"`
+	Difficulty    model.Difficulty `json:"difficulty"`
+	DescriptionMD string           `json:"description_md"`
+	Score         int              `json:"score"`
+	Challenge     struct {
+		Type model.ChallengeType `json:"type"`
+		Flag string             `json:"flag"`
+	} `json:"challenge"`
+	Env struct {
+		Image string `json:"image"`
+		Port  int    `json:"port"`
+	} `json:"env"`
+	Hints []struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+		Cost    int    `json:"cost"`
+	} `json:"hints"`
+	TutorialSlug string `json:"tutorial_slug"`
+}
+
+// UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
+// 逐题校验、整体拒绝（单题失败全部不入库）；slug 冲突视为 upsert（重传更新）。
+func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (imported int, slugs []string, err error) {
+	var single challengeJSON
+	var batch []challengeJSON
+	if json.Unmarshal(raw, &single) == nil && single.Slug != "" {
+		batch = []challengeJSON{single}
+	} else if err := json.Unmarshal(raw, &batch); err != nil {
+		return 0, nil, fmt.Errorf("%w: body must be a challenge object or array", ErrValidation)
+	}
+	if len(batch) == 0 {
+		return 0, nil, fmt.Errorf("%w: empty challenge list", ErrValidation)
+	}
+	// 先整体校验，再逐题 upsert（失败前置，避免部分入库）。
+	seen := map[string]bool{}
+	for i, c := range batch {
+		if err := s.validateChallengeJSON(i, c, seen); err != nil {
+			return 0, nil, err
+		}
+	}
+	for _, c := range batch {
+		hints := make([]model.Hint, 0, len(c.Hints))
+		for _, h := range c.Hints {
+			hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
+		}
+		chal := &model.Challenge{
+			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
+			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
+			Image: c.Env.Image, Port: c.Env.Port, TutorialSlug: c.TutorialSlug,
+		}
+		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
+		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
+			return 0, nil, err
+		}
+		slugs = append(slugs, c.Slug)
+	}
+	return len(batch), slugs, nil
+}
+
+// validateChallengeJSON 单题字段校验（枚举/slug/flag/env 成对/hint cost）。
+func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[string]bool) error {
+	where := fmt.Sprintf("challenge[%d]", i)
+	if c.Slug == "" {
+		return fmt.Errorf("%w: %s: slug is required", ErrValidation, where)
+	}
+	if !slugPattern.MatchString(c.Slug) {
+		return fmt.Errorf("%w: %s: slug must match [a-z0-9-]+", ErrValidation, where)
+	}
+	if seen[c.Slug] {
+		return fmt.Errorf("%w: %s: duplicate slug %q", ErrValidation, where, c.Slug)
+	}
+	seen[c.Slug] = true
+	if c.Title == "" {
+		return fmt.Errorf("%w: %s: title is required", ErrValidation, where)
+	}
+	if c.Category == "" {
+		return fmt.Errorf("%w: %s: category is required", ErrValidation, where)
+	}
+	if !slugPattern.MatchString(c.Category) {
+		return fmt.Errorf("%w: %s: category must match [a-z0-9-]+", ErrValidation, where)
+	}
+	if err := validateDifficulty(c.Difficulty); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrValidation, where, err)
+	}
+	if c.Score < 0 {
+		return fmt.Errorf("%w: %s: score must be non-negative", ErrValidation, where)
+	}
+	switch c.Challenge.Type {
+	case model.ChallengeStatic:
+	case model.ChallengeRegex:
+		if _, err := regexp.Compile(c.Challenge.Flag); err != nil {
+			return fmt.Errorf("%w: %s: invalid regex flag: %v", ErrValidation, where, err)
+		}
+	default:
+		return fmt.Errorf("%w: %s: challenge.type must be static or regex", ErrValidation, where)
+	}
+	if c.Challenge.Flag == "" {
+		return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
+	}
+	// env 段可选；出现则 image 必填、port 合法（1-65535）——与教程包 env 规则一致。
+	if c.Env.Image != "" || c.Env.Port != 0 {
+		if c.Env.Image == "" {
+			return fmt.Errorf("%w: %s: env.image is required when env is present", ErrValidation, where)
+		}
+		if c.Env.Port < 1 || c.Env.Port > 65535 {
+			return fmt.Errorf("%w: %s: env.port must be 1-65535", ErrValidation, where)
+		}
+	}
+	for _, h := range c.Hints {
+		if h.Cost < 0 {
+			return fmt.Errorf("%w: %s: hint cost must be non-negative", ErrValidation, where)
+		}
+	}
+	return nil
+}
+
+// DeleteChallenge 删除题目（级联删 flags/hints）。
+func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) error {
+	return s.challenges.Delete(ctx, slug)
+}
+
+// normalizeZipEntries 条目路径规范化：
+//   - 分隔符统一 `\` → `/`，剥 `./` 前缀与首部 `/`；
+//   - 忽略 `__MACOSX/` 垃圾条目（Mac 打包工具产物）；
+//   - 全部条目共享唯一首段时视为顶层包裹目录，整体剥掉
+//     （多顶层 = 平铺结构，不剥）；
+//   - 结果中禁止 `..` 与绝对路径（zip slip 防护）。
+func normalizeZipEntries(raw map[string][]byte) (map[string][]byte, error) {
+	cleaned := make(map[string][]byte, len(raw))
+	firsts := map[string]bool{}
+	for name, content := range raw {
+		p := strings.TrimPrefix(strings.ReplaceAll(name, "\\", "/"), "/")
+		p = strings.TrimPrefix(p, "./")
+		if p == "" || strings.HasPrefix(p, "__MACOSX/") || strings.HasPrefix(p, "__MACOSX") {
+			continue
+		}
+		cleaned[p] = content
+		if seg := strings.SplitN(p, "/", 2)[0]; seg != "" {
+			firsts[seg] = true
+		}
+	}
+	prefix := ""
+	if len(firsts) == 1 {
+		// 唯一首段且非已知内容根（manifest/topics），判定为包裹目录。
+		for seg := range firsts {
+			if seg != "topics" {
+				prefix = seg + "/"
+			}
+		}
+	}
+	files := make(map[string][]byte, len(cleaned))
+	for p, content := range cleaned {
+		name := p
+		if prefix != "" && strings.HasPrefix(p, prefix) {
+			name = strings.TrimPrefix(p, prefix)
+		}
+		if name == "" {
+			continue
+		}
+		// 防路径穿越（zip slip）。
+		if strings.HasPrefix(name, "../") || path.IsAbs(name) {
+			return nil, fmt.Errorf("illegal entry path: %s", p)
+		}
+		files[name] = content
+	}
+	return files, nil
 }

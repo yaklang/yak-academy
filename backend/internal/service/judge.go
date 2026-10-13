@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"regexp"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -28,7 +28,9 @@ type JudgeService struct {
 	challenges  repo.ChallengeRepo
 	events      repo.EventRepo
 	bus         *eventbus.Bus
-	queue       chan uint // submission ID 队列（进程内）
+	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
+	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
+	queue chan uint
 }
 
 func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, ev repo.EventRepo, bus *eventbus.Bus) *JudgeService {
@@ -37,9 +39,7 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, ev repo.E
 		challenges:  chal,
 		events:      ev,
 		bus:         bus,
-		// 已知限制：进程内队列，容量 256；满时 Submit 报错但 submission 已落库
-		// （永远 pending）。换持久队列为 Phase 4 事项（架构文档演进路线）。
-		queue: make(chan uint, 256),
+		queue:       make(chan uint, 256),
 	}
 }
 
@@ -57,12 +57,12 @@ func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint
 	s.appendEvent(ctx, userID, model.EventSubmissionCreated, map[string]any{
 		"submission_id": sub.ID, "challenge_id": challengeID,
 	})
+	// 队列满静默丢弃：submission 已落库（pending），由 pending 轮询兜底重投。
 	select {
 	case s.queue <- sub.ID:
-		return sub, nil
 	default:
-		return nil, fmt.Errorf("judge queue is full")
 	}
+	return sub, nil
 }
 
 // GetSubmission 查询判定结果（属主校验：仅本人可查，他人 404）。
@@ -83,21 +83,59 @@ func (s *JudgeService) IsSolved(ctx context.Context, userID, challengeID uint) b
 	return err == nil && solved
 }
 
-// StartWorker 启动异步判题 worker。判定结果只通过 submission.judged 事件进入派生表。
+// StartWorker 启动异步判题 worker：消费 goroutine（进程内快路径）+ 轮询 goroutine
+// （Submission 表为持久队列，每 2s 扫描 pending 重投——重启/队列满丢失由此兜底）。
+// judge 幂等护栏：非 pending 的 submission 直接跳过，重复投递不产生重复判定/计分。
 func (s *JudgeService) StartWorker(ctx context.Context) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case id := <-s.queue:
-				s.judge(ctx, id)
-			}
+	go s.consume(ctx)
+	go s.pollPending(ctx)
+}
+
+func (s *JudgeService) consume(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case id := <-s.queue:
+			s.judge(ctx, id)
 		}
-	}()
+	}
+}
+
+// pollPending 先做一次即时扫描（覆盖重启滞留），之后按 2s 周期重投 pending。
+func (s *JudgeService) pollPending(ctx context.Context) {
+	s.requeuePending(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.requeuePending(ctx)
+		}
+	}
+}
+
+// requeuePending 扫描全部 pending submission 重新入队（judge 幂等，重复投递安全）。
+func (s *JudgeService) requeuePending(ctx context.Context) {
+	pending, err := s.submissions.ListPending(ctx)
+	if err != nil {
+		log.Printf("judge: requeue pending: %v", err)
+		return
+	}
+	for _, id := range pending {
+		select {
+		case s.queue <- id:
+		default:
+			return // 队列满则本轮停止，下个周期继续
+		}
+	}
 }
 
 // judge 判定流程：
+//  0. 幂等护栏：重读 submission，status != pending 直接跳过（双投递/并发判定防护，
+//     保证 submission.judged 事件与计分只发生一次）
 //  1. 读 submission 与 challenge flags
 //  2. static 恒时比较（compareFlag）；regex 用 MatchString（恒时要求仅适用 static）
 //  3. 动态计分 value = max(initial - decay*n, minimum)
@@ -107,6 +145,9 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	if err != nil {
 		log.Printf("judge: load submission %d: %v", submissionID, err)
 		return
+	}
+	if sub.Status != model.SubmissionPending {
+		return // 已判定：幂等跳过
 	}
 	flags, err := s.challenges.FindFlags(ctx, sub.ChallengeID)
 	if err != nil {
@@ -132,9 +173,10 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		return
 	}
 	s.finish(ctx, sub, model.SubmissionCorrect, score)
-	// 首通：Room 通关事件（教题一体，teaching-integration skill）。
-	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil {
-		s.AppendRoomCompleted(ctx, sub.UserID, chal.RoomSlug)
+	// 题目关联了教程 Room 时记 Room 通关事件（教程进度物化视图用；
+	// 纯题目不指向 Room，不产生 Room 侧进度）。
+	if chal, err := s.challenges.FindByID(ctx, sub.ChallengeID); err == nil && chal.TutorialSlug != "" {
+		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
 }
 

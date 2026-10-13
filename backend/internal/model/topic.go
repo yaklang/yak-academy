@@ -22,8 +22,8 @@ type Topic struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Room 学习的原子单元：教程正文 + 至多一个内嵌 Lab。
-// 教程与题目不拆两库：Challenge 必然外键到 Room（teaching-integration skill）。
+// Room 学习的原子单元：文字教程正文 + 可选视频教程。
+// 题目是独立资源（Challenge.TutorialSlug 可选指回本 Room），不再内嵌 Lab。
 type Room struct {
 	ID         uint       `gorm:"primaryKey" json:"id"`
 	TopicSlug  string     `gorm:"index;size:128" json:"topic_slug"`
@@ -31,6 +31,8 @@ type Room struct {
 	Title      string     `gorm:"size:256" json:"title"`
 	Difficulty Difficulty `gorm:"size:16" json:"difficulty"`
 	LessonMD   string     `json:"-"` // 教程正文（Markdown），由 Room 详情接口单独返回
+	// VideoURL 视频教程地址（可选，lesson.md front matter video 字段）。
+	VideoURL string `gorm:"size:512" json:"video_url"`
 	// Requirements 前置依赖（Room 级解锁图，JSON 数组存 room slug 列表）。
 	Requirements string `gorm:"type:text" json:"requirements,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`

@@ -4,6 +4,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 )
@@ -30,22 +31,35 @@ type TopicRepo interface {
 type RoomRepo interface {
 	Upsert(ctx context.Context, r *model.Room) error
 	FindBySlug(ctx context.Context, slug string) (*model.Room, error)
+	// FindBySlugs 批量查 Room 元数据（训练场列表拼房间信息）。
+	FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error)
 	ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
 }
 
 type ChallengeRepo interface {
 	Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error
-	FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error)
+	// FindBySlug 按题目 slug 查（详情/实例/提交解析的主键入口）。
+	FindBySlug(ctx context.Context, slug string) (*model.Challenge, error)
+	// FindByTutorialSlug 查关联到某教程 Room 的题目（Room 详情反查，无则 gorm.ErrRecordNotFound）。
+	FindByTutorialSlug(ctx context.Context, tutorialSlug string) (*model.Challenge, error)
 	FindByID(ctx context.Context, id uint) (*model.Challenge, error)
+	// FindByIDs 批量查题（管理端实例列表富化用）。
+	FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error)
+	// List 全量题目分页（训练场列表用）。
+	List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
+	// Delete 删除题目（级联删 flags/hints，事务内）。
+	Delete(ctx context.Context, slug string) error
 }
 
 type SubmissionRepo interface {
 	Create(ctx context.Context, s *model.Submission) error
 	FindByID(ctx context.Context, id uint) (*model.Submission, error)
+	// ListPending 扫描滞留 pending 的提交（worker 启动补偿用）。
+	ListPending(ctx context.Context) ([]uint, error)
 	// HasCorrect 判定"该用户该题是否已通过"（防重复计分）。
 	HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error)
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
@@ -58,6 +72,10 @@ type ContentPackageRepo interface {
 	UpdateStatus(ctx context.Context, id uint, status model.PackageStatus) error
 	AddVersion(ctx context.Context, v *model.ContentVersion) error
 	FindLatestVersion(ctx context.Context, packageID uint) (*model.ContentVersion, error)
+	FindVersionByID(ctx context.Context, id uint) (*model.ContentVersion, error)
+	ListVersions(ctx context.Context, packageID uint) ([]model.ContentVersion, error)
+	UpdateVersionStatus(ctx context.Context, id uint, status model.PackageStatus) error
+	ArchiveOtherVersions(ctx context.Context, packageID, exceptID uint) error
 	UpdateLatestVersion(ctx context.Context, id uint, version string) error
 	List(ctx context.Context, offset, limit int) ([]model.ContentPackage, int64, error)
 }
@@ -81,4 +99,28 @@ type ProgressRepo interface {
 	// MarkInProgress 记录"开始学但未完成"（Room 首次浏览时创建 completed=false 行，幂等）。
 	MarkInProgress(ctx context.Context, userID uint, roomSlug string) error
 	Stats(ctx context.Context, userID uint) (completed int, inProgress int, err error)
+}
+
+type LabInstanceRepo interface {
+	Create(ctx context.Context, i *model.LabInstance) error
+	FindByID(ctx context.Context, id uint) (*model.LabInstance, error)
+	// FindActive 查询 user×challenge 当前活跃（creating/running）实例，无则返回 nil。
+	FindActive(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error)
+	// FindActiveAny 该用户任意题目的当前活跃实例（单容器约束用），无则 nil。
+	FindActiveAny(ctx context.Context, userID uint) (*model.LabInstance, error)
+	// UpdateRunning driver.Create 成功后回写 endpoint/expire_at 并置 running。
+	UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time) error
+	UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error
+	// ListExpired ExpireAt 已过期且仍 running 的实例（reaper 用）。
+	ListExpired(ctx context.Context, now time.Time) ([]model.LabInstance, error)
+	// List 全量实例分页（管理端容器面板用）。
+	List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error)
+	// ListActive 全部用户的活跃（creating/running）实例（管理端概览用）。
+	ListActive(ctx context.Context) ([]model.LabInstance, error)
+}
+
+// InstanceLogRepo 容器实例生命周期日志（append-only：只 Create 与分页查询）。
+type InstanceLogRepo interface {
+	Create(ctx context.Context, l *model.InstanceLog) error
+	List(ctx context.Context, offset, limit int) ([]model.InstanceLog, int64, error)
 }

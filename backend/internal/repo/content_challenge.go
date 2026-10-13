@@ -52,7 +52,7 @@ func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
 func (r *roomRepo) Upsert(ctx context.Context, room *model.Room) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "slug"}},
-		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "requirements", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "video_url", "requirements", "updated_at"}),
 	}).Create(room).Error
 }
 
@@ -62,6 +62,15 @@ func (r *roomRepo) FindBySlug(ctx context.Context, slug string) (*model.Room, er
 		return nil, err
 	}
 	return &room, nil
+}
+
+func (r *roomRepo) FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	var list []model.Room
+	err := r.db.WithContext(ctx).Where("slug IN ?", slugs).Find(&list).Error
+	return list, err
 }
 
 func (r *roomRepo) ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error) {
@@ -83,8 +92,10 @@ func NewChallengeRepo(db *gorm.DB) ChallengeRepo { return &challengeRepo{db} }
 func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "room_slug"}},
-			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score"}),
+			Columns: []clause.Column{{Name: "slug"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"title", "category", "difficulty", "description", "type", "score", "image", "port", "tutorial_slug",
+			}),
 		}).Create(c).Error; err != nil {
 			return err
 		}
@@ -113,9 +124,17 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 	})
 }
 
-func (r *challengeRepo) FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error) {
+func (r *challengeRepo) FindBySlug(ctx context.Context, slug string) (*model.Challenge, error) {
 	var c model.Challenge
-	if err := r.db.WithContext(ctx).Where("room_slug = ?", roomSlug).First(&c).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("slug = ?", slug).First(&c).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *challengeRepo) FindByTutorialSlug(ctx context.Context, tutorialSlug string) (*model.Challenge, error) {
+	var c model.Challenge
+	if err := r.db.WithContext(ctx).Where("tutorial_slug = ?", tutorialSlug).First(&c).Error; err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -127,6 +146,27 @@ func (r *challengeRepo) FindByID(ctx context.Context, id uint) (*model.Challenge
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (r *challengeRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.Challenge
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&list).Error
+	return list, err
+}
+
+func (r *challengeRepo) List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error) {
+	var (
+		list  []model.Challenge
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
 }
 
 func (r *challengeRepo) FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error) {
@@ -149,6 +189,22 @@ func (r *challengeRepo) CountSolves(ctx context.Context, challengeID uint) (int6
 	return n, err
 }
 
+func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var c model.Challenge
+		if err := tx.Where("slug = ?", slug).First(&c).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Flag{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Hint{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&c).Error
+	})
+}
+
 type submissionRepo struct{ db *gorm.DB }
 
 func NewSubmissionRepo(db *gorm.DB) SubmissionRepo { return &submissionRepo{db} }
@@ -163,6 +219,14 @@ func (r *submissionRepo) FindByID(ctx context.Context, id uint) (*model.Submissi
 		return nil, err
 	}
 	return &s, nil
+}
+
+func (r *submissionRepo) ListPending(ctx context.Context) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("status = ?", model.SubmissionPending).
+		Order("id").Pluck("id", &ids).Error
+	return ids, err
 }
 
 func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error) {

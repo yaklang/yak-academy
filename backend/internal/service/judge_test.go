@@ -42,23 +42,23 @@ func newJudgeTestEnv(t *testing.T) *judgeEnv {
 	judge := NewJudgeService(subRepo, chalRepo, evRepo, bus)
 	// 造两道题：static（100 分）与 regex（200 分）。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-static", Title: "静态题", Type: model.ChallengeStatic, Score: 100,
+		Slug: "chal-static", Title: "静态题", Type: model.ChallengeStatic, Score: 100,
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{static}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
-		RoomSlug: "room-regex", Title: "正则题", Type: model.ChallengeRegex, Score: 200,
+		Slug: "chal-regex", Title: "正则题", Type: model.ChallengeRegex, Score: 200,
 	}, []model.Flag{{Type: model.ChallengeRegex, Value: `^flag\{[a-z]+\}$`}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	return &judgeEnv{gdb: gdb, judge: judge, bus: bus}
 }
 
-// chalID 按 room slug 取题目 ID。
-func (e *judgeEnv) chalID(t *testing.T, roomSlug string) uint {
+// chalID 按题目 slug 取 ID。
+func (e *judgeEnv) chalID(t *testing.T, chalSlug string) uint {
 	t.Helper()
 	var chal model.Challenge
-	if err := e.gdb.Where("room_slug = ?", roomSlug).First(&chal).Error; err != nil {
+	if err := e.gdb.Where("slug = ?", chalSlug).First(&chal).Error; err != nil {
 		t.Fatal(err)
 	}
 	return chal.ID
@@ -92,7 +92,7 @@ func TestJudgeCorrectStaticFlag(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "room-static"), "flag{static}")
+	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "chal-static"), "flag{static}")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestJudgeIncorrectFlag(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	sub, _ := env.judge.Submit(ctx, 1, env.chalID(t, "room-static"), "wrong")
+	sub, _ := env.judge.Submit(ctx, 1, env.chalID(t, "chal-static"), "wrong")
 	if got := env.waitStatus(t, sub.ID); got != model.SubmissionIncorrect {
 		t.Fatalf("status = %s, want incorrect", got)
 	}
@@ -125,7 +125,7 @@ func TestJudgeRegexFlag(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	sub, _ := env.judge.Submit(ctx, 1, env.chalID(t, "room-regex"), "flag{anything}")
+	sub, _ := env.judge.Submit(ctx, 1, env.chalID(t, "chal-regex"), "flag{anything}")
 	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
 		t.Fatalf("regex flag should match, got %s", got)
 	}
@@ -135,7 +135,7 @@ func TestJudgeNoDoubleScore(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	id := env.chalID(t, "room-static")
+	id := env.chalID(t, "chal-static")
 	first, _ := env.judge.Submit(ctx, 7, id, "flag{static}")
 	if got := env.waitStatus(t, first.ID); got != model.SubmissionCorrect {
 		t.Fatalf("first = %s", got)
@@ -166,7 +166,7 @@ func TestJudgeDynamicDecay(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	id := env.chalID(t, "room-static")
+	id := env.chalID(t, "chal-static")
 	// 三个用户先通关（solve_count=3）。
 	for user := uint(1); user <= 3; user++ {
 		sub, _ := env.judge.Submit(ctx, user, id, "flag{static}")
@@ -197,7 +197,7 @@ func TestJudgeLinearDecayFloor(t *testing.T) {
 func TestJudgeGetSubmissionOwnerOnly(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
-	sub, _ := env.judge.Submit(ctx, 42, env.chalID(t, "room-static"), "flag{static}")
+	sub, _ := env.judge.Submit(ctx, 42, env.chalID(t, "chal-static"), "flag{static}")
 	if _, err := env.judge.GetSubmission(ctx, 42, sub.ID); err != nil {
 		t.Fatalf("owner should read own submission: %v", err)
 	}
@@ -210,11 +210,87 @@ func TestJudgeSubmitIsAsync(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	// 不启动 worker：提交必须立即返回 pending（无同步判定）。
-	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "room-static"), "flag{static}")
+	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "chal-static"), "flag{static}")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sub.Status != model.SubmissionPending {
 		t.Fatalf("submit without worker must stay pending, got %s", sub.Status)
+	}
+}
+
+func TestJudgeQueueFullStillAccepted(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 容量 1 的队列：塞满后 Submit 不再报错，submission 落库保持 pending。
+	env.judge.queue = make(chan uint, 1)
+	env.judge.queue <- 1 // 占满
+	sub, err := env.judge.Submit(ctx, 1, env.chalID(t, "chal-static"), "flag{static}")
+	if err != nil {
+		t.Fatalf("queue full should still accept: %v", err)
+	}
+	if sub.Status != model.SubmissionPending {
+		t.Fatalf("status = %s, want pending", sub.Status)
+	}
+	// 排空队列启动 worker：pending 轮询兜底把滞留记录判定完结。
+	env.judge.queue = make(chan uint, 256)
+	env.judge.StartWorker(ctx)
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("recovered status = %s, want correct", got)
+	}
+}
+
+func TestJudgeWorkerRecoversStrandedPending(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 模拟崩溃窗口：不启动 worker 直接提交，产生滞留 pending。
+	sub, err := env.judge.Submit(ctx, 5, env.chalID(t, "chal-static"), "flag{static}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 重启 worker：即时 pending 扫描入队并判定。
+	env.judge.StartWorker(ctx)
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("status = %s, want correct", got)
+	}
+}
+
+func TestJudgePollRecoversDirectDBPending(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 不经 Submit 直接落库 pending（模拟外部写入/重启前残留）：
+	// 轮询兜底应扫描到并判定完结。
+	sub := &model.Submission{
+		UserID: 3, ChallengeID: env.chalID(t, "chal-static"),
+		Answer: "flag{static}", Status: model.SubmissionPending,
+	}
+	if err := env.gdb.Create(sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	env.judge.requeuePending(ctx)
+	env.judge.StartWorker(context.Background()) // 空转 consume（pending 已投递）
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("status = %s, want correct", got)
+	}
+}
+
+func TestJudgeIdempotentGuardOnDoubleDelivery(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	sub, err := env.judge.Submit(ctx, 9, env.chalID(t, "chal-static"), "flag{static}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 快路径与轮询同时投递（双入队）：同步调 judge 两次。
+	env.judge.judge(ctx, sub.ID)
+	env.judge.judge(ctx, sub.ID)
+	// submission.judged 事件只产生一次（无重复计分事件）。
+	var judged int64
+	env.gdb.Model(&model.Event{}).Where("type = ?", model.EventSubmissionJudged).Count(&judged)
+	if judged != 1 {
+		t.Fatalf("judged events = %d, want 1", judged)
+	}
+	if s := env.sub(t, sub.ID); s.Status != model.SubmissionCorrect || s.Score != 100 {
+		t.Fatalf("submission = %s/%d, want correct/100", s.Status, s.Score)
 	}
 }

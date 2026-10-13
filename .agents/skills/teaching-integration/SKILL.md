@@ -1,15 +1,16 @@
 ---
 name: teaching-integration
-description: yak-academy 教题一体的内容模型约束。涉及 Room/Lab/Topic/LearningPath 数据模型或接口设计、学习路径、难度分级时必须加载，防止把教程与题目拆成两套体系。
+description: yak-academy 教程与题目两类资源的内容模型约束。涉及 Challenge/Room/Topic/LearningPath 数据模型或接口设计、训练场、题目 JSON、学习路径、难度分级时必须加载，防止教程与题目耦合回内嵌模式或拆成互不相通的两套体系。
 ---
 
-# 教题一体模型（不可拆分）
+# 教程与题目：两类独立资源 + 可选关联
 
 ## 硬性原则
 
-- **Room = 教程 + 内嵌 Lab**，是学习的原子单元（参考 TryHackMe 的 Room 模式）。Room 有 lesson.md 正文，**至多一个**内嵌 lab.yaml。
-- **禁止**建立独立的"教程库"和"题库"两套实体/两张表。Challenge 必然内嵌于 Room（外键 room_id），不存在无 Room 的 Challenge。
-- 层级唯一：`Topic（主题，如 SQLi/XSS）→ Room（教程+Lab）`。Topic 下可以有纯教程 Room（无 Lab），但 Lab 必属于某 Room。
+- **教程与题目是两类独立上传的资源**：教程（Room，文字 + 视频）经教程包 zip 上传走 draft/publish 管线；题目（Challenge，固定格式 challenge.json）由 admin 上传 **upsert 即生效**。禁止把题目定义塞回教程包（旧 lab.yaml 模式已废弃，仅为旧 Payload 回放兼容保留解析）。
+- **题目不内嵌于 Room**：Challenge 以自有 `slug`（uniqueIndex）为主键入口，含 `category`（训练场分组键）、`difficulty`、`description_md`、`env`、`hints` 等自身属性。不存在"Challenge 必须属于某 Room"的约束，纯题目合法。
+- **关联是可选的单向引用**：Challenge.`tutorial_slug` 可选指向配套教程 Room。有关联时双向给入口（题目详情→"配套教程"，Room 详情→"前往题目"）；Room 侧的 `related_challenge_slug` 是按 TutorialSlug 反查的展示字段，不是存储的外键。禁止把题目字段（flag/env/hints）复制进 Room。
+- 层级唯一：教程侧 `Topic → Room`；题目侧扁平（category 分组，无层级）。训练场（/training）**以题目为中心**：按 category 分组列表（Burp all-labs 风格），点入题目详情页完成容器启动与 flag 提交，列表页保持纯浏览。
 
 ## 学习路径（LearningPath）
 
@@ -24,10 +25,11 @@ description: yak-academy 教题一体的内容模型约束。涉及 Room/Lab/Top
 | `practitioner` | 进阶 |
 | `expert` | 专家 |
 
-- 该枚举出现在 model、lab.yaml 校验、前端展示三处，**必须保持一致**，禁止新增第四级（如 "beginner"）。
+- 该枚举出现在 model（Room 与 Challenge 各自持有）、题目 JSON 校验、教程包校验、前端展示四处，**必须保持一致**，禁止新增第四级（如 "beginner"）。
 
 ## 正反例
 
-✅ 正确：新建 Room 时同时解析 lesson.md 与可选 lab.yaml，入库为 Room + 关联 Challenge。
-❌ 错误：设计独立的 `GET /challenges` 题库列表接口，允许脱离 Room 出题。
+✅ 正确：题目 JSON 带 `tutorial_slug` 指向配套教程 Room，两边详情页互给入口。
+✅ 正确：训练场列表只读展示（标题/难度/分值/容器/通关），交互集中在题目详情页。
+❌ 错误：在教程包里恢复 lab.yaml / 让 Challenge 携带 room_id 外键（回退到内嵌模式）。
 ❌ 错误：LearningPath 表里存 room_title/lesson_content 冗余字段。

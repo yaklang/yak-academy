@@ -1,6 +1,9 @@
 package db
 
 import (
+	"fmt"
+	"log"
+
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
@@ -13,13 +16,66 @@ func Open(path string) (*gorm.DB, error) {
 }
 
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.User{}, &model.CourseRole{},
 		&model.ContentPackage{}, &model.ContentVersion{},
 		&model.Topic{}, &model.Room{},
 		&model.Challenge{}, &model.Flag{}, &model.Hint{}, &model.Submission{},
 		&model.LearningPath{}, &model.PathItem{},
 		&model.Event{}, &model.ScoreRecord{}, &model.Progress{},
-		&model.LabInstance{},
-	)
+		&model.LabInstance{}, &model.InstanceLog{},
+	); err != nil {
+		return err
+	}
+	return migrateChallengeSlug(db)
+}
+
+// migrateChallengeSlug 一次性迁移：教题一体时代的旧行没有 slug，
+// 派生 slug=tutorial_slug=room_slug（旧列，已从 model 摘除但物理列仍在）、
+// category=topic_slug、difficulty=room.difficulty。幂等：无旧列或无旧行时为空操作。
+// room_slug 也为空（早期孤儿数据）的行派生 legacy-challenge-{id}，保主键可达。
+func migrateChallengeSlug(db *gorm.DB) error {
+	// 全新库从未有过 room_slug 列（AutoMigrate 只加不删），此时无旧行，直接返回。
+	hasColumn := db.Migrator().HasColumn("challenges", "room_slug")
+	if !hasColumn {
+		return nil
+	}
+	rows := []struct {
+		ID       uint
+		RoomSlug *string
+	}{}
+	if err := db.Table("challenges").
+		Select("id, room_slug").
+		Where("slug IS NULL OR slug = ''").
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, r := range rows {
+		roomSlug := ""
+		if r.RoomSlug != nil {
+			roomSlug = *r.RoomSlug
+		}
+		var room model.Room
+		category, difficulty, slug := "unknown", model.DifficultyApprentice, roomSlug
+		if roomSlug == "" {
+			// 孤儿行：无任何可派生源，用 id 合成 slug 保唯一可达。
+			slug = fmt.Sprintf("legacy-challenge-%d", r.ID)
+		} else if err := db.Where("slug = ?", roomSlug).First(&room).Error; err == nil {
+			category, difficulty = room.TopicSlug, room.Difficulty
+		} else {
+			// 教程已删但题目残留，category 兜底 unknown，只补 slug 保主键。
+			log.Printf("migrate challenge %d: room %q missing, category=unknown", r.ID, roomSlug)
+		}
+		updates := map[string]any{
+			"slug":          slug,
+			"tutorial_slug": roomSlug,
+			"category":      category,
+			"difficulty":    difficulty,
+		}
+		if err := db.Table("challenges").Where("id = ?", r.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		log.Printf("migrate challenge %d: derived slug %q", r.ID, slug)
+	}
+	return nil
 }

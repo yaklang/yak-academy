@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/api"
 	"github.com/yaklang/yak-academy/backend/internal/config"
@@ -60,11 +61,20 @@ func main() {
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, eventRepo, bus)
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
-	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo)
+	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo)
+	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
+	instanceRepo := repo.NewLabInstanceRepo(gdb)
+	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
+	var driver service.InstanceDriver = service.NoopDriver{}
+	if cfg.EnvDriver == "docker" {
+		driver = service.NewDockerDriver()
+	}
+	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver)
+	envSvc.StartReaper(ctx, time.Minute)
 
 	// api 装配
 	router := api.NewRouter(authSvc)
-	api.NewHandlers(authSvc, contentSvc, judgeSvc, progressSvc, topicSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

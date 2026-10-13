@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 管理端：内容包上传与发布（五步管线入口）。
+// 教程管理：教程内容包（zip）上传与版本管理（draft → publish / 归档 / 回滚）。
+// 包内只有教程（文字 + 视频）；题目是独立资源，经"题目管理"用 challenge.json 上传。
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { contentApi, type ContentPackage } from '../../api'
+import { contentApi, type ContentPackage, type ContentVersion } from '../../api'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -11,6 +12,14 @@ const total = ref(0)
 const page = ref(1)
 const loading = ref(false)
 const uploading = ref(false)
+
+// 版本弹窗（回滚入口）。
+const detailVisible = ref(false)
+const detailPkg = ref<ContentPackage | null>(null)
+const versions = ref<ContentVersion[]>([])
+const versionsLoading = ref(false)
+const rollbackLoading = ref(0)
+const specVisible = ref(false)
 
 async function load() {
   loading.value = true
@@ -49,6 +58,45 @@ async function publish(pkg: ContentPackage) {
   }
 }
 
+async function archive(pkg: ContentPackage) {
+  try {
+    await contentApi.archive(pkg.id)
+    ElMessage.success(`已归档 ${pkg.name}（内容保持可见，包冻结）`)
+    await load()
+  } catch (e) {
+    ElMessage.error(`归档失败：${(e as Error).message}`)
+  }
+}
+
+async function openDetail(pkg: ContentPackage) {
+  detailPkg.value = pkg
+  detailVisible.value = true
+  versionsLoading.value = true
+  try {
+    versions.value = await contentApi.versions(pkg.id)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    versionsLoading.value = false
+  }
+}
+
+async function rollback(version: ContentVersion) {
+  if (!detailPkg.value) return
+  rollbackLoading.value = version.id
+  try {
+    const pkg = await contentApi.rollback(detailPkg.value.id, version.id)
+    ElMessage.success(`已回滚到 ${pkg.latest_version}`)
+    detailPkg.value = pkg
+    versions.value = await contentApi.versions(pkg.id)
+    await load()
+  } catch (e) {
+    ElMessage.error(`回滚失败：${(e as Error).message}`)
+  } finally {
+    rollbackLoading.value = 0
+  }
+}
+
 function statusType(s: ContentPackage['status']) {
   return s === 'published' ? 'success' : s === 'draft' ? 'info' : 'warning'
 }
@@ -57,7 +105,8 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>内容包管理</h2>
+  <h2>教程管理</h2>
+  <p class="hint">教程以内容包（zip）上传：文字教程 + 配套视频，走版本化管线（draft → 发布 → 归档/回滚）。题目是独立资源，请到"题目管理"用 JSON 上传。</p>
   <div class="toolbar">
     <el-upload
       :show-file-list="false"
@@ -67,7 +116,41 @@ onMounted(load)
     >
       <el-button type="primary" :loading="uploading">上传内容包（zip）</el-button>
     </el-upload>
+    <el-button @click="specVisible = !specVisible">
+      {{ specVisible ? '收起格式规范' : '查看标准格式规范' }}
+    </el-button>
   </div>
+
+  <el-collapse-transition>
+    <el-card v-show="specVisible" class="spec">
+      <h3>教程内容包格式</h3>
+      <p>zip 根目录（或唯一一层包裹目录）下：</p>
+      <pre class="tree">package.zip
+├── manifest.yaml        # 包元数据（必填）
+└── topics/
+    └── &lt;topic-slug&gt;/
+        ├── topic.md     # topic 首页（front matter 必填）
+        └── rooms/
+            └── &lt;room-slug&gt;/
+                └── lesson.md   # 教程正文（front matter 必填，可含 video）</pre>
+
+      <h4>manifest.yaml（必填）</h4>
+      <pre class="yaml">name: my-course        # 包名（同名再传 = 升级出新版本）
+version: 1.0.0         # 语义化版本
+language: zh
+topics:
+  - web-security       # topic slug 列表</pre>
+
+      <h4>lesson.md front matter（必填）</h4>
+      <pre class="yaml">---
+title: SQL 注入基础
+difficulty: apprentice   # apprentice / practitioner / expert 三级
+video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed 的页面
+---
+正文为 Markdown……</pre>
+      <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。题目（flag、容器环境、提示）不经教程包——用"题目管理"的 challenge.json 定义。</p>
+    </el-card>
+  </el-collapse-transition>
   <el-table :data="packages" v-loading="loading">
     <el-table-column prop="id" label="ID" width="60" />
     <el-table-column prop="name" label="包名" />
@@ -78,7 +161,7 @@ onMounted(load)
       </template>
     </el-table-column>
     <el-table-column prop="error" label="错误" show-overflow-tooltip />
-    <el-table-column label="操作" width="120">
+    <el-table-column label="操作" width="220">
       <template #default="{ row }">
         <el-button
           v-if="auth.user?.global_role === 'admin' && row.status === 'draft'"
@@ -86,6 +169,13 @@ onMounted(load)
           type="success"
           @click="publish(row)"
         >发布</el-button>
+        <el-button
+          v-if="auth.user?.global_role === 'admin' && row.status === 'published'"
+          size="small"
+          type="warning"
+          @click="archive(row)"
+        >归档</el-button>
+        <el-button size="small" @click="openDetail(row)">版本</el-button>
       </template>
     </el-table-column>
   </el-table>
@@ -97,8 +187,37 @@ onMounted(load)
     v-model:current-page="page"
     @current-change="load"
   />
+
+  <el-dialog v-model="detailVisible" :title="`版本历史 - ${detailPkg?.name ?? ''}`" width="560px">
+    <el-table :data="versions" v-loading="versionsLoading" size="small">
+      <el-table-column prop="version" label="版本" width="100" />
+      <el-table-column label="状态" width="110">
+        <template #default="{ row }">
+          <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="checksum" label="Checksum" show-overflow-tooltip />
+      <el-table-column label="操作" width="100">
+        <template #default="{ row }">
+          <el-button
+            v-if="auth.user?.global_role === 'admin' && detailPkg?.status === 'published' && row.status === 'archived'"
+            size="small"
+            type="primary"
+            :loading="rollbackLoading === row.id"
+            @click="rollback(row)"
+          >回滚</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-dialog>
 </template>
 
 <style scoped>
-.toolbar { margin-bottom: 1rem; }
+.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+.spec h3 { margin-top: 0; }
+.spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
+.spec .tree { line-height: 1.5; }
+.spec .yaml { line-height: 1.6; }
+.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

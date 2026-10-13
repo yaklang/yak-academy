@@ -11,6 +11,9 @@ type Config struct {
 	// 初始管理员（users 表为空时启动种子创建，见 AuthService.EnsureAdmin）。
 	AdminUsername string
 	AdminPassword string
+
+	// EnvDriver 实例驱动：noop（默认，接口 501）/ docker（docker CLI 需可用）。
+	EnvDriver string
 }
 
 func Load() *Config {
@@ -20,6 +23,7 @@ func Load() *Config {
 		JWTSecret:     getenv("ACADEMY_JWT_SECRET", "dev-only-secret"),
 		AdminUsername: getenv("ACADEMY_ADMIN_USERNAME", "admin"),
 		AdminPassword: getenv("ACADEMY_ADMIN_PASSWORD", "admin123"),
+		EnvDriver:     getenv("ACADEMY_ENV_DRIVER", "noop"),
 	}
 }
 

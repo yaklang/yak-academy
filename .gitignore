@@ -19,3 +19,4 @@ docs/plans/
 # 本地测试构造的内容包样例
 *.test-package.zip
 testdata/
+.zcode/

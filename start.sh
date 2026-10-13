@@ -30,6 +30,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# 环境驱动：docker daemon 可用则用 docker 驱动（题目可启动容器），否则 noop（启动容器报 501）。
+# 显式设置 ACADEMY_ENV_DRIVER 时以环境变量为准。
+ENV_DRIVER="${ACADEMY_ENV_DRIVER:-}"
+if [ -z "$ENV_DRIVER" ]; then
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    ENV_DRIVER="docker"
+    log "检测到 docker daemon：题目环境驱动 = docker"
+  else
+    ENV_DRIVER="noop"
+    log "docker daemon 不可用：题目环境驱动 = noop（启动 Docker Desktop 后重启即可启用容器）"
+  fi
+fi
+
 # 后端：先编译成二进制再运行（比 go run 进程树更好管理）
 log "编译后端..."
 (cd backend && go build -o academy-server-bin ./cmd/academy-server)
@@ -37,6 +50,7 @@ BIN="academy-server-bin"
 [ -f "backend/academy-server-bin.exe" ] && BIN="academy-server-bin.exe"
 
 log "启动后端 $BACKEND_URL"
+export ACADEMY_ENV_DRIVER="$ENV_DRIVER"
 (cd backend && "./$BIN") &
 BACKEND_PID=$!
 
