@@ -118,6 +118,7 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		Title       string `json:"title"`
 		Score       int    `json:"score"`
 		Solved      bool   `json:"solved"`
+		HasEnv      bool   `json:"has_env"`
 	}
 	var lab *labResp
 	if detail.Challenge != nil {
@@ -127,6 +128,7 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 			Title:       detail.Challenge.Title,
 			Score:       detail.Challenge.Score,
 			Solved:      h.Judge.IsSolved(req.Context(), user.ID, detail.Challenge.ID),
+			HasEnv:      detail.Challenge.Image != "",
 		}
 	}
 	type roomResp struct {

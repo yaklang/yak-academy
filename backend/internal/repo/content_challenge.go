@@ -84,7 +84,7 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "room_slug"}},
-			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score"}),
+			DoUpdates: clause.AssignmentColumns([]string{"title", "type", "score", "image", "port"}),
 		}).Create(c).Error; err != nil {
 			return err
 		}

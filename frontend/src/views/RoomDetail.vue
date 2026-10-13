@@ -25,14 +25,14 @@ async function load() {
   const { topicSlug, roomSlug } = route.params as { topicSlug: string; roomSlug: string }
   try {
     room.value = await topicApi.room(topicSlug, roomSlug)
-    if (room.value.lab) loadInstance()
+    if (room.value.lab?.has_env) loadInstance()
   } catch (e) {
     ElMessage.error((e as Error).message)
   }
 }
 
 async function loadInstance() {
-  if (!room.value?.lab) return
+  if (!room.value?.lab?.has_env) return
   try {
     instance.value = await instanceApi.get(room.value.slug)
   } catch {
@@ -41,7 +41,7 @@ async function loadInstance() {
 }
 
 async function startInstance() {
-  if (!room.value?.lab) return
+  if (!room.value?.lab?.has_env) return
   instanceLoading.value = true
   try {
     instance.value = await instanceApi.start(room.value.slug)
@@ -53,7 +53,7 @@ async function startInstance() {
 }
 
 async function destroyInstance() {
-  if (!room.value?.lab) return
+  if (!room.value?.lab?.has_env) return
   instanceLoading.value = true
   try {
     await instanceApi.destroy(room.value.slug)
@@ -127,8 +127,8 @@ onMounted(load)
       </template>
       <p class="score">分值：{{ room.lab.score }}</p>
 
-      <!-- Lab 环境实例：启动/销毁/状态（幂等启动，TTL 自动回收） -->
-      <div class="instance-row">
+      <!-- Lab 环境实例：仅 has_env（lab.yaml env 段）时展示，启动/销毁/状态（幂等启动，TTL 自动回收） -->
+      <div v-if="room.lab.has_env" class="instance-row">
         <template v-if="instance && instance.status !== 'destroyed' && instance.status !== 'stopped'">
           <el-tag :type="instance.status === 'running' ? 'success' : 'warning'" size="small">
             环境{{ instance.status === 'running' ? '运行中' : '启动中' }}

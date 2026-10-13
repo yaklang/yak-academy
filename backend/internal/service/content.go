@@ -59,6 +59,8 @@ type labDef struct {
 	Type  model.ChallengeType `json:"type"`
 	Flag  string          `json:"flag"`
 	Score int             `json:"score"`
+	Image string          `json:"image,omitempty"` // lab.yaml env 段（可选）：容器镜像
+	Port  int             `json:"port,omitempty"`  // 容器端口
 	Hints []model.Hint    `json:"hints"`
 }
 
@@ -89,6 +91,11 @@ type labYaml struct {
 		Flag string             `yaml:"flag"`
 	} `yaml:"challenge"`
 	Score int `yaml:"score"`
+	// Env 可选在线环境（容器驱动用）：image + port。
+	Env struct {
+		Image string `yaml:"image"`
+		Port  int    `yaml:"port"`
+	} `yaml:"env"`
 	Hints []struct {
 		Title   string `yaml:"title"`
 		Content string `yaml:"content"`
@@ -246,7 +253,10 @@ func (s *ContentService) parseRooms(topicSlug string, files map[string][]byte, p
 			if err != nil {
 				return nil, fmt.Errorf("room %s: %w", slug, err)
 			}
-			def := labDef{Title: lab.Title, Type: lab.Challenge.Type, Flag: lab.Challenge.Flag, Score: lab.Score}
+			def := labDef{
+				Title: lab.Title, Type: lab.Challenge.Type, Flag: lab.Challenge.Flag,
+				Score: lab.Score, Image: lab.Env.Image, Port: lab.Env.Port,
+			}
 			for _, h := range lab.Hints {
 				def.Hints = append(def.Hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
 			}
@@ -348,6 +358,15 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if lab.Score < 0 {
 			return fmt.Errorf("lab %s: score must be non-negative", slug)
 		}
+		// env 段可选；出现则 image 必填、port 合法（1-65535）。
+		if lab.Image != "" || lab.Port != 0 {
+			if lab.Image == "" {
+				return fmt.Errorf("lab %s: env.image is required when env is present", slug)
+			}
+			if lab.Port < 1 || lab.Port > 65535 {
+				return fmt.Errorf("lab %s: env.port must be 1-65535", slug)
+			}
+		}
 		for _, h := range lab.Hints {
 			if h.Cost < 0 {
 				return fmt.Errorf("lab %s: hint cost must be non-negative", slug)
@@ -414,6 +433,7 @@ func (s *ContentService) Publish(ctx context.Context, packageID uint) (*model.Co
 		}
 		chal := &model.Challenge{
 			RoomSlug: roomSlug, Title: lab.Title, Type: lab.Type, Score: lab.Score,
+			Image: lab.Image, Port: lab.Port,
 		}
 		flags := []model.Flag{{Type: lab.Type, Value: lab.Flag}}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {

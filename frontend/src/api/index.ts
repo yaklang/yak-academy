@@ -4,7 +4,7 @@ import { http } from './client'
 export interface TokenResponse { token: string; expires_at: string }
 export interface User { id: number; username: string; global_role: 'student' | 'teacher' | 'admin' }
 export interface Topic { slug: string; title: string; summary: string; room_count: number }
-export interface Lab { challenge_id: number; title: string; score: number; solved: boolean }
+export interface Lab { challenge_id: number; title: string; score: number; solved: boolean; has_env: boolean }
 export interface Room {
   slug: string
   topic_slug: string

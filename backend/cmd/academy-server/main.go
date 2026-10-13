@@ -62,10 +62,13 @@ func main() {
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo)
-	// env 实例生命周期。KNOWN_LIMITATION：NoopDriver 驱动不可用（真实 Docker 驱动为后续计划），
-	// 实例接口一律 501；TTL reaper 照常装配（无实例时为空转）。
+	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
 	instanceRepo := repo.NewLabInstanceRepo(gdb)
-	envSvc := service.NewEnvService(instanceRepo, service.NoopDriver{})
+	var driver service.InstanceDriver = service.NoopDriver{}
+	if cfg.EnvDriver == "docker" {
+		driver = service.NewDockerDriver()
+	}
+	envSvc := service.NewEnvService(instanceRepo, challengeRepo, eventRepo, bus, driver)
 	envSvc.StartReaper(ctx, time.Minute)
 
 	// api 装配

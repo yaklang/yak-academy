@@ -12,12 +12,15 @@ const (
 
 // Challenge 内嵌于 Room 的题目（teaching-integration skill：不存在无 Room 的 Challenge）。
 type Challenge struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	RoomSlug       string         `gorm:"uniqueIndex;size:128" json:"room_slug"`
-	Title          string         `gorm:"size:256" json:"title"`
-	Type           ChallengeType  `gorm:"size:16" json:"type"`
-	Score          int            `json:"score"`  // 初始分值，动态计分基于 solve_count 派生
-	CreatedAt      time.Time      `json:"created_at"`
+	ID        uint           `gorm:"primaryKey" json:"id"`
+	RoomSlug  string         `gorm:"uniqueIndex;size:128" json:"room_slug"`
+	Title     string         `gorm:"size:256" json:"title"`
+	Type      ChallengeType  `gorm:"size:16" json:"type"`
+	Score     int            `json:"score"` // 初始分值，动态计分基于 solve_count 派生
+	// Lab 在线环境定义（lab.yaml env 段，可选）。Image 非空表示该 Lab 有容器环境。
+	Image string `gorm:"size:256" json:"image"`
+	Port  int    `json:"port"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 // Flag 题目的判定答案。比较必须使用恒时比较（event-sourcing-rules skill：禁止 == ）。

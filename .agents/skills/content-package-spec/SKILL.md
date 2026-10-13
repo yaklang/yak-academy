@@ -36,6 +36,17 @@ package.zip
 
 `title`、`challenge.type`（static/regex）、`challenge.flag`、`score`（初始分值）。hint 为可选列表（title/content/cost）。
 
+## lab.yaml 可选 env 段（容器环境）
+
+```yaml
+env:
+  image: <docker 镜像>   # 非空即表示该 Lab 有容器环境
+  port: <容器内端口 1-65535>
+```
+
+- 整段可选；**要么都填要么都不填**（只填其一 = 校验失败整体拒绝）。
+- 有 env 的 Lab 在 Room 详情接口返回 `has_env: true`，前端才展示"启动环境"；无 env 的 Lab 调实例接口返回 422。
+
 ## 上传管线五步（顺序不可跳、不可合并）
 
 ```
