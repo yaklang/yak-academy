@@ -13,13 +13,14 @@ import (
 // TopicService 学生端内容浏览：主题列表 / 主题详情（含 Room 列表）/ Room 详情。
 // 教题一体：Room 详情附带内嵌 Lab（teaching-integration skill）。
 type TopicService struct {
-	topics     repo.TopicRepo
-	rooms      repo.RoomRepo
-	challenges repo.ChallengeRepo
+	topics      repo.TopicRepo
+	rooms       repo.RoomRepo
+	challenges  repo.ChallengeRepo
+	submissions repo.SubmissionRepo
 }
 
-func NewTopicService(t repo.TopicRepo, r repo.RoomRepo, c repo.ChallengeRepo) *TopicService {
-	return &TopicService{topics: t, rooms: r, challenges: c}
+func NewTopicService(t repo.TopicRepo, r repo.RoomRepo, c repo.ChallengeRepo, sub repo.SubmissionRepo) *TopicService {
+	return &TopicService{topics: t, rooms: r, challenges: c, submissions: sub}
 }
 
 type TopicSummary struct {
@@ -99,6 +100,56 @@ func (s *TopicService) GetRoomDetail(ctx context.Context, topicSlug, roomSlug st
 // FindChallengeByRoomSlug 提交答案时解析 room → 内嵌题目（教题一体：Lab 必属 Room）。
 func (s *TopicService) FindChallengeByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error) {
 	return s.challenges.FindByRoomSlug(ctx, roomSlug)
+}
+
+// TrainingItem 训练场条目：跨 Topic 的全量题目视角（含所属 Room 元数据与当前用户状态）。
+type TrainingItem struct {
+	ID         uint             `json:"id"`
+	RoomSlug   string           `json:"room_slug"`
+	RoomTitle  string           `json:"room_title"`
+	TopicSlug  string           `json:"topic_slug"`
+	Title      string           `json:"title"`
+	Difficulty model.Difficulty `json:"difficulty"`
+	Score      int              `json:"score"`
+	Solved     bool             `json:"solved"`
+	HasEnv     bool             `json:"has_env"`
+}
+
+// ListTraining 训练场列表：全量题目分页，批量拼 Room 元数据，逐题算当前用户 solved。
+func (s *TopicService) ListTraining(ctx context.Context, userID uint, offset, limit int) ([]TrainingItem, int64, error) {
+	chals, total, err := s.challenges.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	slugs := make([]string, 0, len(chals))
+	for _, c := range chals {
+		slugs = append(slugs, c.RoomSlug)
+	}
+	rooms, err := s.rooms.FindBySlugs(ctx, slugs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	roomBySlug := make(map[string]model.Room, len(rooms))
+	for _, r := range rooms {
+		roomBySlug[r.Slug] = r
+	}
+	items := make([]TrainingItem, 0, len(chals))
+	for _, c := range chals {
+		item := TrainingItem{
+			ID: c.ID, RoomSlug: c.RoomSlug, Title: c.Title,
+			Score: c.Score, HasEnv: c.Image != "",
+		}
+		if room, ok := roomBySlug[c.RoomSlug]; ok {
+			item.RoomTitle = room.Title
+			item.TopicSlug = room.TopicSlug
+			item.Difficulty = room.Difficulty
+		}
+		if solved, err := s.submissions.HasCorrect(ctx, userID, c.ID); err == nil {
+			item.Solved = solved
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
 }
 
 // UpdateTopic 更新主题元数据（PUT /topics/{slug}，最低 teacher——课程级角色挂载点）。

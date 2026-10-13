@@ -64,6 +64,15 @@ func (r *roomRepo) FindBySlug(ctx context.Context, slug string) (*model.Room, er
 	return &room, nil
 }
 
+func (r *roomRepo) FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	var list []model.Room
+	err := r.db.WithContext(ctx).Where("slug IN ?", slugs).Find(&list).Error
+	return list, err
+}
+
 func (r *roomRepo) ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error) {
 	var list []model.Room
 	err := r.db.WithContext(ctx).Where("topic_slug = ?", topicSlug).Order("id").Find(&list).Error
@@ -127,6 +136,27 @@ func (r *challengeRepo) FindByID(ctx context.Context, id uint) (*model.Challenge
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (r *challengeRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var list []model.Challenge
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&list).Error
+	return list, err
+}
+
+func (r *challengeRepo) List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error) {
+	var (
+		list  []model.Challenge
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
 }
 
 func (r *challengeRepo) FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error) {

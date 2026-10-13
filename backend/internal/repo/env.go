@@ -67,3 +67,15 @@ func (r *labInstanceRepo) ListExpired(ctx context.Context, now time.Time) ([]mod
 		Find(&list).Error
 	return list, err
 }
+
+func (r *labInstanceRepo) List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error) {
+	var (
+		list  []model.LabInstance
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.LabInstance{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}

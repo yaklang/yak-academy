@@ -40,6 +40,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.startInstance)
 	r.Handle(http.MethodGet, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.getInstance)
 	r.Handle(http.MethodDelete, "/api/v1/rooms/{roomSlug}/lab/instance", "", h.destroyInstance)
+	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -51,10 +52,12 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "teacher", h.getPackage)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "teacher", h.listVersions)
 
-	// admin：发布/归档/回滚与用户管理
+	// admin：发布/归档/回滚、容器管理与用户管理
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/archive", "admin", h.archivePackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/rollback", "admin", h.rollbackPackage)
+	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
+	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
@@ -243,6 +246,47 @@ func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {
 
 func (h *Handlers) getPath(w http.ResponseWriter, req *http.Request) {
 	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get learning path"})
+}
+
+// listChallenges 训练场列表（跨 Topic 全量题目，当前用户视角）。
+func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	page, pageSize := pageParams(req)
+	items, total, err := h.Topics.ListTraining(req.Context(), user.ID, (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
+// listInstances 管理端：全部容器实例（分页）。
+func (h *Handlers) listInstances(w http.ResponseWriter, req *http.Request) {
+	page, pageSize := pageParams(req)
+	items, total, err := h.Env.ListInstances(req.Context(), (page-1)*pageSize, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
+// adminDestroyInstance 管理端：强制销毁实例。
+func (h *Handlers) adminDestroyInstance(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Env.AdminDestroyInstance(req.Context(), uint(id)); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (h *Handlers) myProgress(w http.ResponseWriter, req *http.Request) {

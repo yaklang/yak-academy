@@ -31,6 +31,8 @@ type TopicRepo interface {
 type RoomRepo interface {
 	Upsert(ctx context.Context, r *model.Room) error
 	FindBySlug(ctx context.Context, slug string) (*model.Room, error)
+	// FindBySlugs 批量查 Room 元数据（训练场列表拼房间信息）。
+	FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error)
 	ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
 }
@@ -39,6 +41,10 @@ type ChallengeRepo interface {
 	Upsert(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error
 	FindByRoomSlug(ctx context.Context, roomSlug string) (*model.Challenge, error)
 	FindByID(ctx context.Context, id uint) (*model.Challenge, error)
+	// FindByIDs 批量查题（管理端实例列表富化用）。
+	FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error)
+	// List 全量题目分页（训练场列表用）。
+	List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
@@ -102,4 +108,6 @@ type LabInstanceRepo interface {
 	UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error
 	// ListExpired ExpireAt 已过期且仍 running 的实例（reaper 用）。
 	ListExpired(ctx context.Context, now time.Time) ([]model.LabInstance, error)
+	// List 全量实例分页（管理端容器面板用）。
+	List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error)
 }

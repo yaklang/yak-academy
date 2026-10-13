@@ -78,6 +78,7 @@ func newEnvTestService(t *testing.T, d InstanceDriver) (*EnvService, *gorm.DB, u
 	}
 	env := NewEnvService(
 		repo.NewLabInstanceRepo(gdb), chalRepo,
+		repo.NewUserRepo(gdb),
 		repo.NewEventRepo(gdb), eventbus.New(), d,
 	)
 	return env, gdb, chalA.ID, chalB.ID
@@ -290,6 +291,70 @@ func TestDockerParseHostPort(t *testing.T) {
 
 func TestDockerContainerName(t *testing.T) {
 	if got := containerName(42); got != "yak-lab-42" {
-		t.Fatalf("containerName = %q", got)
+		t.Fatalf("containerName = %q, want yak-lab-42", got)
+	}
+}
+
+func TestListInstancesEnrichesUserAndChallenge(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	// 造一个用户与一个运行中实例。
+	if err := gdb.Create(&model.User{Username: "alice", PasswordHash: "x", GlobalRole: model.GlobalRoleStudent}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var alice model.User
+	if err := gdb.Where("username = ?", "alice").First(&alice).Error; err != nil {
+		t.Fatal(err)
+	}
+	inst, err := env.EnsureInstance(context.Background(), alice.ID, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, total, err := env.ListInstances(context.Background(), 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total=%d len=%d, want 1/1", total, len(items))
+	}
+	got := items[0]
+	if got.Username != "alice" || got.ChallengeTitle != "容器题" || got.RoomSlug != "room-env" {
+		t.Fatalf("enriched = %+v", got)
+	}
+	if got.ID != inst.ID || got.Status != model.InstanceRunning {
+		t.Fatalf("instance fields wrong: %+v", got.LabInstance)
+	}
+}
+
+func TestAdminDestroyInstance(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	inst, err := env.EnsureInstance(ctx, 7, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.AdminDestroyInstance(ctx, inst.ID); err != nil {
+		t.Fatalf("admin destroy: %v", err)
+	}
+	if len(driver.destroyed) != 1 || driver.destroyed[0] != inst.ID {
+		t.Fatalf("driver.destroyed = %v, want [%d]", driver.destroyed, inst.ID)
+	}
+	var after model.LabInstance
+	if err := gdb.First(&after, inst.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != model.InstanceDestroyed {
+		t.Fatalf("status = %s, want destroyed", after.Status)
+	}
+	// lab.instance.stopped 事件写入且 payload 标记 source=admin。
+	var events []model.Event
+	gdb.Where("type = ? AND payload LIKE ?", model.EventLabStopped, "%admin%").Find(&events)
+	if len(events) != 1 {
+		t.Fatalf("admin-sourced stop events = %d, want 1", len(events))
+	}
+	// 不存在的实例：404 语义（api 层将 gorm.ErrRecordNotFound 映射为 404）。
+	if err := env.AdminDestroyInstance(ctx, 9999); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing instance should get record-not-found, got %v", err)
 	}
 }

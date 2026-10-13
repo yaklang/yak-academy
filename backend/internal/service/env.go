@@ -52,6 +52,7 @@ const (
 type EnvService struct {
 	instances  repo.LabInstanceRepo
 	challenges repo.ChallengeRepo
+	users      repo.UserRepo
 	events     repo.EventRepo
 	bus        *eventbus.Bus
 	driver     InstanceDriver
@@ -59,9 +60,10 @@ type EnvService struct {
 	now func() time.Time
 }
 
-func NewEnvService(instances repo.LabInstanceRepo, challenges repo.ChallengeRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
+func NewEnvService(instances repo.LabInstanceRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
 	return &EnvService{
-		instances: instances, challenges: challenges, events: events, bus: bus,
+		instances: instances, challenges: challenges, users: users,
+		events: events, bus: bus,
 		driver: d, now: time.Now,
 	}
 }
@@ -142,6 +144,74 @@ func (s *EnvService) DestroyInstance(ctx context.Context, userID, challengeID ui
 // GetInstance 查询本人实例状态（无实例返回 nil，不报错）。
 func (s *EnvService) GetInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
 	return s.instances.FindActive(ctx, userID, challengeID)
+}
+
+// AdminLabInstance 管理端容器面板条目：LabInstance + 用户/题目富化。
+type AdminLabInstance struct {
+	model.LabInstance
+	Username        string `json:"username"`
+	ChallengeTitle  string `json:"challenge_title"`
+	RoomSlug        string `json:"room_slug"`
+}
+
+// ListInstances 全量实例分页（管理端容器面板；批量富化用户名与题目名）。
+func (s *EnvService) ListInstances(ctx context.Context, offset, limit int) ([]AdminLabInstance, int64, error) {
+	list, total, err := s.instances.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	userIDs := make([]uint, 0, len(list))
+	chalIDs := make([]uint, 0, len(list))
+	for _, inst := range list {
+		userIDs = append(userIDs, inst.UserID)
+		chalIDs = append(chalIDs, inst.ChallengeID)
+	}
+	users, err := s.users.FindByIDs(ctx, userIDs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	userName := make(map[uint]string, len(users))
+	for _, u := range users {
+		userName[u.ID] = u.Username
+	}
+	chals, err := s.challenges.FindByIDs(ctx, chalIDs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	chalTitle := make(map[uint]model.Challenge, len(chals))
+	for _, c := range chals {
+		chalTitle[c.ID] = c
+	}
+	out := make([]AdminLabInstance, 0, len(list))
+	for _, inst := range list {
+		item := AdminLabInstance{LabInstance: inst, Username: userName[inst.UserID]}
+		if c, ok := chalTitle[inst.ChallengeID]; ok {
+			item.ChallengeTitle = c.Title
+			item.RoomSlug = c.RoomSlug
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+// AdminDestroyInstance 管理员强制销毁任意实例（管理端容器面板）。
+// 与属主销毁同语义：driver.Destroy → destroyed → lab.instance.stopped 事件
+// （payload 加 source=admin 区分，event-sourcing-rules skill：append-only）。
+func (s *EnvService) AdminDestroyInstance(ctx context.Context, instanceID uint) error {
+	inst, err := s.instances.FindByID(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if err := s.driver.Destroy(ctx, inst.ID); err != nil {
+		return err
+	}
+	if err := s.instances.UpdateStatus(ctx, inst.ID, model.InstanceDestroyed); err != nil {
+		return err
+	}
+	s.appendEvent(ctx, inst.UserID, model.EventLabStopped, map[string]any{
+		"instance_id": inst.ID, "challenge_id": inst.ChallengeID, "source": "admin",
+	})
+	return nil
 }
 
 // StartReaper 后台回收循环：定时清理过期 running 实例。

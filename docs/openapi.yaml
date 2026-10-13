@@ -134,6 +134,33 @@ components:
         endpoint: { type: string, description: 实例访问地址 }
         expire_at: { type: string, description: TTL 过期时间（RFC3339，UTC） }
         created_at: { type: string }
+    TrainingItem:
+      type: object
+      description: 训练场题目条目（跨 Topic 的全量 Challenge 视角）
+      properties:
+        id: { type: integer, description: challenge_id }
+        room_slug: { type: string }
+        room_title: { type: string }
+        topic_slug: { type: string }
+        title: { type: string }
+        difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+        score: { type: integer }
+        solved: { type: boolean, description: 当前用户是否已通关 }
+        has_env: { type: boolean, description: 是否有容器环境（lab.yaml env 段） }
+    AdminLabInstance:
+      type: object
+      description: 管理端容器实例条目（LabInstance + 用户/题目富化）
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        username: { type: string }
+        challenge_id: { type: integer }
+        challenge_title: { type: string }
+        room_slug: { type: string }
+        status: { type: string, enum: [creating, running, stopped, destroyed] }
+        endpoint: { type: string }
+        expire_at: { type: string }
+        created_at: { type: string }
 
   responses:
     ErrorResp:
@@ -326,6 +353,25 @@ paths:
               schema: { $ref: '#/components/schemas/Submission' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /challenges:
+    get:
+      tags: [student]
+      summary: 训练场题目列表（跨 Topic 全量，含当前用户 solved/has_env）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/TrainingItem' } }
+
   /learning-paths:
     get:
       tags: [student]
@@ -511,6 +557,44 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/lab-instances:
+    get:
+      tags: [admin]
+      summary: 全部 Lab 容器实例（分页，含用户/题目富化）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AdminLabInstance' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/lab-instances/{id}:
+    delete:
+      tags: [admin]
+      summary: 强制销毁实例（写 lab.instance.stopped 事件，payload source=admin）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/users:
     get:
