@@ -287,7 +287,7 @@ func (h *Handlers) uploadChallenges(w http.ResponseWriter, req *http.Request) {
 // adminListChallenges 管理端：题目全量列表（题目管理表格）。
 func (h *Handlers) adminListChallenges(w http.ResponseWriter, req *http.Request) {
 	page, pageSize := pageParams(req)
-	items, total, err := h.Challenge.AdminListChallenges(req.Context(), (page-1)*pageSize, pageSize)
+	items, total, err := h.Topics.AdminListChallenges(req.Context(), (page-1)*pageSize, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return

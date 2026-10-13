@@ -186,6 +186,38 @@ func (s *TopicService) ListTraining(ctx context.Context, userID uint, offset, li
 	return items, total, nil
 }
 
+// AdminChallengeItem 题目管理表格条目：TrainingItem + 描述（管理端可看全量，
+// solved 语义属于学生进度，置零值）。
+type AdminChallengeItem struct {
+	TrainingItem
+	DescriptionMD string `json:"description_md"`
+}
+
+// AdminListChallenges 管理端：题目全量列表（分页，含 has_env 与教程关联富化）。
+func (s *TopicService) AdminListChallenges(ctx context.Context, offset, limit int) ([]AdminChallengeItem, int64, error) {
+	chals, total, err := s.challenges.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]AdminChallengeItem, 0, len(chals))
+	for _, c := range chals {
+		items = append(items, AdminChallengeItem{
+			TrainingItem: toTrainingItem(c), DescriptionMD: c.Description,
+		})
+	}
+	flat := make([]TrainingItem, len(items))
+	for i, it := range items {
+		flat[i] = it.TrainingItem
+	}
+	if err := s.enrichTutorial(ctx, flat); err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		items[i].TrainingItem = flat[i]
+	}
+	return items, total, nil
+}
+
 // GetChallengeDetail 题目详情：描述 + hints + solved + 关联教程。
 func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug string) (*ChallengeDetail, error) {
 	chal, err := s.challenges.FindBySlug(ctx, slug)

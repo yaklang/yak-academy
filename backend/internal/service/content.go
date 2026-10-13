@@ -593,11 +593,6 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	return nil
 }
 
-// AdminListChallenges 题目全量列表（管理端题目管理表格，分页）。
-func (s *ChallengeService) AdminListChallenges(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error) {
-	return s.challenges.List(ctx, offset, limit)
-}
-
 // DeleteChallenge 删除题目（级联删 flags/hints）。
 func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) error {
 	return s.challenges.Delete(ctx, slug)
