@@ -220,13 +220,13 @@ components:
           type: string
           enum: [shared, instance]
           default: shared
-          description: shared=题目级共享 flag；instance=每容器实例唯一（模板含 {token}，须有 env）
+          description: "shared=题目级共享 flag；instance=每容器实例唯一（模板含 {token}，须有 env）"
         challenge:
           type: object
           required: [type, flag]
           properties:
             type: { type: string, enum: [static, regex] }
-            flag: { type: string, description: instance 模式下为含 {token} 的模板 }
+            flag: { type: string, description: "instance 模式下为含 {token} 的模板" }
         env:
           type: object
           description: 容器环境（image/port 要么都填要么都不填）
