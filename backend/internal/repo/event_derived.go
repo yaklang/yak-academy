@@ -24,6 +24,15 @@ func (r *eventRepo) ListAfter(ctx context.Context, afterID uint, limit int) ([]m
 	return list, err
 }
 
+func (r *eventRepo) HasHintUnlocked(ctx context.Context, userID, hintID uint) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Event{}).
+		Where("user_id = ? AND type = ? AND json_extract(payload, '$.hint_id') = ?",
+			userID, model.EventHintUnlocked, hintID).
+		Count(&n).Error
+	return n > 0, err
+}
+
 type scoreRepo struct{ db *gorm.DB }
 
 func NewScoreRepo(db *gorm.DB) ScoreRepo { return &scoreRepo{db} }
@@ -86,4 +95,12 @@ func (r *progressRepo) Stats(ctx context.Context, userID uint) (completed, inPro
 			SUM(CASE WHEN completed THEN 0 ELSE 1 END) AS in_progress`).
 		Where("user_id = ?", userID).Scan(&row).Error
 	return int(row.Completed), int(row.InProgress), err
+}
+
+func (r *progressRepo) ListCompletedSlugs(ctx context.Context, userID uint) ([]string, error) {
+	var slugs []string
+	err := r.db.WithContext(ctx).Model(&model.Progress{}).
+		Where("user_id = ? AND completed = ?", userID, true).
+		Pluck("room_slug", &slugs).Error
+	return slugs, err
 }

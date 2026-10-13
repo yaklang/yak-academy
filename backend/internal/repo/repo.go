@@ -50,6 +50,8 @@ type ChallengeRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
+	// FindHint 按 hint 主键查（解锁接口用）。
+	FindHint(ctx context.Context, hintID uint) (*model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
 	// Delete 删除题目（级联删 flags/hints，事务内）。
 	Delete(ctx context.Context, slug string) error
@@ -84,6 +86,8 @@ type EventRepo interface {
 	// Append 是 Event 表唯一允许的写操作（append-only，event-sourcing-rules skill）。
 	Append(ctx context.Context, ev *model.Event) error
 	ListAfter(ctx context.Context, afterID uint, limit int) ([]model.Event, error)
+	// HasHintUnlocked 是否已写过 hint.unlocked（解锁幂等判定）。
+	HasHintUnlocked(ctx context.Context, userID, hintID uint) (bool, error)
 }
 
 type ScoreRepo interface {
@@ -99,6 +103,17 @@ type ProgressRepo interface {
 	// MarkInProgress 记录"开始学但未完成"（Room 首次浏览时创建 completed=false 行，幂等）。
 	MarkInProgress(ctx context.Context, userID uint, roomSlug string) error
 	Stats(ctx context.Context, userID uint) (completed int, inProgress int, err error)
+	// ListCompletedSlugs 当前用户已完成的 Room slug 集合（学习路径进度用）。
+	ListCompletedSlugs(ctx context.Context, userID uint) ([]string, error)
+}
+
+// PathRepo 学习路径：PathItem 只引用 room_slug（teaching-integration skill）。
+type PathRepo interface {
+	List(ctx context.Context) ([]model.LearningPath, error)
+	FindByID(ctx context.Context, id uint) (*model.LearningPath, error)
+	ListItems(ctx context.Context, pathID uint) ([]model.PathItem, error)
+	Create(ctx context.Context, path *model.LearningPath, items []model.PathItem) error
+	Delete(ctx context.Context, id uint) error
 }
 
 type LabInstanceRepo interface {

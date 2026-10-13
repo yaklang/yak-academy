@@ -71,7 +71,11 @@ func mapError(w http.ResponseWriter, err error) {
 	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, service.ErrNotFound):
 		writeError(w, errNotFound)
 	case errors.Is(err, service.ErrValidation):
-		writeError(w, errValidation)
+		msg := err.Error()
+		if msg == "" || msg == service.ErrValidation.Error() {
+			msg = errValidation.Message
+		}
+		writeError(w, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity, msg})
 	case isInstanceConflict(err):
 		writeConflict(w, err)
 	case service.IsNotImplemented(err):

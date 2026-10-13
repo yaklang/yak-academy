@@ -105,6 +105,26 @@ function submit() {
   submitPoll(challenge.value.slug, answer.value)
 }
 
+const unlockingId = ref<number | null>(null)
+
+async function unlockHint(hintId: number) {
+  if (!challenge.value) return
+  unlockingId.value = hintId
+  try {
+    const res = await trainingApi.unlockHint(slug(), hintId)
+    const h = challenge.value.hints.find((x) => x.id === hintId)
+    if (h) {
+      h.unlocked = true
+      h.content = res.content
+    }
+    ElMessage.success(res.cost > 0 ? `已解锁，扣除 ${res.cost} 分（剩余 ${res.score}）` : '已解锁')
+  } catch (e) {
+    ElMessage.error(`解锁失败：${(e as Error).message}`)
+  } finally {
+    unlockingId.value = null
+  }
+}
+
 function difficultyType(d: ChallengeDetail['difficulty']) {
   return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
 }
@@ -134,12 +154,26 @@ onMounted(load)
     <div class="description" v-html="renderedDescription" />
 
     <el-collapse v-if="challenge.hints.length" class="hints">
-      <el-collapse-item v-for="(h, i) in challenge.hints" :key="i">
+      <el-collapse-item v-for="h in challenge.hints" :key="h.id" :name="h.id">
         <template #title>
           <span class="hint-title">{{ h.title }}</span>
-          <el-tag size="small" type="warning" class="cost">提示 -{{ h.cost }} 分</el-tag>
+          <el-tag v-if="h.unlocked" size="small" type="success" class="cost">已解锁</el-tag>
+          <el-tag v-else size="small" type="warning" class="cost">
+            {{ h.cost > 0 ? `解锁 -${h.cost} 分` : '免费解锁' }}
+          </el-tag>
         </template>
-        <p class="hint-content">{{ h.content }}</p>
+        <template v-if="h.unlocked">
+          <p class="hint-content">{{ h.content }}</p>
+        </template>
+        <div v-else class="hint-locked">
+          <p class="hint-locked-text">提示内容已折叠，解锁后可见。</p>
+          <el-button
+            type="warning"
+            size="small"
+            :loading="unlockingId === h.id"
+            @click.stop="unlockHint(h.id)"
+          >{{ h.cost > 0 ? `花费 ${h.cost} 分解锁` : '解锁提示' }}</el-button>
+        </div>
       </el-collapse-item>
     </el-collapse>
 
@@ -199,6 +233,8 @@ onMounted(load)
 .hint-title { margin-right: 0.6rem; }
 .cost { margin-left: 0.3rem; }
 .hint-content { margin: 0; color: var(--el-text-color-regular); }
+.hint-locked { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+.hint-locked-text { margin: 0; color: var(--el-text-color-secondary); font-size: 0.9rem; }
 .solve { max-width: 640px; }
 .instance-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
 .endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }

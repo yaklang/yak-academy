@@ -103,9 +103,15 @@ type completedPayload struct {
 	RoomSlug string `json:"room_slug"`
 }
 
+// hintUnlockedPayload hint.unlocked 事件的 payload 结构。
+type hintUnlockedPayload struct {
+	HintID uint `json:"hint_id"`
+	Cost   int  `json:"cost"`
+}
+
 // Handle 实现事件消费。仅处理计分/进度相关事件。
 // 派生操作幂等性依赖：UpdateScore 只在 score>0 时调用（重复 correct 事件 score=0 天然跳过）；
-// MarkCompleted 幂等（FirstOrCreate）。
+// MarkCompleted 幂等（FirstOrCreate）；hint 扣分由解锁接口保证事件只写一次。
 func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 	switch ev.Type {
 	case model.EventSubmissionJudged:
@@ -119,6 +125,18 @@ func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 		}
 		if err := d.scores.UpdateScore(ctx, ev.UserID, p.Score, 1); err != nil {
 			log.Printf("deriver: update score: %v", err)
+		}
+	case model.EventHintUnlocked:
+		var p hintUnlockedPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			log.Printf("deriver: bad hint.unlocked payload: %v", err)
+			return
+		}
+		if p.Cost <= 0 {
+			return // 免费提示不改积分
+		}
+		if err := d.scores.UpdateScore(ctx, ev.UserID, -p.Cost, 0); err != nil {
+			log.Printf("deriver: deduct hint cost: %v", err)
 		}
 	case model.EventRoomCompleted:
 		var p completedPayload

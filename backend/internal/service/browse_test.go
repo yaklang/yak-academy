@@ -48,7 +48,7 @@ func newTrainingTestService(t *testing.T) (*TopicService, *gorm.DB) {
 		t.Fatal(err)
 	}
 	svc := NewTopicService(
-		repo.NewTopicRepo(gdb), roomRepo, chalRepo, repo.NewSubmissionRepo(gdb),
+		repo.NewTopicRepo(gdb), roomRepo, chalRepo, repo.NewSubmissionRepo(gdb), repo.NewEventRepo(gdb),
 	)
 	return svc, gdb
 }

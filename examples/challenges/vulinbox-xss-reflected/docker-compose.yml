@@ -1,0 +1,6 @@
+# CTFd 本地开发常用 compose；平台运行时按 challenge.yml 的 image/port 单容器拉起。
+services:
+  challenge:
+    build: .
+    ports:
+      - "8787:8787"

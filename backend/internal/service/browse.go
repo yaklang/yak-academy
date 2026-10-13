@@ -17,10 +17,11 @@ type TopicService struct {
 	rooms       repo.RoomRepo
 	challenges  repo.ChallengeRepo
 	submissions repo.SubmissionRepo
+	events      repo.EventRepo
 }
 
-func NewTopicService(t repo.TopicRepo, r repo.RoomRepo, c repo.ChallengeRepo, sub repo.SubmissionRepo) *TopicService {
-	return &TopicService{topics: t, rooms: r, challenges: c, submissions: sub}
+func NewTopicService(t repo.TopicRepo, r repo.RoomRepo, c repo.ChallengeRepo, sub repo.SubmissionRepo, ev repo.EventRepo) *TopicService {
+	return &TopicService{topics: t, rooms: r, challenges: c, submissions: sub, events: ev}
 }
 
 type TopicSummary struct {
@@ -119,11 +120,11 @@ type TrainingItem struct {
 	TutorialTopicSlug string `json:"tutorial_topic_slug"`
 }
 
-// ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints。
+// ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints（未解锁正文为空）。
 type ChallengeDetail struct {
 	TrainingItem
-	DescriptionMD string        `json:"description_md"`
-	Hints          []model.Hint  `json:"hints"`
+	DescriptionMD string     `json:"description_md"`
+	Hints         []HintView `json:"hints"`
 }
 
 // enrichTutorial 批量拼关联教程 Room 的标题（tutorial_slug → room 元数据）。
@@ -218,7 +219,7 @@ func (s *TopicService) AdminListChallenges(ctx context.Context, offset, limit in
 	return items, total, nil
 }
 
-// GetChallengeDetail 题目详情：描述 + hints + solved + 关联教程。
+// GetChallengeDetail 题目详情：描述 + hints（按解锁态脱敏）+ solved + 关联教程。
 func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug string) (*ChallengeDetail, error) {
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
@@ -228,11 +229,19 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 	if err != nil {
 		return nil, err
 	}
-	detail := &ChallengeDetail{TrainingItem: toTrainingItem(*chal), Hints: hints}
-	if hints == nil {
-		detail.Hints = []model.Hint{}
+	unlocked := map[uint]bool{}
+	for _, h := range hints {
+		ok, err := s.events.HasHintUnlocked(ctx, userID, h.ID)
+		if err != nil {
+			return nil, err
+		}
+		unlocked[h.ID] = ok
 	}
-	detail.DescriptionMD = chal.Description
+	detail := &ChallengeDetail{
+		TrainingItem:  toTrainingItem(*chal),
+		Hints:         toHintViews(hints, unlocked),
+		DescriptionMD: chal.Description,
+	}
 	if solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID); err == nil {
 		detail.Solved = solved
 	}

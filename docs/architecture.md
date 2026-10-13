@@ -73,12 +73,12 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 ### 3.3 challenge — 题目域（独立资源）
 
-- 题目以自有 `slug` 为主键入口，管理员经 challenge.json（固定格式 JSON，单对象或数组）上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
+- 题目以自有 `slug` 为主键入口，管理员经 CTFd 风格题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
 - `category` 为自由分类 slug（训练场分组键）；`description_md` 承载背景与任务目标。
 - Challenge 多态 `type` 列（v1：static / regex flag）。
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。
-- Hint 扣分解锁（写 `hint.unlocked` 事件；v1 详情页直接展示，扣分机制待事件溯源迭代）。
+- Hint 扣分解锁：详情页折叠；`POST .../hints/{id}/unlock` 写 `hint.unlocked` 事件，派生器扣分；未解锁正文不返回。
 
 ### 3.4 judge — 异步判题
 

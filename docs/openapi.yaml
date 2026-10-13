@@ -185,15 +185,30 @@ components:
             description_md: { type: string, description: 题目描述 Markdown（背景/任务目标） }
             hints:
               type: array
-              items:
-                type: object
-                properties:
-                  title: { type: string }
-                  content: { type: string }
-                  cost: { type: integer }
+              items: { $ref: '#/components/schemas/HintView' }
+    HintView:
+      type: object
+      description: 提示视图。未解锁时 content 为空字符串；解锁后返回正文。
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        content: { type: string, description: 未解锁时为空 }
+        cost: { type: integer, description: 解锁扣减积分（0 = 免费仍需点解锁） }
+        unlocked: { type: boolean }
+    HintUnlockResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        content: { type: string }
+        cost: { type: integer }
+        unlocked: { type: boolean, enum: [true] }
+        score: { type: integer, description: 解锁后的当前积分 }
     ChallengeJSON:
       type: object
-      description: 题目定义 JSON（管理员上传的固定格式，单对象或对象数组）
+      description: |
+        题目定义 JSON（兼容批量导入的固定格式，单对象或对象数组）。
+        带容器环境的题目推荐改用 challenge 包 zip（challenge.yml + Dockerfile + docker-compose.yml）。
       required: [slug, title, category, difficulty, score, challenge]
       properties:
         slug: { type: string }
@@ -223,6 +238,11 @@ components:
               content: { type: string }
               cost: { type: integer }
         tutorial_slug: { type: string, description: 关联教程 Room slug（可选） }
+    ChallengePackageUpload:
+      type: object
+      description: |
+        CTFd 风格题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
+        详见 content-package-spec skill。
     AdminLabInstance:
       type: object
       description: 管理端容器实例条目（LabInstance + 用户/题目富化）
@@ -421,6 +441,26 @@ paths:
               schema: { $ref: '#/components/schemas/ChallengeDetail' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /challenges/{slug}/hints/{hintId}/unlock:
+    post:
+      tags: [student]
+      summary: 扣分解锁提示（写 hint.unlocked 事件；已解锁则幂等返回正文）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: hintId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HintUnlockResponse' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422':
+          description: 积分不足或其他校验失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /submissions:
     post:
       tags: [student]
@@ -474,7 +514,7 @@ paths:
   /learning-paths:
     get:
       tags: [student]
-      summary: 学习路径列表
+      summary: 学习路径列表（含当前用户各节点完成态）
       responses:
         '200':
           description: OK
@@ -496,6 +536,52 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LearningPath' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/learning-paths:
+    post:
+      tags: [admin]
+      summary: 创建学习路径（PathItem 只引用 room_slug，禁止内联 Room 内容）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, items]
+              properties:
+                title: { type: string }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [order, room_slug]
+                    properties:
+                      order: { type: integer }
+                      room_slug: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearningPath' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/learning-paths/{id}:
+    delete:
+      tags: [admin]
+      summary: 删除学习路径（级联 PathItem）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
   /progress:
@@ -685,7 +771,7 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
     post:
       tags: [admin]
-      summary: 上传题目定义 JSON（单个对象或对象数组，upsert 生效）
+      summary: 上传题目定义 JSON（单个对象或对象数组，upsert 生效；无容器题目可用）
       requestBody:
         required: true
         content:
@@ -698,6 +784,34 @@ paths:
       responses:
         '200':
           description: OK（返回导入数量与 slugs）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported: { type: integer }
+                  slugs: { type: array, items: { type: string } }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges/package:
+    post:
+      tags: [admin]
+      summary: 上传 CTFd 风格题目包 zip（必含 challenge.yml；有容器时必含 Dockerfile + docker-compose.yml）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [package]
+              properties:
+                package:
+                  type: string
+                  format: binary
+                  description: 题目包 zip
+      responses:
+        '200':
+          description: OK（upsert 单题）
           content:
             application/json:
               schema:

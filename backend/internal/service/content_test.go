@@ -34,7 +34,7 @@ func newContentTestService(t *testing.T) (*ContentService, *gorm.DB) {
 		repo.NewContentPackageRepo(gdb),
 		repo.NewTopicRepo(gdb),
 		repo.NewRoomRepo(gdb),
-		NewChallengeService(repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb)),
+		NewChallengeService(repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb), repo.NewEventRepo(gdb), repo.NewScoreRepo(gdb), nil),
 	)
 	return svc, gdb
 }
@@ -468,5 +468,133 @@ func TestArchiveFreezesPackage(t *testing.T) {
 	}
 	if _, err := svc.Rollback(ctx, pkg.ID, versions[1].ID); err == nil {
 		t.Fatal("rollback after archive should be rejected")
+	}
+}
+
+// vulinboxChallengePackageFiles 内存构造 CTFd 风格题目包（对齐 examples/challenges/vulinbox-xss-reflected，
+// 测试不读仓库文件，避免无内置内容原则与样例耦合）。
+func vulinboxChallengePackageFiles() map[string]string {
+	return map[string]string{
+		"vulinbox-xss-reflected/challenge.yml": `slug: vulinbox-xss-reflected
+name: Vulinbox 反射型 XSS
+category: xss
+difficulty: apprentice
+description: |
+  参考 Yaklang Vulinbox（默认 :8787）的 xss/echo 场景。
+  向 name 参数注入脚本，拿到页面中的 flag。
+value: 100
+type: static
+flags:
+  - flag{vulinbox-xss-reflected}
+image: .
+port: 8787
+protocol: http
+hints:
+  - title: 参数入口
+    content: 关注 /xss/echo?name=
+    cost: 10
+  - title: 载荷
+    content: 试试 <script>alert(1)</script>
+    cost: 20
+`,
+		"vulinbox-xss-reflected/Dockerfile": `FROM python:3.12-alpine
+WORKDIR /app
+COPY src/ /app/
+EXPOSE 8787
+CMD ["python", "server.py"]
+`,
+		"vulinbox-xss-reflected/docker-compose.yml": `services:
+  challenge:
+    build: .
+    ports:
+      - "8787:8787"
+`,
+		"vulinbox-xss-reflected/src/server.py": `from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+
+FLAG = "flag{vulinbox-xss-reflected}"
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = parse_qs(urlparse(self.path).query)
+        name = q.get("name", [""])[0]
+        body = f"<html><body><p>Hello {name}</p><!-- {FLAG} --></body></html>".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+
+HTTPServer(("0.0.0.0", 8787), H).serve_forever()
+`,
+	}
+}
+
+func TestUploadChallengePackageVulinboxSample(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	imported, slugs, err := svc.UploadChallengePackage(ctx, buildZip(t, vulinboxChallengePackageFiles()))
+	if err != nil {
+		t.Fatalf("upload package: %v", err)
+	}
+	if imported != 1 || len(slugs) != 1 || slugs[0] != "vulinbox-xss-reflected" {
+		t.Fatalf("imported=%d slugs=%v", imported, slugs)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "vulinbox-xss-reflected").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chal.Image != "yak-academy/vulinbox-xss-reflected:latest" || chal.Port != 8787 {
+		t.Fatalf("env = %s:%d", chal.Image, chal.Port)
+	}
+	if chal.Category != "xss" || chal.Difficulty != model.DifficultyApprentice || chal.Score != 100 {
+		t.Fatalf("meta = %+v", chal)
+	}
+	var hints int64
+	gdb.Model(&model.Hint{}).Where("challenge_id = ?", chal.ID).Count(&hints)
+	if hints != 2 {
+		t.Fatalf("hints=%d, want 2", hints)
+	}
+	var flags int64
+	gdb.Model(&model.Flag{}).Where("challenge_id = ?", chal.ID).Count(&flags)
+	if flags != 1 {
+		t.Fatalf("flags=%d, want 1", flags)
+	}
+}
+
+func TestUploadChallengePackageRequiresYMLAndContainerFiles(t *testing.T) {
+	svc, _ := newContentTestService(t)
+	ctx := context.Background()
+	// 缺 challenge.yml
+	if _, _, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
+		"Dockerfile": "FROM scratch\n",
+	})); err == nil {
+		t.Fatal("expected reject without challenge.yml")
+	}
+	// 有 image 但缺 Dockerfile
+	if _, _, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
+		"challenge.yml": "slug: a\nname: A\ncategory: web\ndifficulty: apprentice\nvalue: 10\ntype: static\nflags: [flag{a}]\nimage: nginx:alpine\nport: 80\n",
+		"docker-compose.yml": "services: {a: {image: nginx:alpine}}\n",
+	})); err == nil {
+		t.Fatal("expected reject without Dockerfile")
+	}
+	// 有 image 但缺 compose
+	if _, _, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
+		"challenge.yml": "slug: b\nname: B\ncategory: web\ndifficulty: apprentice\nvalue: 10\ntype: static\nflags: [flag{b}]\nimage: nginx:alpine\nport: 80\n",
+		"Dockerfile":     "FROM nginx:alpine\n",
+	})); err == nil {
+		t.Fatal("expected reject without docker-compose.yml")
+	}
+	// 无容器：仅 challenge.yml 即可
+	imported, slugs, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
+		"challenge.yml": "slug: static-only\nname: 静态题\ncategory: misc\ndifficulty: apprentice\nvalue: 50\ntype: static\nflags:\n  - flag{static}\n",
+	}))
+	if err != nil {
+		t.Fatalf("static-only package: %v", err)
+	}
+	if imported != 1 || slugs[0] != "static-only" {
+		t.Fatalf("imported=%d slugs=%v", imported, slugs)
 	}
 }

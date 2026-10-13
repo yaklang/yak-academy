@@ -18,12 +18,13 @@ type Handlers struct {
 	Judge     *service.JudgeService
 	Progress  *service.UserProgressService
 	Topics    *service.TopicService
+	Paths     *service.PathService
 	Env       *service.EnvService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, paths *service.PathService, env *service.EnvService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Paths: paths, Env: env}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -43,6 +44,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodDelete, "/api/v1/challenges/{slug}/instance", "", h.destroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
+	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -60,7 +62,10 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/rollback", "admin", h.rollbackPackage)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges", "teacher", h.adminListChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
+	r.Handle(http.MethodPost, "/api/v1/admin/learning-paths", "admin", h.createPath)
+	r.Handle(http.MethodDelete, "/api/v1/admin/learning-paths/{id}", "admin", h.deletePath)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/active", "admin", h.listActiveInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
@@ -239,11 +244,73 @@ func (h *Handlers) destroyInstance(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "list learning paths"})
+	user := UserFrom(req.Context())
+	items, err := h.Paths.List(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handlers) getPath(w http.ResponseWriter, req *http.Request) {
-	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented, "get learning path"})
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	path, err := h.Paths.Get(req.Context(), user.ID, uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, path)
+}
+
+func (h *Handlers) createPath(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Title string                 `json:"title"`
+		Items []service.PathItemView `json:"items"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	path, err := h.Paths.Create(req.Context(), body.Title, body.Items)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, path)
+}
+
+func (h *Handlers) deletePath(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Paths.Delete(req.Context(), uint(id)); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (h *Handlers) unlockHint(w http.ResponseWriter, req *http.Request) {
+	hintID, err := strconv.ParseUint(req.PathValue("hintId"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	res, err := h.Challenge.UnlockHint(req.Context(), user.ID, req.PathValue("slug"), uint(hintID))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // listChallenges 训练场列表（跨分类全量题目，当前用户视角）。
@@ -279,6 +346,35 @@ func (h *Handlers) uploadChallenges(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	imported, slugs, err := h.Content.UploadChallenges(req.Context(), raw)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
+}
+
+// uploadChallengePackage 管理端：上传 CTFd 风格题目包 zip（challenge.yml + 容器文件）。
+func (h *Handlers) uploadChallengePackage(w http.ResponseWriter, req *http.Request) {
+	if err := req.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	file, _, err := req.FormFile("package")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxPackageSize+1))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	if len(data) > maxPackageSize {
+		writeError(w, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity, "package exceeds 50MB limit"})
+		return
+	}
+	imported, slugs, err := h.Content.UploadChallengePackage(req.Context(), data)
 	if err != nil {
 		mapError(w, err)
 		return

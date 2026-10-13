@@ -94,9 +94,13 @@ FE                API middleware                    handler            SVC
 - 判定顺序：全局角色 → 课程级角色；admin 短路。
 - 401（未登录/token 失效）与 403（角色不足）严格区分，统一错误信封 `{"error":{"code","message"}}`。
 
-## 5. Hint 解锁流（远期）
+## 5. Hint 解锁流
 
 ```
-POST /challenges/{slug}/hints/{hintId}/unlock → 校验积分够扣 → 写 hint.unlocked 事件
-→ 派生器扣减 ScoreRecord → 返回 hint 内容
+POST /challenges/{slug}/hints/{hintId}/unlock
+  → 校验 hint 属于该题、积分够扣（已解锁则幂等返回）
+  → 写 hint.unlocked 事件（append-only）
+  → 派生器扣减 ScoreRecord（cost>0）
+  → 返回 hint 正文 + 当前积分
+题目详情 GET /challenges/{slug}：未解锁 hint 的 content 置空，仅返回 id/title/cost/unlocked。
 ```
