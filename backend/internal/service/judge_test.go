@@ -232,7 +232,7 @@ func TestJudgeQueueFullStillAccepted(t *testing.T) {
 	if sub.Status != model.SubmissionPending {
 		t.Fatalf("status = %s, want pending", sub.Status)
 	}
-	// 排空队列启动 worker：补偿扫描应把滞留记录判定完结。
+	// 排空队列启动 worker：pending 轮询兜底把滞留记录判定完结。
 	env.judge.queue = make(chan uint, 256)
 	env.judge.StartWorker(ctx)
 	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
@@ -248,9 +248,49 @@ func TestJudgeWorkerRecoversStrandedPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 重启 worker：recoverPending 扫描入队并判定。
+	// 重启 worker：即时 pending 扫描入队并判定。
 	env.judge.StartWorker(ctx)
 	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
 		t.Fatalf("status = %s, want correct", got)
+	}
+}
+
+func TestJudgePollRecoversDirectDBPending(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	// 不经 Submit 直接落库 pending（模拟外部写入/重启前残留）：
+	// 轮询兜底应扫描到并判定完结。
+	sub := &model.Submission{
+		UserID: 3, ChallengeID: env.chalID(t, "room-static"),
+		Answer: "flag{static}", Status: model.SubmissionPending,
+	}
+	if err := env.gdb.Create(sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	env.judge.requeuePending(ctx)
+	env.judge.StartWorker(context.Background()) // 空转 consume（pending 已投递）
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("status = %s, want correct", got)
+	}
+}
+
+func TestJudgeIdempotentGuardOnDoubleDelivery(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	sub, err := env.judge.Submit(ctx, 9, env.chalID(t, "room-static"), "flag{static}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 快路径与轮询同时投递（双入队）：同步调 judge 两次。
+	env.judge.judge(ctx, sub.ID)
+	env.judge.judge(ctx, sub.ID)
+	// submission.judged 事件只产生一次（无重复计分事件）。
+	var judged int64
+	env.gdb.Model(&model.Event{}).Where("type = ?", model.EventSubmissionJudged).Count(&judged)
+	if judged != 1 {
+		t.Fatalf("judged events = %d, want 1", judged)
+	}
+	if s := env.sub(t, sub.ID); s.Status != model.SubmissionCorrect || s.Score != 100 {
+		t.Fatalf("submission = %s/%d, want correct/100", s.Status, s.Score)
 	}
 }

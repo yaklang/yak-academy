@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -27,7 +28,9 @@ type JudgeService struct {
 	challenges  repo.ChallengeRepo
 	events      repo.EventRepo
 	bus         *eventbus.Bus
-	queue       chan uint // submission ID 队列（进程内）
+	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
+	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
+	queue chan uint
 }
 
 func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, ev repo.EventRepo, bus *eventbus.Bus) *JudgeService {
@@ -36,9 +39,7 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, ev repo.E
 		challenges:  chal,
 		events:      ev,
 		bus:         bus,
-		// 已知限制：进程内队列，容量 256；满时 Submit 报错但 submission 已落库
-		// （永远 pending）。换持久队列为 Phase 4 事项（架构文档演进路线）。
-		queue: make(chan uint, 256),
+		queue:       make(chan uint, 256),
 	}
 }
 
@@ -56,8 +57,7 @@ func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint
 	s.appendEvent(ctx, userID, model.EventSubmissionCreated, map[string]any{
 		"submission_id": sub.ID, "challenge_id": challengeID,
 	})
-	// 队列满不报错：submission 已落库，保持 pending，由 worker 启动时的
-	// pending 扫描补偿判定（与 deriver.Replay 同思路）。
+	// 队列满静默丢弃：submission 已落库（pending），由 pending 轮询兜底重投。
 	select {
 	case s.queue <- sub.ID:
 	default:
@@ -83,40 +83,59 @@ func (s *JudgeService) IsSolved(ctx context.Context, userID, challengeID uint) b
 	return err == nil && solved
 }
 
-// StartWorker 启动异步判题 worker。判定结果只通过 submission.judged 事件进入派生表。
-// 启动时先补偿扫描：把滞留 pending（队列满/崩溃窗口丢失）的 submission 重新入队。
-// judge 幂等：重复判定只覆盖同样的结果，不产生重复计分（HasCorrect 短路 score=0）。
+// StartWorker 启动异步判题 worker：消费 goroutine（进程内快路径）+ 轮询 goroutine
+// （Submission 表为持久队列，每 2s 扫描 pending 重投——重启/队列满丢失由此兜底）。
+// judge 幂等护栏：非 pending 的 submission 直接跳过，重复投递不产生重复判定/计分。
 func (s *JudgeService) StartWorker(ctx context.Context) {
-	s.recoverPending(ctx)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case id := <-s.queue:
-				s.judge(ctx, id)
-			}
-		}
-	}()
+	go s.consume(ctx)
+	go s.pollPending(ctx)
 }
 
-// recoverPending 扫描全部 pending submission 重新入队（worker 空闲时逐条处理）。
-func (s *JudgeService) recoverPending(ctx context.Context) {
+func (s *JudgeService) consume(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case id := <-s.queue:
+			s.judge(ctx, id)
+		}
+	}
+}
+
+// pollPending 先做一次即时扫描（覆盖重启滞留），之后按 2s 周期重投 pending。
+func (s *JudgeService) pollPending(ctx context.Context) {
+	s.requeuePending(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.requeuePending(ctx)
+		}
+	}
+}
+
+// requeuePending 扫描全部 pending submission 重新入队（judge 幂等，重复投递安全）。
+func (s *JudgeService) requeuePending(ctx context.Context) {
 	pending, err := s.submissions.ListPending(ctx)
 	if err != nil {
-		log.Printf("judge: recover pending: %v", err)
+		log.Printf("judge: requeue pending: %v", err)
 		return
 	}
 	for _, id := range pending {
 		select {
 		case s.queue <- id:
 		default:
-			return // 队列满则停止，下次重启再补偿
+			return // 队列满则本轮停止，下个周期继续
 		}
 	}
 }
 
 // judge 判定流程：
+//  0. 幂等护栏：重读 submission，status != pending 直接跳过（双投递/并发判定防护，
+//     保证 submission.judged 事件与计分只发生一次）
 //  1. 读 submission 与 challenge flags
 //  2. static 恒时比较（compareFlag）；regex 用 MatchString（恒时要求仅适用 static）
 //  3. 动态计分 value = max(initial - decay*n, minimum)
@@ -126,6 +145,9 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	if err != nil {
 		log.Printf("judge: load submission %d: %v", submissionID, err)
 		return
+	}
+	if sub.Status != model.SubmissionPending {
+		return // 已判定：幂等跳过
 	}
 	flags, err := s.challenges.FindFlags(ctx, sub.ChallengeID)
 	if err != nil {
