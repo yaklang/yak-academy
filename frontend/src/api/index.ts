@@ -64,6 +64,12 @@ export interface LearningPath {
   title: string
   items: LearningPathItem[]
 }
+// challenge.json 提示条目（上传格式：仅 title/content/cost；展示用 Hint 含 id/unlocked）。
+export interface ChallengeHintInput {
+  title: string
+  content: string
+  cost?: number
+}
 // 题目定义固定格式（challenge.json，管理员上传：单对象或数组）。
 export interface ChallengeJSON {
   slug: string
@@ -72,9 +78,11 @@ export interface ChallengeJSON {
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   description_md?: string
   score: number
+  // flag 作用域：shared=题目级共享（默认）；instance=每实例唯一（flag 为含 {token} 的模板，必须配 env）。
+  flag_mode?: 'shared' | 'instance'
   challenge: { type: 'static' | 'regex'; flag: string }
   env?: { image: string; port: number }
-  hints?: Hint[]
+  hints?: ChallengeHintInput[]
   tutorial_slug?: string
 }
 export interface AdminLabInstance {
