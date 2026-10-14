@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -350,5 +351,59 @@ func TestJudgeInstanceFlagRequiresRunning(t *testing.T) {
 	}
 	if got := env.waitStatus(t, after.ID); got != model.SubmissionIncorrect {
 		t.Fatalf("destroyed: status=%s, want incorrect", got)
+	}
+}
+
+// TestJudgeAutoSolveViaCheckpoint 检测点回调自动判定：哨兵提交判对、
+// 动态计分、与手动首通互斥（防重复通关）。
+func TestJudgeAutoSolveViaCheckpoint(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	ctx := context.Background()
+	id := env.chalID(t, "chal-static")
+	env.judge.StartWorker(ctx)
+	inst := &model.LabInstance{
+		UserID: 11, ChallengeID: id, Status: model.InstanceRunning,
+		CheckpointToken: "tok-abc123",
+	}
+	if err := env.gdb.Create(inst).Error; err != nil {
+		t.Fatal(err)
+	}
+	sub, err := env.judge.AutoSolve(ctx, inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.Status != model.SubmissionPending {
+		t.Fatalf("auto-solve should enqueue pending, got %s", sub.Status)
+	}
+	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
+		t.Fatalf("checkpoint auto-solve = %s, want correct", got)
+	}
+	if s := env.sub(t, sub.ID); s.Score != 100 {
+		t.Fatalf("auto-solve score = %d, want 100 (dynamic scoring applies)", s.Score)
+	}
+	// 重复回调（checker 重试）：再入队一条哨兵提交 → correct 但 0 分（防重复通关）。
+	again, err := env.judge.AutoSolve(ctx, inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.waitStatus(t, again.ID); got != model.SubmissionCorrect {
+		t.Fatalf("repeat auto-solve = %s, want correct", got)
+	}
+	if s := env.sub(t, again.ID); s.Score != 0 {
+		t.Fatalf("repeat auto-solve score = %d, want 0 (duplicate solve)", s.Score)
+	}
+}
+
+// TestJudgeSubmitRejectsSentinel 用户不得借提交接口伪造环境判定通过。
+func TestJudgeSubmitRejectsSentinel(t *testing.T) {
+	env := newJudgeTestEnv(t)
+	if _, err := env.judge.Submit(context.Background(), 1, env.chalID(t, "chal-static"), autoAnswer); !errors.Is(err, ErrValidation) {
+		t.Fatalf("sentinel answer must be rejected with ErrValidation, got %v", err)
+	}
+	// 队列里也不该有任何滞留哨兵提交。
+	var n int64
+	env.gdb.Model(&model.Submission{}).Where("answer = ?", autoAnswer).Count(&n)
+	if n != 0 {
+		t.Fatalf("sentinel submissions = %d, want 0", n)
 	}
 }

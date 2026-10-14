@@ -21,9 +21,13 @@ type LabInstance struct {
 	Endpoint    string         `json:"endpoint"`               // 实例访问地址
 	ExpireAt    time.Time      `gorm:"index" json:"expire_at"` // TTL 回收时间
 	// FlagValue 实例唯一 flag（flag_mode=instance 时写入；禁止出现在 API JSON）。
-	FlagValue string    `gorm:"size:512" json:"-"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	FlagValue string `gorm:"size:512" json:"-"`
+	// CheckpointToken 检测点回调令牌：实例创建时随机生成，注入容器
+	// CHECKPOINT_TOKEN/CHECKPOINT_URL；题目内 checker 持它 POST /checkpoints/{token}
+	// 触发自动判定（token 即能力凭证，无需 JWT；禁止出现在 API JSON）。
+	CheckpointToken string    `gorm:"size:64;index" json:"-"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // InstanceAction 实例生命周期动作（日志表）。

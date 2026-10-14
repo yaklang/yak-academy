@@ -54,6 +54,7 @@ function logout() {
       </span>
       <router-link v-if="canAdmin" to="/admin" class="admin-entry">进入管理端</router-link>
       <router-link to="/leaderboard" class="secondary">排行榜</router-link>
+      <router-link to="/badges" class="secondary">徽章</router-link>
       <span v-if="displayName" class="user">{{ displayName }}（{{ roleLabel }}）</span>
       <el-button v-if="auth.token" link @click="logout">登出</el-button>
     </el-header>

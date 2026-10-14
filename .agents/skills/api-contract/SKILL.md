@@ -38,7 +38,7 @@ description: yak-academy API 契约开发规范。新增或修改任何 HTTP 接
 
 ## 鉴权
 
-除 `POST /auth/login` 外全部需要 Bearer JWT（见 rbac-model skill 的角色声明）。
+除 `POST /auth/login` 与 `POST /checkpoints/{token}`（环境检测点回调，token 能力鉴权，见 rbac-model skill）外全部需要 Bearer JWT。
 
 ## 正反例
 

@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.2（Phase 2 最小闭环 + Phase 3 容器化大部分完成）
+> 版本：v0.3（Phase 2 最小闭环 + Phase 3 全部完成：容器化 + 自动判定 + 徽章）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -84,13 +84,14 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 - 提交接口只入队并返回 pending；worker 消费执行判定，写 `submission.judged` 事件。
 - 动态计分：`value = f(solve_count)`，linear / logarithmic 衰减，下限 minimum。
-- 远期：服务端自动判定（环境内检测点回调，参考 PortSwigger）。
+- 服务端自动判定（检测点回调，参考 PortSwigger）：实例启动时生成 `checkpoint_token`，随 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL` 注入容器；题目内 checker 达成目标后 POST `CHECKPOINT_URL`（公开接口，token 即能力凭证）。服务端以哨兵答案入队，worker 走与手动提交相同的管线判过计分（防重复通关、动态计分、room.completed 复用）；提交接口拒绝哨兵值，用户无法伪造环境判定。
 
 ### 3.5 env — Lab 环境
 
 - `InstanceDriver`：Create（可注入 `FLAG` 等环境变量）/ Destroy；`ImageBuilder`：题目包 `image: .` 时 `docker build`。
 - 单用户同时仅一个活跃容器；TTL 默认 1h，`POST .../instance/extend` 续期不重建。
 - `flag_mode=instance`：启动时生成唯一 flag 写入 `LabInstance.flag_value` 并注入容器；判题只接受 running 实例上的值。
+- 每实例生成 `checkpoint_token`（`LabInstance.checkpoint_token` 列，API JSON 隐藏）：注入 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL`（`ACADEMY_PUBLIC_URL` 前缀，默认 `host.docker.internal`）；实例销毁 token 即失效。
 - Docker 驱动实现；未配置 daemon 时 noop（启动/构建返回明确错误）。
 
 ### 3.6 userprogress — 路径与进度
@@ -153,6 +154,8 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 | `GET /learning-paths` / `GET /learning-paths/{id}` | student | 路径列表/详情（含进度） |
 | `GET /progress` | student | 个人进度 |
 | `GET /leaderboard` | student | 排行榜（派生数据） |
+| `GET /badges` | student | 徽章目录与获得状态（计算型读模型） |
+| `POST /checkpoints/{token}` | 公开（token 能力鉴权） | 环境检测点自动判定回调（容器内 checker 调用） |
 | `POST /content/packages` | admin | 上传教程包（进入管线） |
 | `GET /content/packages/{id}` | admin | 包状态与版本 |
 | `POST /content/packages/{id}/publish` | admin | 发布 |
@@ -175,13 +178,13 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
-- **Phase 3** 🔶 进行中：题目环境容器化已落地（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）；**未做**：服务端自动判定（环境内检测点回调）、徽章与认证。
+- **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 9. 当前边界（明确不做）
 
-- 服务端自动判定与徽章认证（Phase 3 剩余项，见上）。
 - 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
 - 排行榜未按赛季切片；单机部署假设（docker 驱动仅绑 127.0.0.1）。
+- 徽章为计算型读模型：不落库、不产生事件；如未来需要"颁发时间/稀有度"再演进为事件派生表。
 - 不引入 Casbin / Redis / K8s；数据层仍为 SQLite。
 - JWT secret 与初始管理员密码存在开发默认值，生产必须以环境变量覆盖（启动时告警提醒）。

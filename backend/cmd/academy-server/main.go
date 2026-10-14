@@ -81,12 +81,13 @@ func main() {
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)
 	pathRepo := repo.NewPathRepo(gdb)
 	pathSvc := service.NewPathService(pathRepo, roomRepo, progressRepo)
-	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver)
+	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver, cfg.PublicURL)
 	envSvc.StartReaper(ctx, time.Minute)
+	badgeSvc := service.NewBadgeService(scoreRepo, progressRepo, pathRepo)
 
 	// api 装配
 	router := api.NewRouter(authSvc)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, pathSvc, envSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, pathSvc, envSvc, badgeSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

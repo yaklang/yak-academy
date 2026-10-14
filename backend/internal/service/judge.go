@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"regexp"
 	"time"
@@ -20,6 +21,10 @@ const (
 	scoreMinRatio = 20 // minimum = initial 的 20%
 	scoreMinFloor = 10
 )
+
+// autoAnswer 检测点自动判定用的哨兵答案（容器回调触发，非用户提交）。
+// 未导出：提交接口拒绝该值，用户无法借 submissions API 伪造"环境判定通过"。
+const autoAnswer = "__env_checkpoint_solved__"
 
 // JudgeService 异步判题。提交只入队并返回 pending；判定在 worker 内完成，
 // HTTP 请求路径禁止同步判定（event-sourcing-rules skill）。
@@ -46,7 +51,11 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances
 }
 
 // Submit 提交答案：写 submission(pending) + submission.created 事件，立即返回。
+// 哨兵答案保留给检测点自动判定，用户提交一律拒绝（防伪造环境判定）。
 func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint, answer string) (*model.Submission, error) {
+	if answer == autoAnswer {
+		return nil, fmt.Errorf("%w: reserved answer", ErrValidation)
+	}
 	sub := &model.Submission{
 		UserID:      userID,
 		ChallengeID: challengeID,
@@ -75,6 +84,29 @@ func (s *JudgeService) GetSubmission(ctx context.Context, userID, submissionID u
 	}
 	if sub.UserID != userID {
 		return nil, ErrNotFound
+	}
+	return sub, nil
+}
+
+// AutoSolve 检测点自动判定（题目容器内 checker 回调触发）：以哨兵答案入队，
+// worker 走与手动提交完全相同的管线判过计分（幂等/防重复通关/动态计分/room.completed）。
+// 实例必须仍活跃（token 随实例销毁失效）。
+func (s *JudgeService) AutoSolve(ctx context.Context, inst *model.LabInstance) (*model.Submission, error) {
+	sub := &model.Submission{
+		UserID:      inst.UserID,
+		ChallengeID: inst.ChallengeID,
+		Answer:      autoAnswer,
+		Status:      model.SubmissionPending,
+	}
+	if err := s.submissions.Create(ctx, sub); err != nil {
+		return nil, err
+	}
+	s.appendEvent(ctx, inst.UserID, model.EventSubmissionCreated, map[string]any{
+		"submission_id": sub.ID, "challenge_id": inst.ChallengeID, "source": "checkpoint",
+	})
+	select {
+	case s.queue <- sub.ID:
+	default:
 	}
 	return sub, nil
 }
@@ -156,10 +188,15 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		log.Printf("judge: load challenge: %v", err)
 		return
 	}
-	correct, err := s.matchAnswer(ctx, sub, chal)
-	if err != nil {
-		log.Printf("judge: match answer: %v", err)
-		return
+	// 哨兵答案 = 检测点回调判定通过，跳过 flag 比对直接判对
+	// （真实 flag 比对仅服务端内存与 DB，哨兵不泄露任何可用答案）。
+	correct := sub.Answer == autoAnswer
+	if !correct {
+		correct, err = s.matchAnswer(ctx, sub, chal)
+		if err != nil {
+			log.Printf("judge: match answer: %v", err)
+			return
+		}
 	}
 	// 同一用户同一题已 correct → 不重复计分（score=0），派生器跳过零分。
 	if correct {
