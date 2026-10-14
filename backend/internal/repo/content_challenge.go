@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
@@ -167,6 +168,44 @@ func (r *challengeRepo) List(ctx context.Context, offset, limit int) ([]model.Ch
 	}
 	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
 	return list, total, err
+}
+
+// ListVisible 学生端训练场列表：is_visible 且（无发布时间 或 已到发布时间）。
+func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, offset, limit int) ([]model.Challenge, int64, error) {
+	visible := "is_visible = ? AND (release_at IS NULL OR release_at <= ?)"
+	var (
+		list  []model.Challenge
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Where(visible, true, now).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Where(visible, true, now).
+		Order("id").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}
+
+// UpdateVisibility 更新可见性/发布时间。三态：isVisible/releaseAt 为 nil = 不改；
+// releaseAt 为非 nil 零值 = 清空定时（写 NULL，service.VisibilityUpdate.ClearRelease 语义）；
+// 非 nil 非零 = 设新发布时间。map 值用 gorm.Expr/gorm.Valuer 兼容的 nil 写 NULL。
+func (r *challengeRepo) UpdateVisibility(ctx context.Context, slug string, isVisible *bool, releaseAt *time.Time) (int64, error) {
+	updates := map[string]any{}
+	if isVisible != nil {
+		updates["is_visible"] = *isVisible
+	}
+	if releaseAt != nil {
+		if releaseAt.IsZero() {
+			updates["release_at"] = gorm.Expr("NULL")
+		} else {
+			updates["release_at"] = *releaseAt
+		}
+	}
+	if len(updates) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Model(&model.Challenge{}).Where("slug = ?", slug).
+		Updates(updates)
+	return res.RowsAffected, res.Error
 }
 
 func (r *challengeRepo) FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error) {

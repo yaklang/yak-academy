@@ -34,6 +34,8 @@ export interface TrainingItem {
   score: number
   solved: boolean
   has_env: boolean
+  is_visible?: boolean
+  release_at?: string | null
   links?: ChallengeLink[]
   tutorial_slug?: string
   tutorial_title?: string
@@ -251,6 +253,11 @@ export const adminChallengeApi = {
   },
   deleteAttachment: (slug: string, filename: string) =>
     http.del<{ deleted: boolean }>(`/admin/challenges/${slug}/attachments/${filename}`),
+  // 可见性/定时发布。releaseAt 三态：undefined 不改；null 清空；RFC3339 设置。
+  updateVisibility: (
+    slug: string,
+    body: { is_visible?: boolean; release_at?: string | null },
+  ) => http.patch<TrainingItem>(`/admin/challenges/${slug}/visibility`, body),
 }
 
 // 学生端附件下载（blob 保存）。

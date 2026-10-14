@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -19,10 +20,12 @@ type TopicService struct {
 	challenges  repo.ChallengeRepo
 	submissions repo.SubmissionRepo
 	events      repo.EventRepo
+	// now 时钟注入（可见性/定时发布的当前时刻判定）。
+	now func() time.Time
 }
 
 func NewTopicService(t repo.TopicRepo, r repo.RoomRepo, c repo.ChallengeRepo, sub repo.SubmissionRepo, ev repo.EventRepo) *TopicService {
-	return &TopicService{topics: t, rooms: r, challenges: c, submissions: sub, events: ev}
+	return &TopicService{topics: t, rooms: r, challenges: c, submissions: sub, events: ev, now: time.Now}
 }
 
 type TopicSummary struct {
@@ -101,8 +104,16 @@ func (s *TopicService) GetRoomDetail(ctx context.Context, topicSlug, roomSlug st
 }
 
 // FindChallengeBySlug 提交答案/实例操作时按题目 slug 解析（题目独立资源的主键入口）。
+// 学生入口统一做发布校验：隐藏/未到发布时间的题目按不存在处理（404）。
 func (s *TopicService) FindChallengeBySlug(ctx context.Context, slug string) (*model.Challenge, error) {
-	return s.challenges.FindBySlug(ctx, slug)
+	chal, err := s.challenges.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	if !chal.Published(s.now()) {
+		return nil, ErrNotFound
+	}
+	return chal, nil
 }
 
 // TrainingItem 训练场条目：独立题目资源的列表视角（含当前用户状态与可选教程关联）。
@@ -115,6 +126,9 @@ type TrainingItem struct {
 	Score         int              `json:"score"`
 	Solved        bool             `json:"solved"`
 	HasEnv        bool             `json:"has_env"`
+	// IsVisible/ReleaseAt 可见性状态（管理端列表展示与编辑回显；学生端行恒为可见）。
+	IsVisible     bool             `json:"is_visible"`
+	ReleaseAt     *time.Time       `json:"release_at"`
 	Links         []model.ChallengeLink `json:"links"`
 	TutorialSlug  string           `json:"tutorial_slug"`
 	TutorialTitle string           `json:"tutorial_title"`
@@ -161,6 +175,7 @@ func toTrainingItem(c model.Challenge) TrainingItem {
 	return TrainingItem{
 		ID: c.ID, Slug: c.Slug, Title: c.Title, Category: c.Category,
 		Difficulty: c.Difficulty, Score: c.Score, HasEnv: c.Image != "",
+		IsVisible: c.IsVisible, ReleaseAt: c.ReleaseAt,
 		Links: parseLinks(c.Links), TutorialSlug: c.TutorialSlug,
 	}
 }
@@ -186,9 +201,9 @@ func (s *TopicService) markSolved(ctx context.Context, userID uint, items []Trai
 	}
 }
 
-// ListTraining 训练场列表：全量题目分页（按 category 分组由前端渲染）。
+// ListTraining 训练场列表：仅对学生可见（is_visible 且已到发布时间）的题目分页。
 func (s *TopicService) ListTraining(ctx context.Context, userID uint, offset, limit int) ([]TrainingItem, int64, error) {
-	chals, total, err := s.challenges.List(ctx, offset, limit)
+	chals, total, err := s.challenges.ListVisible(ctx, s.now(), offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -236,10 +251,14 @@ func (s *TopicService) AdminListChallenges(ctx context.Context, offset, limit in
 }
 
 // GetChallengeDetail 题目详情：描述 + hints（按解锁态脱敏）+ solved + 关联教程。
+// 隐藏/未到发布时间的题目按不存在处理（404）。
 func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug string) (*ChallengeDetail, error) {
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
+	}
+	if !chal.Published(s.now()) {
+		return nil, ErrNotFound
 	}
 	hints, err := s.challenges.FindHints(ctx, chal.ID)
 	if err != nil {

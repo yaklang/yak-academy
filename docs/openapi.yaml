@@ -172,6 +172,11 @@ components:
         score: { type: integer }
         solved: { type: boolean, description: 当前用户是否已通关 }
         has_env: { type: boolean, description: 是否定义容器环境 }
+        is_visible: { type: boolean, description: 可见性开关（false 学生端整体隐藏；仅管理端列表返回，学生端恒为 true） }
+        release_at:
+          type: string
+          nullable: true
+          description: 定时发布时间（RFC3339；到期前学生端隐藏。null = 立即发布语义，仅受 is_visible 约束）
         links:
           type: array
           description: 题目外链（配套工具/参考资料）
@@ -617,7 +622,7 @@ paths:
   /challenges:
     get:
       tags: [student]
-      summary: 训练场题目列表（跨 Topic 全量，含当前用户 solved/has_env）
+      summary: 训练场题目列表（跨 Topic 全量，含当前用户 solved/has_env；隐藏/未到发布时间的题目已过滤）
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
@@ -983,6 +988,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /admin/challenges/{slug}/visibility:
+    patch:
+      tags: [admin]
+      summary: 更新题目可见性 / 定时发布
+      description: |-
+        is_visible=false 或 release_at 在未来时，学生端训练场列表、题目详情、
+        实例启动、答案提交、提示解锁对该题返回 404（隐藏语义同不存在）。
+        已有通关记录不受影响（事件历史 append-only 不动），题目重新可见后恢复开放。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                is_visible: { type: boolean }
+                release_at:
+                  type: string
+                  nullable: true
+                  description: RFC3339；null = 清除定时（立即语义）
+      responses:
+        '200':
+          description: OK（返回更新后的题目可见性状态）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingItem'
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/challenges/{slug}/attachments:
     get:

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/service"
@@ -70,6 +71,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
+	r.Handle(http.MethodPatch, "/api/v1/admin/challenges/{slug}/visibility", "admin", h.updateChallengeVisibility)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.listAttachments)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.uploadAttachment)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}/attachments/{filename}", "admin", h.deleteAttachment)
@@ -420,6 +422,48 @@ func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// updateChallengeVisibility 管理端：更新题目可见性/定时发布。
+// release_at 三态：key 缺省 = 不改；JSON null = 清空定时；RFC3339 值 = 设置。
+// （*string 无法区分缺省与 null，用 RawMessage 按 key 判定。）
+func (h *Handlers) updateChallengeVisibility(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		IsVisible *bool             `json:"is_visible"`
+		ReleaseAt json.RawMessage   `json:"release_at"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if body.IsVisible == nil && body.ReleaseAt == nil {
+		writeError(w, errValidation)
+		return
+	}
+	u := service.VisibilityUpdate{IsVisible: body.IsVisible}
+	if body.ReleaseAt != nil {
+		if string(body.ReleaseAt) == "null" {
+			u.ClearRelease = true
+		} else {
+			var s string
+			if err := json.Unmarshal(body.ReleaseAt, &s); err != nil {
+				writeError(w, errValidation)
+				return
+			}
+			t, err := time.Parse(time.RFC3339, s)
+			if err != nil {
+				writeError(w, errValidation)
+				return
+			}
+			u.ReleaseAt = &t
+		}
+	}
+	chal, err := h.Challenge.SetVisibility(req.Context(), req.PathValue("slug"), u)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chal)
 }
 
 // listAttachments 管理端：题目附件元数据列表。
