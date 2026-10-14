@@ -171,14 +171,31 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 | 前端 | Vue3 + TS + Vite + Pinia + Vue Router | 管理后台开发效率 |
 | API 契约 | OpenAPI 3.0（手写 yaml） | 契约先行，前后端并行 |
 
-## 8. 演进路线
+## 8. 测试策略（分层金字塔）
+
+| 层 | 位置 | 手段 | 运行 |
+|---|---|---|---|
+| 纯函数单测 | service 内 | 表驱动 + 时钟注入 | `go test` |
+| 服务/仓库单测 | service / repo 同包 | 真实内存 SQLite + 真实 repo，禁止 mock repo | `go test -race ./...` |
+| 契约守卫 | api 包 | contract_test 双向比对 openapi.yaml ↔ 注册路由（集合、角色、公开性），漂移即红 | 同上 |
+| Docker 门控集成 | service | 真实 daemon（`ACADEMY_TEST_DOCKER=1` 门控，无 Docker 自动 Skip） | CI backend-docker job |
+| 并发竞态 | service / judge | 20 goroutine 并发提交，恰好一次结算 | `go test -race` |
+| 前端单测 | frontend | vitest 纯逻辑 | `npm test` |
+| E2E 旅程 | frontend/e2e | Playwright：双 webServer 自管理（后端 :18080 预编译单二进制 + vite :15173）、整跑全新 DB、管理 API 播种；13 条用户旅程（认证/教程/题目全链路/可见性/账号生命周期），`E2E_DOCKER=1` 追加容器旅程 | `npm run e2e` |
+
+E2E 基建约定（README「环境搭建与镜像加速」详述）：浏览器默认用系统 Chrome/Edge
+channel（零下载），串行 worker（共享 DB 与账号），改全局状态的用例自恢复。
+E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题、改密后 1 秒内
+重登被拒），是回归防线的重要组成部分。
+
+## 9. 演进路线
 
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
-- **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分的实时投影，零新表零新事件）。
+- **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
-## 9. 当前边界（明确不做）
+## 10. 当前边界（明确不做）
 
 - 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
 - 排行榜未按赛季切片；单机部署假设（docker 驱动仅绑 127.0.0.1）。
