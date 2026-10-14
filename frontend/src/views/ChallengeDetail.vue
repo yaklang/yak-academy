@@ -24,6 +24,9 @@ const { submitting, polling, result, submit: submitPoll } = useSubmissionPoll(()
   if (challenge.value) challenge.value.solved = true
 })
 
+// 提交时是否已通关：重复提交判对不重复计分（结算只有一次），文案需要区分。
+const solvedBeforeSubmit = ref(false)
+
 const renderedDescription = computed(() =>
   DOMPurify.sanitize(marked.parse(challenge.value?.description_md ?? '') as string),
 )
@@ -146,8 +149,17 @@ async function extendInstance() {
 
 function submit() {
   if (!challenge.value || !answer.value) return
+  solvedBeforeSubmit.value = challenge.value.solved
   submitPoll(challenge.value.slug, answer.value)
 }
+
+// 结算模型：题目分值只结算一次，重复判对 score=0；提示扣费按账号永久（不退回）。
+const resultTitle = computed(() => {
+  if (!result.value) return ''
+  if (result.value.status !== 'correct') return '判定不通过'
+  if (result.value.score > 0) return `判定通过，得分 ${result.value.score}`
+  return solvedBeforeSubmit.value ? '判定通过——本题分值已结算过，重复提交不重复计分' : '判定通过（本题 0 分）'
+})
 
 const unlockingId = ref<number | null>(null)
 
@@ -247,23 +259,31 @@ onUnmounted(stopAutoSolvePolling)
         </el-button>
       </div>
 
+      <!-- 结算模型：分值只结算一次，但题目可重复提交/重复完成——已通关不禁用。 -->
+      <el-alert
+        v-if="challenge.solved"
+        type="success"
+        :closable="false"
+        class="solved-note"
+        title="本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。"
+      />
       <div class="submit-row">
         <el-input
           v-model="answer"
           placeholder="输入 flag"
-          :disabled="challenge.solved || polling"
+          :disabled="polling"
           @keyup.enter="submit"
         />
         <el-button
           type="primary"
           :loading="submitting || polling"
-          :disabled="challenge.solved || !answer"
+          :disabled="!answer"
           @click="submit"
         >提交</el-button>
       </div>
       <el-alert
         v-if="result"
-        :title="result.status === 'correct' ? `判定通过，得分 ${result.score}` : '判定不通过'"
+        :title="resultTitle"
         :type="result.status === 'correct' ? 'success' : 'error'"
         :closable="false"
         class="result"
@@ -291,5 +311,6 @@ onUnmounted(stopAutoSolvePolling)
 .endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }
 .expire { color: var(--el-text-color-secondary); font-size: 0.8rem; }
 .submit-row { display: flex; gap: 0.5rem; }
+.solved-note { margin-bottom: 0.8rem; }
 .result { margin-top: 0.8rem; }
 </style>
