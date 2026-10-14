@@ -128,17 +128,6 @@ type ProgressRepo interface {
 	// MarkInProgress 记录"开始学但未完成"（Room 首次浏览时创建 completed=false 行，幂等）。
 	MarkInProgress(ctx context.Context, userID uint, roomSlug string) error
 	Stats(ctx context.Context, userID uint) (completed int, inProgress int, err error)
-	// ListCompletedSlugs 当前用户已完成的 Room slug 集合（学习路径进度用）。
-	ListCompletedSlugs(ctx context.Context, userID uint) ([]string, error)
-}
-
-// PathRepo 学习路径：PathItem 只引用 room_slug（teaching-integration skill）。
-type PathRepo interface {
-	List(ctx context.Context) ([]model.LearningPath, error)
-	FindByID(ctx context.Context, id uint) (*model.LearningPath, error)
-	ListItems(ctx context.Context, pathID uint) ([]model.PathItem, error)
-	Create(ctx context.Context, path *model.LearningPath, items []model.PathItem) error
-	Delete(ctx context.Context, id uint) error
 }
 
 type LabInstanceRepo interface {

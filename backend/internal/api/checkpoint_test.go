@@ -52,10 +52,10 @@ func newCheckpointTestEnv(t *testing.T) (*Router, *gorm.DB, *service.EnvService)
 		instanceRepo, repo.NewInstanceLogRepo(gdb), chalRepo,
 		repo.NewUserRepo(gdb), evRepo, bus, service.NoopDriver{}, "http://host.docker.internal:8080",
 	)
-	badges := service.NewBadgeService(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb), repo.NewPathRepo(gdb))
+	badges := service.NewBadgeService(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
 	auth := service.NewAuthService(repo.NewUserRepo(gdb), "test-secret")
 	router := NewRouter(auth)
-	NewHandlers(auth, nil, nil, judge, nil, nil, nil, envSvc, badges).Register(router)
+	NewHandlers(auth, nil, nil, judge, nil, nil, envSvc, badges).Register(router)
 	return router, gdb, envSvc
 }
 

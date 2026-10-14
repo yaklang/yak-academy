@@ -87,21 +87,6 @@ components:
         id: { type: integer }
         status: { type: string, enum: [pending, correct, incorrect] }
         score: { type: integer, description: 判定通过后返回的得分 }
-    LearningPath:
-      type: object
-      properties:
-        id: { type: integer }
-        title: { type: string }
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              order: { type: integer }
-              room_slug: { type: string }
-              title: { type: string, description: Room 标题（响应富化字段，非路径存储） }
-              topic_slug: { type: string, description: Room 所属主题 slug（响应富化字段，供前端跳转） }
-              completed: { type: boolean }
     LeaderboardEntry:
       type: object
       properties:
@@ -656,79 +641,6 @@ paths:
                     properties:
                       items: { type: array, items: { $ref: '#/components/schemas/TrainingItem' } }
 
-  /learning-paths:
-    get:
-      tags: [student]
-      summary: 学习路径列表（含当前用户各节点完成态）
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/LearningPath' }
-
-  /learning-paths/{id}:
-    get:
-      tags: [student]
-      summary: 路径详情（含当前用户进度）
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: integer } }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LearningPath' }
-        '404': { $ref: '#/components/responses/ErrorResp' }
-
-  /admin/learning-paths:
-    post:
-      tags: [admin]
-      summary: 创建学习路径（PathItem 只引用 room_slug，禁止内联 Room 内容）
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [title, items]
-              properties:
-                title: { type: string }
-                items:
-                  type: array
-                  items:
-                    type: object
-                    required: [order, room_slug]
-                    properties:
-                      order: { type: integer }
-                      room_slug: { type: string }
-      responses:
-        '201':
-          description: Created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LearningPath' }
-        '422': { $ref: '#/components/responses/ErrorResp' }
-
-  /admin/learning-paths/{id}:
-    delete:
-      tags: [admin]
-      summary: 删除学习路径（级联 PathItem）
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: integer } }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  deleted: { type: boolean }
-        '404': { $ref: '#/components/responses/ErrorResp' }
-
   /progress:
     get:
       tags: [student]
@@ -766,7 +678,7 @@ paths:
   /badges:
     get:
       tags: [student]
-      summary: 徽章列表（含当前用户获得状态；徽章是积分/进度/路径派生数据的计算型读模型，不落库）
+      summary: 徽章列表（含当前用户获得状态；徽章是积分/进度派生数据的计算型读模型，不落库）
       responses:
         '200':
           description: OK

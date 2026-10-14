@@ -97,7 +97,7 @@ func TestAuthenticateRevokedTokenReturns401(t *testing.T) {
 	}
 	router := NewRouter(auth)
 	// 探测路由：任意已注册路由都会先过 authenticate，这里用 me 的路由形态。
-	NewHandlers(auth, nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
+	NewHandlers(auth, nil, nil, nil, nil, nil, nil, nil).Register(router)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -117,7 +117,7 @@ func TestAuthenticateRevokedTokenReturns401(t *testing.T) {
 // health 端点：无鉴权静态响应（compose healthcheck 依赖，鉴权中间件不得拦截）。
 func TestHealthEndpointPublic(t *testing.T) {
 	router := NewRouter(nil)
-	NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
+	NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

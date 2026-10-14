@@ -104,11 +104,3 @@ func (r *progressRepo) Stats(ctx context.Context, userID uint) (completed, inPro
 		Where("user_id = ?", userID).Scan(&row).Error
 	return int(row.Completed), int(row.InProgress), err
 }
-
-func (r *progressRepo) ListCompletedSlugs(ctx context.Context, userID uint) ([]string, error) {
-	var slugs []string
-	err := r.db.WithContext(ctx).Model(&model.Progress{}).
-		Where("user_id = ? AND completed = ?", userID, true).
-		Pluck("room_slug", &slugs).Error
-	return slugs, err
-}

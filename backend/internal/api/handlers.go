@@ -20,14 +20,13 @@ type Handlers struct {
 	Judge     *service.JudgeService
 	Progress  *service.UserProgressService
 	Topics    *service.TopicService
-	Paths     *service.PathService
 	Env       *service.EnvService
 	Badges    *service.BadgeService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, paths *service.PathService, env *service.EnvService, badges *service.BadgeService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Paths: paths, Env: env, Badges: badges}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -55,8 +54,6 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/attachments/{filename}", "", h.downloadAttachment)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
-	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
-	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
 	r.Handle(http.MethodGet, "/api/v1/leaderboard", "", h.leaderboard)
 	r.Handle(http.MethodGet, "/api/v1/badges", "", h.listBadges)
@@ -77,8 +74,6 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.listAttachments)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.uploadAttachment)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}/attachments/{filename}", "admin", h.deleteAttachment)
-	r.Handle(http.MethodPost, "/api/v1/admin/learning-paths", "admin", h.createPath)
-	r.Handle(http.MethodDelete, "/api/v1/admin/learning-paths/{id}", "admin", h.deletePath)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/active", "admin", h.listActiveInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
@@ -328,61 +323,6 @@ func (h *Handlers) extendInstance(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inst)
-}
-
-func (h *Handlers) listPaths(w http.ResponseWriter, req *http.Request) {
-	user := UserFrom(req.Context())
-	items, err := h.Paths.List(req.Context(), user.ID)
-	if err != nil {
-		mapError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, items)
-}
-
-func (h *Handlers) getPath(w http.ResponseWriter, req *http.Request) {
-	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, errValidation)
-		return
-	}
-	user := UserFrom(req.Context())
-	path, err := h.Paths.Get(req.Context(), user.ID, uint(id))
-	if err != nil {
-		mapError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, path)
-}
-
-func (h *Handlers) createPath(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Title string                 `json:"title"`
-		Items []service.PathItemView `json:"items"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, errValidation)
-		return
-	}
-	path, err := h.Paths.Create(req.Context(), body.Title, body.Items)
-	if err != nil {
-		mapError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, path)
-}
-
-func (h *Handlers) deletePath(w http.ResponseWriter, req *http.Request) {
-	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, errValidation)
-		return
-	}
-	if err := h.Paths.Delete(req.Context(), uint(id)); err != nil {
-		mapError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (h *Handlers) unlockHint(w http.ResponseWriter, req *http.Request) {

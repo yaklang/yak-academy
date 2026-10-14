@@ -61,18 +61,6 @@ export interface ChallengeDetail extends TrainingItem {
   hints: Hint[]
   attachments: ChallengeAttachment[]
 }
-export interface LearningPathItem {
-  order: number
-  room_slug: string
-  title: string
-  topic_slug: string
-  completed: boolean
-}
-export interface LearningPath {
-  id: number
-  title: string
-  items: LearningPathItem[]
-}
 // challenge.json 提示条目（上传格式：仅 title/content/cost；展示用 Hint 含 id/unlocked）。
 export interface ChallengeHintInput {
   title: string
@@ -190,17 +178,6 @@ export const trainingApi = {
     http.post<HintUnlockResponse>(`/challenges/${challengeSlug}/hints/${hintId}/unlock`),
 }
 
-export const pathApi = {
-  list: () => http.get<LearningPath[]>('/learning-paths'),
-  get: (id: number) => http.get<LearningPath>(`/learning-paths/${id}`),
-}
-
-// 学习路径管理（契约：POST/DELETE /admin/learning-paths）。
-export const adminPathApi = {
-  create: (title: string, items: { order: number; room_slug: string }[]) =>
-    http.post<LearningPath>('/admin/learning-paths', { title, items }),
-  remove: (id: number) => http.del<{ deleted: boolean }>(`/admin/learning-paths/${id}`),
-}
 
 export const adminInstanceApi = {
   list: (page = 1) => http.get<Paged<AdminLabInstance>>(`/admin/lab-instances?page=${page}`),
