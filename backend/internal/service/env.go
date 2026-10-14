@@ -378,6 +378,11 @@ func (s *EnvService) ListActiveInstances(ctx context.Context) ([]AdminLabInstanc
 	return out, nil
 }
 
+// ListActiveByChallenge 某题目全部用户的活跃实例（题目删除前销毁容器用）。
+func (s *EnvService) ListActiveByChallenge(ctx context.Context, challengeID uint) ([]model.LabInstance, error) {
+	return s.instances.ListActiveByChallenge(ctx, challengeID)
+}
+
 // ListLogs 容器生命周期日志分页（管理端容器日志表格；批量富化用户名与题目）。
 func (s *EnvService) ListLogs(ctx context.Context, offset, limit int) ([]AdminInstanceLog, int64, error) {
 	list, total, err := s.logs.List(ctx, offset, limit)

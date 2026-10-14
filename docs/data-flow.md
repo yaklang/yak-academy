@@ -41,7 +41,7 @@ FE(admin)          API                content/challenge SVC   repo            DB
 
 要点：
 - slug 重复 = 更新（upsert），上传即对学生可见；版本化机制只属于教程包。
-- 删除（DELETE /admin/challenges/{slug}）级联删 flags/hints。
+- 删除（DELETE /admin/challenges/{slug}）：存在通关记录 → 409 拒绝（submission 事件 append-only，删除已解题目会造成悬挂积分）；无通关记录 → 先销毁该题全部运行中容器，再级联删 flags/hints/lab_instances 行。
 - 题目包 zip 且 `image: .`：上传时 docker build 打 tag，失败则 422 不入库。
 - `flag_mode=instance`：须有 env；flag 为含 `{token}` 的模板。
 

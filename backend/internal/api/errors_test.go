@@ -42,6 +42,7 @@ func TestMapErrorStatusCodes(t *testing.T) {
 		{"gorm record not found", gorm.ErrRecordNotFound, http.StatusNotFound, "NOT_FOUND"},
 		{"service not found", service.ErrNotFound, http.StatusNotFound, "NOT_FOUND"},
 		{"validation with reason", fmt.Errorf("%w: bad zip", service.ErrValidation), http.StatusUnprocessableEntity, "VALIDATION_FAILED"},
+		{"has solve history", service.ErrHasSolves, http.StatusConflict, "CONFLICT"},
 		{"unknown internal", errors.New("boom"), http.StatusInternalServerError, "INTERNAL"},
 	}
 	for _, tc := range cases {

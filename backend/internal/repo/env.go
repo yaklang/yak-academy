@@ -100,6 +100,15 @@ func (r *labInstanceRepo) ListActive(ctx context.Context) ([]model.LabInstance, 
 	return list, err
 }
 
+func (r *labInstanceRepo) ListActiveByChallenge(ctx context.Context, challengeID uint) ([]model.LabInstance, error) {
+	var list []model.LabInstance
+	err := r.db.WithContext(ctx).
+		Where("challenge_id = ? AND status IN ?", challengeID,
+			[]model.InstanceStatus{model.InstanceCreating, model.InstanceRunning}).
+		Order("id").Find(&list).Error
+	return list, err
+}
+
 func (r *labInstanceRepo) FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error) {
 	var i model.LabInstance
 	err := r.db.WithContext(ctx).

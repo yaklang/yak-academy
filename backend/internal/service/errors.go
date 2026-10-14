@@ -25,3 +25,8 @@ var ErrNotFound = errors.New("not found")
 
 // ErrValidation 参数/内容校验失败（对外 422 VALIDATION_FAILED）。
 var ErrValidation = errors.New("validation failed")
+
+// ErrHasSolves 题目存在通关记录，拒绝删除（对外 409 CONFLICT）。
+// 事件溯源下提交历史 append-only：删除已被解过的题目会让积分/排行榜
+// 出现悬挂引用且无法重放，故整体拒绝（event-sourcing-rules skill）。
+var ErrHasSolves = errors.New("challenge has solve history, refuse to delete")

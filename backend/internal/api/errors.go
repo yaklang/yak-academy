@@ -78,6 +78,9 @@ func mapError(w http.ResponseWriter, err error) {
 		writeError(w, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity, msg})
 	case isInstanceConflict(err):
 		writeConflict(w, err)
+	case errors.Is(err, service.ErrHasSolves):
+		writeError(w, &apiError{"CONFLICT", http.StatusConflict,
+			"challenge has solve history; submissions are append-only, delete refused"})
 	case service.IsNotImplemented(err):
 		w.WriteHeader(http.StatusNotImplemented)
 		_ = json.NewEncoder(w).Encode(struct {

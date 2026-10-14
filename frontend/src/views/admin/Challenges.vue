@@ -188,11 +188,16 @@ async function load() {
 
 async function remove(row: TrainingItem) {
   try {
-    await ElMessageBox.confirm(`确定删除题目「${row.title}」？判定答案与提示将一并删除。`, '删除题目', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确定删除题目「${row.title}」？该题的运行中容器将被销毁，判定答案与提示一并删除。` +
+        '已有用户通关的题目无法删除（提交历史不可删）。',
+      '删除题目',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
   } catch {
     return
   }
@@ -201,6 +206,7 @@ async function remove(row: TrainingItem) {
     ElMessage.success(`已删除 ${row.slug}`)
     await load()
   } catch (e) {
+    // 409：题目存在通关记录，事件历史 append-only 不可删（契约语义直接透出）。
     ElMessage.error(`删除失败：${(e as Error).message}`)
   }
 }
