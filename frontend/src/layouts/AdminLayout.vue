@@ -29,7 +29,10 @@ function logout() {
         <router-link to="/admin/panel/users" class="sub">用户与角色</router-link>
       </nav>
       <div class="side-footer">
-        <router-link to="/" class="back">← 返回普通端</router-link>
+        <div>
+          <router-link to="/" class="back">← 返回普通端</router-link>
+          <div class="who" v-if="auth.user">{{ auth.user.username }}（管理员）</div>
+        </div>
         <el-button v-if="auth.token" link size="small" @click="logout">登出</el-button>
       </div>
     </el-aside>
@@ -62,4 +65,5 @@ nav .sub.router-link-active { color: var(--el-color-primary); }
 }
 .side-footer { display: flex; align-items: center; justify-content: space-between; padding: 1rem; }
 .back { color: var(--el-color-warning); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+.who { margin-top: 0.35rem; font-size: 0.8rem; color: var(--el-text-color-secondary); }
 </style>

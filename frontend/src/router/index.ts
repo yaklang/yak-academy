@@ -64,17 +64,17 @@ router.beforeEach(async (to) => {
   if (!auth.token) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.meta.requiresAdmin) {
-    if (!auth.user) {
-      try {
-        await auth.fetchMe()
-      } catch {
-        return { name: 'login', query: { redirect: to.fullPath } }
-      }
+  // 登录态下首次导航统一预取用户信息：布局首次绘制即有用户名/角色/管理入口，
+  // 避免刷新后头部出现"无管理入口、无用户信息"的空窗；token 失效则回登录页。
+  if (!auth.user) {
+    try {
+      await auth.fetchMe()
+    } catch {
+      return { name: 'login', query: { redirect: to.fullPath } }
     }
-    if (auth.user?.global_role !== 'admin') {
-      return { name: 'topics' }
-    }
+  }
+  if (to.meta.requiresAdmin && auth.user?.global_role !== 'admin') {
+    return { name: 'topics' }
   }
   return true
 })

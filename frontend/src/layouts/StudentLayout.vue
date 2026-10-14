@@ -17,9 +17,7 @@ const completedRooms = ref<number | null>(null)
 const inProgressRooms = ref<number | null>(null)
 
 onMounted(async () => {
-  if (auth.token && !auth.user) {
-    auth.fetchMe().catch(() => {})
-  }
+  // 用户身份由路由守卫统一预取（刷新/直进 URL 不再出现头部空窗），这里只拉进度。
   if (auth.token) {
     try {
       const p = await progressApi.mine()
