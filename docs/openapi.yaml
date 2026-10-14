@@ -97,11 +97,13 @@ components:
             properties:
               order: { type: integer }
               room_slug: { type: string }
+              title: { type: string, description: Room 标题（响应富化字段，非路径存储） }
+              topic_slug: { type: string, description: Room 所属主题 slug（响应富化字段，供前端跳转） }
               completed: { type: boolean }
     LeaderboardEntry:
       type: object
       properties:
-        rank: { type: integer }
+        rank: { type: integer, description: 并列同分同名次（count-based，跨页一致） }
         username: { type: string }
         score: { type: integer }
         solved_count: { type: integer }
@@ -336,8 +338,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Topic' }
         '404': { $ref: '#/components/responses/ErrorResp' }
-
-  /topics/{topicSlug}:
     put:
       tags: [admin]
       summary: 更新主题元数据（仅管理员）
@@ -983,36 +983,10 @@ paths:
               type: object
               properties:
                 global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
-                course_roles:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      topic_slug: { type: string }
-                      role: { type: string }
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
-        '403': { $ref: '#/components/responses/ErrorResp' }
-
-  /admin/users/{id}/course-roles/{topicSlug}:
-    delete:
-      tags: [admin]
-      deprecated: true
-      summary: （已废弃）删除课程级角色；两档模型下无效果依赖
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: integer } }
-        - { name: topicSlug, in: path, required: true, schema: { type: string } }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  deleted: { type: boolean }
         '403': { $ref: '#/components/responses/ErrorResp' }
