@@ -19,7 +19,8 @@ export function useSubmissionPoll(onCorrect?: (sub: Submission) => void) {
         if (sub.status !== 'pending') {
           result.value = sub
           if (sub.status === 'correct') {
-            ElMessage.success(`回答正确！+${sub.score} 分`)
+            // 分值只结算一次：重复判对 score=0，不显示 +0 分。
+            ElMessage.success(sub.score > 0 ? `回答正确！+${sub.score} 分` : '回答正确（本题已结算过，不重复计分）')
             onCorrect?.(sub)
           } else {
             ElMessage.error('回答错误，再试试')

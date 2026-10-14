@@ -78,6 +78,12 @@ DELETE → destroy；reaper 按 expire_at 回收
 - 重复回调安全：走 HasCorrect 幂等护栏，重复判对 0 分。
 - 前端在环境运行中轮询题目详情 `solved` 字段感知自动判定结果。
 
+## 2d. 结算模型（分值一次结算）
+
+- **题目可重复完成/重复提交 flag**：已通关后仍可提交，判对返回 `correct` 且 `score=0`（不重复计分、不重发 `room.completed`）；前端不禁用提交框，仅提示「已结算过」。
+- **分值以题目为单位、只结算一次**：首次判对按动态分值入账（ScoreRecord 派生）。
+- **提示扣费按账号永久**：`hint.unlocked` 事件扣分一次，解锁状态永久（不随重复完成退回、不重复扣费）。
+
 ## 3. 做题判定流（Event-Sourced Judging）
 
 ```
