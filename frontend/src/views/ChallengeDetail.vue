@@ -8,9 +8,37 @@ import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { trainingApi, instanceApi, type AdminLabInstance, type ChallengeDetail, type LabInstance } from '../api'
+import {
+  trainingApi, instanceApi, downloadAttachment,
+  type AdminLabInstance, type ChallengeDetail, type LabInstance,
+} from '../api'
 import type { ApiError } from '../api/client'
 import { useSubmissionPoll } from '../composables/useSubmissionPoll'
+
+// 附件下载：fetch blob 后触发浏览器保存（附件接口需 JWT，<a href> 无法带头）。
+const downloadingFile = ref('')
+async function download(filename: string) {
+  downloadingFile.value = filename
+  try {
+    const blob = await downloadAttachment(slug(), filename)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error(`附件下载失败：${(e as Error).message}`)
+  } finally {
+    downloadingFile.value = ''
+  }
+}
+
+function fileSize(n: number) {
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`
+  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`
+  return `${n} B`
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -210,6 +238,30 @@ onUnmounted(stopAutoSolvePolling)
 
     <div class="description" v-html="renderedDescription" />
 
+    <div v-if="challenge.attachments?.length" class="attachments">
+      <h4>附件</h4>
+      <div v-for="a in challenge.attachments" :key="a.filename" class="attach-row">
+        <span class="attach-name">{{ a.filename }}</span>
+        <span class="attach-size">{{ fileSize(a.size) }}</span>
+        <el-button
+          size="small"
+          :loading="downloadingFile === a.filename"
+          @click="download(a.filename)"
+        >下载</el-button>
+      </div>
+    </div>
+
+    <div v-if="challenge.links?.length" class="links">
+      <h4>相关链接</h4>
+      <a
+        v-for="l in challenge.links"
+        :key="l.url"
+        :href="l.url"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{{ l.name }} ↗</a>
+    </div>
+
     <el-collapse v-if="challenge.hints.length" class="hints">
       <el-collapse-item v-for="h in challenge.hints" :key="h.id" :name="h.id">
         <template #title>
@@ -300,6 +352,13 @@ onUnmounted(stopAutoSolvePolling)
 .description { line-height: 1.7; margin: 1rem 0 2rem; }
 .description :deep(pre) { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; overflow: auto; }
 .description :deep(code) { background: var(--el-fill-color-light); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.attachments { margin: 0 0 1.2rem; }
+.attachments h4, .links h4 { margin: 0 0 0.4rem; }
+.attach-row { display: flex; align-items: center; gap: 0.8rem; padding: 0.25rem 0; }
+.attach-name { font-family: Consolas, monospace; }
+.attach-size { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.links { margin: 0 0 1.2rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.links a { color: var(--el-color-primary); text-decoration: none; }
 .hints { margin-bottom: 1.5rem; }
 .hint-title { margin-right: 0.6rem; }
 .cost { margin-left: 0.3rem; }

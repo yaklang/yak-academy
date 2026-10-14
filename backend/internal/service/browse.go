@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"gorm.io/gorm"
@@ -114,6 +115,7 @@ type TrainingItem struct {
 	Score         int              `json:"score"`
 	Solved        bool             `json:"solved"`
 	HasEnv        bool             `json:"has_env"`
+	Links         []model.ChallengeLink `json:"links"`
 	TutorialSlug  string           `json:"tutorial_slug"`
 	TutorialTitle string           `json:"tutorial_title"`
 	// TutorialTopicSlug 关联教程所属 topic（前端 Room 详情路由需要 topic 段）。
@@ -123,8 +125,10 @@ type TrainingItem struct {
 // ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints（未解锁正文为空）。
 type ChallengeDetail struct {
 	TrainingItem
-	DescriptionMD string     `json:"description_md"`
-	Hints         []HintView `json:"hints"`
+	DescriptionMD string          `json:"description_md"`
+	Hints         []HintView      `json:"hints"`
+	// Attachments 附件列表（api 层从 ChallengeService 拼装，学生凭 JWT 下载）。
+	Attachments []AttachmentView `json:"attachments"`
 }
 
 // enrichTutorial 批量拼关联教程 Room 的标题（tutorial_slug → room 元数据）。
@@ -157,8 +161,20 @@ func toTrainingItem(c model.Challenge) TrainingItem {
 	return TrainingItem{
 		ID: c.ID, Slug: c.Slug, Title: c.Title, Category: c.Category,
 		Difficulty: c.Difficulty, Score: c.Score, HasEnv: c.Image != "",
-		TutorialSlug: c.TutorialSlug,
+		Links: parseLinks(c.Links), TutorialSlug: c.TutorialSlug,
 	}
+}
+
+// parseLinks Challenge.Links JSON 字符串列 → 切片（空列/坏数据返回 nil）。
+func parseLinks(s string) []model.ChallengeLink {
+	if s == "" {
+		return nil
+	}
+	var links []model.ChallengeLink
+	if err := json.Unmarshal([]byte(s), &links); err != nil {
+		return nil
+	}
+	return links
 }
 
 // markSolved 逐题算当前用户是否已通关。

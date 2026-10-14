@@ -172,6 +172,14 @@ components:
         score: { type: integer }
         solved: { type: boolean, description: 当前用户是否已通关 }
         has_env: { type: boolean, description: 是否定义容器环境 }
+        links:
+          type: array
+          description: 题目外链（配套工具/参考资料）
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              url: { type: string }
         tutorial_slug:
           type: string
           nullable: true
@@ -195,6 +203,10 @@ components:
             hints:
               type: array
               items: { $ref: '#/components/schemas/HintView' }
+            attachments:
+              type: array
+              description: 题目附件列表（学生端凭 JWT 经 /challenges/{slug}/attachments/{filename} 下载）
+              items: { $ref: '#/components/schemas/ChallengeAttachment' }
     HintView:
       type: object
       description: 提示视图。未解锁时 content 为空字符串；解锁后返回正文。
@@ -251,12 +263,28 @@ components:
               title: { type: string }
               content: { type: string }
               cost: { type: integer }
+        links:
+          type: array
+          description: 题目外链（配套工具/参考资料），随 challenge.json 上传存储
+          items:
+            type: object
+            required: [name, url]
+            properties:
+              name: { type: string }
+              url: { type: string }
         tutorial_slug: { type: string, description: 关联教程 Room slug（可选） }
     ChallengePackageUpload:
       type: object
       description: |
         实训常用题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
         详见 content-package-spec skill。
+    ChallengeAttachment:
+      type: object
+      description: 题目附件元数据（文件落盘附件目录，学生端凭 JWT 下载）
+      properties:
+        filename: { type: string, description: 规范化文件名（下载 URL 段） }
+        size: { type: integer, description: 字节数 }
+        created_at: { type: string, description: RFC3339 }
     AdminLabInstance:
       type: object
       description: 管理端容器实例条目（LabInstance + 用户/题目富化）
@@ -931,11 +959,12 @@ paths:
   /admin/challenges/{slug}:
     delete:
       tags: [admin]
-      summary: 删除题目（级联删除 flags/hints；存在通关记录时拒绝）
+      summary: 删除题目（级联删除 flags/hints/attachments；存在通关记录时拒绝）
       description: |-
         题目存在任一用户通关记录（submission 事件历史）时返回 409——
         事件溯源下提交历史 append-only 不可删，删除题目会制造悬挂积分。
-        无通关记录时：销毁该题目全部运行中实例，级联删除 flags/hints/lab_instances 行。
+        无通关记录时：销毁该题目全部运行中实例，级联删除 flags/hints/attachments/lab_instances 行
+        并清理附件目录。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
@@ -954,6 +983,84 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /admin/challenges/{slug}/attachments:
+    get:
+      tags: [admin]
+      summary: 题目附件列表（管理端）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChallengeAttachment' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 上传题目附件（multipart，单文件 ≤50MB，文件名规范化存储）
+      description: 附件落盘 ACADEMY_ATTACHMENTS_DIR/&lt;slug&gt;/，同名覆盖；重复文件名 = 覆盖更新。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeAttachment' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges/{slug}/attachments/{filename}:
+    delete:
+      tags: [admin]
+      summary: 删除题目附件（删元数据行 + 磁盘文件）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: filename, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /challenges/{slug}/attachments/{filename}:
+    get:
+      tags: [student]
+      summary: 下载题目附件（登录即可；Content-Disposition 附文件名）
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: filename, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 附件二进制
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/lab-instances:
     get:

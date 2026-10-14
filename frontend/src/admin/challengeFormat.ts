@@ -1,7 +1,7 @@
 // challenge.json 前端校验与样例工具。
 // 规则镜像后端 ContentService.validateChallengeJSON（content.go）：
 // 前端只做快速反馈，后端校验仍是最终裁决（api-contract skill）。
-import type { ChallengeHintInput, ChallengeJSON } from '../api'
+import type { ChallengeHintInput, ChallengeJSON, ChallengeLink } from '../api'
 
 const slugPattern = /^[a-z0-9-]+$/
 const difficulties = ['apprentice', 'practitioner', 'expert'] as const
@@ -57,6 +57,12 @@ export function validateChallenge(chal: ChallengeJSON): string[] {
     if (h.cost !== undefined && (h.cost < 0 || !Number.isInteger(h.cost)))
       where(`hints[${i}].cost`, '必须为非负整数')
   })
+
+  const links: ChallengeLink[] = chal.links ?? []
+  links.forEach((l, i) => {
+    if (!l.name) where(`links[${i}].name`, '必填')
+    if (!/^https?:\/\//.test(l.url)) where(`links[${i}].url`, '必须为 http(s) 地址')
+  })
   return errs
 }
 
@@ -92,6 +98,7 @@ export const SAMPLE_CHALLENGE_JSON: ChallengeJSON = {
   challenge: { type: 'static', flag: 'flag{answer}' },
   env: { image: 'vulnapp:1.0', port: 80 },
   hints: [{ title: '提示一', content: '看 UNION', cost: 10 }],
+  links: [{ name: 'SQL 注入速查表', url: 'https://portswigger.net/web-security/sql-injection/cheat-sheet' }],
   tutorial_slug: 'sqli-basics',
 }
 

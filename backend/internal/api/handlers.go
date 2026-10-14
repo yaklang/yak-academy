@@ -50,6 +50,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/instance/extend", "", h.extendInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
+	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/attachments/{filename}", "", h.downloadAttachment)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths", "", h.listPaths)
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
@@ -69,6 +70,9 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.listAttachments)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.uploadAttachment)
+	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}/attachments/{filename}", "admin", h.deleteAttachment)
 	r.Handle(http.MethodPost, "/api/v1/admin/learning-paths", "admin", h.createPath)
 	r.Handle(http.MethodDelete, "/api/v1/admin/learning-paths/{id}", "admin", h.deletePath)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances", "admin", h.listInstances)
@@ -401,15 +405,82 @@ func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// getChallenge 题目详情（描述 markdown + hints + 关联教程）。
+// getChallenge 题目详情（描述 markdown + hints + 关联教程 + 附件列表）。
+// 附件元数据在 ChallengeService，浏览视图在 TopicService——在此薄拼装，避免跨 service 注入。
 func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
-	detail, err := h.Topics.GetChallengeDetail(req.Context(), user.ID, req.PathValue("slug"))
+	slug := req.PathValue("slug")
+	detail, err := h.Topics.GetChallengeDetail(req.Context(), user.ID, slug)
 	if err != nil {
 		mapError(w, err)
 		return
 	}
+	if detail.Attachments, err = h.Challenge.ListStudentAttachments(req.Context(), slug); err != nil {
+		mapError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// listAttachments 管理端：题目附件元数据列表。
+func (h *Handlers) listAttachments(w http.ResponseWriter, req *http.Request) {
+	list, err := h.Challenge.ListAttachments(req.Context(), req.PathValue("slug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// uploadAttachment 管理端：上传题目附件（multipart file 字段，单文件 ≤50MB）。
+func (h *Handlers) uploadAttachment(w http.ResponseWriter, req *http.Request) {
+	if err := req.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	file, hdr, err := req.FormFile("file")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	att, err := h.Challenge.UploadAttachment(req.Context(), req.PathValue("slug"), hdr.Filename, file)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, att)
+}
+
+// deleteAttachment 管理端：删除单个附件（元数据 + 磁盘文件）。
+func (h *Handlers) deleteAttachment(w http.ResponseWriter, req *http.Request) {
+	if err := h.Challenge.DeleteAttachment(req.Context(), req.PathValue("slug"), req.PathValue("filename")); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// downloadAttachment 学生端：下载题目附件（octet-stream + Content-Disposition，
+// 前端凭 Authorization header 拉取 blob 后保存）。
+func (h *Handlers) downloadAttachment(w http.ResponseWriter, req *http.Request) {
+	f, filename, err := h.Challenge.OpenAttachment(req.Context(), req.PathValue("slug"), req.PathValue("filename"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	if size, err := f.Seek(0, io.SeekEnd); err == nil && size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			mapError(w, err)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, f)
 }
 
 // uploadChallenges 管理端：上传题目定义 JSON（单对象或数组，upsert）。

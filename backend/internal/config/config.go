@@ -15,6 +15,9 @@ type Config struct {
 	// EnvDriver 实例驱动：noop（默认，接口 501）/ docker（docker CLI 需可用）。
 	EnvDriver string
 
+	// AttachmentsDir 题目附件落盘根目录（<dir>/<slug>/<filename>）。
+	AttachmentsDir string
+
 	// PublicURL 平台对外可达地址：注入题目容器的 CHECKPOINT_URL 前缀
 	// （容器内经 host.docker.internal 回达宿主）。
 	PublicURL string
@@ -29,13 +32,14 @@ const (
 
 func Load() *Config {
 	return &Config{
-		Addr:          getenv("ACADEMY_ADDR", ":8080"),
-		Database:      getenv("ACADEMY_DB", "academy.db"),
-		JWTSecret:     getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
-		AdminUsername: getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
-		AdminPassword: getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
-		EnvDriver:     getenv("ACADEMY_ENV_DRIVER", "noop"),
-		PublicURL:     getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
+		Addr:           getenv("ACADEMY_ADDR", ":8080"),
+		Database:       getenv("ACADEMY_DB", "academy.db"),
+		JWTSecret:      getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
+		AdminUsername:  getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
+		AdminPassword:  getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
+		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "noop"),
+		AttachmentsDir:  getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
+		PublicURL:      getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 	}
 }
 

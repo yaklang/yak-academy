@@ -21,6 +21,7 @@ func Migrate(db *gorm.DB) error {
 		&model.ContentPackage{}, &model.ContentVersion{},
 		&model.Topic{}, &model.Room{},
 		&model.Challenge{}, &model.Flag{}, &model.Hint{}, &model.Submission{},
+		&model.ChallengeAttachment{},
 		&model.LearningPath{}, &model.PathItem{},
 		&model.Event{}, &model.ScoreRecord{}, &model.Progress{},
 		&model.LabInstance{}, &model.InstanceLog{},

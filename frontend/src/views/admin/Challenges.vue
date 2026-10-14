@@ -4,7 +4,10 @@
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { adminChallengeApi, type ChallengeHintInput, type ChallengeJSON, type TrainingItem } from '../../api'
+import {
+  adminChallengeApi,
+  type ChallengeAttachment, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
+} from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
 
@@ -36,6 +39,7 @@ const form = reactive({
   description_md: '',
   tutorial_slug: '',
   hints: [] as ChallengeHintInput[],
+  links: [] as ChallengeLink[],
 })
 
 // 表单 → 规范化题目 JSON（"自动打包"）。
@@ -55,6 +59,8 @@ function buildPayload(): ChallengeJSON {
   payload.hints = form.hints
     .filter((h) => h.title || h.content)
     .map((h) => ({ title: h.title.trim(), content: h.content.trim(), cost: h.cost ?? 0 }))
+  const links = form.links.filter((l) => l.name || l.url)
+  if (links.length) payload.links = links.map((l) => ({ name: l.name.trim(), url: l.url.trim() }))
   return payload
 }
 
@@ -79,6 +85,7 @@ function fillForm(chal: ChallengeJSON) {
   form.description_md = chal.description_md ?? ''
   form.tutorial_slug = chal.tutorial_slug ?? ''
   form.hints = (chal.hints ?? []).map((h) => ({ ...h }))
+  form.links = (chal.links ?? []).map((l) => ({ ...l }))
 }
 
 function addHint() {
@@ -86,6 +93,12 @@ function addHint() {
 }
 function removeHint(i: number) {
   form.hints.splice(i, 1)
+}
+function addLink() {
+  form.links.push({ name: '', url: '' })
+}
+function removeLink(i: number) {
+  form.links.splice(i, 1)
 }
 
 // el-upload before-upload：读文件 → 解析 → 校验 → 单题进编辑弹窗，多题询问批量直传。
@@ -211,6 +224,67 @@ async function remove(row: TrainingItem) {
   }
 }
 
+// ===== 附件管理（题目级：pcap/exe 等配套文件，学生端凭 JWT 下载）=====
+const attachDialog = ref(false)
+const attachSlug = ref('')
+const attachTitle = ref('')
+const attachments = ref<ChallengeAttachment[]>([])
+const attachLoading = ref(false)
+const attachUploading = ref(false)
+
+async function openAttachments(row: TrainingItem) {
+  attachSlug.value = row.slug
+  attachTitle.value = row.title
+  attachDialog.value = true
+  await loadAttachments()
+}
+
+async function loadAttachments() {
+  attachLoading.value = true
+  try {
+    attachments.value = await adminChallengeApi.listAttachments(attachSlug.value)
+  } catch (e) {
+    ElMessage.error(`附件列表加载失败：${(e as Error).message}`)
+  } finally {
+    attachLoading.value = false
+  }
+}
+
+// 同名文件覆盖更新（服务端按 slug+filename upsert）。
+async function onUploadAttachment(file: File) {
+  attachUploading.value = true
+  try {
+    await adminChallengeApi.uploadAttachment(attachSlug.value, file)
+    ElMessage.success(`已上传附件：${file.name}`)
+    await loadAttachments()
+  } catch (e) {
+    ElMessage.error(`附件上传失败：${(e as Error).message}`)
+  } finally {
+    attachUploading.value = false
+  }
+  return false // 阻止 el-upload 默认提交
+}
+
+async function removeAttachment(filename: string) {
+  try {
+    await ElMessageBox.confirm(`确定删除附件「${filename}」？`, '删除附件', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await adminChallengeApi.deleteAttachment(attachSlug.value, filename)
+    await loadAttachments()
+  } catch (e) {
+    ElMessage.error(`附件删除失败：${(e as Error).message}`)
+  }
+}
+
+function attachSize(n: number) {
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`
+  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`
+  return `${n} B`
+}
+
 function difficultyType(d: TrainingItem['difficulty']) {
   return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
 }
@@ -263,8 +337,10 @@ onMounted(load)
   "challenge": { "type": "static", "flag": "flag{answer}" },
   "env": { "image": "vulnapp:1.0", "port": 80 },   // 可选；容器环境
   "hints": [ { "title": "提示一", "content": "看 UNION", "cost": 10 } ],
+  "links": [ { "name": "Wireshark", "url": "https://…" } ],  // 可选外链
   "tutorial_slug": "sqli-basics"       // 可选关联教程
 }</pre>
+      <p class="dim">附件（pcap/exe 等文件）不走 JSON：题目列表「附件」按钮单独上传，学生端凭登录态下载。</p>
       <p class="dim">上传接口：POST /admin/challenges（单对象或数组，逐题校验、整体拒绝）。</p>
       <h3>题目包 zip（image: . 容器题）</h3>
       <pre class="json">challenge.yml + Dockerfile + docker-compose.yml + src/…</pre>
@@ -294,8 +370,9 @@ onMounted(load)
         <span v-else>—</span>
       </template>
     </el-table-column>
-    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="90">
+    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="150">
       <template #default="{ row }">
+        <el-button size="small" @click="openAttachments(row)">附件</el-button>
         <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
       </template>
     </el-table-column>
@@ -375,6 +452,16 @@ onMounted(load)
           <el-button size="small" @click="addHint">添加提示</el-button>
         </div>
       </el-form-item>
+      <el-form-item label="外链">
+        <div class="hints">
+          <div v-for="(l, i) in form.links" :key="i" class="hint-row">
+            <el-input v-model="l.name" placeholder="名称（如 Wireshark 下载）" class="hint-title" />
+            <el-input v-model="l.url" placeholder="https://…" class="hint-content" />
+            <el-button type="danger" link @click="removeLink(i)">删除</el-button>
+          </div>
+          <el-button size="small" @click="addLink">添加外链</el-button>
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="editVisible = false">取消</el-button>
@@ -382,6 +469,33 @@ onMounted(load)
         确认上传
       </el-button>
     </template>
+  </el-dialog>
+
+  <!-- 附件管理弹窗：题目级文件上传/列表/删除 -->
+  <el-dialog v-model="attachDialog" :title="`附件管理：${attachTitle}`" width="560px">
+    <div class="attach-toolbar">
+      <el-upload
+        :show-file-list="false"
+        :before-upload="onUploadAttachment"
+        :disabled="attachUploading"
+      >
+        <el-button type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</el-button>
+      </el-upload>
+    </div>
+    <el-table :data="attachments" v-loading="attachLoading" size="small" empty-text="暂无附件">
+      <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
+      <el-table-column label="大小" width="100">
+        <template #default="{ row }">{{ attachSize(row.size) }}</template>
+      </el-table-column>
+      <el-table-column label="上传时间" width="150">
+        <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="70">
+        <template #default="{ row }">
+          <el-button size="small" type="danger" link @click="removeAttachment(row.filename)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
   </el-dialog>
 </template>
 
@@ -402,4 +516,5 @@ onMounted(load)
 .hint-title { width: 140px; flex: none; }
 .hint-content { flex: 1; }
 .hint-cost { flex: none; }
+.attach-toolbar { margin-bottom: 0.8rem; }
 </style>

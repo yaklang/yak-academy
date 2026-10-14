@@ -28,6 +28,7 @@ services:
       ACADEMY_ADMIN_USERNAME: ${ACADEMY_ADMIN_USERNAME:-admin}
       ACADEMY_ADMIN_PASSWORD: ${ACADEMY_ADMIN_PASSWORD:?请在 .env 或环境变量中设置 ACADEMY_ADMIN_PASSWORD}
       ACADEMY_PUBLIC_URL: ${ACADEMY_PUBLIC_URL:-http://host.docker.internal:8080}
+      ACADEMY_ATTACHMENTS_DIR: /data/attachments # 题目附件与 SQLite 一起随 ./data 卷持久化
     restart: unless-stopped
 
   frontend:
