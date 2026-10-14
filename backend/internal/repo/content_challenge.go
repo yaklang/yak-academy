@@ -171,8 +171,11 @@ func (r *challengeRepo) List(ctx context.Context, offset, limit int) ([]model.Ch
 }
 
 // ListVisible 学生端训练场列表：is_visible 且（无发布时间 或 已到发布时间）。
+// release_at 存 TEXT（驱动序列化为带时区偏移的字符串），SQL 比较走字典序：
+// 写入与查询必须统一 UTC，否则跨时区字符串比较会把未到期的题判为可见。
 func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, offset, limit int) ([]model.Challenge, int64, error) {
 	visible := "is_visible = ? AND (release_at IS NULL OR release_at <= ?)"
+	now = now.UTC()
 	var (
 		list  []model.Challenge
 		total int64
@@ -197,7 +200,8 @@ func (r *challengeRepo) UpdateVisibility(ctx context.Context, slug string, isVis
 		if releaseAt.IsZero() {
 			updates["release_at"] = gorm.Expr("NULL")
 		} else {
-			updates["release_at"] = *releaseAt
+			// 与 ListVisible 对齐：统一 UTC 落库，保证 TEXT 字典序比较语义正确。
+			updates["release_at"] = releaseAt.UTC()
 		}
 	}
 	if len(updates) == 0 {

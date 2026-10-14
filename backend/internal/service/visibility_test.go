@@ -179,3 +179,36 @@ func TestHiddenChallengeBlocksHintUnlock(t *testing.T) {
 		t.Fatalf("hint unlock after re-visible: %v", err)
 	}
 }
+// TestReleaseAtUTCStoredAgainstLocalNow 锁回归：release_at 曾按入参时区原样落库
+// （管理 API 收 RFC3339 UTC 字符串），而查询参数 now 由驱动序列化为本地时区
+// 字符串。SQLite TEXT 字典序比较跨时区偏移不对称，未到期的题被判为可见
+// （E2E visibility 旅程在 UTC+8 本机抓到）。repo 层修复：写入与查询统一 UTC。
+// 本测试在任意本机时区都构造出「UTC 写入 + 本地 now」的历史不对称场景。
+func TestReleaseAtUTCStoredAgainstLocalNow(t *testing.T) {
+	if _, offset := time.Now().Zone(); offset == 0 {
+		t.Skip("本机恰为 UTC 时区时无法构造不对称比较场景")
+	}
+	chalSvc, topicSvc, _ := newVisibilityTestEnv(t)
+	ctx := context.Background()
+
+	// 模拟真实路径：前端 toISOString() → RFC3339 UTC → time.Parse 得 UTC 时间。
+	// 时钟拨到「本地 23:30」——UTC 表示是次日 07:30 之外的未来时刻，
+	// 保证 UTC 字符串字典序上小于本地 now 字符串（曾导致误判可见）。
+	futureLocal := time.Now().Add(2 * time.Hour)
+	futureUTC, err := time.Parse(time.RFC3339, futureLocal.UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chalSvc.SetVisibility(ctx, "vis-a", VisibilityUpdate{ReleaseAt: &futureUTC}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 未到期：列表 SQL 比较（release_at <= now）不得把未来题误判为可见。
+	_, total, err := topicSvc.ListTraining(ctx, 1, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 { // 3 题种子，vis-a 未来发布 → 只见 vis-b/vis-c
+		t.Fatalf("future-released challenge leaked into list: total=%d", total)
+	}
+}
