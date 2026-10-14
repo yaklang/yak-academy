@@ -224,6 +224,62 @@ async function remove(row: TrainingItem) {
   }
 }
 
+// ===== 可见性开关 + 定时发布 =====
+// 状态语义：隐藏或未到发布时间的题目学生端整体 404；到期自动可见。
+const visSaving = ref('')
+
+async function toggleVisible(row: TrainingItem) {
+  visSaving.value = row.slug
+  try {
+    const updated = await adminChallengeApi.updateVisibility(row.slug, { is_visible: !row.is_visible })
+    row.is_visible = updated.is_visible
+    ElMessage.success(updated.is_visible ? `「${row.title}」已对学生可见` : `「${row.title}」已隐藏`)
+  } catch (e) {
+    ElMessage.error(`可见性更新失败：${(e as Error).message}`)
+  } finally {
+    visSaving.value = ''
+  }
+}
+
+const releaseDialog = ref(false)
+const releaseRow = ref<TrainingItem | null>(null)
+const releaseForm = reactive({ mode: 'now' as 'now' | 'at', datetime: '' })
+const releaseSaving = ref(false)
+
+function openReleaseDialog(row: TrainingItem) {
+  releaseRow.value = row
+  releaseForm.mode = 'now'
+  releaseForm.datetime = ''
+  releaseDialog.value = true
+}
+
+async function saveRelease() {
+  if (!releaseRow.value) return
+  releaseSaving.value = true
+  try {
+    // mode=now → release_at: null（清空定时，立即语义）；mode=at → RFC3339（前端本地时区）。
+    const body = releaseForm.mode === 'now'
+      ? { release_at: null }
+      : { release_at: new Date(releaseForm.datetime).toISOString() }
+    const updated = await adminChallengeApi.updateVisibility(releaseRow.value.slug, body)
+    Object.assign(releaseRow.value, { release_at: updated.release_at, is_visible: updated.is_visible })
+    ElMessage.success(releaseForm.mode === 'now'
+      ? '已清除定时，题目立即按可见性开关开放'
+      : `已设定发布时间：${new Date(releaseForm.datetime).toLocaleString()}`)
+    releaseDialog.value = false
+  } catch (e) {
+    ElMessage.error(`定时发布设置失败：${(e as Error).message}`)
+  } finally {
+    releaseSaving.value = false
+  }
+}
+
+function releaseText(row: TrainingItem) {
+  if (!row.release_at) return ''
+  const d = new Date(row.release_at)
+  return d.getTime() <= Date.now() ? `已发布（${d.toLocaleString()}）` : `定时 ${d.toLocaleString()}`
+}
+
 // ===== 附件管理（题目级：pcap/exe 等配套文件，学生端凭 JWT 下载）=====
 const attachDialog = ref(false)
 const attachSlug = ref('')
@@ -370,8 +426,22 @@ onMounted(load)
         <span v-else>—</span>
       </template>
     </el-table-column>
-    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="150">
+    <el-table-column label="可见性" width="170">
       <template #default="{ row }">
+        <el-switch
+          :model-value="row.is_visible !== false"
+          :loading="visSaving === row.slug"
+          inline-prompt
+          active-text="可见"
+          inactive-text="隐藏"
+          @change="toggleVisible(row)"
+        />
+        <div v-if="releaseText(row)" class="release-note">{{ releaseText(row) }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="210">
+      <template #default="{ row }">
+        <el-button size="small" @click="openReleaseDialog(row)">定时</el-button>
         <el-button size="small" @click="openAttachments(row)">附件</el-button>
         <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
       </template>
@@ -497,6 +567,27 @@ onMounted(load)
       </el-table-column>
     </el-table>
   </el-dialog>
+
+  <!-- 定时发布设置：now = 清除定时（立即语义）；at = 指定未来时间到期自动可见 -->
+  <el-dialog v-model="releaseDialog" :title="`定时发布：${releaseRow?.title ?? ''}`" width="480px">
+    <el-radio-group v-model="releaseForm.mode">
+      <el-radio value="now">立即语义（清除定时，只受可见性开关约束）</el-radio>
+      <el-radio value="at">定时发布</el-radio>
+    </el-radio-group>
+    <div v-if="releaseForm.mode === 'at'" class="release-input">
+      <el-date-picker
+        v-model="releaseForm.datetime"
+        type="datetime"
+        placeholder="选择发布时间"
+        :disabled-date="(d: Date) => d.getTime() < Date.now() - 60000"
+      />
+    </div>
+    <p class="dim">定时到期前学生端看不到该题（列表/详情/提交/实例全部 404）；到期自动开放。</p>
+    <template #footer>
+      <el-button @click="releaseDialog = false">取消</el-button>
+      <el-button type="primary" :loading="releaseSaving" @click="saveRelease">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -517,4 +608,7 @@ onMounted(load)
 .hint-content { flex: 1; }
 .hint-cost { flex: none; }
 .attach-toolbar { margin-bottom: 0.8rem; }
+.release-note { font-size: 0.78rem; color: var(--el-text-color-secondary); margin-top: 2px; }
+.release-input { margin-top: 0.8rem; }
+.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

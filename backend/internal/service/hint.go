@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
@@ -33,6 +34,9 @@ func (s *ChallengeService) UnlockHint(ctx context.Context, userID uint, challeng
 	chal, err := s.challenges.FindBySlug(ctx, challengeSlug)
 	if err != nil {
 		return nil, err
+	}
+	if !chal.Published(time.Now()) {
+		return nil, ErrNotFound
 	}
 	hint, err := s.challenges.FindHint(ctx, hintID)
 	if err != nil {

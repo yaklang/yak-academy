@@ -39,7 +39,16 @@ type Challenge struct {
 	Links string `gorm:"type:text" json:"-"`
 	// TutorialSlug 可选关联教程 Room slug（教题关联：题目可指回配套教程）。
 	TutorialSlug string `gorm:"index;size:128" json:"tutorial_slug"`
+	// IsVisible 可见性开关（管理端控制；false 时学生端训练场/详情/实例/提交全部 404）。
+	IsVisible bool `gorm:"default:true" json:"is_visible"`
+	// ReleaseAt 定时发布时间（nil = 不限，立即语义；未来时间学生端隐藏，到期自动可见）。
+	ReleaseAt *time.Time `json:"release_at"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// Published 当前时刻对学生端是否可见（is_visible 且已到发布时间）。
+func (c *Challenge) Published(now time.Time) bool {
+	return c.IsVisible && (c.ReleaseAt == nil || !now.Before(*c.ReleaseAt))
 }
 
 // ChallengeLink 题目外链条目（Challenge.Links JSON 数组元素）。

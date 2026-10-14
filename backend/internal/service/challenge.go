@@ -53,6 +53,40 @@ func (s *ChallengeService) SetAttachmentStore(repo repo.ChallengeAttachmentRepo,
 	s.attachDir = dir
 }
 
+// SetVisibility 管理端更新可见性/定时发布。nil = 不改该字段；
+// clearRelease=true 时清空定时（立即语义）——需要三态（不改/清空/设值），
+// 单 *time.Time 无法区分「清空」与「不改」。
+type VisibilityUpdate struct {
+	IsVisible     *bool
+	ReleaseAt     *time.Time
+	ClearRelease  bool
+}
+
+func (s *ChallengeService) SetVisibility(ctx context.Context, slug string, u VisibilityUpdate) (*model.Challenge, error) {
+	if u.IsVisible == nil && u.ReleaseAt == nil && !u.ClearRelease {
+		return nil, fmt.Errorf("%w: empty visibility update", ErrValidation)
+	}
+	var releaseAt *time.Time
+	if u.ClearRelease {
+		releaseAt = &time.Time{} // 零值 → SQL NULL（gorm 对指针零值 Updates 需显式赋 NULL）
+	}
+	if u.ReleaseAt != nil {
+		releaseAt = u.ReleaseAt
+	}
+	rows, err := s.challenges.UpdateVisibility(ctx, slug, u.IsVisible, releaseAt)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, ErrNotFound
+	}
+	chal, err := s.challenges.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	return chal, nil
+}
+
 // UpsertChallenge 内容发布时写入题目与判定答案/提示（content→challenge 白名单依赖）。
 func (s *ChallengeService) UpsertChallenge(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error {
 	return s.challenges.Upsert(ctx, c, flags, hints)

@@ -54,6 +54,10 @@ type ChallengeRepo interface {
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error)
 	// List 全量题目分页（训练场列表用）。
 	List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error)
+	// ListVisible 学生端训练场分页：仅 is_visible 且已到发布时间的题目。
+	ListVisible(ctx context.Context, now time.Time, offset, limit int) ([]model.Challenge, int64, error)
+	// UpdateVisibility 管理端更新可见性开关/定时发布时间；返回受影响行数（0 = slug 不存在）。
+	UpdateVisibility(ctx context.Context, slug string, isVisible *bool, releaseAt *time.Time) (int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	// FindHint 按 hint 主键查（解锁接口用）。
