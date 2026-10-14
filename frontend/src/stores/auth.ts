@@ -6,6 +6,8 @@ import { authApi, type User } from '../api'
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('academy_token'))
   const user = ref<User | null>(null)
+  // 进行中的 /me 请求去重：路由守卫与布局可能同时触发，只发一次。
+  let meInFlight: Promise<void> | null = null
 
   function setToken(t: string) {
     token.value = t
@@ -17,14 +19,22 @@ export const useAuthStore = defineStore('auth', () => {
     setToken(resp.token)
   }
 
-  // 拉取当前用户（登录后/页面刷新时调用；失败则清除本地 token）
-  async function fetchMe() {
-    try {
-      user.value = await authApi.me()
-    } catch {
-      logout()
-      throw new Error('登录已失效')
-    }
+  // 拉取当前用户（登录后/页面刷新时调用；失败则清除本地 token）。
+  // 并发调用共享同一次请求；已完成（user 已填充）时直接返回。
+  async function fetchMe(): Promise<void> {
+    if (user.value) return
+    if (meInFlight) return meInFlight
+    meInFlight = (async () => {
+      try {
+        user.value = await authApi.me()
+      } catch {
+        logout()
+        throw new Error('登录已失效')
+      } finally {
+        meInFlight = null
+      }
+    })()
+    return meInFlight
   }
 
   function logout() {
