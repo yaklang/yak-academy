@@ -70,6 +70,8 @@ func mapError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, service.ErrNotFound):
 		writeError(w, errNotFound)
+	case errors.Is(err, service.ErrInvalidCredential):
+		writeError(w, errUnauthorized)
 	case errors.Is(err, service.ErrValidation):
 		msg := err.Error()
 		if msg == "" || msg == service.ErrValidation.Error() {

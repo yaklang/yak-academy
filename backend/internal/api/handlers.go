@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -35,6 +36,8 @@ func (h *Handlers) Register(r *Router) {
 
 	// student：浏览、提交、进度、排行榜
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
+	r.Handle(http.MethodPost, "/api/v1/auth/logout", "", h.logout)
+	r.Handle(http.MethodPost, "/api/v1/auth/change-password", "", h.changePassword)
 	r.Handle(http.MethodGet, "/api/v1/topics", "", h.listTopics)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}", "", h.getTopic)
 	r.Handle(http.MethodPut, "/api/v1/topics/{topicSlug}", "admin", h.updateTopic)
@@ -75,6 +78,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
+	r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
 }
 
 func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
@@ -98,6 +102,59 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 func (h *Handlers) me(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
 	writeJSON(w, http.StatusOK, user)
+}
+
+// logout 登出：按当前 token 的 jti 写撤销表（吊销至自然过期）。
+func (h *Handlers) logout(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	if err := h.Auth.Logout(req.Context(), user.ID, TokenFrom(req)); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// changePassword 本人改密：成功后该用户全部 token 失效（前端需跳登录页）。
+func (h *Handlers) changePassword(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	if err := h.Auth.ChangePassword(req.Context(), user.ID, body.CurrentPassword, body.NewPassword); err != nil {
+		if errors.Is(err, service.ErrInvalidCredential) {
+			writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized, "current password incorrect"})
+			return
+		}
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// resetPasswordByAdmin 管理员重置密码：目标用户全部 token 立即失效。
+func (h *Handlers) resetPasswordByAdmin(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errNotFound)
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Auth.ResetPasswordByAdmin(req.Context(), uint(id), body.Password); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handlers) listTopics(w http.ResponseWriter, req *http.Request) {

@@ -136,12 +136,20 @@ export const adminApi = {
     http.post<User>('/admin/users', { username, password, global_role: globalRole }),
   updateRoles: (id: number, globalRole: string) =>
     http.patch<User>(`/admin/users/${id}/roles`, { global_role: globalRole }),
+  resetPassword: (id: number, password: string) =>
+    http.post<{ ok: boolean }>(`/admin/users/${id}/reset-password`, { password }),
 }
 
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),
   me: () => http.get<User>('/me'),
+  logout: () => http.post<{ ok: boolean }>('/auth/logout'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    http.post<{ ok: boolean }>('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
 }
 
 export const topicApi = {

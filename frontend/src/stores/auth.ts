@@ -37,7 +37,15 @@ export const useAuthStore = defineStore('auth', () => {
     return meInFlight
   }
 
-  function logout() {
+  // 登出：吊销当前 token（后端撤销表），无论接口结果如何都清理本地态。
+  async function logout() {
+    if (token.value) {
+      try {
+        await authApi.logout()
+      } catch {
+        // token 已失效/网络失败也照常清理本地登录态
+      }
+    }
     token.value = null
     user.value = null
     localStorage.removeItem('academy_token')

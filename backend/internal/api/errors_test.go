@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,9 +9,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/yaklang/yak-academy/backend/internal/db"
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/repo"
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
@@ -44,6 +48,7 @@ func TestMapErrorStatusCodes(t *testing.T) {
 		{"validation with reason", fmt.Errorf("%w: bad zip", service.ErrValidation), http.StatusUnprocessableEntity, "VALIDATION_FAILED"},
 		{"has solve history", service.ErrHasSolves, http.StatusConflict, "CONFLICT"},
 		{"unknown internal", errors.New("boom"), http.StatusInternalServerError, "INTERNAL"},
+		{"login bad credential", service.ErrInvalidCredential, http.StatusUnauthorized, "UNAUTHORIZED"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,6 +65,52 @@ func TestMapErrorStatusCodes(t *testing.T) {
 				t.Fatalf("code = %q, want %q", env.Error.Code, tc.code)
 			}
 		})
+	}
+}
+
+// 撤销 token 走 authenticate 专路（"token revoked" 文案），不进 mapError——
+// 这里直测 authenticate 的 401 信封。
+func TestAuthenticateRevokedTokenReturns401(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:apirevokedtest?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.Migrate(gdb); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, _ := gdb.DB()
+		sqlDB.Close()
+	})
+	auth := service.NewAuthService(repo.NewUserRepo(gdb), "revoked-test-secret")
+	auth.SetRevocationRepo(repo.NewTokenRevocationRepo(gdb))
+	ctx := context.Background()
+	if _, err := auth.CreateUser(ctx, "alice", "pass-123", model.GlobalRoleStudent); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := auth.Login(ctx, "alice", "pass-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Logout(ctx, 1, token); err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(auth)
+	// 探测路由：任意已注册路由都会先过 authenticate，这里用 me 的路由形态。
+	NewHandlers(auth, nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	var env errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != "UNAUTHORIZED" {
+		t.Fatalf("code = %q, want UNAUTHORIZED", env.Error.Code)
 	}
 }
 

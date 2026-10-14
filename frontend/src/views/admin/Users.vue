@@ -10,6 +10,11 @@ const page = ref(1)
 const loading = ref(false)
 const createVisible = ref(false)
 const createForm = reactive({ username: '', password: '', global_role: 'student' })
+// 重置密码对话框（目标用户全部 token 立即失效）
+const resetVisible = ref(false)
+const resetTarget = ref<User | null>(null)
+const resetForm = reactive({ password: '', confirm: '' })
+const resetLoading = ref(false)
 
 const roleLabel: Record<string, string> = {
   student: '普通人',
@@ -54,6 +59,36 @@ async function changeGlobalRole(user: User, role: string) {
   }
 }
 
+function openReset(user: User) {
+  resetTarget.value = user
+  resetForm.password = ''
+  resetForm.confirm = ''
+  resetVisible.value = true
+}
+
+async function submitReset() {
+  const target = resetTarget.value
+  if (!target) return
+  if (resetForm.password.length < 6) {
+    ElMessage.warning('新密码至少 6 位')
+    return
+  }
+  if (resetForm.password !== resetForm.confirm) {
+    ElMessage.warning('两次输入不一致')
+    return
+  }
+  resetLoading.value = true
+  try {
+    await adminApi.resetPassword(target.id, resetForm.password)
+    resetVisible.value = false
+    ElMessage.success(`已重置 ${target.username} 的密码（其全部登录已失效）`)
+  } catch (e) {
+    ElMessage.error(`重置失败：${(e as Error).message}`)
+  } finally {
+    resetLoading.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -72,6 +107,11 @@ onMounted(load)
           <el-option value="student" label="普通人" />
           <el-option value="admin" label="管理员" />
         </el-select>
+      </template>
+    </el-table-column>
+    <el-table-column label="操作" width="120">
+      <template #default="{ row }">
+        <el-button size="small" @click="openReset(row)">重置密码</el-button>
       </template>
     </el-table-column>
   </el-table>
@@ -102,6 +142,22 @@ onMounted(load)
     <template #footer>
       <el-button @click="createVisible = false">取消</el-button>
       <el-button type="primary" @click="createUser">创建</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="resetVisible" :title="`重置密码：${resetTarget?.username ?? ''}`" width="420px">
+    <p class="hint">重置后该用户全部登录立即失效，需用新密码重新登录。</p>
+    <el-form label-width="80px">
+      <el-form-item label="新密码">
+        <el-input v-model="resetForm.password" type="password" show-password placeholder="至少 6 位" />
+      </el-form-item>
+      <el-form-item label="确认">
+        <el-input v-model="resetForm.confirm" type="password" show-password />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="resetVisible = false">取消</el-button>
+      <el-button type="primary" :loading="resetLoading" @click="submitReset">确认重置</el-button>
     </template>
   </el-dialog>
 </template>

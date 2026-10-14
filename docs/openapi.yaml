@@ -301,6 +301,49 @@ paths:
               schema: { $ref: '#/components/schemas/TokenResponse' }
         '401': { $ref: '#/components/responses/ErrorResp' }
 
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 登出（吊销当前 token）
+      description: 按 JWT 的 jti 写入撤销表，令牌在自然过期前立即失效。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /auth/change-password:
+    post:
+      tags: [auth]
+      summary: 修改本人密码
+      description: 校验当前密码后更新；同时使该用户全部已签发 token 失效（需重新登录）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 6 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /me:
     get:
       tags: [auth]
@@ -1045,3 +1088,32 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
         '403': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/users/{id}/reset-password:
+    post:
+      tags: [admin]
+      summary: 重置用户密码（使该用户全部已签发 token 失效）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, minLength: 6 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
