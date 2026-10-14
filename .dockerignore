@@ -1,0 +1,12 @@
+# 构建上下文瘦身：两个 Dockerfile 都以仓库根为 context。
+.git
+.github
+.agents
+docs
+data
+frontend/node_modules
+frontend/dist
+backend/academy.db
+backend/coverage.out
+examples
+*.md

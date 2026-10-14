@@ -1,0 +1,42 @@
+# yak-academy 平台部署（单机）。
+#
+# 架构边界（docs/architecture.md 演进路线：第一版单机边界）：
+# - 后端通过挂载宿主 /var/run/docker.sock + 容器内 docker CLI 管理题目容器；
+#   题目容器创建在宿主 daemon 上，与本服务是兄弟容器（非 in-docker 嵌套）。
+# - 题目容器端口固定发布到宿主 127.0.0.1（DockerDriver.Create），
+#   因此学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围。
+# - CHECKPOINT_URL 由 ACADEMY_PUBLIC_URL 拼出：题目容器需回达后端 8080 端口。
+#   Docker Desktop（Win/Mac）默认 host.docker.internal 可用；
+#   Linux 上需改为宿主 LAN IP 或 docker0 网桥 IP（通常 172.17.0.1）。
+#
+# 可通过 .env / 环境变量覆盖：ACADEMY_JWT_SECRET、ACADEMY_ADMIN_PASSWORD 必改，
+# ACADEMY_PUBLIC_URL 按宿主网络环境调整。
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    image: yak-academy/backend:latest
+    ports:
+      - "8080:8080" # 题目容器检测点回调经此端口回达（ACADEMY_PUBLIC_URL 指向它）
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # 题目容器治理（兄弟容器模式）
+      - ./data:/data # SQLite 数据库与上传内容持久化
+    environment:
+      ACADEMY_ENV_DRIVER: docker
+      ACADEMY_JWT_SECRET: ${ACADEMY_JWT_SECRET:?请在 .env 或环境变量中设置 ACADEMY_JWT_SECRET}
+      ACADEMY_ADMIN_USERNAME: ${ACADEMY_ADMIN_USERNAME:-admin}
+      ACADEMY_ADMIN_PASSWORD: ${ACADEMY_ADMIN_PASSWORD:?请在 .env 或环境变量中设置 ACADEMY_ADMIN_PASSWORD}
+      ACADEMY_PUBLIC_URL: ${ACADEMY_PUBLIC_URL:-http://host.docker.internal:8080}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    image: yak-academy/frontend:latest
+    depends_on:
+      - backend
+    ports:
+      - "${ACADEMY_WEB_PORT:-8081}:80"
+    restart: unless-stopped
