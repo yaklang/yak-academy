@@ -16,13 +16,20 @@ type Config struct {
 	EnvDriver string
 }
 
+// 内置默认值仅用于本地开发；生产必须通过环境变量覆盖（main 启动时对照告警）。
+const (
+	DefaultJWTSecret     = "dev-only-secret"
+	DefaultAdminUsername = "admin"
+	DefaultAdminPassword = "admin123"
+)
+
 func Load() *Config {
 	return &Config{
 		Addr:          getenv("ACADEMY_ADDR", ":8080"),
 		Database:      getenv("ACADEMY_DB", "academy.db"),
-		JWTSecret:     getenv("ACADEMY_JWT_SECRET", "dev-only-secret"),
-		AdminUsername: getenv("ACADEMY_ADMIN_USERNAME", "admin"),
-		AdminPassword: getenv("ACADEMY_ADMIN_PASSWORD", "admin123"),
+		JWTSecret:     getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
+		AdminUsername: getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
+		AdminPassword: getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
 		EnvDriver:     getenv("ACADEMY_ENV_DRIVER", "noop"),
 	}
 }

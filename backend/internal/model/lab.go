@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// InstanceStatus 题目环境实例状态（env 模块，第一版仅接口 + stub）。
+// InstanceStatus 题目环境实例状态（env 模块：docker 驱动 / noop 兜底）。
 type InstanceStatus string
 
 const (

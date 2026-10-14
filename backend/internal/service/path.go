@@ -8,10 +8,13 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
-// PathItemView 学习路径节点视图（只引用 room_slug，附完成态）。
+// PathItemView 学习路径节点视图（存储只引用 room_slug；title/topic_slug 为
+// 响应富化字段，供前端展示与跳转，不落路径表——teaching-integration skill）。
 type PathItemView struct {
 	Order     int    `json:"order"`
 	RoomSlug  string `json:"room_slug"`
+	Title     string `json:"title"`
+	TopicSlug string `json:"topic_slug"`
 	Completed bool   `json:"completed"`
 }
 
@@ -125,11 +128,25 @@ func (s *PathService) buildView(ctx context.Context, path model.LearningPath, co
 	if err != nil {
 		return nil, err
 	}
+	slugs := make([]string, len(items))
+	for i, it := range items {
+		slugs[i] = it.RoomSlug
+	}
+	rooms, err := s.rooms.FindBySlugs(ctx, slugs...)
+	if err != nil {
+		return nil, err
+	}
+	bySlug := make(map[string]model.Room, len(rooms))
+	for _, r := range rooms {
+		bySlug[r.Slug] = r
+	}
 	view := &PathView{ID: path.ID, Title: path.Title, Items: []PathItemView{}}
 	for _, it := range items {
-		view.Items = append(view.Items, PathItemView{
-			Order: it.Order, RoomSlug: it.RoomSlug, Completed: completed[it.RoomSlug],
-		})
+		v := PathItemView{Order: it.Order, RoomSlug: it.RoomSlug, Completed: completed[it.RoomSlug]}
+		if r, ok := bySlug[it.RoomSlug]; ok {
+			v.Title, v.TopicSlug = r.Title, r.TopicSlug
+		}
+		view.Items = append(view.Items, v)
 	}
 	return view, nil
 }

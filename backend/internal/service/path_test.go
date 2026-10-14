@@ -50,6 +50,13 @@ func TestPathCreateListGetWithProgress(t *testing.T) {
 	if created.ID == 0 || created.Title != "Web 入门" || len(created.Items) != 2 {
 		t.Fatalf("created = %+v", created)
 	}
+	// 节点视图富化：title/topic_slug 来自 Room（供前端跳转），非路径存储。
+	if created.Items[0].Title != "A" || created.Items[0].TopicSlug != "topic-x" {
+		t.Fatalf("item[0] not enriched: %+v", created.Items[0])
+	}
+	if created.Items[1].Title != "B" || created.Items[1].TopicSlug != "topic-x" {
+		t.Fatalf("item[1] not enriched: %+v", created.Items[1])
+	}
 	// 用户 3 完成 room-a。
 	if err := repo.NewProgressRepo(gdb).MarkCompleted(ctx, 3, "room-a"); err != nil {
 		t.Fatal(err)
