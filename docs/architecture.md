@@ -5,13 +5,13 @@
 
 ## 1. 背景与对标分析
 
-yak-academy 是一个安全实训平台，提供安全教程（文字+视频）、独立实战题目、学习路径、进度与积分排行。设计对标调研结论：
+yak-academy 是一个安全实训平台，提供安全教程（文字+视频）、独立实战题目、进度与积分排行。设计对标调研结论：
 
 | 参考对象 | 借鉴点 | 不借鉴点 |
 |---|---|---|
-| PortSwigger Web Security Academy | 训练场按分类分组展示题目；题目详情页承载描述/提示/环境/提交；路径只引用不复制；服务端自动判定（远期）；徽章/认证分层激励 | 商业变现部分 |
+| PortSwigger Web Security Academy | 训练场按分类分组展示题目；题目详情页承载描述/提示/环境/提交；服务端自动判定（远期）；徽章/认证分层激励 | 商业变现部分 |
 | 实训常用判题约定 | challenges/flags/hints/submissions 数据模型；恒时比较；动态计分衰减函数 | 比赛制 teams 模式、第三方插件体系（第一版） |
-| TryHackMe | 教题关联：教程与题目互指而非互嵌；Path→Room→Lesson；XP 游戏化 | 靶机常驻 IaaS 成本模型；教题强制同库耦合 |
+| TryHackMe | 教题关联：教程与题目互指而非互嵌；XP 游戏化 | 靶机常驻 IaaS 成本模型；教题强制同库耦合 |
 | CTFtime | 排行榜按赛季切片；题目页聚合题解（远期） | 纯 UGC 聚合模式（无判定） |
 
 **核心架构决策**（均在 skill 中有对应纠偏规则）：
@@ -29,7 +29,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 ┌────────────────────────────────────────────────────────────┐
 │ 表现层  frontend/  Vue3 + TS + Vite                          │
 │   学生端：Topic/Room 教程浏览、训练场（题目分组列表+详情）、     │
-│           路径、进度、排行榜                                    │
+│           进度、排行榜                                          │
 │   管理端：资源管理（教程管理/题目管理）、用户与角色管理、       │
 │           容器监控                                             │
 ├────────────────────────────────────────────────────────────┤
@@ -39,7 +39,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │   ├─ challenge   Challenge/Flag/Hint 业务（题目独立资源）      │
 │   ├─ judge       异步判题 worker（恒时比较、动态计分）          │
 │   ├─ env         Lab 环境生命周期（docker 驱动 / noop 兜底）   │
-│   ├─ userprogress 学习路径、进度跟踪                            │
+│   ├─ userprogress 进度跟踪                                      │
 │   └─ eventbus    进程内 append-only 事件总线 + 派生器           │
 ├────────────────────────────────────────────────────────────┤
 │ 数据层  SQLite + gorm（repo 层接口抽象，可平滑迁 PostgreSQL）    │
@@ -94,10 +94,9 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 每实例生成 `checkpoint_token`（`LabInstance.checkpoint_token` 列，API JSON 隐藏）：注入 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL`（`ACADEMY_PUBLIC_URL` 前缀，默认 `host.docker.internal`）；实例销毁 token 即失效。
 - Docker 驱动实现；未配置 daemon 时 noop（启动/构建返回明确错误）。
 
-### 3.6 userprogress — 路径与进度
+### 3.6 userprogress — 进度
 
-- LearningPath = 有序 Room ID 引用（PathItem），不复制内容。
-- Progress 为事件派生物：Room 完成率、路径完成率、XP。
+- Progress 为事件派生物：Room 完成率、XP。
 
 ### 3.7 eventbus — 事件总线
 
@@ -119,7 +118,6 @@ Challenge(slug 主键, category, difficulty, description_md,     # 独立题目�
        ─┬─ Flag(type: static|regex)
          ├─ Hint(title/content/cost)
          └─ Submission(user, answer, status: pending|correct|incorrect)
-LearningPath ─→ PathItem(path_id, room_id, order)
 Event(id, user_id, type, payload, created_at)   # append-only
 ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 ```
@@ -151,7 +149,6 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 | `DELETE /challenges/{slug}/instance` | student | 销毁环境 |
 | `POST /submissions` | student | 提交答案（challenge_slug 键，返回 pending） |
 | `GET /submissions/{id}` | student | 查询判定结果 |
-| `GET /learning-paths` / `GET /learning-paths/{id}` | student | 路径列表/详情（含进度） |
 | `GET /progress` | student | 个人进度 |
 | `GET /leaderboard` | student | 排行榜（派生数据） |
 | `GET /badges` | student | 徽章目录与获得状态（计算型读模型） |
@@ -178,7 +175,7 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
-- **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
+- **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分的实时投影，零新表零新事件）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 9. 当前边界（明确不做）

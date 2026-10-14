@@ -71,7 +71,6 @@ async function submitChangePassword() {
       <nav>
         <router-link to="/">教程</router-link>
         <router-link to="/training">训练</router-link>
-        <router-link to="/paths">路径</router-link>
       </nav>
       <div class="spacer" />
       <span v-if="xp !== null" class="xp">XP: {{ xp }}</span>

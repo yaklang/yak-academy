@@ -25,8 +25,6 @@ const router = createRouter({
         // 训练板块
         { path: 'training', name: 'training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 学习路径
-        { path: 'paths', name: 'paths', component: () => import('../views/LearningPaths.vue') },
         // 徽章（计算型读模型视图）
         { path: 'badges', name: 'badges', component: () => import('../views/Badges.vue') },
         // 次级页面（不进主导航）
@@ -46,11 +44,10 @@ const router = createRouter({
         // 训练板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 资源管理（教程管理 / 题目管理 / 路径管理 + 容器、用户）
+        // 资源管理（教程管理 / 题目管理 + 容器、用户）
         { path: 'panel', redirect: '/admin/panel/tutorials' },
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
-        { path: 'panel/paths', name: 'admin-paths', component: () => import('../views/admin/Paths.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
         { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
       ],

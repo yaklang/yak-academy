@@ -11,7 +11,7 @@
 |---|---|
 | 任何代码改动 | `project-conventions` |
 | 内容上传 / 教程解析 / 教程包或题目 JSON 格式 | `content-package-spec` |
-| Room / Challenge / 训练场 / 学习路径设计 | `teaching-integration` |
+| Room / Challenge / 训练场设计 | `teaching-integration` |
 | 用户 / 角色 / 接口鉴权 | `rbac-model` |
 | 积分 / 进度 / 排行榜 / 判题 | `event-sourcing-rules` |
 | 新增或修改 HTTP 接口 | `api-contract` |

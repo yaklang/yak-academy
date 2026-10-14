@@ -13,7 +13,7 @@ description: yak-academy API 契约开发规范。新增或修改任何 HTTP 接
 
 ## REST 命名约定
 
-- 资源名用复数 kebab-case：`/content/packages`、`/learning-paths`。
+- 资源名用复数 kebab-case：多词资源用连字符，如 `/content/packages`。
 - 层级不超过两级，更深用查询参数：`/topics/{topicSlug}/rooms`（✅），`/topics/{a}/rooms/{b}/labs/{c}`（❌）。
 - 动作用子资源动词（POST）：`/submissions/{id}/rejudge` 仅限管理场景。
 
