@@ -20,6 +20,8 @@ type LabInstance struct {
 	Status      InstanceStatus `gorm:"size:16;index" json:"status"`
 	Endpoint    string         `json:"endpoint"`               // 实例访问地址
 	ExpireAt    time.Time      `gorm:"index" json:"expire_at"` // TTL 回收时间
+	// ExtendCount 已续期次数（治理上限 2 次：初始 1h + 2×1h = 最长 3h 占用）。
+	ExtendCount int `gorm:"default:0" json:"extend_count"`
 	// FlagValue 实例唯一 flag（flag_mode=instance 时写入；禁止出现在 API JSON）。
 	FlagValue string `gorm:"size:512" json:"-"`
 	// CheckpointToken 检测点回调令牌：实例创建时随机生成，注入容器

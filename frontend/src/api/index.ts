@@ -20,6 +20,7 @@ export interface LabInstance {
   status: 'creating' | 'running' | 'stopped' | 'destroyed'
   endpoint: string
   expire_at: string
+  extend_count: number
   created_at: string
 }
 export interface Paged<T> { total: number; page: number; page_size: number; items: T[] }
