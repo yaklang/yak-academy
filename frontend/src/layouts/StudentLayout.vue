@@ -13,6 +13,8 @@ const role = computed(() => auth.user?.global_role ?? '')
 const roleLabel = computed(() => (role.value === 'admin' ? '管理员' : '普通人'))
 const canAdmin = computed(() => role.value === 'admin')
 const xp = ref<number | null>(null)
+const completedRooms = ref<number | null>(null)
+const inProgressRooms = ref<number | null>(null)
 
 onMounted(async () => {
   if (auth.token && !auth.user) {
@@ -22,6 +24,8 @@ onMounted(async () => {
     try {
       const p = await progressApi.mine()
       xp.value = p.xp
+      completedRooms.value = p.completed_rooms
+      inProgressRooms.value = p.in_progress_rooms
     } catch {
       // 进度拉取失败不打断布局
     }
@@ -41,9 +45,13 @@ function logout() {
       <nav>
         <router-link to="/">教程</router-link>
         <router-link to="/training">训练</router-link>
+        <router-link to="/paths">路径</router-link>
       </nav>
       <div class="spacer" />
       <span v-if="xp !== null" class="xp">XP: {{ xp }}</span>
+      <span v-if="completedRooms !== null" class="stats" title="事件派生的 Progress：已完成 / 进行中的教程 Room">
+        已完成 {{ completedRooms }} · 进行中 {{ inProgressRooms }}
+      </span>
       <router-link v-if="canAdmin" to="/admin" class="admin-entry">进入管理端</router-link>
       <router-link to="/leaderboard" class="secondary">排行榜</router-link>
       <span v-if="displayName" class="user">{{ displayName }}（{{ roleLabel }}）</span>
@@ -72,6 +80,7 @@ nav a {
 nav a.router-link-active { color: var(--el-color-primary); border-bottom-color: var(--el-color-primary); }
 .spacer { flex: 1; }
 .xp { color: var(--el-color-primary); font-weight: 600; font-family: Consolas, monospace; }
+.stats { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 .admin-entry { color: var(--el-color-warning); text-decoration: none; font-weight: 600; }
 .secondary { color: var(--el-text-color-secondary); text-decoration: none; font-size: 0.9rem; }
 .user { color: var(--el-text-color-secondary); font-size: 0.9rem; }

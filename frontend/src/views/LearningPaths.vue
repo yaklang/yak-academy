@@ -63,7 +63,13 @@ onMounted(load)
             {{ it.completed ? '已完成' : '未完成' }}
           </el-tag>
           <span class="order">#{{ it.order }}</span>
-          <code>{{ it.room_slug }}</code>
+          <!-- topic_slug 为响应富化字段，缺失（Room 已下架等）时降级为纯文本 -->
+          <router-link
+            v-if="it.topic_slug"
+            class="room-link"
+            :to="`/topics/${it.topic_slug}/rooms/${it.room_slug}`"
+          >{{ it.title || it.room_slug }}</router-link>
+          <code v-else>{{ it.room_slug }}</code>
         </li>
       </ol>
     </div>
@@ -84,6 +90,8 @@ onMounted(load)
 .items { padding-left: 1.2rem; }
 .items li { display: flex; align-items: center; gap: 0.6rem; margin: 0.6rem 0; }
 .order { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.room-link { color: var(--el-color-primary); text-decoration: none; }
+.room-link:hover { text-decoration: underline; }
 @media (max-width: 720px) {
   .layout { grid-template-columns: 1fr; }
   .path-list { border-right: none; border-bottom: 1px solid var(--el-border-color); padding-bottom: 0.5rem; }
