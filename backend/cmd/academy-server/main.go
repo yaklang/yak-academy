@@ -22,6 +22,13 @@ func main() {
 	defer stop()
 
 	cfg := config.Load()
+	// 默认凭据告警：本地开发默认值一旦带进生产即等于弱口令/可伪造 token。
+	if cfg.JWTSecret == config.DefaultJWTSecret {
+		log.Println("warning: ACADEMY_JWT_SECRET unset — using dev-only default; set a strong secret in production")
+	}
+	if cfg.AdminPassword == config.DefaultAdminPassword {
+		log.Println("warning: ACADEMY_ADMIN_PASSWORD unset — initial admin will use the built-in default password")
+	}
 
 	gdb, err := db.Open(cfg.Database)
 	if err != nil {
@@ -91,4 +98,10 @@ func main() {
 
 	<-ctx.Done()
 	log.Println("shutting down")
+	// 排水在途请求（判题入队等）后再退出；超时兜底强制关闭。
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
 }
