@@ -12,6 +12,16 @@ export const E2E = {
     flag: 'flag{the_quick_brown_fox}',
     hintTitle: '从首词入手',
     hintCost: 5,
+    // tutorial_slug 指向教程 Room 的关联题（教题双向入口旅程用）
+    linkedSlug: 'sqli-basics-lab',
+    linkedTitle: 'SQL 注入：找 flag',
+    linkedFlag: 'flag{sqli_e2e}',
+    // 附件题（学生端 JWT 附件下载旅程用）
+    attachSlug: 'forensics-attachment',
+    attachTitle: '取证：隐藏的附件',
+    attachFlag: 'flag{hidden_in_attachment}',
+    attachFile: 'secret.txt',
+    attachContent: 'flag{hidden_in_attachment}\n',
   },
   tutorial: {
     pkgName: 'e2e-test',

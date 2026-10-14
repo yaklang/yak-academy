@@ -39,6 +39,57 @@ export default async function globalSetup(): Promise<void> {
       '上传示例题目',
     )
 
+    // 关联题：tutorial_slug 指向教程 Room，覆盖教题双向入口
+    // （题目详情「配套教程」/ Room 详情「前往配套题目」）。
+    await must(
+      ctx.post('/api/v1/admin/challenges', {
+        headers: auth,
+        data: {
+          slug: E2E.challenge.linkedSlug,
+          title: E2E.challenge.linkedTitle,
+          category: 'web-security',
+          difficulty: 'apprentice',
+          description_md: '关联教程的配套练习题。',
+          score: 60,
+          flag_mode: 'shared',
+          challenge: { type: 'static', flag: E2E.challenge.linkedFlag },
+          tutorial_slug: E2E.tutorial.roomSlug,
+        },
+      }),
+      '上传教程关联题目',
+    )
+
+    // 附件题：覆盖学生端凭 JWT 的附件下载链路（上传接口字段名 file）。
+    await must(
+      ctx.post('/api/v1/admin/challenges', {
+        headers: auth,
+        data: {
+          slug: E2E.challenge.attachSlug,
+          title: E2E.challenge.attachTitle,
+          category: 'forensics',
+          difficulty: 'apprentice',
+          description_md: '下载附件并找出隐藏内容。',
+          score: 40,
+          flag_mode: 'shared',
+          challenge: { type: 'static', flag: E2E.challenge.attachFlag },
+        },
+      }),
+      '上传附件题目',
+    )
+    await must(
+      ctx.post(`/api/v1/admin/challenges/${E2E.challenge.attachSlug}/attachments`, {
+        headers: auth,
+        multipart: {
+          file: {
+            name: E2E.challenge.attachFile,
+            mimeType: 'text/plain',
+            buffer: Buffer.from(E2E.challenge.attachContent),
+          },
+        },
+      }),
+      '上传附件',
+    )
+
     const zip = await readFile(path.join(e2eDir, 'fixtures', 'tutorial-package.zip'))
     await must(
       ctx.post('/api/v1/content/packages', {
