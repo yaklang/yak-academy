@@ -65,6 +65,10 @@ const instanceAlive = computed(() =>
   instance.value && instance.value.status !== 'destroyed' && instance.value.status !== 'stopped',
 )
 
+// 治理上限：每实例最多续期 2 次（后端 422 兜底，这里只做预展示）。
+const maxExtends = 2
+const remainingExtends = computed(() => maxExtends - (instance.value?.extend_count ?? 0))
+
 // 自动判定轮询：实例运行中每 5s 刷新详情，checker 回调判过即显示通关。
 let autoSolveTimer: number | null = null
 
@@ -301,9 +305,11 @@ onUnmounted(stopAutoSolvePolling)
           <el-button
             v-if="instance!.status === 'running'"
             size="small"
+            :disabled="remainingExtends <= 0"
+            :title="remainingExtends > 0 ? `还可续期 ${remainingExtends} 次（每次 1 小时）` : '续期次数已用完，请销毁后重新启动'"
             :loading="instanceLoading"
             @click="extendInstance"
-          >续期</el-button>
+          >续期{{ remainingExtends > 0 ? `（剩 ${remainingExtends} 次）` : '' }}</el-button>
           <el-button size="small" :loading="instanceLoading" @click="destroyInstance">销毁环境</el-button>
         </template>
         <el-button v-else type="primary" size="small" :loading="instanceLoading" @click="startInstance">

@@ -14,6 +14,7 @@ tags:
   - name: student
   - name: admin
   - name: env
+  - name: public
 
 components:
   securitySchemes:
@@ -138,6 +139,7 @@ components:
         status: { type: string, enum: [creating, running, stopped, destroyed] }
         endpoint: { type: string, description: 实例访问地址 }
         expire_at: { type: string, description: TTL 过期时间（RFC3339，UTC） }
+        extend_count: { type: integer, description: 已续期次数（上限 2，达到后续期 422） }
         created_at: { type: string }
     InstanceConflict:
       type: object
@@ -316,6 +318,20 @@ security:
   - bearerAuth: []
 
 paths:
+  /health:
+    get:
+      tags: [public]
+      security: []
+      summary: 健康检查（进程存活探针，无鉴权；compose healthcheck 使用）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
   /auth/login:
     post:
       tags: [auth]
@@ -518,7 +534,9 @@ paths:
   /challenges/{slug}/instance/extend:
     post:
       tags: [student]
-      summary: 续期本人在该题目的运行中实例 TTL（不重建容器；expire_at = now+1h）
+      summary: 续期实例 TTL（不重建容器；expire_at = now+1h；每实例最多续期 2 次）
+      description: 已续期 2 次后再续期返回 422（治理约束：防止容器被无限占用，
+        单容器 TTL 上限 3 小时 = 初始 1h + 续期 2×1h）。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       responses:

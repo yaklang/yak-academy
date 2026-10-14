@@ -17,6 +17,10 @@ type Config struct {
 
 	// AttachmentsDir 题目附件落盘根目录（<dir>/<slug>/<filename>）。
 	AttachmentsDir string
+	// InstanceMemory/InstanceCPUs 题目容器资源限额（docker --memory/--cpus 语法；
+	// 空串 = 不限。默认对齐 GeekChallenge 512Mi/0.5 核）。
+	InstanceMemory string
+	InstanceCPUs   string
 
 	// PublicURL 平台对外可达地址：注入题目容器的 CHECKPOINT_URL 前缀
 	// （容器内经 host.docker.internal 回达宿主）。
@@ -39,6 +43,8 @@ func Load() *Config {
 		AdminPassword:  getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
 		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "noop"),
 		AttachmentsDir:  getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
+		InstanceMemory:  getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
+		InstanceCPUs:    getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
 		PublicURL:      getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 	}
 }

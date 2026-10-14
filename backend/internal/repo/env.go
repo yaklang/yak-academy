@@ -47,9 +47,12 @@ func (r *labInstanceRepo) UpdateRunning(ctx context.Context, id uint, endpoint s
 		}).Error
 }
 
-func (r *labInstanceRepo) UpdateExpireAt(ctx context.Context, id uint, expireAt time.Time) error {
+func (r *labInstanceRepo) Extend(ctx context.Context, id uint, expireAt time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.LabInstance{}).Where("id = ?", id).
-		Update("expire_at", expireAt).Error
+		Updates(map[string]any{
+			"expire_at":    expireAt,
+			"extend_count": gorm.Expr("extend_count + 1"),
+		}).Error
 }
 
 func (r *labInstanceRepo) UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error {

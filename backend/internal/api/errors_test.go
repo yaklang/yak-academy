@@ -114,6 +114,24 @@ func TestAuthenticateRevokedTokenReturns401(t *testing.T) {
 	}
 }
 
+// health 端点：无鉴权静态响应（compose healthcheck 依赖，鉴权中间件不得拦截）。
+func TestHealthEndpointPublic(t *testing.T) {
+	router := NewRouter(nil)
+	NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Status != "ok" {
+		t.Fatalf("body = %q err = %v", rec.Body.String(), err)
+	}
+}
+
 func TestMapErrorInstanceConflictCarriesCurrent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mapError(rec, &service.InstanceConflictError{

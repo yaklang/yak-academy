@@ -225,8 +225,12 @@ func (s *EnvService) ExtendInstance(ctx context.Context, userID, challengeID uin
 	if inst.Status != model.InstanceRunning {
 		return nil, fmt.Errorf("%w: only running instances can be extended", ErrValidation)
 	}
+	// 治理上限：每实例最多续期 2 次（初始 1h + 2×1h = 最长 3h 占用）。
+	if inst.ExtendCount >= maxExtends {
+		return nil, fmt.Errorf("%w: extend limit reached (%d times); destroy and restart the instance", ErrValidation, maxExtends)
+	}
 	expireAt := s.now().Add(instanceTTL)
-	if err := s.instances.UpdateExpireAt(ctx, inst.ID, expireAt); err != nil {
+	if err := s.instances.Extend(ctx, inst.ID, expireAt); err != nil {
 		return nil, err
 	}
 	return s.instances.FindByID(ctx, inst.ID)
@@ -476,20 +480,35 @@ func (s *EnvService) appendEvent(ctx context.Context, userID uint, t model.Event
 	s.bus.Publish(ctx, ev)
 }
 
-// DockerDriver 通过 docker CLI 管理容器（无 SDK 依赖；接口已隔离实现）。
-type DockerDriver struct{}
+// maxExtends 单实例续期次数上限（治理约束）。
+const maxExtends = 2
 
-func NewDockerDriver() *DockerDriver { return &DockerDriver{} }
+// DockerDriver 通过 docker CLI 管理容器（无 SDK 依赖；接口已隔离实现）。
+// Memory/CPUs 为题目容器资源限额（docker --memory/--cpus；空串 = 不限）。
+type DockerDriver struct {
+	Memory string
+	CPUs   string
+}
+
+func NewDockerDriver(memory, cpus string) *DockerDriver {
+	return &DockerDriver{Memory: memory, CPUs: cpus}
+}
 
 // containerName 实例容器命名（纯函数便于测试）。
 func containerName(instanceID uint) string {
 	return fmt.Sprintf("yak-lab-%d", instanceID)
 }
 
-// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，可选 -e 环境变量，读回实际端口生成 endpoint。
-func (DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
+// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，可选 -e 环境变量与资源限额，读回实际端口生成 endpoint。
+func (d DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
 	name := containerName(spec.InstanceID)
 	args := []string{"run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1::%d", spec.Port)}
+	if d.Memory != "" {
+		args = append(args, "--memory", d.Memory)
+	}
+	if d.CPUs != "" {
+		args = append(args, "--cpus", d.CPUs)
+	}
 	for k, v := range spec.Env {
 		args = append(args, "-e", k+"="+v)
 	}

@@ -72,7 +72,7 @@ func main() {
 	var driver service.InstanceDriver = service.NoopDriver{}
 	var builder service.ImageBuilder = service.NoopDriver{}
 	if cfg.EnvDriver == "docker" {
-		dd := service.NewDockerDriver()
+		dd := service.NewDockerDriver(cfg.InstanceMemory, cfg.InstanceCPUs)
 		driver = dd
 		builder = dd
 	}

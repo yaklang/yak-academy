@@ -150,8 +150,8 @@ type LabInstanceRepo interface {
 	FindActiveAny(ctx context.Context, userID uint) (*model.LabInstance, error)
 	// UpdateRunning driver.Create 成功后回写 endpoint/expire_at/flag_value 并置 running。
 	UpdateRunning(ctx context.Context, id uint, endpoint string, expireAt time.Time, flagValue string) error
-	// UpdateExpireAt TTL 续期（不重建容器）。
-	UpdateExpireAt(ctx context.Context, id uint, expireAt time.Time) error
+	// Extend TTL 续期：expire_at 前移并自增 extend_count（单语句原子）。
+	Extend(ctx context.Context, id uint, expireAt time.Time) error
 	UpdateStatus(ctx context.Context, id uint, status model.InstanceStatus) error
 	// ListExpired ExpireAt 已过期且仍 running 的实例（reaper 用）。
 	ListExpired(ctx context.Context, now time.Time) ([]model.LabInstance, error)

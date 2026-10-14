@@ -29,7 +29,15 @@ services:
       ACADEMY_ADMIN_PASSWORD: ${ACADEMY_ADMIN_PASSWORD:?请在 .env 或环境变量中设置 ACADEMY_ADMIN_PASSWORD}
       ACADEMY_PUBLIC_URL: ${ACADEMY_PUBLIC_URL:-http://host.docker.internal:8080}
       ACADEMY_ATTACHMENTS_DIR: /data/attachments # 题目附件与 SQLite 一起随 ./data 卷持久化
+      ACADEMY_INSTANCE_MEMORY: ${ACADEMY_INSTANCE_MEMORY:-512m} # 题目容器资源限额（docker --memory）
+      ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
     restart: unless-stopped
+    healthcheck: # GET /health 存活探针（alpine busybox wget）
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
@@ -37,7 +45,8 @@ services:
       dockerfile: deploy/frontend.Dockerfile
     image: yak-academy/frontend:latest
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy # 后端健康后前端才启动（反代不再打到未就绪进程）
     ports:
       - "${ACADEMY_WEB_PORT:-8081}:80"
     restart: unless-stopped

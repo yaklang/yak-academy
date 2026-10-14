@@ -31,9 +31,11 @@ func NewHandlers(auth *service.AuthService, content *service.ContentService, cha
 }
 
 func (h *Handlers) Register(r *Router) {
-	// 公开接口：登录（JWT）与检测点回调（token 能力鉴权，容器内 checker 调用）。
+	// 公开接口：登录（JWT）、检测点回调（token 能力鉴权，容器内 checker 调用）
+	// 与健康检查（进程存活探针，无鉴权；compose healthcheck 用）。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
+	r.HandlePublic(http.MethodGet, "/health", h.health)
 
 	// student：浏览、提交、进度、排行榜
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
@@ -85,6 +87,11 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
 	r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
+}
+
+// health 存活探针：无鉴权静态响应（部署编排健康检查用，不暴露内部状态）。
+func (h *Handlers) health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
