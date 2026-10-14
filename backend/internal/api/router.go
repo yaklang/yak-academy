@@ -2,10 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
-
-	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/service"
@@ -59,21 +58,22 @@ func (r *Router) authenticate(w http.ResponseWriter, req *http.Request) (*model.
 		return nil, false
 	}
 	tokenStr := strings.TrimPrefix(header, "Bearer ")
-	claims := jwt.MapClaims{}
-	if _, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
-		return r.auth.Secret(), nil
-	}); err != nil {
-		writeError(w, errUnauthorized)
-		return nil, false
-	}
-	sub, _ := claims["sub"].(string)
-	// 从 DB 加载真实用户，保证 token 反映最新角色/状态。
-	user, err := r.auth.FindUser(req.Context(), sub)
+	// ValidateToken 统一执行：签名 → jti 撤销表 → 改密失效阈值 → 加载最新用户。
+	user, err := r.auth.ValidateToken(req.Context(), tokenStr)
 	if err != nil {
-		writeError(w, errUnauthorized)
+		if errors.Is(err, service.ErrTokenRevoked) {
+			writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized, "token revoked, please login again"})
+		} else {
+			writeError(w, errUnauthorized)
+		}
 		return nil, false
 	}
 	return user, true
+}
+
+// TokenFrom 从 Authorization 头提取原始 token（登出 handler 用）。
+func TokenFrom(req *http.Request) string {
+	return strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
 }
 
 // authorize 两档角色判定：普通人(student) / 管理员(admin)。

@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
@@ -57,6 +58,34 @@ func (r *userRepo) List(ctx context.Context, offset, limit int) ([]model.User, i
 func (r *userRepo) UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
 		Update("global_role", role).Error
+}
+
+func (r *userRepo) UpdatePassword(ctx context.Context, id uint, passwordHash string, invalidBefore time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"password_hash":         passwordHash,
+			"token_invalid_before": invalidBefore,
+		}).Error
+}
+
+type tokenRevocationRepo struct{ db *gorm.DB }
+
+func NewTokenRevocationRepo(db *gorm.DB) TokenRevocationRepo { return &tokenRevocationRepo{db} }
+
+func (r *tokenRevocationRepo) Revoke(ctx context.Context, rec *model.TokenRevocation) error {
+	return r.db.WithContext(ctx).Create(rec).Error
+}
+
+func (r *tokenRevocationRepo) FindByJTI(ctx context.Context, jti string) (*model.TokenRevocation, error) {
+	var rec model.TokenRevocation
+	err := r.db.WithContext(ctx).Where("jti = ?", jti).First(&rec).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 type contentPackageRepo struct{ db *gorm.DB }

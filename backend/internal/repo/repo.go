@@ -16,6 +16,15 @@ type UserRepo interface {
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
 	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
+	// UpdatePassword 改密 + 同时推进 token 失效阈值（全量吊销已签发 token）。
+	UpdatePassword(ctx context.Context, id uint, passwordHash string, invalidBefore time.Time) error
+}
+
+// TokenRevocationRepo 登出撤销表（jti 唯一，插入即吊销；查询走索引）。
+type TokenRevocationRepo interface {
+	Revoke(ctx context.Context, r *model.TokenRevocation) error
+	// FindByJTI jti 命中返回撤销记录，未命中返回 nil。
+	FindByJTI(ctx context.Context, jti string) (*model.TokenRevocation, error)
 }
 
 type TopicRepo interface {

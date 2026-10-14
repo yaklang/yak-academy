@@ -60,6 +60,7 @@ func main() {
 
 	// service 装配（横向依赖仅白名单：judge→event、content→challenge）
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	authSvc.SetRevocationRepo(repo.NewTokenRevocationRepo(gdb))
 	if err := authSvc.EnsureAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Fatalf("ensure admin: %v", err)
 	}
