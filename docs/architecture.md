@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.1（第一版：架构设计 + 前后端骨架）
+> 版本：v0.2（Phase 2 最小闭环 + Phase 3 容器化大部分完成）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -38,7 +38,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │   ├─ content     教程包上传→解析→校验→入库→发布（五步管线）    │
 │   ├─ challenge   Challenge/Flag/Hint 业务（题目独立资源）      │
 │   ├─ judge       异步判题 worker（恒时比较、动态计分）          │
-│   ├─ env         Lab 环境生命周期（InstanceDriver 接口，v1 stub）│
+│   ├─ env         Lab 环境生命周期（docker 驱动 / noop 兜底）   │
 │   ├─ userprogress 学习路径、进度跟踪                            │
 │   └─ eventbus    进程内 append-only 事件总线 + 派生器           │
 ├────────────────────────────────────────────────────────────┤
@@ -173,14 +173,15 @@ ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 
 ## 8. 演进路线
 
-- **Phase 1（当前）**：架构文档 + skill 体系 + 可编译骨架（stub 实现）；登录/上传/判题为契约+stub。
-- **Phase 2**：最小闭环——登录、内容包上传与发布、Room 浏览、提交与异步判题、事件派生积分排行榜。
-- **Phase 3**：题目环境容器化（Docker 驱动：模板镜像+按需实例+回收）；服务端自动判定；徽章与认证。
-- **Phase 4**：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
+- **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
+- **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
+- **Phase 3** 🔶 进行中：题目环境容器化已落地（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）；**未做**：服务端自动判定（环境内检测点回调）、徽章与认证。
+- **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
-## 9. 第一版边界（明确不做）
+## 9. 当前边界（明确不做）
 
-- 不实现真实登录/判题/上传逻辑（契约 + 骨架 + stub）。
-- 不引入 Casbin / Redis / K8s。
-- 题目环境只定义 `InstanceDriver` 接口，不实现驱动。
-- 前端页面为占位骨架。
+- 服务端自动判定与徽章认证（Phase 3 剩余项，见上）。
+- 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
+- 排行榜未按赛季切片；单机部署假设（docker 驱动仅绑 127.0.0.1）。
+- 不引入 Casbin / Redis / K8s；数据层仍为 SQLite。
+- JWT secret 与初始管理员密码存在开发默认值，生产必须以环境变量覆盖（启动时告警提醒）。
