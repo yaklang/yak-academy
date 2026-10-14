@@ -24,3 +24,8 @@ docs/plans/
 *.test-package.zip
 testdata/
 .zcode/
+
+# E2E (Playwright)
+frontend/e2e/.state/
+frontend/playwright-report/
+frontend/test-results/
