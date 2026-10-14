@@ -501,6 +501,8 @@ type challengeJSON struct {
 		Content string `json:"content"`
 		Cost    int    `json:"cost"`
 	} `json:"hints"`
+	// Links 题目外链（配套工具/参考资料），存 JSON 列。
+	Links []model.ChallengeLink `json:"links"`
 	TutorialSlug string `json:"tutorial_slug"`
 }
 
@@ -533,7 +535,7 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
 			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
-			TutorialSlug: c.TutorialSlug,
+			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
 		}
 		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
@@ -610,7 +612,27 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 			return fmt.Errorf("%w: %s: hint cost must be non-negative", ErrValidation, where)
 		}
 	}
+	for i, l := range c.Links {
+		if l.Name == "" {
+			return fmt.Errorf("%w: %s: links[%d].name is required", ErrValidation, where, i)
+		}
+		if !strings.HasPrefix(l.URL, "http://") && !strings.HasPrefix(l.URL, "https://") {
+			return fmt.Errorf("%w: %s: links[%d].url must be http(s)", ErrValidation, where, i)
+		}
+	}
 	return nil
+}
+
+// linksJSON 外链列表序列化为 Challenge.Links JSON 字符串列；空列表存空串。
+func linksJSON(links []model.ChallengeLink) string {
+	if len(links) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(links)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func resolveFlagMode(m model.FlagMode) model.FlagMode {
@@ -645,6 +667,10 @@ func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) err
 			}
 		}
 	}
+	// 级联删附件：先清元数据行，再删磁盘目录（目录不存在不算错）。
+	if err := s.DeleteChallengeAttachments(ctx, slug); err != nil {
+		return err
+	}
 	return s.challenges.Delete(ctx, slug)
 }
 
@@ -665,6 +691,7 @@ type challengeYML struct {
 	Image         string           `yaml:"image"`
 	Port          int              `yaml:"port"`
 	Protocol      string           `yaml:"protocol"`
+	Links         []model.ChallengeLink `yaml:"links"`
 	Flags         []challengeYMLFlag `yaml:"flags"`
 	Hints         []struct {
 		Title   string `yaml:"title"`
@@ -764,7 +791,7 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
 		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
 		FlagMode: resolveFlagMode(cj.FlagMode), Image: cj.Env.Image, Port: cj.Env.Port,
-		TutorialSlug: cj.TutorialSlug,
+		Links: linksJSON(cj.Links), TutorialSlug: cj.TutorialSlug,
 	}
 	flags := []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
 	if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
@@ -814,6 +841,7 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 	}
 	out.FlagMode = y.FlagMode
 	out.TutorialSlug = y.TutorialSlug
+	out.Links = y.Links
 	flagType := model.ChallengeType(y.Type)
 	if flagType == "" {
 		flagType = model.ChallengeStatic

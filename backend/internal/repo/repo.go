@@ -64,6 +64,17 @@ type ChallengeRepo interface {
 	Delete(ctx context.Context, slug string) error
 }
 
+// ChallengeAttachmentRepo 题目附件元数据（文件本体由 service 层落盘/删除）。
+type ChallengeAttachmentRepo interface {
+	Upsert(ctx context.Context, a *model.ChallengeAttachment) error
+	ListByChallenge(ctx context.Context, challengeID uint) ([]model.ChallengeAttachment, error)
+	// Find 按题目 + 文件名查附件元数据，未命中返回 nil。
+	Find(ctx context.Context, challengeID uint, filename string) (*model.ChallengeAttachment, error)
+	Delete(ctx context.Context, id uint) error
+	// DeleteByChallenge 题目删除时级联清理（事务外由调用方保证顺序）。
+	DeleteByChallenge(ctx context.Context, challengeID uint) error
+}
+
 type SubmissionRepo interface {
 	Create(ctx context.Context, s *model.Submission) error
 	FindByID(ctx context.Context, id uint) (*model.Submission, error)

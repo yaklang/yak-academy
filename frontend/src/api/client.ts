@@ -50,10 +50,31 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T
 }
 
+// downloadBlob 带 JWT 拉取二进制附件（附件 URL 不公开，鉴权走 Authorization header；
+// 浏览器直接 <a href> 无法带头，故 fetch → blob → 本地保存）。
+async function downloadBlob(path: string) {
+  const headers: Record<string, string> = {}
+  const token = localStorage.getItem('academy_token')
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const resp = await fetch(`${BASE}${path}`, { headers })
+  if (!resp.ok) {
+    let code = 'UNKNOWN'
+    let message = resp.statusText
+    try {
+      const env = (await resp.json()) as ApiErrorEnvelope
+      code = env?.error?.code ?? code
+      message = env?.error?.message ?? message
+    } catch { /* 二进制端点错误响应仍为 JSON 信封，解析失败保留状态码语义 */ }
+    throw new ApiError(resp.status, code, message)
+  }
+  return resp.blob()
+}
+
 export const http = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),
   upload: <T>(path: string, form: FormData) => request<T>('POST', path, form),
+  download: (path: string) => downloadBlob(path),
 }

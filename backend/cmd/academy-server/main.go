@@ -65,6 +65,7 @@ func main() {
 		log.Fatalf("ensure admin: %v", err)
 	}
 	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo, eventRepo, scoreRepo, bus)
+	challengeSvc.SetAttachmentStore(repo.NewChallengeAttachmentRepo(gdb), cfg.AttachmentsDir)
 	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
 	instanceRepo := repo.NewLabInstanceRepo(gdb)
 	instanceLogRepo := repo.NewInstanceLogRepo(gdb)

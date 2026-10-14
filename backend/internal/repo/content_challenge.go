@@ -94,7 +94,7 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "slug"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"title", "category", "difficulty", "description", "type", "score", "flag_mode", "image", "port", "tutorial_slug",
+				"title", "category", "difficulty", "description", "type", "score", "flag_mode", "image", "port", "links", "tutorial_slug",
 			}),
 		}).Create(c).Error; err != nil {
 			return err
@@ -215,6 +215,48 @@ func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
 		}
 		return tx.Delete(&c).Error
 	})
+}
+
+type challengeAttachmentRepo struct{ db *gorm.DB }
+
+func NewChallengeAttachmentRepo(db *gorm.DB) ChallengeAttachmentRepo {
+	return &challengeAttachmentRepo{db: db}
+}
+
+func (r *challengeAttachmentRepo) Upsert(ctx context.Context, a *model.ChallengeAttachment) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "challenge_id"}, {Name: "filename"}},
+		DoUpdates: clause.AssignmentColumns([]string{"size", "created_at"}),
+	}).Create(a).Error
+}
+
+func (r *challengeAttachmentRepo) ListByChallenge(ctx context.Context, challengeID uint) ([]model.ChallengeAttachment, error) {
+	var list []model.ChallengeAttachment
+	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Order("filename").Find(&list).Error
+	return list, err
+}
+
+func (r *challengeAttachmentRepo) Find(ctx context.Context, challengeID uint, filename string) (*model.ChallengeAttachment, error) {
+	var a model.ChallengeAttachment
+	err := r.db.WithContext(ctx).
+		Where("challenge_id = ? AND filename = ?", challengeID, filename).
+		First(&a).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *challengeAttachmentRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&model.ChallengeAttachment{}, id).Error
+}
+
+func (r *challengeAttachmentRepo) DeleteByChallenge(ctx context.Context, challengeID uint) error {
+	return r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).
+		Delete(&model.ChallengeAttachment{}).Error
 }
 
 type submissionRepo struct{ db *gorm.DB }

@@ -35,9 +35,28 @@ type Challenge struct {
 	// 容器环境定义（challenge.json env 段，可选）。Image 非空表示该题有容器环境。
 	Image string `gorm:"size:256" json:"image"`
 	Port  int    `json:"port"`
+	// Links 题目外链（JSON 数组 [{name,url}]，配套工具/参考资料）。
+	Links string `gorm:"type:text" json:"-"`
 	// TutorialSlug 可选关联教程 Room slug（教题关联：题目可指回配套教程）。
 	TutorialSlug string `gorm:"index;size:128" json:"tutorial_slug"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// ChallengeLink 题目外链条目（Challenge.Links JSON 数组元素）。
+type ChallengeLink struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// ChallengeAttachment 题目附件元数据。文件本体落盘附件目录
+// ACADEMY_ATTACHMENTS_DIR/<slug>/<filename>，学生端凭 JWT 下载。
+// JSON 按契约输出 filename/size/created_at（id/challenge_id 是库内主键，不外泄）。
+type ChallengeAttachment struct {
+	ID          uint      `gorm:"primaryKey" json:"-"`
+	ChallengeID uint      `gorm:"uniqueIndex:idx_chal_attach;" json:"-"`
+	Filename    string    `gorm:"uniqueIndex:idx_chal_attach;size:255" json:"filename"` // 规范化文件名（下载 URL 段）
+	Size        int64     `json:"size"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Flag 题目的判定答案。比较必须使用恒时比较（event-sourcing-rules skill：禁止 == ）。

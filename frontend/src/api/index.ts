@@ -34,6 +34,7 @@ export interface TrainingItem {
   score: number
   solved: boolean
   has_env: boolean
+  links?: ChallengeLink[]
   tutorial_slug?: string
   tutorial_title?: string
   tutorial_topic_slug?: string
@@ -48,9 +49,14 @@ export interface Hint {
 export interface HintUnlockResponse extends Hint {
   score: number
 }
+// 题目外链（随 challenge.json links 上传：配套工具/参考资料）。
+export interface ChallengeLink { name: string; url: string }
+// 题目附件元数据（学生端凭 JWT 经 downloadAttachment 拉取）。
+export interface ChallengeAttachment { filename: string; size: number; created_at: string }
 export interface ChallengeDetail extends TrainingItem {
   description_md: string
   hints: Hint[]
+  attachments: ChallengeAttachment[]
 }
 export interface LearningPathItem {
   order: number
@@ -83,6 +89,7 @@ export interface ChallengeJSON {
   challenge: { type: 'static' | 'regex'; flag: string }
   env?: { image: string; port: number }
   hints?: ChallengeHintInput[]
+  links?: ChallengeLink[]
   tutorial_slug?: string
 }
 export interface AdminLabInstance {
@@ -224,7 +231,7 @@ export const contentApi = {
     http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
 }
 
-// 题目管理（challenge.json / 题目包 zip 上传 / 表格 / 删除）。
+// 题目管理（challenge.json / 题目包 zip 上传 / 表格 / 附件 / 删除）。
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
@@ -235,4 +242,18 @@ export const adminChallengeApi = {
   },
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
   remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),
+  listAttachments: (slug: string) =>
+    http.get<ChallengeAttachment[]>(`/admin/challenges/${slug}/attachments`),
+  uploadAttachment: (slug: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.upload<ChallengeAttachment>(`/admin/challenges/${slug}/attachments`, form)
+  },
+  deleteAttachment: (slug: string, filename: string) =>
+    http.del<{ deleted: boolean }>(`/admin/challenges/${slug}/attachments/${filename}`),
+}
+
+// 学生端附件下载（blob 保存）。
+export function downloadAttachment(slug: string, filename: string) {
+  return http.download(`/challenges/${slug}/attachments/${encodeURIComponent(filename)}`)
 }
