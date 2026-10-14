@@ -182,3 +182,21 @@ func TestValidateTokenThresholdSemantics(t *testing.T) {
 		t.Fatalf("err = %v, want ErrTokenRevoked", err)
 	}
 }
+// TestChangePasswordImmediateRelogin 锁回归：改密阈值按「签发秒 + 1」存储，
+// iat 秒精度下改密后 1 秒内的新登录曾被拒（用户改完密码立刻用新密码登录
+// 反而失败，E2E 账号生命周期旅程抓到）。issueToken 签发前等待出窗修复。
+func TestChangePasswordImmediateRelogin(t *testing.T) {
+	svc, _ := newAuthLifecycleEnv(t)
+	ctx := context.Background()
+	if err := svc.ChangePassword(ctx, 1, "old-pass", "new-pass"); err != nil {
+		t.Fatal(err)
+	}
+	// 改密后立即重登：新 token 必须通过校验（等待出窗后 iat >= 阈值）。
+	tok, _, err := svc.Login(ctx, "alice", "new-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ValidateToken(ctx, tok); err != nil {
+		t.Fatalf("immediate re-login token rejected: %v", err)
+	}
+}

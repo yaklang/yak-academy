@@ -51,10 +51,28 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return "", time.Time{}, ErrInvalidCredential
 	}
-	return s.issueToken(user)
+	return s.issueToken(ctx, user)
 }
 
-func (s *AuthService) issueToken(user *model.User) (string, time.Time, error) {
+func (s *AuthService) issueToken(ctx context.Context, user *model.User) (string, time.Time, error) {
+	// iat 只有秒精度，改密/重置阈值按「签发秒 + 1」存储（见 UpdatePassword）：
+	// 改密后 1 秒内的新登录会因 iat < 阈值被拒。签发前等待出窗，
+	// 保证改密后的新登录永远有效。等待上限 2s 兜底阈值被推到远未来的
+	// 病态场景（正常改密只差 1 秒），超限放弃等待（token 会被拒但登录不挂死）。
+	if before := user.TokenInvalidBefore; !before.IsZero() {
+		if wait := time.Until(before); wait > 0 {
+			if wait > 2*time.Second {
+				wait = 2 * time.Second
+			}
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				return "", time.Time{}, ctx.Err()
+			}
+		}
+	}
 	now := time.Now()
 	expires := now.Add(s.ttl)
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
