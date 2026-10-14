@@ -1,0 +1,14 @@
+{
+  "slug": "crypto-caesar-shift",
+  "title": "凯撒密码：找回偏移量",
+  "category": "cryptography",
+  "difficulty": "apprentice",
+  "description_md": "# 背景\n\n截获了一段密文，情报员确认它是标准的凯撒密码（字母循环移位），且明文以 `the` 开头：\n\n```\nwkh txlfn eurzq ira\n```\n\n# 任务目标\n\n求出移位量并还原明文，拼接得到 flag：`flag{明文单词以下划线连接}`（全小写）。\n\n例如若明文是 `abc def`，flag 就是 `flag{abc_def}`。\n\n# 无容器说明\n\n本题是**纯题目**（`flag_mode: shared`、无 `env`）：不需要启动容器，训练场详情页只显示 flag 提交框，直接提交答案即可。",
+  "score": 50,
+  "flag_mode": "shared",
+  "challenge": { "type": "static", "flag": "flag{the_quick_brown_fox}" },
+  "hints": [
+    { "title": "从首词入手", "content": "wkh → the，三个字母各偏移了多少？", "cost": 5 },
+    { "title": "移位方向", "content": "密文 = 明文 + 3（加密向后移 3，解密向前移 3）。", "cost": 10 }
+  ]
+}

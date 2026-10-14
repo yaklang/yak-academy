@@ -47,3 +47,11 @@ zip -r sqli-login-bypass.zip sqli-login-bypass
 4. 容器镜像两条路（任选）：
    - 预构建：`docker build -t yak-academy/sqli-login-bypass:latest sqli-login-bypass`（challenge.json 引用该 tag，适合 JSON 通道）
    - zip 包通道：`zip -r sqli-login-bypass.zip sqli-login-bypass` 后经 `POST /admin/challenges/package` 上传（包内 `challenge.yml` 的 `image: .` 上传时自动构建同名 tag）
+
+## 样例：`crypto-caesar-shift`（纯题目：无容器，static flag）
+
+最简形态——`flag_mode: shared`、无 `env`、static flag，直接管理页选择 `challenge.json` 上传即可。便于验证：
+
+1. 纯题目在训练场只渲染「flag 提交框」（无容器控制条），提交即判分
+2. hints 扣分解锁（cost 5/10）对纯题目同样生效
+3. 解题后重复提交不重复计分（分值只结算一次）
