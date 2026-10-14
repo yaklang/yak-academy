@@ -67,6 +67,14 @@ api → service → repo → model
 - **事件溯源断言**（event-sourcing-rules skill）：只查 Event 表的 type/payload 计数，**禁止**在测试里直改派生表来"准备"进度或积分。
 - 边界条件必须显式：`go test -count=1` 防缓存是本地命令约定，**禁止**依赖测试执行顺序或共享状态。
 
+### Docker 门控集成测试与 E2E
+
+- **真实 Docker 集成测试**：文件置顶 `requireDocker(t)`（探测 `docker info`，不可用即 `t.Skip`），用 `ACADEMY_TEST_DOCKER=1` 显式开启（CI 的 backend-docker job 与本地手动跑），**禁止**让无 Docker 的环境因测试报错。参考 `service/env_docker_test.go`。
+- **E2E 位置**：`frontend/e2e/`（Playwright）。配置 `frontend/playwright.config.ts`：双 webServer（后端 :18080 预编译单二进制 + vite :15173 代理）、每次整跑全新 DB、`global-setup.ts` 走管理 API 播种（**禁止**内置内容或前端直改 DB）。
+- **浏览器获取**：默认探测系统 Chrome/Edge 作 channel（零下载）；`E2E_CHANNEL=chrome|msedge|bundled` 覆盖。**禁止**依赖 npmmirror/huaweicloud 的 playwright 镜像（已停更/假 200，实测不可用）。
+- **串行执行**：e2e 套件共享一个后端 DB 与账号，`workers: 1`；改全局状态（密码/可见性）的用例必须**用例内恢复**（后续 spec 依赖初始常量）。
+- **容器旅程**：`frontend/e2e/docker/`，`E2E_DOCKER=1` 才成为独立 project；默认套件不得依赖 Docker。
+
 ### GORM 陷阱（测试中反复踩过）
 
 - **禁止复用同一 struct 变量做多次 First/查询**：struct 里残留的旧主键 ID 会成为隐式条件，查不到或查错行。每查一次用新变量（`var room model.Room`）。
