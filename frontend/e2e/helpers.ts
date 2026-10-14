@@ -14,8 +14,9 @@ export function loginAsAdmin(page: Page) {
   return login(page, E2E.admin)
 }
 
-export function loginAsStudent(page: Page) {
-  return login(page, E2E.student)
+// 可传覆盖密码：账号生命周期用例改密/重置后以新密码重登。
+export function loginAsStudent(page: Page, password: string = E2E.student.password) {
+  return login(page, { username: E2E.student.username, password })
 }
 
 // 登出按钮位于两端布局头部；登出后应回到登录页。

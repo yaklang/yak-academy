@@ -16,6 +16,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string) {
     const resp = await authApi.login(username, password)
+    // 作废改密/登出前遗留的 in-flight fetchMe：其 401 兜底会清掉刚存的新 token，
+    // 且复用旧 promise 会让新登录的 /me 拉取被吞（改密→重新登录卡在登录页）。
+    meInFlight = null
+    user.value = null
     setToken(resp.token)
   }
 

@@ -56,7 +56,11 @@ export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
   timeout: 30_000,
-  fullyParallel: true,
+  // 全套件共享同一个后端 DB 与同一批账号，且可见性/密码用例会改全局状态：
+  // 并行 worker 互踩（隐藏题时别人正在做题、改密时别人在登录）。串行执行，
+  // 换来确定性；单个 e2e 也就 ~20s，总时长可接受。
+  fullyParallel: false,
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: { baseURL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
