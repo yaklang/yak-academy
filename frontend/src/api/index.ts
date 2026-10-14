@@ -105,6 +105,8 @@ export interface InstanceLog {
   created_at: string
 }
 export interface LeaderboardEntry { rank: number; username: string; score: number; solved_count: number }
+// 徽章（计算型读模型：积分/进度/路径派生数据的实时投影，不落库）。
+export interface Badge { code: string; title: string; description: string; earned: boolean }
 export interface ContentPackage {
   id: number
   name: string
@@ -185,6 +187,10 @@ export const adminInstanceApi = {
 export const progressApi = {
   mine: () => http.get<{ xp: number; completed_rooms: number; in_progress_rooms: number }>('/progress'),
   leaderboard: (page = 1) => http.get<Paged<LeaderboardEntry>>(`/leaderboard?page=${page}`),
+}
+
+export const badgeApi = {
+  list: () => http.get<Badge[]>('/badges'),
 }
 
 export const contentApi = {

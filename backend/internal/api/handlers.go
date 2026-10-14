@@ -20,16 +20,18 @@ type Handlers struct {
 	Topics    *service.TopicService
 	Paths     *service.PathService
 	Env       *service.EnvService
+	Badges    *service.BadgeService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, paths *service.PathService, env *service.EnvService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Paths: paths, Env: env}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, paths *service.PathService, env *service.EnvService, badges *service.BadgeService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Paths: paths, Env: env, Badges: badges}
 }
 
 func (h *Handlers) Register(r *Router) {
-	// 公开接口（仅登录）
+	// 公开接口：登录（JWT）与检测点回调（token 能力鉴权，容器内 checker 调用）。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
+	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
 
 	// student：浏览、提交、进度、排行榜
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
@@ -50,6 +52,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/learning-paths/{id}", "", h.getPath)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
 	r.Handle(http.MethodGet, "/api/v1/leaderboard", "", h.leaderboard)
+	r.Handle(http.MethodGet, "/api/v1/badges", "", h.listBadges)
 
 	// admin：内容包、题目、路径、容器、用户（普通人无管理端能力）
 	r.Handle(http.MethodPost, "/api/v1/content/packages", "admin", h.uploadPackage)
@@ -488,6 +491,37 @@ func (h *Handlers) leaderboard(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total": total, "page": page, "page_size": pageSize, "items": items,
 	})
+}
+
+// checkpoint 环境检测点回调（公开接口，token 即能力凭证）：
+// token 命中活跃实例 → 入队自动判定（哨兵答案，异步判过）。
+func (h *Handlers) checkpoint(w http.ResponseWriter, req *http.Request) {
+	inst, err := h.Env.ResolveCheckpoint(req.Context(), req.PathValue("token"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	if inst == nil {
+		writeError(w, errNotFound)
+		return
+	}
+	sub, err := h.Judge.AutoSolve(req.Context(), inst)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": sub.Status})
+}
+
+// listBadges 当前用户徽章全集（计算型读模型：目录 + earned）。
+func (h *Handlers) listBadges(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	items, err := h.Badges.List(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 const maxPackageSize = 50 << 20 // 内容包 zip 上限 50MB

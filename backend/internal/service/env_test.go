@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -80,7 +81,7 @@ func newEnvTestService(t *testing.T, d InstanceDriver) (*EnvService, *gorm.DB, u
 	env := NewEnvService(
 		repo.NewLabInstanceRepo(gdb), repo.NewInstanceLogRepo(gdb), chalRepo,
 		repo.NewUserRepo(gdb),
-		repo.NewEventRepo(gdb), eventbus.New(), d,
+		repo.NewEventRepo(gdb), eventbus.New(), d, "http://host.docker.internal:8080",
 	)
 	return env, gdb, chalA.ID, chalB.ID
 }
@@ -482,6 +483,94 @@ func TestEnsureInstanceInjectsDynamicFlag(t *testing.T) {
 	}
 	if len(driver.specs) != 1 || driver.specs[0].Env["FLAG"] != inst.FlagValue {
 		t.Fatalf("spec.env = %+v, want FLAG=%s", driver.specs[0].Env, inst.FlagValue)
+	}
+}
+
+// TestEnsureInstanceInjectsCheckpointEnv 每实例注入 CHECKPOINT_TOKEN/CHECKPOINT_URL，
+// token 落库且不重复（幂等启动不换 token）。
+func TestEnsureInstanceInjectsCheckpointEnv(t *testing.T) {
+	driver := &fakeDriver{}
+	env, _, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	inst, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.specs) != 1 {
+		t.Fatalf("driver specs = %d, want 1", len(driver.specs))
+	}
+	e := driver.specs[0].Env
+	if e["CHECKPOINT_TOKEN"] == "" || e["CHECKPOINT_TOKEN"] != inst.CheckpointToken {
+		t.Fatalf("CHECKPOINT_TOKEN = %q, want instance token %q", e["CHECKPOINT_TOKEN"], inst.CheckpointToken)
+	}
+	wantURL := "http://host.docker.internal:8080/api/v1/checkpoints/" + inst.CheckpointToken
+	if e["CHECKPOINT_URL"] != wantURL {
+		t.Fatalf("CHECKPOINT_URL = %q, want %q", e["CHECKPOINT_URL"], wantURL)
+	}
+	// token 不出现在 API JSON（LabInstance 序列化隐藏）。
+	raw, err := json.Marshal(inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), inst.CheckpointToken) {
+		t.Fatal("checkpoint token must not leak into API JSON")
+	}
+	// 幂等启动：token 不变。
+	again, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.CheckpointToken != inst.CheckpointToken {
+		t.Fatalf("token changed on idempotent ensure: %q -> %q", inst.CheckpointToken, again.CheckpointToken)
+	}
+	// 两个实例 token 互不相同（随机性）。
+	if _, err := env.EnsureInstance(ctx, 2, chalA); err != nil {
+		t.Fatal(err)
+	}
+	if driver.specs[1].Env["CHECKPOINT_TOKEN"] == driver.specs[0].Env["CHECKPOINT_TOKEN"] {
+		t.Fatal("distinct instances must get distinct checkpoint tokens")
+	}
+}
+
+// TestResolveCheckpointLifecycle token 解析：活跃命中、销毁后失效、未知 token 为 nil。
+func TestResolveCheckpointLifecycle(t *testing.T) {
+	driver := &fakeDriver{}
+	env, gdb, chalA, _ := newEnvTestService(t, driver)
+	ctx := context.Background()
+	inst, err := env.EnsureInstance(ctx, 1, chalA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.ResolveCheckpoint(ctx, inst.CheckpointToken)
+	if err != nil || got == nil || got.ID != inst.ID {
+		t.Fatalf("resolve active = (%v, %v), want instance %d", got, err, inst.ID)
+	}
+	// 未知 token：nil 且不报错（api 层 404 语义）。
+	unknown, err := env.ResolveCheckpoint(ctx, "no-such-token")
+	if err != nil {
+		t.Fatalf("unknown token: %v", err)
+	}
+	if unknown != nil {
+		t.Fatalf("unknown token resolved to %+v, want nil", unknown)
+	}
+	// 销毁后 token 失效。
+	if err := env.DestroyInstance(ctx, 1, chalA); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.ResolveCheckpoint(ctx, inst.CheckpointToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != nil {
+		t.Fatalf("destroyed instance token must not resolve, got %+v", after)
+	}
+	// DB 落库校验（防御：token 存列而非仅环境变量）。
+	var stored model.LabInstance
+	if err := gdb.First(&stored, inst.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.CheckpointToken != inst.CheckpointToken {
+		t.Fatalf("stored token = %q, want %q", stored.CheckpointToken, inst.CheckpointToken)
 	}
 }
 

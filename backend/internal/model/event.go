@@ -34,9 +34,10 @@ type ScoreRecord struct {
 }
 
 // Progress 学习进度（派生表）：Room/路径完成率，来源同上。
+// 主键 = (user_id, room_slug)：同一用户对多个 Room 各有一行。
 type Progress struct {
-	UserID    uint   `gorm:"primaryKey"`
-	RoomSlug  string `gorm:"uniqueIndex:idx_user_room;size:128"`
+	UserID    uint   `gorm:"primaryKey;autoIncrement:false"`
+	RoomSlug  string `gorm:"primaryKey;size:128"`
 	Completed bool
 	UpdatedAt time.Time
 }

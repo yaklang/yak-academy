@@ -48,10 +48,35 @@ FE(admin)          API                content/challenge SVC   repo            DB
 ## 2b. 实例生命周期与续期
 
 ```
-POST /challenges/{slug}/instance → creating → driver.Create(-e FLAG) → running + expire_at
+POST /challenges/{slug}/instance → creating → driver.Create(-e FLAG, -e CHECKPOINT_TOKEN, -e CHECKPOINT_URL) → running + expire_at
 POST /challenges/{slug}/instance/extend → 仅 running：expire_at = now+1h（不写 Event）
 DELETE → destroy；reaper 按 expire_at 回收
 ```
+
+要点：
+- `checkpoint_token` 每实例随机生成，存 `LabInstance.checkpoint_token`（API JSON 隐藏）；实例销毁 token 即失效。
+- `CHECKPOINT_URL = $ACADEMY_PUBLIC_URL/api/v1/checkpoints/<token>`（容器内经 host.docker.internal 回达宿主）。
+
+## 2c. 检测点自动判定流（容器回调，参考 PortSwigger）
+
+```
+题目容器内 checker   API                judge SVC            EB              DB
+   │  POST /checkpoints/{token}（无 JWT，token 即能力凭证）   │               │
+   ├────────────────────────→│ FindByCheckpointToken           │               │
+   │                         │  ├─ 未命中/实例非活跃 → 404      │               │
+   │                         │  └─ 命中活跃实例                 │               │
+   │                         ├─ 写 submission(pending, 哨兵答案) →             │
+   │                         ├─ Append(submission.created, source=checkpoint)→│
+   │   202 {status:"pending"} │                                 │               │
+   │←────────────────────────┤                                 │               │
+   │                         │ worker：哨兵答案短路判对（跳过 flag 比对），       │
+   │                         │ 复用防重复通关/动态计分/room.completed 管线        │
+```
+
+要点：
+- 哨兵答案未导出：`POST /submissions` 拒绝该值，用户无法伪造环境判定。
+- 重复回调安全：走 HasCorrect 幂等护栏，重复判对 0 分。
+- 前端在环境运行中轮询题目详情 `solved` 字段感知自动判定结果。
 
 ## 3. 做题判定流（Event-Sourced Judging）
 

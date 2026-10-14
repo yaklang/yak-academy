@@ -13,6 +13,7 @@ tags:
   - name: auth
   - name: student
   - name: admin
+  - name: env
 
 components:
   securitySchemes:
@@ -107,6 +108,13 @@ components:
         username: { type: string }
         score: { type: integer }
         solved_count: { type: integer }
+    Badge:
+      type: object
+      properties:
+        code: { type: string, description: 徽章唯一码（如 first_solve） }
+        title: { type: string }
+        description: { type: string, description: 获得条件说明 }
+        earned: { type: boolean, description: 当前用户是否已获得 }
     ContentPackage:
       type: object
       properties:
@@ -446,6 +454,30 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /checkpoints/{token}:
+    post:
+      tags: [env]
+      security: []
+      summary: 环境检测点自动判定回调（题目容器内 checker 调用，token 能力鉴权，非 JWT）
+      description: >
+        实例启动时服务端向容器注入 CHECKPOINT_TOKEN 与 CHECKPOINT_URL 两个环境变量。
+        题目内置 checker 检测到目标达成后 POST CHECKPOINT_URL（无需 body）。
+        token 命中活跃实例即入队一条自动判定提交（哨兵答案，不出现在提交接口可用的取值里），
+        由异步 worker 走与手动提交完全相同的管线判过计分（防重复通关、动态计分、room.completed）。
+        语义参考 PortSwigger lab 的服务端通关按钮。
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: 已入队（异步判定，结果经 GET /submissions/{id} 或题目详情 solved 字段体现）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [pending] }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /challenges/{slug}:
     get:
       tags: [student]
@@ -636,6 +668,19 @@ paths:
                   - type: object
                     properties:
                       items: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' } }
+
+  /badges:
+    get:
+      tags: [student]
+      summary: 徽章列表（含当前用户获得状态；徽章是积分/进度/路径派生数据的计算型读模型，不落库）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Badge' }
 
   /content/packages:
     get:

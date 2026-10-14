@@ -74,21 +74,22 @@ const (
 
 type EnvService struct {
 	instances  repo.LabInstanceRepo
-	logs       repo.InstanceLogRepo
-	challenges repo.ChallengeRepo
-	users      repo.UserRepo
-	events     repo.EventRepo
-	bus        *eventbus.Bus
-	driver     InstanceDriver
+	logs        repo.InstanceLogRepo
+	challenges  repo.ChallengeRepo
+	users       repo.UserRepo
+	events      repo.EventRepo
+	bus         *eventbus.Bus
+	driver      InstanceDriver
+	publicURL   string // CHECKPOINT_URL 前缀（容器内回达平台）
 	// now 时钟注入，测试可固定时间；生产用 time.Now。
 	now func() time.Time
 }
 
-func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver) *EnvService {
+func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver, publicURL string) *EnvService {
 	return &EnvService{
 		instances: instances, logs: logs, challenges: challenges, users: users,
 		events: events, bus: bus,
-		driver: d, now: time.Now,
+		driver: d, publicURL: publicURL, now: time.Now,
 	}
 }
 
@@ -127,9 +128,21 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	if err != nil {
 		return nil, err
 	}
+	// 检测点令牌：每实例随机生成，注入 CHECKPOINT_TOKEN/CHECKPOINT_URL
+	// （题目内 checker 达成目标后回调触发自动判定）。
+	checkpointToken, err := randomToken(16)
+	if err != nil {
+		return nil, err
+	}
+	if envVars == nil {
+		envVars = map[string]string{}
+	}
+	envVars["CHECKPOINT_TOKEN"] = checkpointToken
+	envVars["CHECKPOINT_URL"] = fmt.Sprintf("%s/api/v1/checkpoints/%s", s.publicURL, checkpointToken)
 	inst := &model.LabInstance{
 		UserID: userID, ChallengeID: challengeID,
-		Status: model.InstanceCreating,
+		Status:          model.InstanceCreating,
+		CheckpointToken: checkpointToken,
 	}
 	if err := s.instances.Create(ctx, inst); err != nil {
 		return nil, err
@@ -192,6 +205,12 @@ func (s *EnvService) DestroyInstance(ctx context.Context, userID, challengeID ui
 // GetInstance 查询本人实例状态（无实例返回 nil，不报错）。
 func (s *EnvService) GetInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
 	return s.instances.FindActive(ctx, userID, challengeID)
+}
+
+// ResolveCheckpoint 检测点回调解析：token 命中活跃实例则返回 (实例, nil)，
+// 否则 (nil, nil)（api 层 404）。token 即能力凭证（随容器环境注入，仅题目可见）。
+func (s *EnvService) ResolveCheckpoint(ctx context.Context, token string) (*model.LabInstance, error) {
+	return s.instances.FindByCheckpointToken(ctx, token)
 }
 
 // ExtendInstance 续期 running 实例 TTL（不重建容器；expire_at = now+1h）。

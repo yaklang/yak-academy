@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // 题目详情页（Burp lab 页风格）：描述 markdown、提示折叠、配套教程入口、
 // 容器环境生命周期与 flag 提交都集中在这里（列表页只做浏览）。
-import { computed, onMounted, ref } from 'vue'
+// 环境运行中时轮询详情：题目内置 checker 经检测点回调自动判定
+// （CHECKPOINT_URL，服务端直判），通关状态无需用户手动提交。
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -32,6 +34,33 @@ const instanceAlive = computed(() =>
   instance.value && instance.value.status !== 'destroyed' && instance.value.status !== 'stopped',
 )
 
+// 自动判定轮询：实例运行中每 5s 刷新详情，checker 回调判过即显示通关。
+let autoSolveTimer: number | null = null
+
+function restartAutoSolvePolling() {
+  stopAutoSolvePolling()
+  if (!instanceAlive.value || challenge.value?.solved) return
+  autoSolveTimer = window.setInterval(async () => {
+    try {
+      const detail = await trainingApi.detail(slug())
+      if (detail.solved) {
+        challenge.value = detail
+        ElMessage.success('环境检测通过，本题通关！')
+        stopAutoSolvePolling()
+      }
+    } catch {
+      // 轮询失败静默（下轮重试）；离开页面时统一清理
+    }
+  }, 5000)
+}
+
+function stopAutoSolvePolling() {
+  if (autoSolveTimer !== null) {
+    window.clearInterval(autoSolveTimer)
+    autoSolveTimer = null
+  }
+}
+
 function slug() {
   return route.params.challengeSlug as string
 }
@@ -54,6 +83,7 @@ async function loadInstance() {
   } catch {
     instance.value = null // 无实例（含 501 驱动未配置）静默处理
   }
+  restartAutoSolvePolling()
 }
 
 // 单容器约束：409 时提示关闭上一个容器（显示其题目名并可跳转过去销毁）。
@@ -61,6 +91,7 @@ async function startInstance() {
   instanceLoading.value = true
   try {
     instance.value = await instanceApi.start(slug())
+    restartAutoSolvePolling()
   } catch (e) {
     const err = e as ApiError
     if (err.status === 409 && err.data?.current) {
@@ -93,6 +124,7 @@ async function destroyInstance() {
   try {
     await instanceApi.destroy(slug())
     instance.value = null
+    stopAutoSolvePolling()
   } catch (e) {
     ElMessage.error(`环境销毁失败：${(e as Error).message}`)
   } finally {
@@ -142,6 +174,7 @@ function difficultyType(d: ChallengeDetail['difficulty']) {
 }
 
 onMounted(load)
+onUnmounted(stopAutoSolvePolling)
 </script>
 
 <template>

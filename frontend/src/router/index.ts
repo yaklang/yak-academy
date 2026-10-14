@@ -27,6 +27,8 @@ const router = createRouter({
         { path: 'training/:challengeSlug', name: 'challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
         // 学习路径
         { path: 'paths', name: 'paths', component: () => import('../views/LearningPaths.vue') },
+        // 徽章（计算型读模型视图）
+        { path: 'badges', name: 'badges', component: () => import('../views/Badges.vue') },
         // 次级页面（不进主导航）
         { path: 'leaderboard', name: 'leaderboard', component: () => import('../views/Leaderboard.vue') },
       ],

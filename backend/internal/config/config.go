@@ -14,6 +14,10 @@ type Config struct {
 
 	// EnvDriver 实例驱动：noop（默认，接口 501）/ docker（docker CLI 需可用）。
 	EnvDriver string
+
+	// PublicURL 平台对外可达地址：注入题目容器的 CHECKPOINT_URL 前缀
+	// （容器内经 host.docker.internal 回达宿主）。
+	PublicURL string
 }
 
 // 内置默认值仅用于本地开发；生产必须通过环境变量覆盖（main 启动时对照告警）。
@@ -31,6 +35,7 @@ func Load() *Config {
 		AdminUsername: getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
 		AdminPassword: getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
 		EnvDriver:     getenv("ACADEMY_ENV_DRIVER", "noop"),
+		PublicURL:     getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 	}
 }
 

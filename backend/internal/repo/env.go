@@ -100,6 +100,21 @@ func (r *labInstanceRepo) ListActive(ctx context.Context) ([]model.LabInstance, 
 	return list, err
 }
 
+func (r *labInstanceRepo) FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error) {
+	var i model.LabInstance
+	err := r.db.WithContext(ctx).
+		Where("checkpoint_token = ? AND status IN ?", token,
+			[]model.InstanceStatus{model.InstanceCreating, model.InstanceRunning}).
+		First(&i).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
 type instanceLogRepo struct{ db *gorm.DB }
 
 func NewInstanceLogRepo(db *gorm.DB) InstanceLogRepo { return &instanceLogRepo{db: db} }

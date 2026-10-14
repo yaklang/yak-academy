@@ -134,6 +134,9 @@ type LabInstanceRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error)
 	// ListActive 全部用户的活跃（creating/running）实例（管理端概览用）。
 	ListActive(ctx context.Context) ([]model.LabInstance, error)
+	// FindByCheckpointToken 检测点回调解析：token 命中且实例仍活跃（creating/running），
+	// 无则返回 nil（回调 404 语义）。
+	FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error)
 }
 
 // InstanceLogRepo 容器实例生命周期日志（append-only：只 Create 与分页查询）。
