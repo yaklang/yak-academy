@@ -82,6 +82,7 @@ func main() {
 	pathRepo := repo.NewPathRepo(gdb)
 	pathSvc := service.NewPathService(pathRepo, roomRepo, progressRepo)
 	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver, cfg.PublicURL)
+	challengeSvc.SetEnvService(envSvc)
 	envSvc.StartReaper(ctx, time.Minute)
 	badgeSvc := service.NewBadgeService(scoreRepo, progressRepo, pathRepo)
 

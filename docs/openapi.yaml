@@ -29,7 +29,7 @@ components:
           properties:
             code:
               type: string
-              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, INTERNAL]
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, CONFLICT, INTERNAL]
             message: { type: string }
     Page:
       type: object
@@ -888,7 +888,11 @@ paths:
   /admin/challenges/{slug}:
     delete:
       tags: [admin]
-      summary: 删除题目（级联删除 flags/hints）
+      summary: 删除题目（级联删除 flags/hints；存在通关记录时拒绝）
+      description: |-
+        题目存在任一用户通关记录（submission 事件历史）时返回 409——
+        事件溯源下提交历史 append-only 不可删，删除题目会制造悬挂积分。
+        无通关记录时：销毁该题目全部运行中实例，级联删除 flags/hints/lab_instances 行。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
@@ -901,6 +905,12 @@ paths:
                 properties:
                   deleted: { type: boolean }
         '404': { $ref: '#/components/responses/ErrorResp' }
+        '409':
+          description: 题目存在通关记录，拒绝删除（事件历史不可删）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /admin/lab-instances:
     get:

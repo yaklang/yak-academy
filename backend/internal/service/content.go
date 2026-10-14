@@ -620,8 +620,31 @@ func resolveFlagMode(m model.FlagMode) model.FlagMode {
 	return m
 }
 
-// DeleteChallenge 删除题目（级联删 flags/hints）。
+// DeleteChallenge 删除题目：存在通关记录拒绝（409）；
+// 否则先销毁全部运行中容器，再级联删 flags/hints/lab_instances 行。
+// 提交事件历史 append-only 保留（event-sourcing-rules skill），题目行删除后
+// 历史 submission.challenge_id 悬挂属预期——重放派生只按事件流进行，不再读题。
 func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) error {
+	chal, err := s.challenges.FindBySlug(ctx, slug)
+	if err != nil {
+		return err
+	}
+	if n, err := s.challenges.CountSolves(ctx, chal.ID); err != nil {
+		return err
+	} else if n > 0 {
+		return ErrHasSolves
+	}
+	if s.env != nil {
+		instances, err := s.env.ListActiveByChallenge(ctx, chal.ID)
+		if err != nil {
+			return err
+		}
+		for _, inst := range instances {
+			if err := s.env.AdminDestroyInstance(ctx, inst.ID); err != nil {
+				return fmt.Errorf("destroy instance %d: %w", inst.ID, err)
+			}
+		}
+	}
 	return s.challenges.Delete(ctx, slug)
 }
 

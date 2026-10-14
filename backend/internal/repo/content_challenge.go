@@ -209,6 +209,10 @@ func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Hint{}).Error; err != nil {
 			return err
 		}
+		// 题目删除后实例行失去引用：一并级联（容器本体由 service 层先销毁）。
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.LabInstance{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&c).Error
 	})
 }

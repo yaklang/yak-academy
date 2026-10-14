@@ -17,11 +17,17 @@ type ChallengeService struct {
 	events      repo.EventRepo
 	scores      repo.ScoreRepo
 	bus         *eventbus.Bus
+	// env 延迟注入（main 装配顺序：envSvc 依赖 challengeRepo 构造在后）。
+	// 删除题目前销毁运行中容器用；nil 时跳过（仅测试场景）。
+	env *EnvService
 }
 
 func NewChallengeService(c repo.ChallengeRepo, s repo.SubmissionRepo, ev repo.EventRepo, scores repo.ScoreRepo, bus *eventbus.Bus) *ChallengeService {
 	return &ChallengeService{challenges: c, submissions: s, events: ev, scores: scores, bus: bus}
 }
+
+// SetEnvService 注入实例服务（main 中 envSvc 构造后调用一次）。
+func (s *ChallengeService) SetEnvService(env *EnvService) { s.env = env }
 
 // UpsertChallenge 内容发布时写入题目与判定答案/提示（content→challenge 白名单依赖）。
 func (s *ChallengeService) UpsertChallenge(ctx context.Context, c *model.Challenge, flags []model.Flag, hints []model.Hint) error {

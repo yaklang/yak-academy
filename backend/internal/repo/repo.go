@@ -50,7 +50,8 @@ type ChallengeRepo interface {
 	// FindHint 按 hint 主键查（解锁接口用）。
 	FindHint(ctx context.Context, hintID uint) (*model.Hint, error)
 	CountSolves(ctx context.Context, challengeID uint) (int64, error)
-	// Delete 删除题目（级联删 flags/hints，事务内）。
+	// Delete 删除题目（级联删 flags/hints/lab_instances 行，事务内）。
+	// 调用方负责先销毁运行中容器（service.EnvService）并拦截存在通关记录的删除。
 	Delete(ctx context.Context, slug string) error
 }
 
@@ -134,6 +135,8 @@ type LabInstanceRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.LabInstance, int64, error)
 	// ListActive 全部用户的活跃（creating/running）实例（管理端概览用）。
 	ListActive(ctx context.Context) ([]model.LabInstance, error)
+	// ListActiveByChallenge 某题目全部用户的活跃实例（删除题目前销毁容器用）。
+	ListActiveByChallenge(ctx context.Context, challengeID uint) ([]model.LabInstance, error)
 	// FindByCheckpointToken 检测点回调解析：token 命中且实例仍活跃（creating/running），
 	// 无则返回 nil（回调 404 语义）。
 	FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error)
