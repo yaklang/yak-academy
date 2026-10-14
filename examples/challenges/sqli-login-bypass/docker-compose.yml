@@ -1,0 +1,6 @@
+# 本地开发用 compose；平台运行时按 challenge.json 的 image/port 单容器拉起。
+services:
+  challenge:
+    build: .
+    ports:
+      - "8080:8080"
