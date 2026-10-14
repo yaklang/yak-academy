@@ -63,11 +63,6 @@ func (s *AuthService) FindUser(ctx context.Context, username string) (*model.Use
 	return s.users.FindByUsername(ctx, username)
 }
 
-// CheckRole 两档角色判定：仅比较全局 Rank（admin 短路）。topicSlug 保留参数签名兼容，已忽略。
-func (s *AuthService) CheckRole(_ context.Context, user *model.User, required model.GlobalRole, _ string) (bool, error) {
-	return user.GlobalRole.Normalize().Rank() >= required.Normalize().Rank(), nil
-}
-
 // CreateUser 管理端创建用户（bcrypt 哈希）。角色只允许 student / admin。
 func (s *AuthService) CreateUser(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error) {
 	if username == "" || password == "" {
@@ -96,8 +91,8 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password string,
 	return user, nil
 }
 
-// UpdateRoles 修改全局角色（仅 student / admin）。courseRoles 参数忽略（课程级角色已废弃）。
-func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole model.GlobalRole, _ []model.CourseRole) (*model.User, error) {
+// UpdateRoles 修改全局角色（仅 student / admin）。
+func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole model.GlobalRole) (*model.User, error) {
 	if globalRole != "" {
 		role := globalRole.Normalize()
 		if role != model.GlobalRoleStudent && role != model.GlobalRoleAdmin {
@@ -110,22 +105,9 @@ func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole m
 	return s.users.FindByID(ctx, userID)
 }
 
-// DeleteCourseRole 删除课程级角色（前端"增删行"的删）。
-func (s *AuthService) DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error {
-	if topicSlug == "" {
-		return ErrValidation
-	}
-	return s.users.DeleteCourseRole(ctx, userID, topicSlug)
-}
-
 // ListUsers 用户列表（分页）。
 func (s *AuthService) ListUsers(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
 	return s.users.List(ctx, offset, limit)
-}
-
-// ListCourseRolesOf 某用户的课程级角色（用户管理页展示）。
-func (s *AuthService) ListCourseRolesOf(ctx context.Context, userID uint) ([]model.CourseRole, error) {
-	return s.users.ListCourseRoles(ctx, userID)
 }
 
 // EnsureAdmin users 表为空时创建初始管理员。

@@ -72,7 +72,6 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
-	r.Handle(http.MethodDelete, "/api/v1/admin/users/{id}/course-roles/{topicSlug}", "admin", h.deleteCourseRole)
 }
 
 func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
@@ -493,8 +492,9 @@ func (h *Handlers) leaderboard(w http.ResponseWriter, req *http.Request) {
 
 const maxPackageSize = 50 << 20 // 内容包 zip 上限 50MB
 
+// uploadPackage 管理端：上传教程包 zip → content 五步管线（Parse → Validate → Persist），
+// Publish 由管理员显式触发。超过 50MB 直接拒绝，避免大文件整体读入内存。
 func (h *Handlers) uploadPackage(w http.ResponseWriter, req *http.Request) {
-	// TODO(Phase2): multipart 解析 zip → Content.Upload 五步管线。
 	if err := req.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, errValidation)
 		return
@@ -666,39 +666,18 @@ func (h *Handlers) updateRoles(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var body struct {
-		GlobalRole  string `json:"global_role"`
-		CourseRoles []struct {
-			TopicSlug string `json:"topic_slug"`
-			Role      string `json:"role"`
-		} `json:"course_roles"`
+		GlobalRole string `json:"global_role"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeError(w, errValidation)
 		return
 	}
-	courseRoles := make([]model.CourseRole, len(body.CourseRoles))
-	for i, cr := range body.CourseRoles {
-		courseRoles[i] = model.CourseRole{TopicSlug: cr.TopicSlug, Role: cr.Role}
-	}
-	user, err := h.Auth.UpdateRoles(req.Context(), uint(id), model.GlobalRole(body.GlobalRole), courseRoles)
+	user, err := h.Auth.UpdateRoles(req.Context(), uint(id), model.GlobalRole(body.GlobalRole))
 	if err != nil {
 		mapError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, user)
-}
-
-func (h *Handlers) deleteCourseRole(w http.ResponseWriter, req *http.Request) {
-	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, errValidation)
-		return
-	}
-	if err := h.Auth.DeleteCourseRole(req.Context(), uint(id), req.PathValue("topicSlug")); err != nil {
-		mapError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func pageParams(req *http.Request) (page, pageSize int) {

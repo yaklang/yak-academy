@@ -69,6 +69,14 @@ func (r *scoreRepo) Leaderboard(ctx context.Context, offset, limit int) ([]model
 	return list, total, err
 }
 
+func (r *scoreRepo) CountAhead(ctx context.Context, score, solveCount int) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.ScoreRecord{}).
+		Where("score > ? OR (score = ? AND solve_count > ?)", score, score, solveCount).
+		Count(&n).Error
+	return n, err
+}
+
 type progressRepo struct{ db *gorm.DB }
 
 func NewProgressRepo(db *gorm.DB) ProgressRepo { return &progressRepo{db} }
