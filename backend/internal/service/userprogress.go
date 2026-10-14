@@ -47,8 +47,8 @@ type LeaderboardEntry struct {
 	SolveCount int    `json:"solved_count"`
 }
 
-// Leaderboard 排行榜（派生数据视图）。rank 按 score DESC, solve_count DESC 排序赋值；
-// 同分并列的跨页歧义 Phase 2 接受（Phase 4 引入持久化 rank）。
+// Leaderboard 排行榜（派生数据视图）。rank = 1 + 严格靠前记录数：
+// 同分同解决数并列同名次，且跨页一致（count-based，替代 offset+i+1 的分页错位）。
 func (s *UserProgressService) Leaderboard(ctx context.Context, offset, limit int) ([]LeaderboardEntry, int64, error) {
 	records, total, err := s.scores.Leaderboard(ctx, offset, limit)
 	if err != nil {
@@ -71,8 +71,12 @@ func (s *UserProgressService) Leaderboard(ctx context.Context, offset, limit int
 	}
 	entries := make([]LeaderboardEntry, len(records))
 	for i, r := range records {
+		ahead, err := s.scores.CountAhead(ctx, r.Score, r.SolveCount)
+		if err != nil {
+			return nil, 0, err
+		}
 		entries[i] = LeaderboardEntry{
-			Rank: offset + i + 1, Username: names[r.UserID],
+			Rank: int(ahead) + 1, Username: names[r.UserID],
 			Score: r.Score, SolveCount: r.SolveCount,
 		}
 	}

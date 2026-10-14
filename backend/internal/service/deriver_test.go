@@ -186,3 +186,51 @@ func TestLeaderboardAssemblesEntries(t *testing.T) {
 		t.Fatalf("entry[1] = %+v", entries[1])
 	}
 }
+
+func TestLeaderboardTiesShareRankAcrossPages(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:lbrdtietest?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(gdb); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		sqlDB, _ := gdb.DB()
+		sqlDB.Close()
+	})
+	ctx := context.Background()
+	users := repo.NewUserRepo(gdb)
+	for _, name := range []string{"alice", "bob", "carol"} {
+		if err := users.Create(ctx, &model.User{Username: name, GlobalRole: model.GlobalRoleStudent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scores := repo.NewScoreRepo(gdb)
+	svc := NewUserProgressService(scores, repo.NewProgressRepo(gdb), users)
+	// alice 100 分 2 题；bob / carol 同为 50 分 1 题（并列）。
+	if err := scores.UpdateScore(ctx, 1, 100, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := scores.UpdateScore(ctx, 2, 50, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := scores.UpdateScore(ctx, 3, 50, 1); err != nil {
+		t.Fatal(err)
+	}
+	page1, _, err := svc.Leaderboard(ctx, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page1[0].Rank != 1 || page1[1].Rank != 2 {
+		t.Fatalf("page1 ranks = %d,%d, want 1,2", page1[0].Rank, page1[1].Rank)
+	}
+	// 第二页的并列者必须仍是 rank 2（count-based），而非 offset 错位的 3。
+	page2, _, err := svc.Leaderboard(ctx, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2) != 1 || page2[0].Rank != 2 {
+		t.Fatalf("page2 = %+v, want single entry with rank 2", page2)
+	}
+}

@@ -87,14 +87,14 @@ func TestUpdateRolesTwoTierOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := auth.UpdateRoles(ctx, user.ID, model.GlobalRoleAdmin, nil)
+	updated, err := auth.UpdateRoles(ctx, user.ID, model.GlobalRoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.GlobalRole != model.GlobalRoleAdmin {
 		t.Fatalf("global_role = %s, want admin", updated.GlobalRole)
 	}
-	updated, err = auth.UpdateRoles(ctx, user.ID, model.GlobalRoleStudent, nil)
+	updated, err = auth.UpdateRoles(ctx, user.ID, model.GlobalRoleStudent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,22 +109,16 @@ func TestCheckRoleTwoTier(t *testing.T) {
 	student, _ := auth.CreateUser(ctx, "eve", "pw", model.GlobalRoleStudent)
 	admin, _ := auth.CreateUser(ctx, "root", "pw", model.GlobalRoleAdmin)
 
-	ok, err := auth.CheckRole(ctx, student, model.GlobalRoleAdmin, "")
-	if err != nil || ok {
-		t.Fatalf("student must not pass admin check, ok=%v err=%v", ok, err)
+	// 两档 Rank 判定（中间件 authorize 的同一套逻辑，rbac-model skill）。
+	if student.GlobalRole.Normalize().Rank() >= model.GlobalRoleAdmin.Rank() {
+		t.Fatal("student must not reach admin rank")
 	}
-	ok, err = auth.CheckRole(ctx, admin, model.GlobalRoleAdmin, "")
-	if err != nil || !ok {
-		t.Fatalf("admin must pass, ok=%v err=%v", ok, err)
-	}
-	ok, err = auth.CheckRole(ctx, student, model.GlobalRoleStudent, "")
-	if err != nil || !ok {
-		t.Fatalf("student must pass student check, ok=%v err=%v", ok, err)
+	if admin.GlobalRole.Rank() < model.GlobalRoleAdmin.Rank() {
+		t.Fatal("admin must reach admin rank")
 	}
 	// 遗留 teacher 角色按普通人处理。
 	legacy := &model.User{Username: "old", GlobalRole: model.GlobalRoleTeacher}
-	ok, err = auth.CheckRole(ctx, legacy, model.GlobalRoleAdmin, "")
-	if err != nil || ok {
-		t.Fatalf("legacy teacher must not be admin, ok=%v err=%v", ok, err)
+	if legacy.GlobalRole.Normalize().Rank() >= model.GlobalRoleAdmin.Rank() {
+		t.Fatal("legacy teacher must normalize below admin")
 	}
 }

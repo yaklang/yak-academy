@@ -79,7 +79,6 @@ func mapError(w http.ResponseWriter, err error) {
 	case isInstanceConflict(err):
 		writeConflict(w, err)
 	case service.IsNotImplemented(err):
-	case service.IsNotImplemented(err):
 		w.WriteHeader(http.StatusNotImplemented)
 		_ = json.NewEncoder(w).Encode(struct {
 			Error struct {

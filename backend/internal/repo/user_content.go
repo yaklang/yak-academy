@@ -5,7 +5,6 @@ import (
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // sqlite 实现集合。实现细节（gorm）不得泄漏到接口之外（project-conventions skill）。
@@ -58,24 +57,6 @@ func (r *userRepo) List(ctx context.Context, offset, limit int) ([]model.User, i
 func (r *userRepo) UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
 		Update("global_role", role).Error
-}
-
-func (r *userRepo) UpsertCourseRole(ctx context.Context, cr *model.CourseRole) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "topic_slug"}},
-		DoUpdates: clause.AssignmentColumns([]string{"role"}),
-	}).Create(cr).Error
-}
-
-func (r *userRepo) ListCourseRoles(ctx context.Context, userID uint) ([]model.CourseRole, error) {
-	var list []model.CourseRole
-	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&list).Error
-	return list, err
-}
-
-func (r *userRepo) DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error {
-	return r.db.WithContext(ctx).Where("user_id = ? AND topic_slug = ?", userID, topicSlug).
-		Delete(&model.CourseRole{}).Error
 }
 
 type contentPackageRepo struct{ db *gorm.DB }

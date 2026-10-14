@@ -16,9 +16,6 @@ type UserRepo interface {
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
 	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
-	UpsertCourseRole(ctx context.Context, r *model.CourseRole) error
-	DeleteCourseRole(ctx context.Context, userID uint, topicSlug string) error
-	ListCourseRoles(ctx context.Context, userID uint) ([]model.CourseRole, error)
 }
 
 type TopicRepo interface {
@@ -95,6 +92,9 @@ type ScoreRepo interface {
 	UpdateScore(ctx context.Context, userID uint, delta int, solveDelta int) error
 	Get(ctx context.Context, userID uint) (*model.ScoreRecord, error)
 	Leaderboard(ctx context.Context, offset, limit int) ([]model.ScoreRecord, int64, error)
+	// CountAhead 统计 (score, solve_count) 严格靠前的记录数：rank = 1 + CountAhead，
+	// 并列同名次且跨页一致（服务端分页下 offset+i+1 会错位）。
+	CountAhead(ctx context.Context, score, solveCount int) (int64, error)
 }
 
 type ProgressRepo interface {
