@@ -20,7 +20,7 @@ const BASE = '/api/v1'
 
 // request 是前端唯一允许的 HTTP 出口（project-conventions skill：
 // 组件内禁止直接 fetch/axios，必须经 src/api/）。
-async function request<T>(method: string, path: string, body?: unknown, isForm = false): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
   const token = localStorage.getItem('academy_token')
   if (token) headers['Authorization'] = `Bearer ${token}`
@@ -31,7 +31,6 @@ async function request<T>(method: string, path: string, body?: unknown, isForm =
     headers['Content-Type'] = 'application/json'
     payload = JSON.stringify(body)
   }
-  void isForm
   const resp = await fetch(`${BASE}${path}`, { method, headers, body: payload })
   if (resp.status === 204) return undefined as T
   const text = await resp.text()

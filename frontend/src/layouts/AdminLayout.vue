@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 管理端布局：教程 | 训练 | 资源管理 三组导航（资源管理含教程管理、题目管理、
-// 容器管理、用户与角色——教程与题目是两类独立上传资源）。
+// 路径管理、容器管理、用户与角色——教程与题目是两类独立上传资源）。
 // 底部提供"返回普通端"入口。教程/训练与管理端预览共用普通端视图。
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
@@ -24,6 +24,7 @@ function logout() {
         <div class="group-title">资源管理</div>
         <router-link to="/admin/panel/tutorials" class="sub">教程管理</router-link>
         <router-link to="/admin/panel/challenges" class="sub">题目管理</router-link>
+        <router-link to="/admin/panel/paths" class="sub">路径管理</router-link>
         <router-link to="/admin/panel/containers" class="sub">容器管理</router-link>
         <router-link to="/admin/panel/users" class="sub">用户与角色</router-link>
       </nav>
