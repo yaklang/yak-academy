@@ -19,6 +19,15 @@ const userKey ctxKey = "user"
 type Router struct {
 	mux    *http.ServeMux
 	auth   *service.AuthService
+	routes []RouteInfo
+}
+
+// RouteInfo 单条路由的注册元数据（Routes() 快照，契约测试比对 openapi.yaml 用）。
+type RouteInfo struct {
+	Method  string
+	Pattern string
+	Role    model.GlobalRole // 空 = 仅需登录
+	Public  bool
 }
 
 func NewRouter(auth *service.AuthService) *Router {
@@ -27,6 +36,7 @@ func NewRouter(auth *service.AuthService) *Router {
 
 // Handle 注册路由。requiredRole 为空串表示仅需登录（student 即可）。
 func (r *Router) Handle(method, pattern string, required model.GlobalRole, h http.HandlerFunc) {
+	r.routes = append(r.routes, RouteInfo{Method: method, Pattern: pattern, Role: required})
 	full := method + " " + pattern
 	r.mux.HandleFunc(full, func(w http.ResponseWriter, req *http.Request) {
 		// 中间件：JWT 解析 → 双层角色判定
@@ -42,9 +52,17 @@ func (r *Router) Handle(method, pattern string, required model.GlobalRole, h htt
 	})
 }
 
-// HandlePublic 注册公开路由（仅 /auth/login）。
+// HandlePublic 注册公开路由（仅 /auth/login、/checkpoints/{token}、/health）。
 func (r *Router) HandlePublic(method, pattern string, h http.HandlerFunc) {
+	r.routes = append(r.routes, RouteInfo{Method: method, Pattern: pattern, Public: true})
 	r.mux.HandleFunc(method+" "+pattern, h)
+}
+
+// Routes 返回已注册路由的快照（契约测试与调试用，不暴露 mux 本体）。
+func (r *Router) Routes() []RouteInfo {
+	out := make([]RouteInfo, len(r.routes))
+	copy(out, r.routes)
+	return out
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
