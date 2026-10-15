@@ -20,15 +20,15 @@ test.describe('认证旅程', () => {
     await expect(page.getByRole('link', { name: '训练' })).toBeVisible()
     await expect(page.getByRole('link', { name: '进入管理端' })).toHaveCount(0)
     // 普通人直入管理路由被守卫弹回普通端
-    await page.goto('/admin/panel/users')
+    await page.goto('/admin/panel/challenges')
     await expect(page).not.toHaveURL(/\/admin/)
   })
 
   test('admin 登录：有管理入口且可进入管理端', async ({ page }) => {
     await loginAsAdmin(page)
     await expect(page.getByRole('link', { name: '进入管理端' })).toBeVisible()
-    await page.goto('/admin/panel/users')
-    await expect(page).toHaveURL(/\/admin\/panel\/users/)
+    await page.goto('/admin/panel/challenges')
+    await expect(page).toHaveURL(/\/admin\/panel\/challenges/)
   })
 
   test('登出后旧 token 失效（API 401）', async ({ page, request }) => {

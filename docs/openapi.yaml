@@ -537,6 +537,64 @@ paths:
               schema: { $ref: '#/components/schemas/TokenResponse' }
         '401': { $ref: '#/components/responses/ErrorResp' }
 
+  /auth/sms/code:
+    post:
+      tags: [auth]
+      security: []
+      summary: 发送注册验证码
+      description: >
+        向手机号发送 6 位验证码（5 分钟有效，核销一次性）。
+        同手机号 60 秒内仅允许发送一次、10 分钟内最多 3 次。
+        第一版为开发投递器：验证码写入服务日志（不接第三方短信通道）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+      responses:
+        '200':
+          description: OK（已发送；60 秒内重复请求返回此状态并带 retry_after 提示）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /auth/register:
+    post:
+      tags: [auth]
+      security: []
+      summary: 自助注册（手机验证码核销）
+      description: >
+        凭有效验证码创建账号，角色固定 student（禁止自选）。
+        验证码错误/过期/已核销 → 422；用户名或手机号已存在 → 422。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code, username, password]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                code: { type: string, minLength: 6, maxLength: 6 }
+                username: { type: string, minLength: 3, maxLength: 64 }
+                password: { type: string, minLength: 6 }
+      responses:
+        '200':
+          description: OK（注册成功，直接返回登录 token，无需再登录）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /auth/logout:
     post:
       tags: [auth]

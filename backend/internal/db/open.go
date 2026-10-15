@@ -26,7 +26,7 @@ func Migrate(db *gorm.DB) error {
 		&model.LabInstance{}, &model.InstanceLog{},
 		&model.Competition{}, &model.Team{}, &model.Participant{},
 		&model.CompetitionChallenge{}, &model.CheatWarning{}, &model.Writeup{},
-		&model.CompetitionScore{},
+		&model.CompetitionScore{}, &model.SmsCode{},
 	); err != nil {
 		return err
 	}

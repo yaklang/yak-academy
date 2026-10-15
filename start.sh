@@ -43,11 +43,13 @@ if [ -z "$ENV_DRIVER" ]; then
   fi
 fi
 
-# 后端：先编译成二进制再运行（比 go run 进程树更好管理）
+# 后端：先编译成二进制再运行（比 go run 进程树更好管理）。
+# 输出名固定不带 .exe：Windows 的 go build -o 不会自动补后缀，若按 .exe
+# 探测会优先命中历史遗留的旧 .exe（本次实际踩到：跑了前天的旧二进制）。
 log "编译后端..."
+rm -f backend/academy-server-bin backend/academy-server-bin.exe
 (cd backend && go build -o academy-server-bin ./cmd/academy-server)
 BIN="academy-server-bin"
-[ -f "backend/academy-server-bin.exe" ] && BIN="academy-server-bin.exe"
 
 log "启动后端 $BACKEND_URL"
 export ACADEMY_ENV_DRIVER="$ENV_DRIVER"

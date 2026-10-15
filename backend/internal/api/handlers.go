@@ -24,17 +24,20 @@ type Handlers struct {
 	Badges       *service.BadgeService
 	Profile      *service.ProfileService
 	Competitions *service.CompetitionService
+	RegisterSvc  *service.RegisterService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register}
 }
 
 func (h *Handlers) Register(r *Router) {
 	// 公开接口：登录（JWT）、检测点回调（token 能力鉴权，容器内 checker 调用）
 	// 与健康检查（进程存活探针，无鉴权；compose healthcheck 用）。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/sms/code", h.sendSmsCode)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/register", h.register)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
 	r.HandlePublic(http.MethodGet, "/health", h.health)
 
@@ -139,6 +142,49 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		// 登录失败与缺 token 区分文案，避免前端误报「invalid or missing token」。
 		writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized, "invalid username or password"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
+}
+
+// sendSmsCode 注册发码（公开）。限频不报错：按契约返回 200 + retry_after，
+// 前端据此显示倒计时（与真实短信通道行为一致，不泄漏限频细节差异）。
+func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Phone string `json:"phone"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" {
+		writeError(w, errValidation)
+		return
+	}
+	retryAfter, err := h.RegisterSvc.SendCode(req.Context(), body.Phone)
+	if err != nil {
+		if errors.Is(err, service.ErrSmsThrottled) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "retry_after": retryAfter})
+			return
+		}
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// register 凭验证码建号（公开，角色固定 student），成功即签发登录 token。
+func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Phone    string `json:"phone"`
+		Code     string `json:"code"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" || body.Code == "" || body.Username == "" || body.Password == "" {
+		writeError(w, errValidation)
+		return
+	}
+	token, expires, _, err := h.RegisterSvc.Register(req.Context(), body.Phone, body.Code, body.Username, body.Password,
+		func(u *model.User) (string, time.Time, error) { return h.Auth.IssueToken(req.Context(), u) })
+	if err != nil {
+		mapError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})

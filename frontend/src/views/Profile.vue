@@ -1,10 +1,15 @@
 <script setup lang="ts">
-// 账号信息面板：内置账号 ID、账号名称、描述简介、总得分（事件派生只读）、头像上传。
+// 账号信息面板：内置账号 ID、账号名称、描述简介、总得分（事件派生只读）、头像上传、
+// 修改密码（自布局头部移入，账号安全操作集中在账号信息内）。
 // 简介可编辑（≤500 字）；头像 png/jpg/gif/webp ≤2MB，重复上传覆盖。
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { profileApi, type UserProfile } from '../api'
+import { authApi, profileApi, type UserProfile } from '../api'
+import { useAuthStore } from '../stores/auth'
 
+const auth = useAuthStore()
+const router = useRouter()
 const profile = ref<UserProfile | null>(null)
 const loading = ref(false)
 const bio = ref('')
@@ -12,6 +17,10 @@ const editing = ref(false)
 const bioLoading = ref(false)
 const avatarUploading = ref(false)
 const avatarUrl = ref<string | null>(null)
+
+const pwdVisible = ref(false)
+const pwdForm = reactive({ current: '', next: '', confirm: '' })
+const pwdLoading = ref(false)
 
 async function load() {
   loading.value = true
@@ -72,6 +81,30 @@ async function onAvatarChange(file: File) {
     ElMessage.error((e as Error).message)
   } finally {
     avatarUploading.value = false
+  }
+}
+
+async function submitChangePassword() {
+  if (!pwdForm.current || pwdForm.next.length < 6) {
+    ElMessage.warning('请填写当前密码，且新密码至少 6 位')
+    return
+  }
+  if (pwdForm.next !== pwdForm.confirm) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  pwdLoading.value = true
+  try {
+    await authApi.changePassword(pwdForm.current, pwdForm.next)
+    pwdVisible.value = false
+    ElMessage.success('密码已修改，请重新登录')
+    // 改密后全部 token 失效：清本地态回登录页
+    await auth.logout()
+    router.push('/login')
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    pwdLoading.value = false
   }
 }
 
@@ -145,7 +178,33 @@ onMounted(load)
       />
       <p v-else class="bio-text">{{ profile.bio || '暂无简介' }}</p>
     </div>
+
+    <div class="bio-block">
+      <div class="bio-head">
+        <span>账号安全</span>
+        <el-button size="small" @click="pwdVisible = true">修改密码</el-button>
+      </div>
+      <p class="bio-text">修改后需重新登录（全部已登录会话失效）。</p>
+    </div>
   </div>
+
+  <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
+    <el-form label-width="90px">
+      <el-form-item label="当前密码">
+        <el-input v-model="pwdForm.current" type="password" show-password />
+      </el-form-item>
+      <el-form-item label="新密码">
+        <el-input v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
+      </el-form-item>
+      <el-form-item label="确认新密码">
+        <el-input v-model="pwdForm.confirm" type="password" show-password />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="pwdVisible = false">取消</el-button>
+      <el-button type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>

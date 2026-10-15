@@ -8,6 +8,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminCompetitionApi,
   type AdminLabInstance,
+  type ChallengeJSON,
   type CheatWarningItem,
   type Competition,
   type CompetitionDetail,
@@ -17,6 +18,7 @@ import {
   type TrainingItem,
   type WriteupItem,
 } from '../../api'
+import { parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 
 const route = useRoute()
 const compId = Number(route.params.id)
@@ -100,21 +102,64 @@ async function loadChallenges() {
 const showBind = ref(false)
 const bindMode = ref<'slugs' | 'json'>('slugs')
 const bindSlugs = ref('')
-const bindJSON = ref('')
 const binding = ref(false)
 const unbinding = ref('')
+
+// 导入模式：文件（可多选）与粘贴共用一个暂存列表，逐题校验（challengeFormat），
+// 全部通过后一次性提交；修正编辑仍走题目管理，此处只做导入与绑定。
+interface StagedChallenge {
+  key: number
+  source: string
+  chal: ChallengeJSON
+  errors: string[]
+}
+const staged = ref<StagedChallenge[]>([])
+const stagedSeq = ref(0)
+const bindPaste = ref('')
 
 function openBind() {
   bindMode.value = 'slugs'
   bindSlugs.value = ''
-  bindJSON.value = ''
+  staged.value = []
+  bindPaste.value = ''
   showBind.value = true
 }
+
+function stageChallenges(text: string, source: string): boolean {
+  const { list, error } = parseChallengeJSON(text)
+  if (error) {
+    ElMessage.warning(`${source}：${error}`)
+    return false
+  }
+  for (const chal of list) {
+    const errors = [...validateChallenge(chal)]
+    if (staged.value.some((s) => s.chal.slug === chal.slug)) errors.push(`slug：与暂存列表中的「${chal.slug}」重复`)
+    staged.value.push({ key: stagedSeq.value++, source, chal, errors })
+  }
+  return true
+}
+
+// el-upload before-upload：文件文本进暂存列表（单文件即逐题，多文件即批量）。
+async function onStageFile(file: File) {
+  stageChallenges(await file.text(), file.name)
+  return false // 阻止 el-upload 默认上传行为
+}
+
+function stagePaste() {
+  if (!bindPaste.value.trim()) return
+  if (stageChallenges(bindPaste.value, '粘贴')) bindPaste.value = ''
+}
+
+function removeStaged(row: StagedChallenge) {
+  staged.value = staged.value.filter((s) => s.key !== row.key)
+}
+
+const stagedInvalid = computed(() => staged.value.some((s) => s.errors.length))
 
 async function submitBind() {
   binding.value = true
   try {
-    let body: { slugs: string[] } | unknown[]
+    let body: { slugs: string[] } | ChallengeJSON[]
     if (bindMode.value === 'slugs') {
       const slugs = bindSlugs.value.split(/[\s,，;；]+/).filter(Boolean)
       if (!slugs.length) {
@@ -123,18 +168,17 @@ async function submitBind() {
       }
       body = { slugs }
     } else {
-      try {
-        body = JSON.parse(bindJSON.value)
-      } catch {
-        ElMessage.warning('JSON 解析失败，请检查格式')
+      if (!staged.value.length) {
+        ElMessage.warning('请先选择题目 JSON 文件或粘贴内容')
         return
       }
-      if (!Array.isArray(body) && typeof body !== 'object') {
-        ElMessage.warning('应为 challenge.json 对象或数组')
+      if (stagedInvalid.value) {
+        ElMessage.warning('暂存列表中存在校验未通过的题目，请修正文件或移除对应条目')
         return
       }
+      body = staged.value.map((s) => s.chal)
     }
-    const resp = await adminCompetitionApi.bindChallenges(compId, body as { slugs: string[] })
+    const resp = await adminCompetitionApi.bindChallenges(compId, body)
     ElMessage.success(`绑定完成：新增 ${resp.added} 题`)
     showBind.value = false
     await Promise.all([loadChallenges(), loadDetail()])
@@ -433,7 +477,7 @@ onMounted(async () => {
           <template #header>
             <div class="card-head">
               <span>竞赛题目（{{ challenges.length }}）</span>
-              <el-button type="primary" size="small" @click="openBind">绑定 / 批量导入</el-button>
+              <el-button type="primary" size="small" @click="openBind">绑定 / 导入题目</el-button>
             </div>
           </template>
           <el-table :data="challenges" v-loading="challengesLoading" empty-text="尚未绑定题目">
@@ -659,23 +703,60 @@ onMounted(async () => {
     </el-tabs>
   </div>
 
-  <!-- 绑定/批量导入题目 -->
-  <el-dialog v-model="showBind" title="绑定 / 批量导入题目" width="680px">
+  <!-- 绑定/导入题目（既有 slug 绑定，或文件/粘贴导入 challenge.json） -->
+  <el-dialog v-model="showBind" title="绑定 / 导入题目" width="760px">
     <el-radio-group v-model="bindMode" class="bind-mode">
       <el-radio-button value="slugs">绑定既有题目</el-radio-button>
-      <el-radio-button value="json">批量导入题目 JSON</el-radio-button>
+      <el-radio-button value="json">导入题目 JSON</el-radio-button>
     </el-radio-group>
     <template v-if="bindMode === 'slugs'">
       <p class="dim">填写训练场已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，训练场侧不受影响。</p>
       <el-input v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
     </template>
     <template v-else>
-      <p class="dim">粘贴 challenge.json（单对象或数组，格式与题目管理上传一致）。单题失败整体拒绝；导入成功后自动绑定进本场。</p>
-      <el-input v-model="bindJSON" type="textarea" :rows="12" placeholder='[{"slug": "comp-web-1", ...}]' />
+      <p class="dim">
+        与题目管理上传同一格式：可一次选择多个 .json 文件批量导入，也可选单个逐题导入，或直接粘贴 JSON（单对象或数组）。
+        所有题目先经本地校验进入下方暂存列表，全部通过后一次性导入并绑定进本场（导入的题目同时进入训练场题库，如需修改请到题目管理编辑）。
+      </p>
+      <div class="stage-actions">
+        <el-upload multiple accept=".json,application/json" :show-file-list="false" :before-upload="onStageFile" :disabled="binding">
+          <el-button size="small">选择 JSON 文件（可多选）</el-button>
+        </el-upload>
+        <el-input v-model="bindPaste" type="textarea" :rows="3" placeholder='或粘贴 challenge.json（单对象或数组）' />
+        <el-button size="small" @click="stagePaste">解析并加入</el-button>
+      </div>
+      <el-table v-if="staged.length" :data="staged" size="small" class="stage-table" empty-text="暂存列表为空">
+        <el-table-column label="来源" width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.source }}</template>
+        </el-table-column>
+        <el-table-column label="题目" min-width="160">
+          <template #default="{ row }">
+            {{ row.chal.title || '（未命名）' }}
+            <span class="dim">（{{ row.chal.slug || '无 slug' }}）</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="校验" min-width="220">
+          <template #default="{ row }">
+            <el-tag v-if="!row.errors.length" type="success" size="small">通过</el-tag>
+            <div v-else class="stage-errs">
+              <el-tag type="danger" size="small">未通过</el-tag>
+              <span>{{ row.errors.join('；') }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button size="small" type="danger" link @click="removeStaged(row)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <p v-else class="dim">尚未暂存任何题目：选择文件或粘贴 JSON 后将在此逐题列出。</p>
     </template>
     <template #footer>
       <el-button @click="showBind = false">取消</el-button>
-      <el-button type="primary" :loading="binding" @click="submitBind">{{ bindMode === 'slugs' ? '绑定' : '导入并绑定' }}</el-button>
+      <el-button type="primary" :loading="binding" @click="submitBind">
+        {{ bindMode === 'slugs' ? '绑定' : `导入并绑定（${staged.length} 题）` }}
+      </el-button>
     </template>
   </el-dialog>
 
@@ -770,6 +851,11 @@ onMounted(async () => {
 .dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
 .pager { margin-top: 1rem; }
 .bind-mode { margin-bottom: 0.8rem; }
+.stage-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.8rem; }
+.stage-actions .el-button { margin-left: 0; }
+.stage-table { margin-bottom: 0.4rem; }
+.stage-errs { display: flex; align-items: flex-start; gap: 0.4rem; }
+.stage-errs span { color: var(--el-color-danger); font-size: 0.82rem; line-height: 1.4; }
 .wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
 .wp-group { margin-bottom: 1.4rem; }
 .wp-group h4 { margin: 0 0 0.5rem; }

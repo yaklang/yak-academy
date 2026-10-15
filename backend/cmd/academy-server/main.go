@@ -106,7 +106,9 @@ func main() {
 	// api 装配（竞赛入场锁定：已入场未结束的参赛者只能访问竞赛域接口）
 	router := api.NewRouter(authSvc)
 	router.SetEntryLock(competitionSvc)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc).Register(router)
+	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
+	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {
