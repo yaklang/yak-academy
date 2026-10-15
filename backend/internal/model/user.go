@@ -38,6 +38,10 @@ type User struct {
 	Username     string     `gorm:"uniqueIndex;size:64" json:"username"`
 	PasswordHash string     `json:"-"`
 	GlobalRole   GlobalRole `gorm:"size:16;index" json:"global_role"`
+	// Phone 注册手机号（自助注册凭据，唯一；竞赛导入建号可为空）。不参与登录。
+	// SQLite 唯一索引允许多个 NULL，但空串不空——竞赛批量建号的空 Phone 会撞唯一索引，
+	// 故唯一性排除空串（手机号已注册的查重由 service FindByPhone 兜住）。
+	Phone string `gorm:"index:idx_users_phone,unique,where:phone <> ''" json:"phone"`
 	// Bio 描述简介（账号信息面板，≤500 字）。
 	Bio string `gorm:"size:500" json:"bio"`
 	// AvatarFile 头像落盘文件名（avatars/<userID>/<file>，空 = 未上传）。
@@ -73,6 +77,17 @@ type TokenRevocation struct {
 	JTI       string    `gorm:"uniqueIndex;size:64"`
 	UserID    uint      `gorm:"index"`
 	ExpiresAt time.Time `gorm:"index"` // token 自然过期后可清理
+	CreatedAt time.Time
+}
+
+// SmsCode 注册验证码（自助注册，手机验证码核销）。鉴权辅助状态而非派生数据，
+// 不进事件表（同 TokenRevocation）。核销一次性：Used 置位后不可重复注册。
+type SmsCode struct {
+	ID        uint      `gorm:"primaryKey"`
+	Phone     string    `gorm:"size:20;index"`
+	Code      string    `gorm:"size:6"`
+	ExpiresAt time.Time `gorm:"index"` // 5 分钟有效
+	Used      bool      // 核销一次性标记
 	CreatedAt time.Time
 }
 

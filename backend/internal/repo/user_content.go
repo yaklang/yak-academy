@@ -43,6 +43,14 @@ func (r *userRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.User, er
 	return list, err
 }
 
+func (r *userRepo) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
+	var u model.User
+	if err := r.db.WithContext(ctx).Where("phone = ?", phone).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *userRepo) List(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
 	var (
 		list  []model.User
@@ -182,4 +190,36 @@ func (r *contentPackageRepo) List(ctx context.Context, offset, limit int) ([]mod
 	}
 	err := r.db.WithContext(ctx).Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
 	return list, total, err
+}
+
+// smsCodeRepo 注册验证码表实现。核销走条件更新（used=0 → 1）保证一次性。
+type smsCodeRepo struct{ db *gorm.DB }
+
+func NewSmsCodeRepo(db *gorm.DB) SmsCodeRepo { return &smsCodeRepo{db} }
+
+func (r *smsCodeRepo) Create(ctx context.Context, c *model.SmsCode) error {
+	return r.db.WithContext(ctx).Create(c).Error
+}
+
+func (r *smsCodeRepo) LatestByPhone(ctx context.Context, phone string) (*model.SmsCode, error) {
+	var c model.SmsCode
+	if err := r.db.WithContext(ctx).Where("phone = ?", phone).
+		Order("id DESC").First(&c).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *smsCodeRepo) CountSince(ctx context.Context, phone string, windowStart time.Time) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.SmsCode{}).
+		Where("phone = ? AND created_at >= ?", phone, windowStart).
+		Count(&n).Error
+	return n, err
+}
+
+func (r *smsCodeRepo) MarkUsed(ctx context.Context, id uint) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.SmsCode{}).
+		Where("id = ? AND used = 0", id).Update("used", true)
+	return res.RowsAffected, res.Error
 }

@@ -20,7 +20,7 @@ description: yak-academy 两档角色权限模型约束。涉及用户、角色�
 - **每个接口必须声明所需角色**（路由注册时的声明式元数据），由统一中间件执行。
 - **禁止**在 handler 函数体内写 `if user.Role == ...` 这类散落权限判断。
 - 资源属主判断放 service 层，角色/权限检查放中间件。
-- **公开接口仅两个**：`POST /auth/login`（JWT 换取）与 `POST /checkpoints/{token}`（环境检测点回调，token 即能力凭证——每实例随机生成、注入容器、实例销毁即失效；无 JWT 语义，不适用角色判定）。新增公开接口必须先在 architecture.md 立项。
+- **公开接口仅四个**：`POST /auth/login`（JWT 换取）、`POST /auth/sms/code`（注册发验证码）、`POST /auth/register`（验证码核销后建号，角色固定 student）与 `POST /checkpoints/{token}`（环境检测点回调，token 即能力凭证——每实例随机生成、注入容器、实例销毁即失效；无 JWT 语义，不适用角色判定）。新增公开接口必须先在 architecture.md 立项。
 
 ## 接口 → 最低角色速查
 

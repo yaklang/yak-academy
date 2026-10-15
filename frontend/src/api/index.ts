@@ -128,6 +128,8 @@ export interface ContentVersion {
   created_at: string
 }
 
+// 用户与角色管理页已下线（两档模型角色为账号固有属性，无独立管理入口），
+// 但管理 API 保留：竞赛「导入参赛者」建号、E2E 账号生命周期重置密码仍走这些接口。
 export const adminApi = {
   listUsers: (page = 1) => http.get<Paged<User>>(`/admin/users?page=${page}`),
   createUser: (username: string, password: string, globalRole: string) =>
@@ -141,6 +143,12 @@ export const adminApi = {
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),
+  // 注册发码：限频时后端不报错，返回 200 + retry_after（秒），前端据此倒计时。
+  sendSmsCode: (phone: string) =>
+    http.post<{ ok: boolean; retry_after?: number }>('/auth/sms/code', { phone }),
+  // 凭验证码建号（角色固定 student），成功直接返回登录 token。
+  register: (phone: string, code: string, username: string, password: string) =>
+    http.post<TokenResponse>('/auth/register', { phone, code, username, password }),
   me: () => http.get<User>('/me'),
   logout: () => http.post<{ ok: boolean }>('/auth/logout'),
   changePassword: (currentPassword: string, newPassword: string) =>

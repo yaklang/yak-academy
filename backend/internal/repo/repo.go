@@ -14,6 +14,8 @@ type UserRepo interface {
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	FindByID(ctx context.Context, id uint) (*model.User, error)
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
+	// FindByPhone 注册手机号查重（自助注册）。调用前应保证 phone 非空。
+	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
 	// UpdatePassword 改密 + 同时推进 token 失效阈值（全量吊销已签发 token）。
@@ -22,6 +24,18 @@ type UserRepo interface {
 	UpdateBio(ctx context.Context, id uint, bio string) error
 	// UpdateAvatar 更新头像文件名（空串 = 未上传）。
 	UpdateAvatar(ctx context.Context, id uint, avatarFile string) error
+}
+
+// SmsCodeRepo 注册验证码（自助注册）：发码入库、限频计数、核销。
+type SmsCodeRepo interface {
+	Create(ctx context.Context, c *model.SmsCode) error
+	// LatestByPhone 该手机号最近一条验证码（含已用/已过期，供核销判定）；
+	// gorm.ErrRecordNotFound = 从未发过。
+	LatestByPhone(ctx context.Context, phone string) (*model.SmsCode, error)
+	// CountSince 该手机号 windowStart 之后已发送条数（限频窗口计数）。
+	CountSince(ctx context.Context, phone string, windowStart time.Time) (int64, error)
+	// MarkUsed 核销（一次性；返回 0 = 已被并发核销或不存在）。
+	MarkUsed(ctx context.Context, id uint) (int64, error)
 }
 
 // MailRepo 站内邮箱（只收不发）：用户只读 + 标记已读；投递走 Deliver。

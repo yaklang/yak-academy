@@ -45,12 +45,15 @@ const isMainProcess = process.env.TEST_WORKER_INDEX === undefined
 if (isMainProcess && process.env.E2E_KEEP_STATE !== '1') {
   rmSync(path.join(stateDir, 'e2e.db'), { force: true })
   rmSync(path.join(stateDir, 'attachments'), { recursive: true, force: true })
+  rmSync(path.join(stateDir, 'backend.log'), { force: true })
 }
 if (isMainProcess) mkdirSync(stateDir, { recursive: true })
 
 // 先编译再运行单进程二进制（而不是 go run）：Playwright 杀进程树时
 // go run 的子进程在 Windows 上容易残留孤儿容器/进程。
 const serverBin = path.join(stateDir, `academy-e2e${process.platform === 'win32' ? '.exe' : ''}`)
+// 后端 stdout 落盘：注册 e2e 从中取开发投递的短信验证码；排障时直接看日志。
+const backendLog = path.join(stateDir, 'backend.log')
 
 export default defineConfig({
   testDir: './e2e',
@@ -73,7 +76,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `go build -o "${serverBin}" ./cmd/academy-server && "${serverBin}"`,
+      command: `go build -o "${serverBin}" ./cmd/academy-server && "${serverBin}" > "${backendLog}" 2>&1`,
       cwd: path.join(rootDir, '..', 'backend'),
       url: `${apiURL}/health`,
       timeout: 180_000, // 首次编译 + 迁移

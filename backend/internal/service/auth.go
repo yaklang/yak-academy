@@ -54,6 +54,12 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return s.issueToken(ctx, user)
 }
 
+// IssueToken 为指定用户签发 token（注册建号成功后即时登录，复用登录签发逻辑；
+// 不做密码校验，调用方须已通过自己的凭据核验）。
+func (s *AuthService) IssueToken(ctx context.Context, user *model.User) (string, time.Time, error) {
+	return s.issueToken(ctx, user)
+}
+
 func (s *AuthService) issueToken(ctx context.Context, user *model.User) (string, time.Time, error) {
 	// iat 只有秒精度，改密/重置阈值按「签发秒 + 1」存储（见 UpdatePassword）：
 	// 改密后 1 秒内的新登录会因 iat < 阈值被拒。签发前等待出窗，

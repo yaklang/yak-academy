@@ -49,12 +49,12 @@ const router = createRouter({
         // 训练板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 资源管理（教程管理 / 题目管理 + 容器、用户、竞赛）
+        // 资源管理（教程管理 / 题目管理 + 容器、竞赛）。
+        // 用户与角色不再提供管理页（两档模型下角色为账号固有属性；建号入口在竞赛导入参赛者）。
         { path: 'panel', redirect: '/admin/panel/tutorials' },
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
-        { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
         { path: 'panel/competitions', name: 'admin-competitions', component: () => import('../views/admin/Competitions.vue') },
         {
           path: 'panel/competitions/:id',
