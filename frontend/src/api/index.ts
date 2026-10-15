@@ -283,3 +283,153 @@ export const adminChallengeApi = {
 export function downloadAttachment(slug: string, filename: string) {
   return http.download(`/challenges/${slug}/attachments/${encodeURIComponent(filename)}`)
 }
+
+// --- 竞赛域（管理端 + 参赛者） ---
+
+export type CompetitionStatus = 'scheduled' | 'running' | 'ended'
+export interface Competition {
+  id: number
+  name: string
+  description: string
+  start_time: string
+  end_time: string
+  status: CompetitionStatus
+  created_at: string
+}
+export interface CompetitionDetail extends Competition {
+  stats: {
+    teams: number
+    participants: number
+    entered: number
+    challenges: number
+    instances: number
+    warnings: number
+    writeups: number
+  }
+}
+// 参赛者视角题目条目（含描述与通关状态）。
+export interface CompetitionChallengeItem {
+  id: number
+  slug: string
+  title: string
+  category: string
+  difficulty: 'apprentice' | 'practitioner' | 'expert'
+  score: number
+  has_env: boolean
+  description_md: string
+  solved: boolean
+}
+export interface CompetitionParticipantItem {
+  id: number
+  user_id: number
+  username: string
+  team_id: number | null
+  team_name: string | null
+  invite_code: string
+  entered: boolean
+  entered_at: string | null
+  last_ip: string
+  created_at: string
+}
+export interface CheatWarningItem {
+  id: number
+  user_id: number
+  username: string
+  team_id: number | null
+  team_name: string | null
+  kind: 'cross_team_flag' | 'ip_anomaly'
+  reason: string
+  created_at: string
+}
+export interface WriteupItem {
+  user_id: number
+  username: string
+  team_name: string | null
+  submitted: boolean
+  submitted_at: string | null
+  content: string
+}
+// 榜单条目（team/individual 两模式复用：individual 时 members 只有一个用户名）。
+export interface TeamLeaderboardEntry {
+  rank: number
+  team_id: number
+  team_name: string | null
+  score: number
+  solved_count: number
+  members: string[]
+  last_solve_at: string | null
+}
+export interface LeaderboardResp {
+  mode: 'team' | 'individual'
+  items: TeamLeaderboardEntry[]
+}
+// 批量导入请求：队伍（成员按用户名，缺失自动建号）+ 个人参赛者。
+export interface ParticipantImportRequest {
+  teams?: { name: string; members: string[] }[]
+  individuals?: string[]
+}
+export interface ParticipantImportResult {
+  created_accounts: { username: string; initial_password: string }[]
+  participants: { username: string; team_name: string | null; invite_code: string; mail_delivered: boolean }[]
+}
+export interface MyCompetitionEntry {
+  competition: Competition | null
+  locked: boolean
+  entered: boolean
+  team_name: string | null
+}
+export interface CompetitionHomeView {
+  competition: Competition
+  team_name: string | null
+  teammates: string[]
+  challenges: CompetitionChallengeItem[]
+  my_submissions: { id: number; status: 'pending' | 'correct' | 'incorrect'; score: number; created_at: string }[]
+  writeup_submitted: boolean
+}
+
+// 竞赛管理（管理端）。
+export const adminCompetitionApi = {
+  list: (page = 1, pageSize = 20) =>
+    http.get<Paged<Competition>>(`/admin/competitions?page=${page}&page_size=${pageSize}`),
+  create: (body: { name: string; description?: string; start_time: string; end_time: string }) =>
+    http.post<Competition>('/admin/competitions', body),
+  detail: (id: number) => http.get<CompetitionDetail>(`/admin/competitions/${id}`),
+  update: (id: number, body: { name?: string; description?: string; start_time?: string; end_time?: string }) =>
+    http.patch<CompetitionDetail>(`/admin/competitions/${id}`, body),
+  challenges: (id: number) =>
+    http.get<{ items: TrainingItem[] }>(`/admin/competitions/${id}/challenges`),
+  // 双模式绑定：{"slugs":[...]} 绑既有题目；数组=challenge.json 批量导入（单题失败整体拒绝）。
+  bindChallenges: (id: number, body: { slugs: string[] } | ChallengeJSON[]) =>
+    http.post<{ added: number; items: TrainingItem[] }>(`/admin/competitions/${id}/challenges`, body),
+  unbindChallenges: (id: number, slugs: string[]) =>
+    http.del<{ removed: number }>(`/admin/competitions/${id}/challenges`, { slugs }),
+  participants: (id: number, page = 1, pageSize = 20) =>
+    http.get<Paged<CompetitionParticipantItem> & { teams: TeamLeaderboardEntry[] }>(
+      `/admin/competitions/${id}/participants?page=${page}&page_size=${pageSize}`),
+  importParticipants: (id: number, body: ParticipantImportRequest) =>
+    http.post<ParticipantImportResult>(`/admin/competitions/${id}/participants`, body),
+  instances: (id: number, page = 1, pageSize = 20) =>
+    http.get<Paged<AdminLabInstance>>(`/admin/competitions/${id}/instances?page=${page}&page_size=${pageSize}`),
+  warnings: (id: number) =>
+    http.get<{ items: CheatWarningItem[] }>(`/admin/competitions/${id}/warnings`),
+  writeups: (id: number) =>
+    http.get<{ items: WriteupItem[] }>(`/admin/competitions/${id}/writeups`),
+  leaderboard: (id: number, mode: 'team' | 'individual' = 'team') =>
+    http.get<LeaderboardResp>(`/admin/competitions/${id}/leaderboard?mode=${mode}`),
+}
+
+// 竞赛参赛（学生端）。
+export const competitionApi = {
+  myEntry: () => http.get<MyCompetitionEntry>('/competitions/me'),
+  enter: (id: number, inviteCode: string) =>
+    http.post<MyCompetitionEntry>(`/competitions/${id}/enter`, { invite_code: inviteCode }),
+  view: (id: number) => http.get<CompetitionHomeView>(`/competitions/${id}/view`),
+  startInstance: (id: number, slug: string) =>
+    http.post<LabInstance>(`/competitions/${id}/challenges/${slug}/instance`),
+  submitFlag: (id: number, slug: string, answer: string) =>
+    http.post<Submission>(`/competitions/${id}/submissions`, { challenge_slug: slug, answer }),
+  leaderboard: (id: number, mode: 'team' | 'individual' = 'team') =>
+    http.get<LeaderboardResp>(`/competitions/${id}/leaderboard?mode=${mode}`),
+  submitWriteup: (id: number, contentMd: string) =>
+    http.post<{ ok: boolean }>(`/competitions/${id}/writeup`, { content_md: contentMd }),
+}

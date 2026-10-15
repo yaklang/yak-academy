@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { authApi, type User } from '../api'
+import { useCompetitionStore } from './competition'
 
 // 登录态：token + 当前用户。登录后拉取 /me 获取真实角色。
 export const useAuthStore = defineStore('auth', () => {
@@ -14,12 +15,18 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('academy_token', t)
   }
 
+  // 参赛锁定缓存随登录态重置（切换账号后由路由守卫重查）。
+  function resetCompetition() {
+    useCompetitionStore().unlock()
+  }
+
   async function login(username: string, password: string) {
     const resp = await authApi.login(username, password)
     // 作废改密/登出前遗留的 in-flight fetchMe：其 401 兜底会清掉刚存的新 token，
     // 且复用旧 promise 会让新登录的 /me 拉取被吞（改密→重新登录卡在登录页）。
     meInFlight = null
     user.value = null
+    resetCompetition()
     setToken(resp.token)
   }
 
@@ -53,6 +60,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     localStorage.removeItem('academy_token')
+    resetCompetition()
   }
 
   return { token, user, login, fetchMe, logout, setToken }

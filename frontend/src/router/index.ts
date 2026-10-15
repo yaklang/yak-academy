@@ -1,10 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useCompetitionStore } from '../stores/competition'
 
 // 信息架构：两个端。
 //   普通端 /（教程 / 训练）—— 普通人与管理员均可。
 //   管理端 /admin —— 仅管理员（global_role === admin）；普通人无入口且路由守卫拦截。
 // 两端复用同一组视图组件（Topics/TopicDetail/RoomDetail/Training）。
+// 竞赛参赛流程为独立满屏布局（入场页 + 竞赛首页），对应"入场后锁定在竞赛页面"。
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -47,13 +49,33 @@ const router = createRouter({
         // 训练板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 资源管理（教程管理 / 题目管理 + 容器、用户）
+        // 资源管理（教程管理 / 题目管理 + 容器、用户、竞赛）
         { path: 'panel', redirect: '/admin/panel/tutorials' },
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
         { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
+        { path: 'panel/competitions', name: 'admin-competitions', component: () => import('../views/admin/Competitions.vue') },
+        {
+          path: 'panel/competitions/:id',
+          name: 'admin-competition-detail',
+          component: () => import('../views/admin/CompetitionDetail.vue'),
+        },
       ],
+    },
+    // 竞赛参赛流程（独立满屏布局，不进两端导航）。
+    // 入场后后端中间件强制隔离（非竞赛接口一律 403），前端守卫只做 UX 引导。
+    {
+      path: '/competitions/enter/:id',
+      name: 'competition-enter',
+      component: () => import('../views/CompetitionEnter.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/competitions/:id',
+      name: 'competition-home',
+      component: () => import('../views/CompetitionHome.vue'),
+      meta: { requiresAuth: true },
     },
   ],
 })
@@ -75,6 +97,13 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.requiresAdmin && auth.user?.global_role !== 'admin') {
     return { name: 'topics' }
+  }
+  // 参赛锁定（仅学生；管理员不锁）：已入场且竞赛未结束时，
+  // 平台其余路径全部引导回竞赛首页 —— 与后端锁定中间件同语义。
+  if (auth.user?.global_role !== 'admin' && !to.path.startsWith('/competitions')) {
+    const compStore = useCompetitionStore()
+    const lockedId = await compStore.ensureChecked()
+    if (lockedId) return { path: `/competitions/${lockedId}` }
   }
   return true
 })

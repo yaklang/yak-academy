@@ -1,0 +1,687 @@
+<script setup lang="ts">
+// 管理面板：竞赛详情页。配置编辑 + 题目绑定/批量导入 + 参赛人员与队伍批量导入
+// （自动建号/邀请码/站内邀请邮件）+ 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
+// 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）。
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  adminCompetitionApi,
+  type AdminLabInstance,
+  type CheatWarningItem,
+  type Competition,
+  type CompetitionDetail,
+  type CompetitionParticipantItem,
+  type ParticipantImportResult,
+  type TeamLeaderboardEntry,
+  type TrainingItem,
+  type WriteupItem,
+} from '../../api'
+
+const route = useRoute()
+const compId = Number(route.params.id)
+
+const detail = ref<CompetitionDetail | null>(null)
+const loading = ref(true)
+const activeTab = ref('config')
+
+async function loadDetail() {
+  try {
+    detail.value = await adminCompetitionApi.detail(compId)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  }
+}
+
+const status = computed<Competition['status']>(() => detail.value?.status ?? 'scheduled')
+const running = computed(() => status.value === 'running')
+
+function statusType(s: Competition['status']) {
+  return s === 'running' ? 'success' : s === 'scheduled' ? 'warning' : 'info'
+}
+function statusLabel(s: Competition['status']) {
+  return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
+}
+function fmt(ts: string | null | undefined) {
+  return ts ? new Date(ts).toLocaleString() : '-'
+}
+
+// ---------- 配置 ----------
+const form = ref({ name: '', description: '', start: null as Date | null, end: null as Date | null })
+const saving = ref(false)
+
+function syncForm() {
+  if (!detail.value) return
+  form.value = {
+    name: detail.value.name,
+    description: detail.value.description,
+    start: new Date(detail.value.start_time),
+    end: new Date(detail.value.end_time),
+  }
+}
+
+async function saveConfig() {
+  if (!form.value.name.trim() || !form.value.start || !form.value.end) {
+    ElMessage.warning('名称与起止时间必填')
+    return
+  }
+  saving.value = true
+  try {
+    detail.value = await adminCompetitionApi.update(compId, {
+      name: form.value.name.trim(),
+      description: form.value.description,
+      start_time: form.value.start.toISOString(),
+      end_time: form.value.end.toISOString(),
+    })
+    ElMessage.success('配置已保存')
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    saving.value = false
+  }
+}
+
+// ---------- 题目 ----------
+const challenges = ref<TrainingItem[]>([])
+const challengesLoading = ref(false)
+
+async function loadChallenges() {
+  challengesLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.challenges(compId)
+    challenges.value = resp.items
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    challengesLoading.value = false
+  }
+}
+
+const showBind = ref(false)
+const bindMode = ref<'slugs' | 'json'>('slugs')
+const bindSlugs = ref('')
+const bindJSON = ref('')
+const binding = ref(false)
+const unbinding = ref('')
+
+function openBind() {
+  bindMode.value = 'slugs'
+  bindSlugs.value = ''
+  bindJSON.value = ''
+  showBind.value = true
+}
+
+async function submitBind() {
+  binding.value = true
+  try {
+    let body: { slugs: string[] } | unknown[]
+    if (bindMode.value === 'slugs') {
+      const slugs = bindSlugs.value.split(/[\s,，;；]+/).filter(Boolean)
+      if (!slugs.length) {
+        ElMessage.warning('请填写题目 slug')
+        return
+      }
+      body = { slugs }
+    } else {
+      try {
+        body = JSON.parse(bindJSON.value)
+      } catch {
+        ElMessage.warning('JSON 解析失败，请检查格式')
+        return
+      }
+      if (!Array.isArray(body) && typeof body !== 'object') {
+        ElMessage.warning('应为 challenge.json 对象或数组')
+        return
+      }
+    }
+    const resp = await adminCompetitionApi.bindChallenges(compId, body as { slugs: string[] })
+    ElMessage.success(`绑定完成：新增 ${resp.added} 题`)
+    showBind.value = false
+    await Promise.all([loadChallenges(), loadDetail()])
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    binding.value = false
+  }
+}
+
+async function unbind(item: TrainingItem) {
+  try {
+    await ElMessageBox.confirm(`解绑题目「${item.title}」（${item.slug}）？参赛者将无法再访问该题。`, '解绑确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  unbinding.value = item.slug
+  try {
+    const resp = await adminCompetitionApi.unbindChallenges(compId, [item.slug])
+    ElMessage.success(`已解绑 ${resp.removed} 题`)
+    await Promise.all([loadChallenges(), loadDetail()])
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    unbinding.value = ''
+  }
+}
+
+// ---------- 参赛人员 ----------
+const participants = ref<CompetitionParticipantItem[]>([])
+const teams = ref<TeamLeaderboardEntry[]>([])
+const partTotal = ref(0)
+const partPage = ref(1)
+const partLoading = ref(false)
+
+async function loadParticipants() {
+  partLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.participants(compId, partPage.value)
+    participants.value = resp.items
+    teams.value = resp.teams
+    partTotal.value = resp.total
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    partLoading.value = false
+  }
+}
+
+const showImport = ref(false)
+const importing = ref(false)
+const teamJSON = ref('')
+const individualNames = ref('')
+const importResult = ref<ParticipantImportResult | null>(null)
+const showResult = ref(false)
+
+function openImport() {
+  teamJSON.value = '[{"name": "一队", "members": ["alice", "bob"]}]'
+  individualNames.value = ''
+  showImport.value = true
+}
+
+async function submitImport() {
+  let teamsReq: { name: string; members: string[] }[] = []
+  if (teamJSON.value.trim()) {
+    try {
+      const parsed = JSON.parse(teamJSON.value)
+      if (!Array.isArray(parsed)) throw new Error('not array')
+      teamsReq = parsed
+    } catch {
+      ElMessage.warning('队伍 JSON 解析失败，应为 [{"name":"队伍名","members":["用户名",...]}]')
+      return
+    }
+  }
+  const individuals = individualNames.value.split(/[\s,，;；]+/).filter(Boolean)
+  if (!teamsReq.length && !individuals.length) {
+    ElMessage.warning('请至少填写一支队伍或一名个人参赛者')
+    return
+  }
+  importing.value = true
+  try {
+    importResult.value = await adminCompetitionApi.importParticipants(compId, {
+      teams: teamsReq,
+      individuals,
+    })
+    showImport.value = false
+    showResult.value = true
+    await Promise.all([loadParticipants(), loadDetail()])
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    importing.value = false
+  }
+}
+
+// ---------- 容器 ----------
+const instances = ref<AdminLabInstance[]>([])
+const instTotal = ref(0)
+const instPage = ref(1)
+const instLoading = ref(false)
+
+async function loadInstances() {
+  instLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.instances(compId, instPage.value)
+    instances.value = resp.items
+    instTotal.value = resp.total
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    instLoading.value = false
+  }
+}
+
+// ---------- 反作弊 ----------
+const warnings = ref<CheatWarningItem[]>([])
+const warningsLoading = ref(false)
+
+async function loadWarnings() {
+  warningsLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.warnings(compId)
+    warnings.value = resp.items
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    warningsLoading.value = false
+  }
+}
+
+function warningLabel(k: CheatWarningItem['kind']) {
+  return k === 'cross_team_flag' ? '跨队 flag' : 'IP 异常'
+}
+function warningType(k: CheatWarningItem['kind']) {
+  return k === 'cross_team_flag' ? 'danger' : 'warning'
+}
+
+// ---------- WP ----------
+const writeups = ref<WriteupItem[]>([])
+const writeupsLoading = ref(false)
+const viewing = ref<WriteupItem | null>(null)
+
+async function loadWriteups() {
+  writeupsLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.writeups(compId)
+    writeups.value = resp.items
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    writeupsLoading.value = false
+  }
+}
+
+// ---------- 排行榜 ----------
+const boardMode = ref<'team' | 'individual'>('team')
+const board = ref<TeamLeaderboardEntry[]>([])
+const boardLoading = ref(false)
+
+async function loadBoard() {
+  boardLoading.value = true
+  try {
+    const resp = await adminCompetitionApi.leaderboard(compId, boardMode.value)
+    board.value = resp.items
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    boardLoading.value = false
+  }
+}
+
+async function onBoardModeChange() {
+  await loadBoard()
+}
+
+async function onTab(name: string | number) {
+  // 懒加载：进入对应标签页时拉取数据。
+  if (name === 'challenges' && !challenges.value.length) await loadChallenges()
+  if (name === 'participants' && !participants.value.length) await loadParticipants()
+  if (name === 'instances' && !instances.value.length) await loadInstances()
+  if (name === 'warnings') await loadWarnings()
+  if (name === 'writeups') await loadWriteups()
+  if (name === 'leaderboard') await loadBoard()
+}
+
+onMounted(async () => {
+  await loadDetail()
+  syncForm()
+  loading.value = false
+})
+</script>
+
+<template>
+  <div v-loading="loading">
+    <div class="head">
+      <h2>
+        {{ detail?.name ?? '竞赛详情' }}
+        <el-tag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</el-tag>
+      </h2>
+      <router-link to="/admin/panel/competitions"><el-button size="small">← 返回列表</el-button></router-link>
+    </div>
+    <p class="hint">
+      {{ fmt(detail?.start_time) }} ~ {{ fmt(detail?.end_time) }}
+      <span v-if="detail?.description"> · {{ detail.description }}</span>
+    </p>
+
+    <!-- 统计卡片 -->
+    <div v-if="detail" class="stats">
+      <div class="stat"><b>{{ detail.stats.teams }}</b><span>战队</span></div>
+      <div class="stat"><b>{{ detail.stats.participants }}</b><span>参赛人数</span></div>
+      <div class="stat"><b>{{ detail.stats.entered }}</b><span>已入场</span></div>
+      <div class="stat"><b>{{ detail.stats.challenges }}</b><span>题目</span></div>
+      <div class="stat"><b>{{ detail.stats.instances }}</b><span>容器</span></div>
+      <div class="stat warn"><b>{{ detail.stats.warnings }}</b><span>反作弊警告</span></div>
+      <div class="stat"><b>{{ detail.stats.writeups }}</b><span>WP 提交</span></div>
+    </div>
+
+    <el-tabs v-model="activeTab" @tab-change="onTab">
+      <!-- 配置 -->
+      <el-tab-pane label="配置" name="config">
+        <el-card shadow="never">
+          <el-form label-width="90px" style="max-width: 560px">
+            <el-form-item label="竞赛名称">
+              <el-input v-model="form.name" maxlength="100" />
+            </el-form-item>
+            <el-form-item label="竞赛说明">
+              <el-input v-model="form.description" type="textarea" :rows="3" />
+            </el-form-item>
+            <el-form-item label="开始时间">
+              <el-date-picker v-model="form.start" type="datetime" :disabled="status !== 'scheduled'" style="width: 100%" />
+              <div v-if="status !== 'scheduled'" class="dim">已开始的竞赛不能修改开赛时间</div>
+            </el-form-item>
+            <el-form-item label="结束时间">
+              <el-date-picker v-model="form.end" type="datetime" style="width: 100%" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 题目 -->
+      <el-tab-pane label="题目" name="challenges">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>竞赛题目（{{ challenges.length }}）</span>
+              <el-button type="primary" size="small" @click="openBind">绑定 / 批量导入</el-button>
+            </div>
+          </template>
+          <el-table :data="challenges" v-loading="challengesLoading" empty-text="尚未绑定题目">
+            <el-table-column prop="slug" label="Slug" width="180" />
+            <el-table-column prop="title" label="标题" min-width="160" />
+            <el-table-column prop="category" label="分类" width="110" />
+            <el-table-column prop="difficulty" label="难度" width="100" />
+            <el-table-column prop="score" label="分值" width="80" />
+            <el-table-column label="容器" width="80">
+              <template #default="{ row }">
+                <el-tag v-if="row.has_env" size="small" type="success">有</el-tag>
+                <el-tag v-else size="small" type="info">无</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="110">
+              <template #default="{ row }">
+                <el-button
+                  size="small"
+                  type="danger"
+                  link
+                  :disabled="running"
+                  :loading="unbinding === row.slug"
+                  @click="unbind(row)"
+                >解绑</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p v-if="running" class="dim">竞赛进行中不允许解绑题目</p>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 参赛人员 -->
+      <el-tab-pane :label="`参赛人员（${partTotal}）`" name="participants">
+        <el-card shadow="never" class="block">
+          <template #header>
+            <div class="card-head">
+              <span>参赛人员</span>
+              <el-button type="primary" size="small" @click="openImport">批量导入队伍 / 人员</el-button>
+            </div>
+          </template>
+          <el-table :data="participants" v-loading="partLoading" empty-text="尚未导入参赛人员">
+            <el-table-column prop="username" label="用户" width="130" />
+            <el-table-column label="队伍" width="140">
+              <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
+            </el-table-column>
+            <el-table-column prop="invite_code" label="邀请码" width="160">
+              <template #default="{ row }"><code>{{ row.invite_code }}</code></template>
+            </el-table-column>
+            <el-table-column label="已入场" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.entered ? 'success' : 'info'" size="small">{{ row.entered ? '是' : '否' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="入场时间" width="160">
+              <template #default="{ row }">{{ fmt(row.entered_at) }}</template>
+            </el-table-column>
+            <el-table-column label="最近 IP" width="130">
+              <template #default="{ row }">{{ row.last_ip || '-' }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            background
+            layout="total, prev, pager, next"
+            :total="partTotal"
+            :page-size="20"
+            v-model:current-page="partPage"
+            @current-change="loadParticipants"
+            class="pager"
+          />
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>队伍总览（{{ teams.length }}）</span></template>
+          <el-table :data="teams" empty-text="暂无队伍">
+            <el-table-column prop="team_name" label="队伍" width="160" />
+            <el-table-column label="成员" min-width="200">
+              <template #default="{ row }">{{ row.members.join('、') }}</template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 容器 -->
+      <el-tab-pane label="容器" name="instances">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>竞赛容器（{{ instTotal }}）</span>
+              <el-button size="small" @click="loadInstances">刷新</el-button>
+            </div>
+          </template>
+          <el-table :data="instances" v-loading="instLoading" empty-text="暂无竞赛容器">
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="username" label="用户" width="120" />
+            <el-table-column prop="challenge_title" label="题目" min-width="160" />
+            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column label="Endpoint" min-width="150">
+              <template #default="{ row }"><code v-if="row.endpoint">{{ row.endpoint }}</code><span v-else class="dim">-</span></template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="160">
+              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            background
+            layout="total, prev, pager, next"
+            :total="instTotal"
+            :page-size="20"
+            v-model:current-page="instPage"
+            @current-change="loadInstances"
+            class="pager"
+          />
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 反作弊 -->
+      <el-tab-pane :label="`反作弊${detail?.stats.warnings ? `（${detail.stats.warnings}）` : ''}`" name="warnings">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>反作弊警告（提交跨队 flag / 来源 IP 异常）</span>
+              <el-button size="small" @click="loadWarnings">刷新</el-button>
+            </div>
+          </template>
+          <el-table :data="warnings" v-loading="warningsLoading" empty-text="暂无警告">
+            <el-table-column label="时间" width="160">
+              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="类型" width="110">
+              <template #default="{ row }">
+                <el-tag :type="warningType(row.kind)" size="small">{{ warningLabel(row.kind) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="username" label="人员" width="120" />
+            <el-table-column label="队伍" width="140">
+              <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
+            </el-table-column>
+            <el-table-column prop="reason" label="原因" min-width="240" show-overflow-tooltip />
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- WP -->
+      <el-tab-pane label="WP 提交情况" name="writeups">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>比赛结束后参赛者可提交 WP（{{ writeups.filter((w) => w.submitted).length }}/{{ writeups.length }}）</span>
+              <el-button size="small" @click="loadWriteups">刷新</el-button>
+            </div>
+          </template>
+          <el-table :data="writeups" v-loading="writeupsLoading" empty-text="暂无参赛人员">
+            <el-table-column prop="username" label="用户" width="130" />
+            <el-table-column label="队伍" width="140">
+              <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
+            </el-table-column>
+            <el-table-column label="已提交" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.submitted ? 'success' : 'info'" size="small">{{ row.submitted ? '是' : '否' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="提交时间" width="160">
+              <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="{ row }">
+                <el-button v-if="row.submitted" size="small" type="primary" link @click="viewing = row">查看</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 排行榜 -->
+      <el-tab-pane label="排行榜" name="leaderboard">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>竞赛排行榜</span>
+              <el-radio-group v-model="boardMode" size="small" @change="onBoardModeChange">
+                <el-radio-button value="team">战队榜</el-radio-button>
+                <el-radio-button value="individual">个人榜</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <el-table :data="board" v-loading="boardLoading" empty-text="暂无成绩">
+            <el-table-column prop="rank" label="名次" width="80" />
+            <el-table-column :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
+              <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
+            </el-table-column>
+            <el-table-column label="成员" min-width="180">
+              <template #default="{ row }">{{ row.members.join('、') }}</template>
+            </el-table-column>
+            <el-table-column prop="score" label="得分" width="100" />
+            <el-table-column prop="solved_count" label="解题数" width="90" />
+            <el-table-column label="最近通关" width="160">
+              <template #default="{ row }">{{ fmt(row.last_solve_at) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
+  </div>
+
+  <!-- 绑定/批量导入题目 -->
+  <el-dialog v-model="showBind" title="绑定 / 批量导入题目" width="680px">
+    <el-radio-group v-model="bindMode" class="bind-mode">
+      <el-radio-button value="slugs">绑定既有题目</el-radio-button>
+      <el-radio-button value="json">批量导入题目 JSON</el-radio-button>
+    </el-radio-group>
+    <template v-if="bindMode === 'slugs'">
+      <p class="dim">填写训练场已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，训练场侧不受影响。</p>
+      <el-input v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
+    </template>
+    <template v-else>
+      <p class="dim">粘贴 challenge.json（单对象或数组，格式与题目管理上传一致）。单题失败整体拒绝；导入成功后自动绑定进本场。</p>
+      <el-input v-model="bindJSON" type="textarea" :rows="12" placeholder='[{"slug": "comp-web-1", ...}]' />
+    </template>
+    <template #footer>
+      <el-button @click="showBind = false">取消</el-button>
+      <el-button type="primary" :loading="binding" @click="submitBind">{{ bindMode === 'slugs' ? '绑定' : '导入并绑定' }}</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 参赛人员批量导入 -->
+  <el-dialog v-model="showImport" title="批量导入队伍 / 参赛人员" width="680px">
+    <p class="dim">
+      成员按用户名引用，不存在的用户自动创建（随机初始密码，导入结果中显示一次）。每人生成唯一邀请码并投递站内邀请邮件。
+    </p>
+    <el-form label-width="90px">
+      <el-form-item label="队伍 JSON">
+        <el-input v-model="teamJSON" type="textarea" :rows="6" />
+      </el-form-item>
+      <el-form-item label="个人参赛">
+        <el-input v-model="individualNames" type="textarea" :rows="2" placeholder="用户名，逗号或换行分隔（可留空）" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showImport = false">取消</el-button>
+      <el-button type="primary" :loading="importing" @click="submitImport">导入</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 导入结果 -->
+  <el-dialog v-model="showResult" title="导入结果" width="720px">
+    <el-alert
+      v-if="importResult && importResult.created_accounts.length"
+      type="warning"
+      :closable="false"
+      class="block"
+      title="以下账号为自动创建，初始密码仅本次显示，请立即分发给参赛者。"
+    />
+    <el-table v-if="importResult" :data="importResult.created_accounts" class="block" empty-text="本次无新建账号">
+      <el-table-column prop="username" label="新建账号" width="160" />
+      <el-table-column prop="initial_password" label="初始密码" min-width="180" />
+    </el-table>
+    <el-table v-if="importResult" :data="importResult.participants" empty-text="无参赛者">
+      <el-table-column prop="username" label="参赛者" width="130" />
+      <el-table-column label="队伍" width="140">
+        <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
+      </el-table-column>
+      <el-table-column prop="invite_code" label="邀请码" width="160">
+        <template #default="{ row }"><code>{{ row.invite_code }}</code></template>
+      </el-table-column>
+      <el-table-column label="邮件" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.mail_delivered ? 'success' : 'danger'" size="small">{{ row.mail_delivered ? '已投递' : '失败' }}</el-tag>
+        </template>
+      </el-table-column>
+    </el-table>
+    <template #footer>
+      <el-button @click="showResult = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- WP 查看 -->
+  <el-dialog :model-value="viewing !== null" :title="`WP：${viewing?.username ?? ''}`" width="680px" @close="viewing = null">
+    <pre class="wp">{{ viewing?.content }}</pre>
+  </el-dialog>
+</template>
+
+<style scoped>
+.head { display: flex; align-items: center; justify-content: space-between; }
+.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.stats { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 0.8rem 0 1.2rem; }
+.stat {
+  min-width: 96px; padding: 0.6rem 1rem; text-align: center;
+  border: 1px solid var(--el-border-color-lighter); border-radius: 6px;
+  display: flex; flex-direction: column; gap: 0.2rem;
+}
+.stat b { font-size: 1.3rem; }
+.stat span { color: var(--el-text-color-secondary); font-size: 0.8rem; }
+.stat.warn b { color: var(--el-color-danger); }
+.card-head { display: flex; align-items: center; justify-content: space-between; }
+.block { margin-bottom: 1.2rem; }
+.dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
+.pager { margin-top: 1rem; }
+.bind-mode { margin-bottom: 0.8rem; }
+.wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
+</style>
