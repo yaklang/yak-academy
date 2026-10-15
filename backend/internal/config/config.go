@@ -20,7 +20,7 @@ type Config struct {
 	// AvatarsDir 头像落盘根目录（<dir>/<userID>/<file>）。
 	AvatarsDir string
 	// InstanceMemory/InstanceCPUs 题目容器资源限额（docker --memory/--cpus 语法；
-	// 空串 = 不限。默认对齐 GeekChallenge 512Mi/0.5 核）。
+	// 空串 = 不限。默认 512Mi / 0.5 核）。
 	InstanceMemory string
 	InstanceCPUs   string
 
