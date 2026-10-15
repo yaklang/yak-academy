@@ -143,3 +143,87 @@ POST /challenges/{slug}/hints/{hintId}/unlock
   → 返回 hint 正文 + 当前积分
 题目详情 GET /challenges/{slug}：未解锁 hint 的 content 置空，仅返回 id/title/cost/unlocked。
 ```
+## 6. 自助注册流（手机验证码）
+
+```
+FE(未登录)         API                register SVC          repo            DB
+   │  POST /auth/sms/code {phone}     │                      │               │
+   ├─────────────────────────────────→│ 手机号格式(1[3-9]×10位)校验           │
+   │                                  │ 60s 限频（最近一码 CreatedAt）        │
+   │                                  │ 10min 窗口 ≤3 条                      │
+   │                                  │ 手机号已注册 → 422（不发码）           │
+   │                                  │ genCode(crypto/rand 拒绝采样) ─────→│ SmsCode 落库(5min TTL)
+   │                                  │ DevSmsSender 投递（写服务日志）       │
+   │   200 {ok:true}（限频 → 200 {ok, retry_after}，不报错）                  │
+   │←─────────────────────────────────┤                      │               │
+   │  POST /auth/register {phone, code, username, password}  │               │
+   ├─────────────────────────────────→│ 参数校验(码6位/用户名3-64/密码≥6)     │
+   │                                  │ 取该手机号最新一码：                  │
+   │                                  │  ├─ 无码/已核销/过期 → 422            │
+   │                                  │  ├─ 恒时比较(逐字符XOR)失败 → 422     │
+   │                                  │ MarkUsed(条件更新 used=0→1) ───────→│
+   │                                  │  └─ 0 行 = 并发已核销 → 422（一次性） │
+   │                                  │ 用户名/手机号查重 → 422               │
+   │                                  │ bcrypt 建号(角色固定 student) ──────→│
+   │   200 {token, expires_at}（建号即登录）                                  │
+   │←─────────────────────────────────┤                      │               │
+```
+
+要点：
+- 手机号是注册凭据与找回依据，**不参与登录**（登录仍为用户名 + 密码）。
+- 验证码比对与核销分离：比对失败不消耗；核销是条件更新，并发同码注册只有一个成功。
+- 角色固定 `student`，接口无角色入参（禁止自选）。
+- 限频对客户端表现为 200 + retry_after（与真实短信通道行为一致），前端据此倒计时。
+
+## 7. 竞赛生命周期与入场锁定流
+
+```
+FE(admin)          API                competition SVC        repo            DB
+   │  POST /admin/competitions {name, start, end}            │               │
+   ├─────────────────────────────────→│ 校验(起止/名称) → 落库 ─────────────→│ Competition
+   │  绑题 POST .../challenges {slugs|JSON}                   │               │
+   ├─────────────────────────────────→│ JSON 走 content 管线导入后绑定；      │
+   │                                  │ running 禁止解绑（保榜单现场）         │
+   │  导入参赛者 POST .../participants {teams|users}          │               │
+   ├─────────────────────────────────→│ 用户不存在 → 自动建号(随机密码) ────→│ User
+   │                                  │ 每人生成唯一邀请码 ─────────────────→│ Participant
+   │                                  │ 站内邀请邮件（失败仅标记可重发）─────→│ Mail
+   │   200 {created_accounts(仅本次), participants[]}          │               │
+   │←─────────────────────────────────┤                      │               │
+
+FE(参赛者)         API middleware                competition SVC
+   │  邮件邀请 → /competitions/enter/{id}?code=                │               │
+   │  POST /competitions/{id}/enter {code}     │              │               │
+   ├─────────────────────────────────→│ 仅 running 有效（scheduled/ended → 422）
+   │                                  │ Participant.entered_at 落库           │
+   │   200 {locked:true}               │                                      │
+   │←─────────────────────────────────┤                                      │
+   │  此后访问任何平台接口（/topics、/challenges...）                        │
+   ├─────────────────────────────────→│ 锁定中间件：已入场且 running           │
+   │   403 LOCKED（重定向竞赛首页）    │ 管理员不受约束；ended 自动解锁         │
+   │←─────────────────────────────────┤                                      │
+```
+
+## 8. 竞赛做题与双榜派生流
+
+```
+FE(参赛者)         API                judge SVC             EB              DB
+   │  POST /competitions/{id}/submissions {slug, answer}    │               │
+   ├─────────────────────────────────→│ 与平台提交同一管线：入队 pending      │
+   │                                  │ worker 判定(恒时比较/动态计分)         │
+   │                                  │  ├─ Append(submission.judged) ─────→│
+   │                                  │  └─ 竞赛提交：detectCheat            │
+   │                                  │     提交串命中他队运行实例 flag       │
+   │                                  │     → CheatWarning（仅管理端警告）──→│
+   │                                  │                      │ 派生器消费:   │
+   │                                  │                      │  └─ 竞赛首通 → CompetitionScore
+   │                                  │                      │     （AddScore 幂等，冗余队伍快照）
+   │  GET /competitions/{id}/leaderboard?scope=team|individual                │
+   ├─────────────────────────────────→│ 从 CompetitionScore 只读聚合          │
+```
+
+要点：
+- 竞赛提交复用平台 judge 管线（异步、恒时比较、动态计分、防重复通关），无第二套判定。
+- CompetitionScore 为事件派生表：competition 服务只读聚合双榜，**禁止**直写（event-sourcing-rules）。
+- 反作弊只告警不打断：cross_team_flag 等类型写 CheatWarning，管理端竞赛详情「反作弊」页浏览。
+- WP 仅 ended 后开放：按题目分条提交/覆盖（markdown + 可选 zip ≤20MB），管理端可下载附件。
