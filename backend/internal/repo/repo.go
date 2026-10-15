@@ -217,6 +217,8 @@ type CompetitionRepo interface {
 
 	UpsertWriteup(ctx context.Context, w *model.Writeup) error
 	ListWriteups(ctx context.Context, competitionID uint) ([]model.Writeup, error)
+	// FindWriteup 单份 WP（nil = 不存在）。
+	FindWriteup(ctx context.Context, id uint) (*model.Writeup, error)
 
 	// AddScore 竞赛派生积分首通插入（重复返回 0 行）。仅事件派生器调用。
 	AddScore(ctx context.Context, rec *model.CompetitionScore) (int64, error)

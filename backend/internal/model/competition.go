@@ -87,12 +87,19 @@ type CheatWarning struct {
 	CreatedAt     time.Time `gorm:"index" json:"created_at"`
 }
 
-// Writeup 比赛结束后的 WP 提交（每参赛者一份，可反复修改）。
+// Writeup 比赛结束后的 WP（单位 = 题目 × 队伍/个人，可反复修改）：
+// 队伍模式全队共享一份（TeamID>0，任一队员可提交/修改，UserID 记最近修改人）；
+// 个人参赛者 TeamID=0、按本人一份。Content 为 Markdown 正文，ZipFile/ZipName
+// 为附带脚本 zip（落盘路径 + 原文件名，空串 = 未上传）。
 type Writeup struct {
-	ID            uint   `gorm:"primaryKey"`
-	CompetitionID uint   `gorm:"uniqueIndex:idx_wp_comp_user;"`
-	UserID        uint   `gorm:"uniqueIndex:idx_wp_comp_user;"`
+	ID            uint `gorm:"primaryKey"`
+	CompetitionID uint `gorm:"uniqueIndex:idx_wp_scope;"`
+	ChallengeID   uint `gorm:"uniqueIndex:idx_wp_scope;"`
+	TeamID        uint `gorm:"uniqueIndex:idx_wp_scope;"`
+	UserID        uint
 	Content       string `gorm:"type:text" json:"content"`
+	ZipFile       string `gorm:"size:255" json:"zip_file"`
+	ZipName       string `gorm:"size:255" json:"zip_name"`
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

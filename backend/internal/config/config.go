@@ -19,6 +19,8 @@ type Config struct {
 	AttachmentsDir string
 	// AvatarsDir 头像落盘根目录（<dir>/<userID>/<file>）。
 	AvatarsDir string
+	// WriteupsDir 竞赛 WP 附带 zip 落盘根目录（<dir>/<competitionID>/<wpID>.zip）。
+	WriteupsDir string
 	// InstanceMemory/InstanceCPUs 题目容器资源限额（docker --memory/--cpus 语法；
 	// 空串 = 不限。默认 512Mi / 0.5 核）。
 	InstanceMemory string
@@ -46,6 +48,7 @@ func Load() *Config {
 		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "noop"),
 		AttachmentsDir:  getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
 		AvatarsDir:     getenv("ACADEMY_AVATARS_DIR", "avatars"),
+		WriteupsDir:    getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
 		InstanceMemory:  getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
 		InstanceCPUs:    getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
 		PublicURL:      getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),

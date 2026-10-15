@@ -396,18 +396,29 @@ components:
         created_at: { type: string }
     WriteupItem:
       type: object
-      description: WP 提交状态条目（管理端；比赛结束后参赛者提交）
+      description: WP 提交条目（管理端；单位 = 题目 × 队伍/个人）
       properties:
-        user_id: { type: integer }
+        id: { type: integer }
+        challenge_id: { type: integer }
+        challenge_title: { type: string }
+        user_id: { type: integer, description: 最近一次提交/修改人（队伍模式为提交队员） }
         username: { type: string }
         team_name:
           type: string
           nullable: true
-        submitted: { type: boolean }
-        submitted_at:
-          type: string
-          nullable: true
-        content: { type: string, description: WP 正文 Markdown（未提交为空字符串） }
+          description: null = 个人参赛者
+        submitted_at: { type: string }
+        content: { type: string, description: WP 正文 Markdown }
+        zip_name: { type: string, description: 附带 zip 原文件名（未上传为空字符串） }
+    MyWriteupItem:
+      type: object
+      description: 本队/本人某题的 WP（参赛端）
+      properties:
+        challenge_id: { type: integer }
+        content_md: { type: string }
+        zip_name: { type: string, description: 已上传 zip 原文件名（未上传为空字符串） }
+        updated_at: { type: string }
+        updated_by: { type: string, description: 最近一次提交/修改人用户名 }
     TeamLeaderboardEntry:
       type: object
       description: 战队排行榜条目（同分并列同名次）
@@ -1750,7 +1761,7 @@ paths:
   /admin/competitions/{id}/writeups:
     get:
       tags: [admin]
-      summary: WP 提交情况（比赛结束后参赛者提交，管理端查看）
+      summary: WP 提交情况（按题目一份；队伍模式全队共享，管理端按队伍/个人聚合查看）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -1762,6 +1773,22 @@ paths:
                 type: object
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/WriteupItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/writeups/{wid}/zip:
+    get:
+      tags: [admin]
+      summary: 下载某份 WP 的附带 zip（multipart 上传的原包）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: wid, in: path, required: true, schema: { type: integer, description: WP 条目 id } }
+      responses:
+        '200':
+          description: zip 文件流
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
@@ -1847,7 +1874,7 @@ paths:
                         status: { type: string, enum: [pending, correct, incorrect] }
                         score: { type: integer }
                         created_at: { type: string }
-                  writeup_submitted: { type: boolean, description: 是否已提交 WP（结束后） }
+                  writeup_submitted: { type: boolean, description: 是否已提交任一题 WP（结束后；队伍模式任一队员提交即为 true） }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/challenges/{slug}/instance:
@@ -1915,12 +1942,31 @@ paths:
                   items: { type: array, items: { $ref: '#/components/schemas/TeamLeaderboardEntry' } }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
-  /competitions/{id}/writeup:
-    post:
+  /competitions/{id}/writeups:
+    get:
       tags: [competitions]
-      summary: 提交 WP（比赛结束后；未结束提交 422）
+      summary: 本队/本人全部 WP（比赛结束后；按题目一份，队伍模式任一队员可读改）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/MyWriteupItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/writeups/{challengeId}:
+    put:
+      tags: [competitions]
+      summary: 提交/修改某题 WP 文字（比赛结束后；队伍模式全队共享一份，可反复修改）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: challengeId, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
@@ -1929,7 +1975,8 @@ paths:
               type: object
               required: [content_md]
               properties:
-                content_md: { type: string, minLength: 1 }
+                # 空串 = 仅保留已上传 zip、清空文字；文字与 zip 至少一项存在（否则 422）。
+                content_md: { type: string }
       responses:
         '200':
           description: OK
@@ -1939,5 +1986,35 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/writeups/{challengeId}/zip:
+    post:
+      tags: [competitions]
+      summary: 上传/替换某题 WP 附带 zip（脚本与截图打包，≤20MB，需为合法 zip；覆盖旧包）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: challengeId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  zip_name: { type: string, description: 保存的原文件名 }
+        '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }

@@ -32,3 +32,6 @@ frontend/test-results/
 
 # 运行时用户数据（头像上传落盘目录）
 backend/avatars/
+
+# 运行时用户数据（竞赛 WP 附带 zip 落盘目录）
+backend/writeups/

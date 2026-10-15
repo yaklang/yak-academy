@@ -101,6 +101,7 @@ func main() {
 	profileSvc := service.NewProfileService(userRepo, scoreRepo, mailRepo, cfg.AvatarsDir)
 	competitionSvc := service.NewCompetitionService(competitionRepo, challengeRepo, userRepo, instanceRepo, submissionRepo)
 	competitionSvc.SetDelivery(profileSvc.DeliverInvite, authSvc.CreateUser)
+	competitionSvc.SetWriteupDir(cfg.WriteupsDir)
 
 	// api 装配（竞赛入场锁定：已入场未结束的参赛者只能访问竞赛域接口）
 	router := api.NewRouter(authSvc)

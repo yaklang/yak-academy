@@ -33,7 +33,30 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateChallengeSlug(db); err != nil {
 		return err
 	}
+	if err := migrateWriteupScope(db); err != nil {
+		return err
+	}
 	return migrateTwoRoleModel(db)
+}
+
+// migrateWriteupScope 一次性迁移：WP 模型从"每人一份"改为"题目 × 队伍/个人"后，
+// 旧唯一索引 idx_wp_comp_user 与新唯一索引并存会让新 upsert 误撞旧约束；
+// 旧模型行（无 challenge_id）在新模型下不可达。幂等：无旧索引/旧行时为空操作。
+func migrateWriteupScope(db *gorm.DB) error {
+	if db.Migrator().HasIndex("writeups", "idx_wp_comp_user") {
+		if err := db.Migrator().DropIndex("writeups", "idx_wp_comp_user"); err != nil {
+			return err
+		}
+		log.Printf("migrate writeups: dropped legacy index idx_wp_comp_user")
+	}
+	res := db.Exec(`DELETE FROM writeups WHERE challenge_id IS NULL OR challenge_id = 0`)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("migrate writeups: removed %d legacy per-user rows", res.RowsAffected)
+	}
+	return nil
 }
 
 // migrateTwoRoleModel 收敛为普通人(student)/管理员(admin)：

@@ -5,6 +5,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { UploadFile } from 'element-plus'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import {
@@ -13,6 +14,7 @@ import {
   type CompetitionChallengeItem,
   type CompetitionHomeView,
   type LabInstance,
+  type MyWriteupItem,
   type TeamLeaderboardEntry,
 } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -168,20 +170,45 @@ async function onBoardMode() {
   await loadBoard()
 }
 
-// ---------- WP ----------
-const wpContent = ref('')
+// ---------- WP（按题目分次：文字 + 附带 zip，全队一份，可反复修改） ----------
+const wps = ref<MyWriteupItem[]>([])
 const wpSaving = ref(false)
+const wpUploading = ref(0) // challengeId → 上传中标记
 
-async function submitWp() {
-  if (!wpContent.value.trim()) {
-    ElMessage.warning('请输入 WP 内容（Markdown）')
+async function loadWps() {
+  try {
+    const resp = await competitionApi.myWriteups(compId)
+    wps.value = resp.items
+    // 打开卡片时用已提交内容初始化草稿；用户改过的草稿不覆盖。
+    for (const w of resp.items) {
+      if (!(w.challenge_id in wpDrafts.value)) {
+        wpDrafts.value[w.challenge_id] = w.content_md
+      }
+    }
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  }
+}
+
+function wpOf(challengeId: number): MyWriteupItem | undefined {
+  return wps.value.find((w) => w.challenge_id === challengeId)
+}
+
+// 编辑态：challengeId → 草稿文字（loadWps 时从已提交内容初始化）。
+const wpDrafts = ref<Record<number, string>>({})
+
+async function saveWp(item: CompetitionChallengeItem) {
+  const content = wpDrafts.value[item.id] ?? ''
+  const existing = wpOf(item.id)
+  if (!content.trim() && !existing?.zip_name) {
+    ElMessage.warning('请填写 WP 文字或上传 zip（至少一项）')
     return
   }
   wpSaving.value = true
   try {
-    await competitionApi.submitWriteup(compId, wpContent.value)
-    ElMessage.success('WP 已提交（可反复修改，以最后一次为准）')
-    await loadView()
+    await competitionApi.saveWriteup(compId, item.id, content)
+    ElMessage.success(`「${item.title}」WP 已提交（可继续修改）`)
+    await loadWps()
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -189,8 +216,26 @@ async function submitWp() {
   }
 }
 
+async function uploadWpZip(item: CompetitionChallengeItem, file: File) {
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    ElMessage.warning('仅支持 zip 文件')
+    return
+  }
+  wpUploading.value = item.id
+  try {
+    const resp = await competitionApi.uploadWriteupZip(compId, item.id, file)
+    ElMessage.success(`「${item.title}」zip 已上传：${resp.zip_name}（可重新上传替换）`)
+    await loadWps()
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    wpUploading.value = 0
+  }
+}
+
 async function onTab(name: string | number) {
   if (name === 'leaderboard') await loadBoard()
+  if (name === 'writeup' && ended.value) await loadWps()
 }
 
 async function logout() {
@@ -309,24 +354,46 @@ onUnmounted(() => {
           </el-table>
         </el-tab-pane>
 
-        <!-- WP（结束后） -->
+        <!-- WP（结束后；按题目一份，全队共享可互相修改） -->
         <el-tab-pane v-if="ended" label="WP 提交" name="writeup">
           <el-alert
-            v-if="view?.writeup_submitted"
-            type="success"
+            type="info"
             :closable="false"
-            title="你已提交 WP，可继续修改（以最后一次为准）。"
+            title="每道题提交一份 WP：文字 + 可选附带 zip（脚本/截图打包）；队伍模式下全队共享同一份，任一成员均可修改或重新上传。"
             class="block"
           />
-          <el-input
-            v-model="wpContent"
-            type="textarea"
-            :rows="16"
-            placeholder="Writeup（Markdown）：解题思路、关键步骤、所用工具与 flag 截图说明等。"
-          />
-          <el-button type="primary" :loading="wpSaving" class="wp-btn" @click="submitWp">
-            {{ view?.writeup_submitted ? '更新 WP' : '提交 WP' }}
-          </el-button>
+          <div v-for="item in view?.challenges ?? []" :key="item.id" class="wp-card">
+            <div class="wp-card-head">
+              <b>{{ item.title }}</b>
+              <el-tag v-if="wpOf(item.id)" type="success" size="small">已提交</el-tag>
+            </div>
+            <p v-if="wpOf(item.id)" class="wp-meta dim">
+              最近修改：{{ wpOf(item.id)?.updated_by }} · {{ wpOf(item.id)?.updated_at?.replace('T', ' ').slice(0, 19) }}
+              <template v-if="wpOf(item.id)?.zip_name"> · zip：{{ wpOf(item.id)?.zip_name }}</template>
+            </p>
+            <el-input
+              v-model="wpDrafts[item.id]"
+              type="textarea"
+              :rows="6"
+              placeholder="本题解题思路（Markdown）：关键步骤、所用工具、flag 截图说明等。"
+            />
+            <div class="wp-actions">
+              <el-upload
+                :show-file-list="false"
+                :auto-upload="false"
+                accept=".zip"
+                :on-change="(f: UploadFile) => uploadWpZip(item, f.raw as File)"
+              >
+                <el-button size="small" :loading="wpUploading === item.id">
+                  {{ wpOf(item.id)?.zip_name ? '重新上传 zip' : '上传 zip' }}
+                </el-button>
+              </el-upload>
+              <el-button type="primary" size="small" :loading="wpSaving" @click="saveWp(item)">
+                {{ wpOf(item.id) ? '更新 WP' : '提交 WP' }}
+              </el-button>
+            </div>
+          </div>
+          <el-empty v-if="!view?.challenges?.length" description="本竞赛没有绑定题目" />
         </el-tab-pane>
       </el-tabs>
     </main>
@@ -385,7 +452,10 @@ onUnmounted(() => {
 .body { padding: 1.2rem 1.6rem; max-width: 1100px; margin: 0 auto; }
 .board-head { display: flex; justify-content: space-between; margin-bottom: 0.8rem; }
 .block { margin-bottom: 1rem; }
-.wp-btn { margin-top: 0.8rem; }
+.wp-card { background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.wp-card-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.2rem; }
+.wp-meta { margin: 0.2rem 0 0.6rem; }
+.wp-actions { display: flex; gap: 0.6rem; margin-top: 0.6rem; }
 .drawer-meta { display: flex; gap: 0.4rem; margin-bottom: 0.8rem; }
 .description { line-height: 1.7; }
 .description :deep(pre) { background: var(--el-fill-color-darker); padding: 0.8rem; border-radius: 4px; overflow: auto; }

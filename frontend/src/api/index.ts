@@ -342,12 +342,22 @@ export interface CheatWarningItem {
   created_at: string
 }
 export interface WriteupItem {
+  id: number
+  challenge_id: number
+  challenge_title: string
   user_id: number
   username: string
   team_name: string | null
-  submitted: boolean
-  submitted_at: string | null
+  submitted_at: string
   content: string
+  zip_name: string
+}
+export interface MyWriteupItem {
+  challenge_id: number
+  content_md: string
+  zip_name: string
+  updated_at: string
+  updated_by: string
 }
 // 榜单条目（team/individual 两模式复用：individual 时 members 只有一个用户名）。
 export interface TeamLeaderboardEntry {
@@ -414,6 +424,8 @@ export const adminCompetitionApi = {
     http.get<{ items: CheatWarningItem[] }>(`/admin/competitions/${id}/warnings`),
   writeups: (id: number) =>
     http.get<{ items: WriteupItem[] }>(`/admin/competitions/${id}/writeups`),
+  writeupZip: (id: number, wid: number) =>
+    http.download(`/admin/competitions/${id}/writeups/${wid}/zip`),
   leaderboard: (id: number, mode: 'team' | 'individual' = 'team') =>
     http.get<LeaderboardResp>(`/admin/competitions/${id}/leaderboard?mode=${mode}`),
 }
@@ -430,6 +442,13 @@ export const competitionApi = {
     http.post<Submission>(`/competitions/${id}/submissions`, { challenge_slug: slug, answer }),
   leaderboard: (id: number, mode: 'team' | 'individual' = 'team') =>
     http.get<LeaderboardResp>(`/competitions/${id}/leaderboard?mode=${mode}`),
-  submitWriteup: (id: number, contentMd: string) =>
-    http.post<{ ok: boolean }>(`/competitions/${id}/writeup`, { content_md: contentMd }),
+  myWriteups: (id: number) =>
+    http.get<{ items: MyWriteupItem[] }>(`/competitions/${id}/writeups`),
+  saveWriteup: (id: number, challengeId: number, contentMd: string) =>
+    http.put<{ ok: boolean }>(`/competitions/${id}/writeups/${challengeId}`, { content_md: contentMd }),
+  uploadWriteupZip: (id: number, challengeId: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.upload<{ ok: boolean; zip_name: string }>(`/competitions/${id}/writeups/${challengeId}/zip`, form)
+  },
 }

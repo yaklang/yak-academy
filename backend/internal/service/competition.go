@@ -1,12 +1,17 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,16 +22,22 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
+// MaxWriteupZipBytes WP 附带 zip 上限 20MB（脚本+截图打包；导出供 api 层
+// 设置 MaxBytesReader，multipart 头部余量在 api 层另加）。
+const MaxWriteupZipBytes = 20 << 20
+
 // CompetitionService 竞赛域业务：竞赛 CRUD、题目绑定、参赛者/队伍批量导入、
 // 邀请邮件投递、入场与锁定、排行榜聚合、WP 提交。
 // 判定与竞赛积分派生走 judge/deriver（event-sourcing-rules skill），
 // 本服务不触碰派生表写入。
 type CompetitionService struct {
-	comps        repo.CompetitionRepo
-	challenges   repo.ChallengeRepo
-	users        repo.UserRepo
-	instances    repo.LabInstanceRepo
-	submissions  repo.SubmissionRepo
+	comps       repo.CompetitionRepo
+	challenges  repo.ChallengeRepo
+	users       repo.UserRepo
+	instances   repo.LabInstanceRepo
+	submissions repo.SubmissionRepo
+	// writeupDir WP 附带 zip 落盘根目录（SetWriteupDir 注入，测试可指向 t.TempDir）。
+	writeupDir    string
 	deliverInvite func(ctx context.Context, userID uint, title, bodyMd string, competitionID uint, inviteCode string) error
 	createAccount func(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error)
 	// now 时钟注入（测试固定时间推进竞赛状态）。
@@ -48,6 +59,11 @@ func NewCompetitionService(
 		submissions: submissions,
 		now:         time.Now,
 	}
+}
+
+// SetWriteupDir 注入 WP zip 落盘根目录（main 装配后调用；测试用 t.TempDir）。
+func (s *CompetitionService) SetWriteupDir(dir string) {
+	s.writeupDir = dir
 }
 
 // SetDelivery 注入站内信投递与账号创建入口（main 装配后调用一次）。
@@ -119,13 +135,13 @@ type CompetitionDetail struct {
 }
 
 type CompetitionStats struct {
-	Teams       int64 `json:"teams"`
+	Teams        int64 `json:"teams"`
 	Participants int64 `json:"participants"`
-	Entered     int64 `json:"entered"`
-	Challenges  int   `json:"challenges"`
-	Instances   int64 `json:"instances"`
-	Warnings    int64 `json:"warnings"`
-	Writeups    int64 `json:"writeups"`
+	Entered      int64 `json:"entered"`
+	Challenges   int   `json:"challenges"`
+	Instances    int64 `json:"instances"`
+	Warnings     int64 `json:"warnings"`
+	Writeups     int64 `json:"writeups"`
 }
 
 func (s *CompetitionService) Detail(ctx context.Context, id uint) (*CompetitionDetail, error) {
@@ -176,7 +192,7 @@ func (s *CompetitionService) buildDetail(ctx context.Context, c *model.Competiti
 			Challenges:   len(bound),
 			Instances:    instTotal,
 			Warnings:     int64(len(warnings)),
-			Writeups:     int64(len(writeups)),
+			Writeups:     int64(distinctWpUnits(writeups)),
 		},
 	}, nil
 }
@@ -252,6 +268,7 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 // BindChallenges 三种入参统一入口：
 //  1. 题目 JSON（对象或数组）→ 复用 content 管线导入后绑定；
 //  2. {"slugs": [...]} → 绑定既有题目。
+//
 // 单题失败整体拒绝；已绑定跳过（幂等）。
 func (s *CompetitionService) BindChallenges(ctx context.Context, id uint, raw []byte, importJSON func(ctx context.Context, raw []byte) (imported int, slugs []string, err error)) (*BindResult, error) {
 	if _, err := s.find(ctx, id); err != nil {
@@ -276,7 +293,7 @@ func (s *CompetitionService) BindChallenges(ctx context.Context, id uint, raw []
 
 // BindResult 绑定结果（契约 added + items）。
 type BindResult struct {
-	Added int64         `json:"added"`
+	Added int64          `json:"added"`
 	Items []TrainingItem `json:"items"`
 }
 
@@ -366,7 +383,7 @@ type TeamImport struct {
 }
 
 type ParticipantImportResult struct {
-	CreatedAccounts []CreatedAccount `json:"created_accounts"`
+	CreatedAccounts []CreatedAccount     `json:"created_accounts"`
 	Participants    []InvitedParticipant `json:"participants"`
 }
 
@@ -376,10 +393,10 @@ type CreatedAccount struct {
 }
 
 type InvitedParticipant struct {
-	Username      string `json:"username"`
+	Username      string  `json:"username"`
 	TeamName      *string `json:"team_name"`
-	InviteCode    string `json:"invite_code"`
-	MailDelivered bool   `json:"mail_delivered"`
+	InviteCode    string  `json:"invite_code"`
+	MailDelivered bool    `json:"mail_delivered"`
 }
 
 // ImportParticipants 批量导入：队伍/个人按用户名引用，不存在自动创建
@@ -730,6 +747,15 @@ func (s *CompetitionService) participantTeamName(ctx context.Context, part *mode
 	return nil, nil
 }
 
+// distinctWpUnits WP 份数统计口径 = 题目 × 队伍/个人（与提交单位一致）。
+func distinctWpUnits(list []model.Writeup) int {
+	seen := map[[2]uint]bool{}
+	for _, w := range list {
+		seen[[2]uint{w.ChallengeID, w.TeamID}] = true
+	}
+	return len(seen)
+}
+
 // requireEntered 校验"已入场参赛者"（参赛者视角全部接口的前置条件）。
 // 结束后仍允许访问（看榜单、提交 WP），running 之外不允许开容器/提交 flag。
 func (s *CompetitionService) requireEntered(ctx context.Context, userID, id uint) (*model.Competition, *model.Participant, error) {
@@ -751,15 +777,15 @@ func (s *CompetitionService) requireEntered(ctx context.Context, userID, id uint
 
 // CompetitionChallengeView 参赛者视角题目条目。
 type CompetitionChallengeView struct {
-	ID           uint   `json:"id"`
-	Slug         string `json:"slug"`
-	Title        string `json:"title"`
-	Category     string `json:"category"`
-	Difficulty   string `json:"difficulty"`
-	Score        int    `json:"score"`
-	HasEnv       bool   `json:"has_env"`
-	Description  string `json:"description_md"`
-	Solved       bool   `json:"solved"`
+	ID          uint   `json:"id"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Category    string `json:"category"`
+	Difficulty  string `json:"difficulty"`
+	Score       int    `json:"score"`
+	HasEnv      bool   `json:"has_env"`
+	Description string `json:"description_md"`
+	Solved      bool   `json:"solved"`
 }
 
 // MySubmissionView 参赛者本人的提交条目（竞赛首页"我的提交"）。
@@ -772,12 +798,12 @@ type MySubmissionView struct {
 
 // CompetitionHome 竞赛首页聚合视图。
 type CompetitionHome struct {
-	Competition      CompetitionView         `json:"competition"`
-	TeamName         *string                 `json:"team_name"`
-	Teammates        []string                `json:"teammates"`
+	Competition      CompetitionView            `json:"competition"`
+	TeamName         *string                    `json:"team_name"`
+	Teammates        []string                   `json:"teammates"`
 	Challenges       []CompetitionChallengeView `json:"challenges"`
-	MySubmissions    []MySubmissionView     `json:"my_submissions"`
-	WriteupSubmitted bool                    `json:"writeup_submitted"`
+	MySubmissions    []MySubmissionView         `json:"my_submissions"`
+	WriteupSubmitted bool                       `json:"writeup_submitted"`
 }
 
 func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*CompetitionHome, error) {
@@ -820,6 +846,7 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 	if err != nil {
 		return nil, err
 	}
+	// 队伍模式任一队员提交过任一题即视为已提交。
 	writeupSubmitted := false
 	if c.Status(s.now()) == model.CompetitionEnded {
 		writeups, err := s.comps.ListWriteups(ctx, id)
@@ -827,7 +854,7 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 			return nil, err
 		}
 		for _, w := range writeups {
-			if w.UserID == userID {
+			if w.TeamID == part.TeamID {
 				writeupSubmitted = true
 				break
 			}
@@ -933,13 +960,13 @@ func (s *CompetitionService) SubmitFlag(ctx context.Context, judge *JudgeService
 // TeamLeaderboardEntry 战队榜条目；individual 模式下复用（TeamID=0，
 // TeamName=nil，按成员聚合）。同分并列同名次；先达者靠前。
 type TeamLeaderboardEntry struct {
-	Rank       int      `json:"rank"`
-	TeamID     uint     `json:"team_id"`
-	TeamName   *string  `json:"team_name"`
-	Score      int      `json:"score"`
-	SolvedCount int     `json:"solved_count"`
-	Members    []string `json:"members"`
-	LastSolveAt *string `json:"last_solve_at"`
+	Rank        int      `json:"rank"`
+	TeamID      uint     `json:"team_id"`
+	TeamName    *string  `json:"team_name"`
+	Score       int      `json:"score"`
+	SolvedCount int      `json:"solved_count"`
+	Members     []string `json:"members"`
+	LastSolveAt *string  `json:"last_solve_at"`
 }
 
 // CompLeaderboardEntry 个人榜条目（同分并列，先达者靠前）。
@@ -1199,22 +1226,22 @@ func (s *CompetitionService) AdminWarnings(ctx context.Context, id uint) ([]Admi
 	return items, nil
 }
 
-// AdminWriteups WP 提交情况：全部参赛者一行，未提交 submitted=false。
+// AdminWriteups WP 提交情况（单位 = 题目 × 队伍/个人）：仅返回已提交条目，
+// 前端按题目分组、与参赛名单对差集得未提交名单。
 type AdminWriteupItem struct {
-	UserID      uint    `json:"user_id"`
-	Username    string  `json:"username"`
-	TeamName    *string `json:"team_name"`
-	Submitted   bool    `json:"submitted"`
-	SubmittedAt *string `json:"submitted_at"`
-	Content     string  `json:"content"`
+	ID             uint    `json:"id"`
+	ChallengeID    uint    `json:"challenge_id"`
+	ChallengeTitle string  `json:"challenge_title"`
+	UserID         uint    `json:"user_id"`
+	Username       string  `json:"username"`
+	TeamName       *string `json:"team_name"`
+	SubmittedAt    string  `json:"submitted_at"`
+	Content        string  `json:"content"`
+	ZipName        string  `json:"zip_name"`
 }
 
 func (s *CompetitionService) AdminWriteups(ctx context.Context, id uint) ([]AdminWriteupItem, error) {
 	if _, err := s.find(ctx, id); err != nil {
-		return nil, err
-	}
-	parts, _, err := s.comps.ListParticipants(ctx, id, 0, 1<<30)
-	if err != nil {
 		return nil, err
 	}
 	teams, err := s.comps.ListTeams(ctx, id)
@@ -1225,61 +1252,265 @@ func (s *CompetitionService) AdminWriteups(ctx context.Context, id uint) ([]Admi
 	for _, t := range teams {
 		teamNames[t.ID] = t.Name
 	}
-	userIDs := make([]uint, len(parts))
-	for i, p := range parts {
-		userIDs[i] = p.UserID
-	}
-	users, err := s.users.FindByIDs(ctx, userIDs...)
+	writeups, err := s.comps.ListWriteups(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	// 题目标题与修改人用户名批量补全。
+	chalIDs := make([]uint, 0, len(writeups))
+	userIDs := make([]uint, 0, len(writeups))
+	for _, w := range writeups {
+		chalIDs = append(chalIDs, w.ChallengeID)
+		userIDs = append(userIDs, w.UserID)
+	}
+	chalTitles := map[uint]string{}
+	if len(chalIDs) > 0 {
+		chals, err := s.challenges.FindByIDs(ctx, chalIDs...)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range chals {
+			chalTitles[c.ID] = c.Title
+		}
+	}
 	userNames := map[uint]string{}
-	for _, u := range users {
-		userNames[u.ID] = u.Username
+	if len(userIDs) > 0 {
+		users, err := s.users.FindByIDs(ctx, userIDs...)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			userNames[u.ID] = u.Username
+		}
+	}
+	items := make([]AdminWriteupItem, 0, len(writeups))
+	for _, w := range writeups {
+		item := AdminWriteupItem{
+			ID: w.ID, ChallengeID: w.ChallengeID, ChallengeTitle: chalTitles[w.ChallengeID],
+			UserID: w.UserID, Username: userNames[w.UserID],
+			SubmittedAt: w.UpdatedAt.Format(time.RFC3339),
+			Content:     w.Content, ZipName: w.ZipName,
+		}
+		if w.TeamID > 0 {
+			if n, ok := teamNames[w.TeamID]; ok {
+				item.TeamName = &n
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// OpenWriteupZip 管理端下载 WP 附带 zip（打开落盘文件；未上传 404）。
+func (s *CompetitionService) OpenWriteupZip(ctx context.Context, competitionID, writeupID uint) (*os.File, string, error) {
+	w, err := s.comps.FindWriteup(ctx, writeupID)
+	if err != nil {
+		return nil, "", err
+	}
+	if w == nil || w.CompetitionID != competitionID || w.ZipFile == "" {
+		return nil, "", ErrNotFound
+	}
+	f, err := os.Open(filepath.Join(s.writeupDir, w.ZipFile))
+	if err != nil {
+		return nil, "", ErrNotFound
+	}
+	return f, w.ZipName, nil
+}
+
+// MyWriteups 本队/本人全部 WP（结束后的 WP 标签页数据源）。
+type MyWriteupItem struct {
+	ChallengeID uint   `json:"challenge_id"`
+	ContentMd   string `json:"content_md"`
+	ZipName     string `json:"zip_name"`
+	UpdatedAt   string `json:"updated_at"`
+	UpdatedBy   string `json:"updated_by"`
+}
+
+func (s *CompetitionService) MyWriteups(ctx context.Context, userID, id uint) ([]MyWriteupItem, error) {
+	_, part, err := s.requireEntered(ctx, userID, id)
+	if err != nil {
+		return nil, err
 	}
 	writeups, err := s.comps.ListWriteups(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	wpByUser := map[uint]model.Writeup{}
+	userIDs := make([]uint, 0, len(writeups))
 	for _, w := range writeups {
-		wpByUser[w.UserID] = w
+		if w.TeamID == part.TeamID {
+			userIDs = append(userIDs, w.UserID)
+		}
 	}
-	items := make([]AdminWriteupItem, len(parts))
-	for i, p := range parts {
-		item := AdminWriteupItem{UserID: p.UserID, Username: userNames[p.UserID]}
-		if p.TeamID > 0 {
-			if n, ok := teamNames[p.TeamID]; ok {
-				item.TeamName = &n
-			}
+	userNames := map[uint]string{}
+	if len(userIDs) > 0 {
+		users, err := s.users.FindByIDs(ctx, userIDs...)
+		if err != nil {
+			return nil, err
 		}
-		if w, ok := wpByUser[p.UserID]; ok {
-			item.Submitted = true
-			ts := w.UpdatedAt.Format(time.RFC3339)
-			item.SubmittedAt = &ts
-			item.Content = w.Content
+		for _, u := range users {
+			userNames[u.ID] = u.Username
 		}
-		items[i] = item
+	}
+	items := make([]MyWriteupItem, 0, len(writeups))
+	for _, w := range writeups {
+		if w.TeamID != part.TeamID {
+			continue
+		}
+		items = append(items, MyWriteupItem{
+			ChallengeID: w.ChallengeID, ContentMd: w.Content, ZipName: w.ZipName,
+			UpdatedAt: w.UpdatedAt.Format(time.RFC3339), UpdatedBy: userNames[w.UserID],
+		})
 	}
 	return items, nil
 }
 
-// SubmitWriteup 参赛者提交 WP：仅竞赛结束后允许（未结束 422），可反复修改。
-func (s *CompetitionService) SubmitWriteup(ctx context.Context, userID, id uint, contentMd string) error {
-	c, _, err := s.requireEntered(ctx, userID, id)
+// SaveWriteup 提交/修改某题 WP 文字（比赛结束后；队伍模式全队一份，
+// 任一队员可改；文字与 zip 至少保留一项，全空 422）。
+func (s *CompetitionService) SaveWriteup(ctx context.Context, userID, id, challengeID uint, contentMd string) error {
+	c, part, err := s.requireEntered(ctx, userID, id)
 	if err != nil {
 		return err
 	}
 	if c.Status(s.now()) != model.CompetitionEnded {
 		return fmt.Errorf("%w: writeup is accepted only after competition ends", ErrValidation)
 	}
-	if strings.TrimSpace(contentMd) == "" {
-		return fmt.Errorf("%w: content_md is required", ErrValidation)
+	if err := s.requireBoundChallenge(ctx, id, challengeID); err != nil {
+		return err
+	}
+	// 既有 zip 保留判定：文字清空且原份无 zip → 拒绝。
+	existing, err := s.findWriteup(ctx, id, challengeID, part.TeamID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(contentMd) == "" && (existing == nil || existing.ZipFile == "") {
+		return fmt.Errorf("%w: content_md is required when no zip uploaded", ErrValidation)
 	}
 	return s.comps.UpsertWriteup(ctx, &model.Writeup{
-		CompetitionID: id, UserID: userID, Content: contentMd,
+		CompetitionID: id, ChallengeID: challengeID, TeamID: part.TeamID, UserID: userID,
+		Content: contentMd,
+		ZipFile: existingZip(existing), ZipName: existingZipName(existing),
 	})
 }
+
+// UploadWriteupZip 上传/替换某题 WP 附带 zip（≤MaxWriteupZipBytes、需为合法 zip；
+// 覆盖旧包；不影响已提交文字）。
+func (s *CompetitionService) UploadWriteupZip(ctx context.Context, userID, id, challengeID uint, filename string, r io.Reader) (string, error) {
+	c, part, err := s.requireEntered(ctx, userID, id)
+	if err != nil {
+		return "", err
+	}
+	if c.Status(s.now()) != model.CompetitionEnded {
+		return "", fmt.Errorf("%w: writeup is accepted only after competition ends", ErrValidation)
+	}
+	if err := s.requireBoundChallenge(ctx, id, challengeID); err != nil {
+		return "", err
+	}
+	data, err := io.ReadAll(io.LimitReader(r, MaxWriteupZipBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("%w: read zip", ErrValidation)
+	}
+	if len(data) > MaxWriteupZipBytes {
+		return "", fmt.Errorf("%w: zip exceeds %d bytes", ErrValidation, MaxWriteupZipBytes)
+	}
+	if len(data) < 4 || !bytes.Equal(data[:4], []byte("PK\x03\x04")) {
+		return "", fmt.Errorf("%w: not a valid zip archive", ErrValidation)
+	}
+	existing, err := s.findWriteup(ctx, id, challengeID, part.TeamID)
+	if err != nil {
+		return "", err
+	}
+	name := sanitizeZipName(filename)
+	// 落盘名 = <compID>/<wpID>.zip：同一份 WP 永远同一路径，覆盖即替换。
+	rel := fmt.Sprintf("%d/%d.zip", id, existingID(existing))
+	abs := filepath.Join(s.writeupDir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(abs, data, 0o644); err != nil {
+		return "", err
+	}
+	// 旧包在其他路径（历史上传）时清理，避免孤儿文件。
+	if existing != nil && existing.ZipFile != "" && existing.ZipFile != rel {
+		os.Remove(filepath.Join(s.writeupDir, existing.ZipFile))
+	}
+	if err := s.comps.UpsertWriteup(ctx, &model.Writeup{
+		CompetitionID: id, ChallengeID: challengeID, TeamID: part.TeamID, UserID: userID,
+		Content: existingContent(existing), ZipFile: rel, ZipName: name,
+	}); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// requireBoundChallenge 校验题目属于该竞赛（防跨竞赛提交 WP）。
+func (s *CompetitionService) requireBoundChallenge(ctx context.Context, id, challengeID uint) error {
+	ids, err := s.comps.ListBoundChallengeIDs(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, cid := range ids {
+		if cid == challengeID {
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+// findWriteup 定位本单位（队伍/个人）某题的 WP（nil = 无）。
+func (s *CompetitionService) findWriteup(ctx context.Context, id, challengeID, teamID uint) (*model.Writeup, error) {
+	writeups, err := s.comps.ListWriteups(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range writeups {
+		if w.ChallengeID == challengeID && w.TeamID == teamID {
+			return &w, nil
+		}
+	}
+	return nil, nil
+}
+
+func existingID(w *model.Writeup) uint {
+	if w == nil {
+		return 0
+	}
+	return w.ID
+}
+
+func existingZip(w *model.Writeup) string {
+	if w == nil {
+		return ""
+	}
+	return w.ZipFile
+}
+
+func existingZipName(w *model.Writeup) string {
+	if w == nil {
+		return ""
+	}
+	return w.ZipName
+}
+
+func existingContent(w *model.Writeup) string {
+	if w == nil {
+		return ""
+	}
+	return w.Content
+}
+
+// sanitizeZipName 保留原文件名供下载展示：仅白名单字符折叠为 -，
+// 杜绝路径穿越；空名回退 writeup.zip。
+func sanitizeZipName(name string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	out := zipNamePattern.ReplaceAllString(base, "-")
+	out = strings.Trim(out, "-.")
+	if out == "" {
+		out = "writeup.zip"
+	}
+	return out
+}
+
+var zipNamePattern = regexp.MustCompile(`[^a-zA-Z0-9_.\x{4e00}-\x{9fa5}]+`)
 
 // ---------- 工具 ----------
 

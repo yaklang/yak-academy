@@ -106,6 +106,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/instances", "admin", h.adminCompetitionInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/warnings", "admin", h.adminCompetitionWarnings)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups", "admin", h.adminCompetitionWriteups)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups/{wid}/zip", "admin", h.adminDownloadWriteupZip)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/leaderboard", "admin", h.adminCompetitionLeaderboard)
 
 	// 竞赛：参赛者（入场/首页/容器/提交/榜单/WP——登录即可，入场校验在 service）
@@ -115,7 +116,9 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/challenges/{slug}/instance", "", h.competitionStartInstance)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/submissions", "", h.competitionSubmitFlag)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/leaderboard", "", h.competitionLeaderboard)
-	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/writeup", "", h.competitionSubmitWriteup)
+	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/writeups", "", h.competitionMyWriteups)
+	r.Handle(http.MethodPut, "/api/v1/competitions/{id}/writeups/{challengeId}", "", h.competitionSaveWriteup)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/writeups/{challengeId}/zip", "", h.competitionUploadWriteupZip)
 }
 
 // health 存活探针：无鉴权静态响应（部署编排健康检查用，不暴露内部状态）。

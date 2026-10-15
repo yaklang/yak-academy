@@ -377,26 +377,107 @@ func (h *Handlers) competitionLeaderboard(w http.ResponseWriter, req *http.Reque
 	writeJSON(w, http.StatusOK, board)
 }
 
-// competitionSubmitWriteup 比赛结束后提交 WP。
-func (h *Handlers) competitionSubmitWriteup(w http.ResponseWriter, req *http.Request) {
+// competitionMyWriteups 本队/本人全部 WP（结束后的 WP 标签页）。
+func (h *Handlers) competitionMyWriteups(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	items, err := h.Competitions.MyWriteups(req.Context(), user.ID, id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// competitionSaveWriteup 比赛结束后提交/修改某题 WP 文字。
+func (h *Handlers) competitionSaveWriteup(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	challengeID, err := strconv.ParseUint(req.PathValue("challengeId"), 10, 64)
+	if err != nil || challengeID == 0 {
 		writeError(w, errValidation)
 		return
 	}
 	var body struct {
 		ContentMd string `json:"content_md"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ContentMd == "" {
+	// content_md 允许空串（仅保留 zip 场景），仅拒绝 JSON 解析失败。
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeError(w, errValidation)
 		return
 	}
 	user := UserFrom(req.Context())
-	if err := h.Competitions.SubmitWriteup(req.Context(), user.ID, id, body.ContentMd); err != nil {
+	if err := h.Competitions.SaveWriteup(req.Context(), user.ID, id, uint(challengeID), body.ContentMd); err != nil {
 		mapError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// competitionUploadWriteupZip 比赛结束后上传/替换某题 WP 附带 zip（multipart file）。
+func (h *Handlers) competitionUploadWriteupZip(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	challengeID, err := strconv.ParseUint(req.PathValue("challengeId"), 10, 64)
+	if err != nil || challengeID == 0 {
+		writeError(w, errValidation)
+		return
+	}
+	req.Body = http.MaxBytesReader(w, req.Body, service.MaxWriteupZipBytes+1<<20)
+	file, hdr, err := req.FormFile("file")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	user := UserFrom(req.Context())
+	name, err := h.Competitions.UploadWriteupZip(req.Context(), user.ID, id, uint(challengeID), hdr.Filename, file)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "zip_name": name})
+}
+
+// adminDownloadWriteupZip 管理端下载某份 WP 的附带 zip。
+func (h *Handlers) adminDownloadWriteupZip(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	wid, err := strconv.ParseUint(req.PathValue("wid"), 10, 64)
+	if err != nil || wid == 0 {
+		writeError(w, errValidation)
+		return
+	}
+	f, filename, err := h.Competitions.OpenWriteupZip(req.Context(), id, uint(wid))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	if size, err := f.Seek(0, io.SeekEnd); err == nil && size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			mapError(w, err)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, f)
 }
 
 // sourceIP 提交来源 IP（反作弊基线）：优先反向代理头（部署在 nginx 后面），

@@ -188,18 +188,39 @@ func (r *competitionRepo) ListWarnings(ctx context.Context, competitionID uint) 
 	return list, err
 }
 
-// UpsertWriteup WP 提交（每参赛者一份，重复提交覆盖）。
+// UpsertWriteup WP upsert（单位 = 题目 × 队伍/个人）：重复提交覆盖同一份，
+// w 的 UserID 记录最近修改人。
 func (r *competitionRepo) UpsertWriteup(ctx context.Context, w *model.Writeup) error {
-	return r.db.WithContext(ctx).Where(model.Writeup{CompetitionID: w.CompetitionID, UserID: w.UserID}).
-		Assign(model.Writeup{Content: w.Content}).
+	// map 条件：TeamID=0（个人）是有效值，struct 条件会丢零值字段（GORM 陷阱）。
+	return r.db.WithContext(ctx).
+		Where(map[string]any{
+			"competition_id": w.CompetitionID, "challenge_id": w.ChallengeID, "team_id": w.TeamID,
+		}).
+		// Assign 用 map：Content 清空（零值）也要能更新（GORM struct 零值陷阱）。
+		Assign(map[string]any{
+			"content": w.Content, "zip_file": w.ZipFile, "zip_name": w.ZipName, "user_id": w.UserID,
+		}).
 		FirstOrCreate(w).Error
 }
 
-// ListWriteups 竞赛全部 WP（参赛者视图中 has_writeup 判定也走这里）。
+// ListWriteups 竞赛全部 WP（管理端列表、视图中已提交判定走这里）。
 func (r *competitionRepo) ListWriteups(ctx context.Context, competitionID uint) ([]model.Writeup, error) {
 	var list []model.Writeup
-	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).Find(&list).Error
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).Order("challenge_id, id").Find(&list).Error
 	return list, err
+}
+
+// FindWriteup 单份 WP（zip 下载按 id 直取）。
+func (r *competitionRepo) FindWriteup(ctx context.Context, id uint) (*model.Writeup, error) {
+	var w model.Writeup
+	err := r.db.WithContext(ctx).First(&w, id).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
 }
 
 // AddScore 竞赛派生积分：新首通插入，已存在（该用户该题）返回 0 行。

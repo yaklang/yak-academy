@@ -274,7 +274,7 @@ function warningType(k: CheatWarningItem['kind']) {
   return k === 'cross_team_flag' ? 'danger' : 'warning'
 }
 
-// ---------- WP ----------
+// ---------- WP（单位 = 题目 × 队伍/个人，仅返回已提交条目） ----------
 const writeups = ref<WriteupItem[]>([])
 const writeupsLoading = ref(false)
 const viewing = ref<WriteupItem | null>(null)
@@ -288,6 +288,54 @@ async function loadWriteups() {
     ElMessage.error((e as Error).message)
   } finally {
     writeupsLoading.value = false
+  }
+}
+
+// 按题目分组：题目标题 → 该题已提交的队伍/个人条目。
+const writeupsByChallenge = computed(() => {
+  const map = new Map<string, WriteupItem[]>()
+  for (const w of writeups.value) {
+    const key = w.challenge_title
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(w)
+  }
+  return [...map.entries()].map(([title, items]) => ({ title, items }))
+})
+
+// 该题未提交名单 = 参赛单位（队伍/个人）减已提交。
+// teams 为队伍总览（参赛人员接口返回）；个人参赛者按 participants 当前页推导。
+const wpMissing = (challengeId: number): string[] => {
+  const submittedUnits = new Set(
+    writeups.value
+      .filter((w) => w.challenge_id === challengeId)
+      .map((w) => w.team_name ?? `个人：${w.username}`),
+  )
+  const units: string[] = []
+  for (const t of teams.value) {
+    if (t.team_name && !submittedUnits.has(t.team_name)) units.push(t.team_name)
+  }
+  const seen = new Set(units)
+  for (const p of participants.value) {
+    const key = `个人：${p.username}`
+    if (!p.team_id && !submittedUnits.has(key) && !seen.has(key)) {
+      units.push(key)
+      seen.add(key)
+    }
+  }
+  return units
+}
+
+async function downloadWriteupZip(w: WriteupItem) {
+  try {
+    const blob = await adminCompetitionApi.writeupZip(compId, w.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = w.zip_name || 'writeup.zip'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
   }
 }
 
@@ -527,34 +575,56 @@ onMounted(async () => {
         </el-card>
       </el-tab-pane>
 
-      <!-- WP -->
+      <!-- WP（按题目分组） -->
       <el-tab-pane label="WP 提交情况" name="writeups">
         <el-card shadow="never">
           <template #header>
             <div class="card-head">
-              <span>比赛结束后参赛者可提交 WP（{{ writeups.filter((w) => w.submitted).length }}/{{ writeups.length }}）</span>
+              <span>
+                比赛结束后按题目提交 WP（单位 = 题目 × 队伍/个人，已提交
+                {{ writeups.length }} 份）
+              </span>
               <el-button size="small" @click="loadWriteups">刷新</el-button>
             </div>
           </template>
-          <el-table :data="writeups" v-loading="writeupsLoading" empty-text="暂无参赛人员">
-            <el-table-column prop="username" label="用户" width="130" />
-            <el-table-column label="队伍" width="140">
-              <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
-            </el-table-column>
-            <el-table-column label="已提交" width="90">
-              <template #default="{ row }">
-                <el-tag :type="row.submitted ? 'success' : 'info'" size="small">{{ row.submitted ? '是' : '否' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="提交时间" width="160">
-              <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="90">
-              <template #default="{ row }">
-                <el-button v-if="row.submitted" size="small" type="primary" link @click="viewing = row">查看</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
+          <div v-loading="writeupsLoading">
+            <template v-if="writeupsByChallenge.length">
+              <div v-for="group in writeupsByChallenge" :key="group.title" class="wp-group">
+                <h4>{{ group.title }}（{{ group.items.length }} 份）</h4>
+                <el-table :data="group.items" size="small" empty-text="暂无提交">
+                  <el-table-column label="队伍/选手" width="160">
+                    <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
+                  </el-table-column>
+                  <el-table-column prop="username" label="最近修改人" width="120" />
+                  <el-table-column label="提交时间" width="170">
+                    <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
+                  </el-table-column>
+                  <el-table-column label="zip" width="110">
+                    <template #default="{ row }">
+                      <el-link
+                        v-if="row.zip_name"
+                        type="primary"
+                        :underline="false"
+                        @click="downloadWriteupZip(row)"
+                      >
+                        {{ row.zip_name }}
+                      </el-link>
+                      <span v-else class="dim">—</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80">
+                    <template #default="{ row }">
+                      <el-button size="small" type="primary" link @click="viewing = row">查看</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <p v-if="wpMissing(group.items[0].challenge_id).length" class="dim wp-missing">
+                  未提交：{{ wpMissing(group.items[0].challenge_id).join('、') }}
+                </p>
+              </div>
+            </template>
+            <el-empty v-else description="暂无 WP 提交" />
+          </div>
         </el-card>
       </el-tab-pane>
 
@@ -661,8 +731,25 @@ onMounted(async () => {
   </el-dialog>
 
   <!-- WP 查看 -->
-  <el-dialog :model-value="viewing !== null" :title="`WP：${viewing?.username ?? ''}`" width="680px" @close="viewing = null">
-    <pre class="wp">{{ viewing?.content }}</pre>
+  <el-dialog
+    :model-value="viewing !== null"
+    :title="`WP：${viewing?.challenge_title ?? ''} · ${viewing?.team_name ?? viewing?.username ?? ''}`"
+    width="680px"
+    @close="viewing = null"
+  >
+    <p v-if="viewing" class="dim wp-dialog-meta">
+      最近修改：{{ viewing.username }} · {{ fmt(viewing.submitted_at) }}
+      <el-link
+        v-if="viewing.zip_name"
+        type="primary"
+        :underline="false"
+        class="wp-dialog-zip"
+        @click="downloadWriteupZip(viewing)"
+      >
+        下载 zip：{{ viewing.zip_name }}
+      </el-link>
+    </p>
+    <pre class="wp">{{ viewing?.content || '（仅上传了 zip，未填写文字）' }}</pre>
   </el-dialog>
 </template>
 
@@ -684,4 +771,9 @@ onMounted(async () => {
 .pager { margin-top: 1rem; }
 .bind-mode { margin-bottom: 0.8rem; }
 .wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
+.wp-group { margin-bottom: 1.4rem; }
+.wp-group h4 { margin: 0 0 0.5rem; }
+.wp-missing { margin: 0.4rem 0 0; }
+.wp-dialog-meta { margin: 0 0 0.6rem; }
+.wp-dialog-zip { margin-left: 1rem; }
 </style>

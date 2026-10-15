@@ -5,10 +5,17 @@ package service
 // 排行榜聚合、反作弊检测、WP 时序。
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +38,7 @@ type compEnv struct {
 	users  repo.UserRepo
 	// inviteMail 投递记录（SetDelivery 注入的探针）。
 	inviteMails []string
-	now        time.Time
+	now         time.Time
 }
 
 func newCompEnv(t *testing.T) *compEnv {
@@ -400,34 +407,186 @@ func TestWriteupSubmissionWindow(t *testing.T) {
 	ctx := context.Background()
 	comp := e.createRunningComp(t, "WP 赛")
 	user := e.ensureUser(t, "writer")
+	chal := e.seedChallenge(t, "wp-chal", "static")
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"writer"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
 	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	if _, err := e.comps.BindChallenges(ctx, comp.ID, []byte(`{"slugs":["`+chal.Slug+`"]}`), nil); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
 	// running：拒绝。
-	if err := e.comps.SubmitWriteup(ctx, user.ID, comp.ID, "# wp v1"); !errors.Is(err, ErrValidation) {
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, "# wp v1"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("writeup while running: want ErrValidation, got %v", err)
 	}
-	// 结束：提交成功，再次提交覆盖。
+	// 未绑定题目：404。
 	e.now = comp.EndTime.Add(time.Minute)
-	if err := e.comps.SubmitWriteup(ctx, user.ID, comp.ID, "# wp v1"); err != nil {
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID+999, "# x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unbound challenge: want ErrNotFound, got %v", err)
+	}
+	// 结束：提交成功，再次提交覆盖；空文字且无 zip → 422。
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, "# wp v1"); err != nil {
 		t.Fatalf("writeup after end: %v", err)
 	}
-	if err := e.comps.SubmitWriteup(ctx, user.ID, comp.ID, "# wp v2 更新版"); err != nil {
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty md without zip: want ErrValidation, got %v", err)
+	}
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, "# wp v2 更新版"); err != nil {
 		t.Fatalf("writeup update: %v", err)
 	}
 	wps, _ := compRepo.ListWriteups(ctx, comp.ID)
 	if len(wps) != 1 || wps[0].Content != "# wp v2 更新版" {
 		t.Fatalf("writeups: %+v", wps)
 	}
-	// 管理端 WP 情况：全部参赛者一行，writer submitted=true。
+	// 管理端 WP 情况（单位 = 题目 × 队伍/个人）。
 	items, err := e.comps.AdminWriteups(ctx, comp.ID)
 	if err != nil {
 		t.Fatalf("admin writeups: %v", err)
 	}
-	if len(items) != 1 || !items[0].Submitted || items[0].Content != "# wp v2 更新版" {
+	if len(items) != 1 || items[0].Content != "# wp v2 更新版" || items[0].TeamName != nil || items[0].ChallengeID != chal.ID {
 		t.Fatalf("admin writeup items: %+v", items)
 	}
+}
+
+// TestWriteupTeamSharedAndZip 队伍一份（任一队员可改，不重复建行）+
+// zip 上传/替换/纯 zip 保留（文字与 zip 至少一项）。
+func TestWriteupTeamSharedAndZip(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	e.comps.SetWriteupDir(dir)
+	comp := e.createRunningComp(t, "组队 WP 赛")
+	chalA := e.seedChallenge(t, "team-wp-a", "static")
+	chalB := e.seedChallenge(t, "team-wp-b", "static")
+	alice := e.ensureUser(t, "alice")
+	bob := e.ensureUser(t, "bob")
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
+		Teams: []TeamImport{{Name: "Blue", Members: []string{"alice", "bob"}}},
+	})
+	// rival 走导入建号（ImportParticipants 内部 createAccount）→ 按用户名取回。
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"rival"}})
+	compRepo := repo.NewCompetitionRepo(e.gdb)
+	parts, _, _ := compRepo.ListParticipants(ctx, comp.ID, 0, 100)
+	codes := map[uint]string{}
+	for _, p := range parts {
+		codes[p.UserID] = p.InviteCode
+	}
+	rival, err := e.users.FindByUsername(context.Background(), "rival")
+	if err != nil {
+		t.Fatalf("load rival: %v", err)
+	}
+	for _, u := range []*model.User{alice, bob, rival} {
+		if _, err := e.comps.Enter(ctx, u.ID, comp.ID, codes[u.ID]); err != nil {
+			t.Fatalf("enter %s: %v", u.Username, err)
+		}
+	}
+	if _, err := e.comps.BindChallenges(ctx, comp.ID, []byte(`{"slugs":["`+chalA.Slug+`","`+chalB.Slug+`"]}`), nil); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	e.now = comp.EndTime.Add(time.Minute)
+
+	// alice 提交 A 题，bob（同队）修改 → 同一份（一行）。
+	if err := e.comps.SaveWriteup(ctx, alice.ID, comp.ID, chalA.ID, "# A by alice"); err != nil {
+		t.Fatalf("alice save A: %v", err)
+	}
+	if err := e.comps.SaveWriteup(ctx, bob.ID, comp.ID, chalA.ID, "# A by bob 覆盖"); err != nil {
+		t.Fatalf("bob save A: %v", err)
+	}
+	// rival 与 Blue 不是同一单位：A 题个人份互不干扰。
+	if err := e.comps.SaveWriteup(ctx, rival.ID, comp.ID, chalA.ID, "# A by rival"); err != nil {
+		t.Fatalf("rival save A: %v", err)
+	}
+	wps, _ := compRepo.ListWriteups(ctx, comp.ID)
+	if len(wps) != 2 {
+		t.Fatalf("want 2 writeups (Blue A + rival A), got %d: %+v", len(wps), wps)
+	}
+
+	// alice 上传 A 题 zip；bob 重传替换；文字保留。
+	zipV1 := makeZip(t, "solve_v1.py")
+	name, err := e.comps.UploadWriteupZip(ctx, alice.ID, comp.ID, chalA.ID, "攻击脚本 v1.zip", bytes.NewReader(zipV1))
+	if err != nil {
+		t.Fatalf("upload zip: %v", err)
+	}
+	if name != "攻击脚本-v1.zip" {
+		t.Fatalf("zip name sanitize: %q", name)
+	}
+	zipV2 := makeZip(t, "solve_v2.py")
+	if _, err := e.comps.UploadWriteupZip(ctx, bob.ID, comp.ID, chalA.ID, "attack_v2.zip", bytes.NewReader(zipV2)); err != nil {
+		t.Fatalf("reupload zip: %v", err)
+	}
+	// 非 zip 内容 → 422。
+	if _, err := e.comps.UploadWriteupZip(ctx, alice.ID, comp.ID, chalA.ID, "fake.zip", strings.NewReader("not a zip")); !errors.Is(err, ErrValidation) {
+		t.Fatalf("non-zip: want ErrValidation, got %v", err)
+	}
+
+	// Blue A 份：最新内容 + 最新 zip + 修改人 bob；B 题独立无份。
+	mine, err := e.comps.MyWriteups(ctx, alice.ID, comp.ID)
+	if err != nil {
+		t.Fatalf("my writeups: %v", err)
+	}
+	if len(mine) != 1 || mine[0].ChallengeID != chalA.ID {
+		t.Fatalf("alice my writeups: %+v", mine)
+	}
+	if mine[0].ContentMd != "# A by bob 覆盖" || mine[0].ZipName != "attack_v2.zip" || mine[0].UpdatedBy != "bob" {
+		t.Fatalf("blue A writeup: %+v", mine[0])
+	}
+	// rival 看到的只有个人份。
+	rivalMine, _ := e.comps.MyWriteups(ctx, rival.ID, comp.ID)
+	if len(rivalMine) != 1 || rivalMine[0].UpdatedBy != "rival" || rivalMine[0].ZipName != "" {
+		t.Fatalf("rival my writeups: %+v", rivalMine)
+	}
+
+	// 落盘只保留最新包（同路径覆盖）。
+	entries, _ := os.ReadDir(filepath.Join(dir, strconv.FormatUint(uint64(comp.ID), 10)))
+	if len(entries) != 1 {
+		t.Fatalf("zip files on disk: %d", len(entries))
+	}
+	// 纯 zip 份：清空文字允许（zip 还在）。
+	if err := e.comps.SaveWriteup(ctx, bob.ID, comp.ID, chalA.ID, ""); err != nil {
+		t.Fatalf("clear md with zip kept: %v", err)
+	}
+	// 管理端下载 zip。
+	items, err := e.comps.AdminWriteups(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("admin writeups: %v", err)
+	}
+	var blueA *AdminWriteupItem
+	for i := range items {
+		if items[i].ChallengeID == chalA.ID && items[i].TeamName != nil && *items[i].TeamName == "Blue" {
+			blueA = &items[i]
+		}
+	}
+	if blueA == nil || blueA.ZipName != "attack_v2.zip" || blueA.Content != "" {
+		t.Fatalf("admin blue A: %+v", blueA)
+	}
+	f, fname, err := e.comps.OpenWriteupZip(ctx, comp.ID, blueA.ID)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer f.Close()
+	if fname != "attack_v2.zip" {
+		t.Fatalf("download name: %q", fname)
+	}
+	got, _ := io.ReadAll(f)
+	if !bytes.Equal(got, zipV2) {
+		t.Fatalf("zip content mismatch: %d bytes", len(got))
+	}
+}
+
+// makeZip 构造最小合法 zip（内容为一个入口）。
+func makeZip(t *testing.T, entry string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(entry)
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	w.Write([]byte("print('solved')\n"))
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return buf.Bytes()
 }
 
 // TestCrossTeamFlagWarning 反作弊：提交其他队伍成员的实例 flag → 管理端警告。
