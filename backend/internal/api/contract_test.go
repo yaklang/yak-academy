@@ -98,7 +98,7 @@ func TestContractMatchesRegisteredRoutes(t *testing.T) {
 	auth := service.NewAuthService(repo.NewUserRepo(gdb), "test-secret")
 	router := NewRouter(auth)
 	// nil 服务即可：Register 只做路由注册，不触达业务。
-	NewHandlers(auth, nil, nil, nil, nil, nil, nil, nil).Register(router)
+	NewHandlers(auth, nil, nil, nil, nil, nil, nil, nil, nil).Register(router)
 
 	contract := loadContract(t)
 	registered := make(map[string]RouteInfo, len(router.Routes()))

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 管理面板：容器管理。整体视图 = 当前活跃容器概览（含题目信息，可强制销毁）
 // + 下方容器生命周期日志（append-only，记录每次启动/停止及失败原因）。
+// 两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminInstanceApi, type AdminLabInstance, type InstanceLog } from '../../api'
@@ -12,6 +13,7 @@ const destroying = ref(0)
 const logs = ref<InstanceLog[]>([])
 const logTotal = ref(0)
 const logPage = ref(1)
+const logPageSize = ref(20)
 const logLoading = ref(false)
 
 async function loadActive() {
@@ -29,13 +31,23 @@ async function loadActive() {
 async function loadLogs() {
   logLoading.value = true
   try {
-    const resp = await adminInstanceApi.logs(logPage.value)
+    const resp = await adminInstanceApi.logs(logPage.value, logPageSize.value)
     logs.value = resp.items
     logTotal.value = resp.total
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
     logLoading.value = false
+  }
+}
+
+// 换页容量后回到第 1 页：page>1 时改值会触发 current-change 拉取一次，
+// 已在第 1 页时 current-change 不会触发，需显式拉取，避免双请求。
+async function onLogSizeChange() {
+  if (logPage.value !== 1) {
+    logPage.value = 1
+  } else {
+    await loadLogs()
   }
 }
 
@@ -100,7 +112,12 @@ onMounted(load)
         <el-tag size="small" type="primary">{{ active.length }}</el-tag>
       </div>
     </template>
-    <el-table :data="active" v-loading="activeLoading" empty-text="当前没有运行中的容器">
+    <el-table
+      :data="active"
+      v-loading="activeLoading"
+      max-height="360"
+      empty-text="当前没有运行中的容器"
+    >
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="username" label="用户" width="120" />
       <el-table-column label="题目" min-width="180">
@@ -144,7 +161,12 @@ onMounted(load)
         <el-button size="small" @click="load">刷新</el-button>
       </div>
     </template>
-    <el-table :data="logs" v-loading="logLoading" empty-text="暂无容器操作记录">
+    <el-table
+      :data="logs"
+      v-loading="logLoading"
+      max-height="480"
+      empty-text="暂无容器操作记录"
+    >
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
       </el-table-column>
@@ -173,13 +195,16 @@ onMounted(load)
         </template>
       </el-table-column>
     </el-table>
+    <!-- 分页常驻（含总数与每页条数）：日志 append-only 只增不减，total 短暂为 0 也应保留翻页入口 -->
     <el-pagination
-      v-if="logTotal > 20"
-      layout="prev, pager, next"
+      background
+      layout="total, sizes, prev, pager, next, jumper"
       :total="logTotal"
-      :page-size="20"
+      :page-sizes="[20, 50, 100]"
+      v-model:page-size="logPageSize"
       v-model:current-page="logPage"
       @current-change="loadLogs"
+      @size-change="onLogSizeChange"
       class="pager"
     />
   </el-card>

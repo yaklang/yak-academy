@@ -18,6 +18,19 @@ type UserRepo interface {
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
 	// UpdatePassword 改密 + 同时推进 token 失效阈值（全量吊销已签发 token）。
 	UpdatePassword(ctx context.Context, id uint, passwordHash string, invalidBefore time.Time) error
+	// UpdateBio 更新账号简介（账号信息面板）。
+	UpdateBio(ctx context.Context, id uint, bio string) error
+	// UpdateAvatar 更新头像文件名（空串 = 未上传）。
+	UpdateAvatar(ctx context.Context, id uint, avatarFile string) error
+}
+
+// MailRepo 站内邮箱（只收不发）：用户只读 + 标记已读；投递走 Deliver。
+type MailRepo interface {
+	Deliver(ctx context.Context, m *model.Mail) error
+	List(ctx context.Context, userID uint, offset, limit int) ([]model.Mail, int64, error)
+	UnreadCount(ctx context.Context, userID uint) (int64, error)
+	// MarkRead 标记已读（幂等；返回 0 = 无此邮件或不属当前用户）。
+	MarkRead(ctx context.Context, userID, mailID uint) (int64, error)
 }
 
 // TokenRevocationRepo 登出撤销表（jti 唯一，插入即吊销；查询走索引）。

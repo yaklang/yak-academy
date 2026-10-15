@@ -17,7 +17,7 @@ func Open(path string) (*gorm.DB, error) {
 
 func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
-		&model.User{}, &model.CourseRole{}, &model.TokenRevocation{},
+		&model.User{}, &model.CourseRole{}, &model.TokenRevocation{}, &model.Mail{},
 		&model.ContentPackage{}, &model.ContentVersion{},
 		&model.Topic{}, &model.Room{},
 		&model.Challenge{}, &model.Flag{}, &model.Hint{}, &model.Submission{},
