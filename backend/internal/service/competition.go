@@ -80,7 +80,9 @@ func (s *CompetitionService) Create(ctx context.Context, name, description strin
 	if !end.After(start) {
 		return nil, fmt.Errorf("%w: end_time must be after start_time", ErrValidation)
 	}
-	c := &model.Competition{Name: name, Description: description, StartTime: start, EndTime: end}
+	// 起止时间统一以 UTC 落库：SQLite 按文本比较时间，混用时区偏移会导致
+	// ActiveCompetitions 的区间判定失真（锁定/入场窗口错判）。
+	c := &model.Competition{Name: name, Description: description, StartTime: start.UTC(), EndTime: end.UTC()}
 	if err := s.comps.Create(ctx, c); err != nil {
 		return nil, mapRecordNotFound(err)
 	}
@@ -230,10 +232,10 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 		}
 	}
 	if u.StartTime != nil {
-		fields["start_time"] = start
+		fields["start_time"] = start.UTC()
 	}
 	if u.EndTime != nil {
-		fields["end_time"] = end
+		fields["end_time"] = end.UTC()
 	}
 	if err := s.comps.UpdateSelective(ctx, id, fields); err != nil {
 		return nil, err

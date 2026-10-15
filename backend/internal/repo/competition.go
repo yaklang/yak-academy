@@ -219,9 +219,10 @@ func (r *competitionRepo) ListScores(ctx context.Context, competitionID uint) ([
 }
 
 // ActiveCompetitions 当前处于 running 状态的竞赛（锁定判定用）。
-// 时间比较在 SQL 侧完成，避免时钟注入差异。
+// 时间比较在 SQL 侧完成，避免时钟注入差异。入参统一转 UTC：
+// SQLite 以文本比较时间，与落库的 UTC 值保持同一基准才可靠。
 func (r *competitionRepo) ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error) {
 	var list []model.Competition
-	err := r.db.WithContext(ctx).Where("start_time <= ? AND end_time > ?", now, now).Find(&list).Error
+	err := r.db.WithContext(ctx).Where("start_time <= ? AND end_time > ?", now.UTC(), now.UTC()).Find(&list).Error
 	return list, err
 }

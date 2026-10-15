@@ -498,6 +498,38 @@ func TestCrossTeamFlagWarning(t *testing.T) {
 	}
 }
 
+// TestActiveCompetitionNonUTCZone 服务时区非 UTC 时锁定判定仍正确：
+// 起止时间 UTC 落库 + ActiveCompetitions 查询参数归一 UTC（SQLite 文本比较）。
+func TestActiveCompetitionNonUTCZone(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	// 服务器时钟在 +08:00 时区：同一时刻，墙上时间与 UTC 差 8 小时。
+	zone := time.FixedZone("CST", 8*3600)
+	localNow := e.now.In(zone)
+	e.comps.now = func() time.Time { return localNow }
+	// 竞赛用 UTC 时间创建（API 层 RFC3339 常带 Z）。
+	comp := e.createRunningComp(t, "跨时区赛")
+	user := e.ensureUser(t, "zoner")
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"zoner"}})
+	compRepo := repo.NewCompetitionRepo(e.gdb)
+	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
+	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode); err != nil {
+		t.Fatalf("enter: %v", err)
+	}
+	if id, locked := e.comps.LockedCompetition(ctx, user.ID); !locked || id != comp.ID {
+		t.Fatalf("locked in non-UTC zone: id=%d locked=%v", id, locked)
+	}
+	entry, err := e.comps.MyEntry(ctx, user.ID)
+	if err != nil || !entry.Locked {
+		t.Fatalf("my entry in non-UTC zone: err=%v locked=%v", err, entry.Locked)
+	}
+	// 结束（UTC 判定）后解锁。
+	e.comps.now = func() time.Time { return comp.EndTime.Add(time.Minute).In(zone) }
+	if _, locked := e.comps.LockedCompetition(ctx, user.ID); locked {
+		t.Fatalf("should unlock after end in non-UTC zone")
+	}
+}
+
 // TestCompetitionInstanceScope 竞赛容器归属：竞赛内启动的实例落 competition_id，
 // 管理端按竞赛过滤可见。
 func TestCompetitionInstanceScope(t *testing.T) {
