@@ -29,6 +29,9 @@ const router = createRouter({
         { path: 'badges', name: 'badges', component: () => import('../views/Badges.vue') },
         // 次级页面（不进主导航）
         { path: 'leaderboard', name: 'leaderboard', component: () => import('../views/Leaderboard.vue') },
+        // 账号信息面板 + 站内邮箱（次级页面，入口在头部用户区）
+        { path: 'profile', name: 'profile', component: () => import('../views/Profile.vue') },
+        { path: 'mailbox', name: 'mailbox', component: () => import('../views/Mailbox.vue') },
       ],
     },
     {

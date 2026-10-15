@@ -150,6 +150,47 @@ export const authApi = {
     }),
 }
 
+// --- 账号信息面板 + 站内邮箱（本人视角） ---
+export interface UserProfile {
+  id: number
+  username: string
+  global_role: 'student' | 'admin'
+  bio: string
+  score: number
+  solve_count: number
+  avatar: string | null
+  created_at: string
+}
+export interface MailItem {
+  id: number
+  title: string
+  body_md: string
+  kind: 'invite' | string
+  competition_id: number | null
+  invite_code: string | null
+  read: boolean
+  created_at: string
+}
+export interface MailPage extends Paged<MailItem> {
+  unread: number
+}
+
+export const profileApi = {
+  profile: () => http.get<UserProfile>('/me/profile'),
+  updateBio: (bio: string) => http.patch<UserProfile>('/me/profile', { bio }),
+  uploadAvatar: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.upload<{ avatar: string | null }>('/me/avatar', form)
+  },
+  // 头像二进制（blob：头像 URL 需带 JWT，<img> 直连无法带头）。
+  avatarBlob: () => http.download('/me/avatar'),
+  mails: (page = 1, pageSize = 20) =>
+    http.get<MailPage>(`/me/mails?page=${page}&page_size=${pageSize}`),
+  unreadCount: () => http.get<{ unread: number }>('/me/mails/unread-count'),
+  markRead: (id: number) => http.post<{ read: boolean }>(`/me/mails/${id}/read`),
+}
+
 export const topicApi = {
   list: (page = 1) => http.get<Paged<Topic>>(`/topics?page=${page}`),
   rooms: (topicSlug: string) => http.get<TopicDetail>(`/topics/${topicSlug}`),
