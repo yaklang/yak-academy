@@ -55,6 +55,30 @@ components:
         id: { type: integer }
         username: { type: string }
         global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
+    UserProfile:
+      type: object
+      description: 账号信息面板（本人视角）：内置账号 ID、账号名称、简介、总得分、头像。
+      properties:
+        id: { type: integer, description: 内置账号 ID }
+        username: { type: string, description: 账号名称 }
+        global_role: { type: string, enum: [student, admin] }
+        bio: { type: string, description: 描述简介（≤500 字，可空） }
+        score: { type: integer, description: 总得分（事件派生数据，只读） }
+        solve_count: { type: integer, description: 解题数（事件派生数据，只读） }
+        avatar: { type: string, nullable: true, description: 头像 URL（未上传为 null） }
+        created_at: { type: string, description: 注册时间（RFC3339） }
+    MailItem:
+      type: object
+      description: 站内邮件（只收不发）：竞赛邀请等系统通知。
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        body_md: { type: string, description: 正文 Markdown }
+        kind: { type: string, enum: [invite], description: invite=竞赛邀请（附邀请码） }
+        competition_id: { type: integer, nullable: true, description: 竞赛邀请关联的竞赛 ID }
+        invite_code: { type: string, nullable: true, description: 竞赛邀请码（kind=invite 时必有） }
+        read: { type: boolean, description: 是否已读 }
+        created_at: { type: string, description: RFC3339 }
     Topic:
       type: object
       properties:
@@ -389,6 +413,126 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
         '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/profile:
+    get:
+      tags: [auth]
+      summary: 账号信息面板（含内置账号 ID、名称、简介、总得分、头像）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+    patch:
+      tags: [auth]
+      summary: 修改账号信息（描述简介）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bio: { type: string, description: 描述简介（≤500 字） }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/avatar:
+    get:
+      tags: [auth]
+      summary: 下载当前用户头像（未上传返回 404；浏览器 <img> 直连）
+      responses:
+        '200':
+          description: 头像文件（image/png|jpeg|gif|webp）
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [auth]
+      summary: 上传头像（multipart 字段 file；png/jpeg/gif/webp，≤2MB；重复上传覆盖）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avatar: { type: string, description: 头像 URL }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/mails:
+    get:
+      tags: [auth]
+      summary: 站内邮箱（只收不发）：收件列表，分页，新邮件在前
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      unread: { type: integer, description: 全部未读数（角标） }
+                      items: { type: array, items: { $ref: '#/components/schemas/MailItem' } }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/mails/unread-count:
+    get:
+      tags: [auth]
+      summary: 未读邮件数（头部角标轮询）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread: { type: integer }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/mails/{id}/read:
+    post:
+      tags: [auth]
+      summary: 标记邮件已读
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  read: { type: boolean }
+        '401': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /topics:
     get:

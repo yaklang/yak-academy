@@ -63,9 +63,19 @@ func (r *userRepo) UpdateGlobalRole(ctx context.Context, id uint, role model.Glo
 func (r *userRepo) UpdatePassword(ctx context.Context, id uint, passwordHash string, invalidBefore time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
 		Updates(map[string]any{
-			"password_hash":         passwordHash,
+			"password_hash":        passwordHash,
 			"token_invalid_before": invalidBefore,
 		}).Error
+}
+
+func (r *userRepo) UpdateBio(ctx context.Context, id uint, bio string) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
+		Update("bio", bio).Error
+}
+
+func (r *userRepo) UpdateAvatar(ctx context.Context, id uint, avatarFile string) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
+		Update("avatar_file", avatarFile).Error
 }
 
 type tokenRevocationRepo struct{ db *gorm.DB }

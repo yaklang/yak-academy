@@ -22,11 +22,12 @@ type Handlers struct {
 	Topics    *service.TopicService
 	Env       *service.EnvService
 	Badges    *service.BadgeService
+	Profile   *service.ProfileService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -40,6 +41,14 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)
 	r.Handle(http.MethodPost, "/api/v1/auth/logout", "", h.logout)
 	r.Handle(http.MethodPost, "/api/v1/auth/change-password", "", h.changePassword)
+	// 账号信息面板 + 头像 + 站内邮箱（本人视角）
+	r.Handle(http.MethodGet, "/api/v1/me/profile", "", h.myProfile)
+	r.Handle(http.MethodPatch, "/api/v1/me/profile", "", h.updateMyProfile)
+	r.Handle(http.MethodGet, "/api/v1/me/avatar", "", h.downloadAvatar)
+	r.Handle(http.MethodPost, "/api/v1/me/avatar", "", h.uploadAvatar)
+	r.Handle(http.MethodGet, "/api/v1/me/mails", "", h.listMyMails)
+	r.Handle(http.MethodGet, "/api/v1/me/mails/unread-count", "", h.myMailUnreadCount)
+	r.Handle(http.MethodPost, "/api/v1/me/mails/{id}/read", "", h.markMailRead)
 	r.Handle(http.MethodGet, "/api/v1/topics", "", h.listTopics)
 	r.Handle(http.MethodGet, "/api/v1/topics/{topicSlug}", "", h.getTopic)
 	r.Handle(http.MethodPut, "/api/v1/topics/{topicSlug}", "admin", h.updateTopic)
@@ -142,6 +151,110 @@ func (h *Handlers) changePassword(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// --- 账号信息面板 + 头像 + 站内邮箱（本人视角） ---
+
+// myProfile 账号信息面板：内置账号 ID、名称、简介、总得分、头像。
+func (h *Handlers) myProfile(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	p, err := h.Profile.Profile(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// updateMyProfile 修改账号信息（描述简介）。
+func (h *Handlers) updateMyProfile(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Bio string `json:"bio"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	p, err := h.Profile.UpdateBio(req.Context(), user.ID, body.Bio)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// maxAvatarUpload 头像 multipart 读取上限（与 service 2MB 一致，多 1KB 头部余量）。
+const maxAvatarUpload = service.MaxAvatarSize + 1<<10
+
+// uploadAvatar 上传头像（multipart file 字段；png/jpg/gif/webp ≤2MB）。
+func (h *Handlers) uploadAvatar(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, maxAvatarUpload)
+	file, hdr, err := req.FormFile("file")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	user := UserFrom(req.Context())
+	p, err := h.Profile.UploadAvatar(req.Context(), user.ID, hdr.Filename, file)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"avatar": p.Avatar})
+}
+
+// downloadAvatar 下载当前用户头像（未上传 404；浏览器 <img> 直连）。
+func (h *Handlers) downloadAvatar(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	f, ext, err := h.Profile.OpenAvatar(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", service.AvatarContentType(ext))
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.Copy(w, f)
+}
+
+// listMyMails 站内邮箱：分页收件列表 + 全量未读数。
+func (h *Handlers) listMyMails(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	page, pageSize := pageParams(req)
+	mp, err := h.Profile.ListMails(req.Context(), user.ID, page, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mp)
+}
+
+// myMailUnreadCount 未读邮件数（头部角标轮询）。
+func (h *Handlers) myMailUnreadCount(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	n, err := h.Profile.UnreadCount(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"unread": n})
+}
+
+// markMailRead 标记邮件已读。
+func (h *Handlers) markMailRead(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Profile.MarkRead(req.Context(), user.ID, uint(id)); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"read": true})
 }
 
 // resetPasswordByAdmin 管理员重置密码：目标用户全部 token 立即失效。
