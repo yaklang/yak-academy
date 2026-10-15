@@ -3,45 +3,17 @@
 // 容器管理、竞赛管理——教程与题目是两类独立上传资源）。
 // 用户与角色不再提供管理页：两档角色模型下角色是账号固有属性，
 // 管理员建号入口在竞赛「导入参赛者」（自动建号+初始密码）。
-// 底部提供"返回普通端"入口。教程/训练与管理端预览共用普通端视图。
-import { reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+// 改密码在账号信息面板（/profile）。底部提供"返回普通端"入口。
+// 教程/训练与管理端预览共用普通端视图。
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
-import { authApi } from '../api'
 
 const auth = useAuthStore()
 const router = useRouter()
-const pwdVisible = ref(false)
-const pwdForm = reactive({ current: '', next: '', confirm: '' })
-const pwdLoading = ref(false)
 
 function logout() {
   auth.logout()
   router.push('/login')
-}
-
-async function submitChangePassword() {
-  if (!pwdForm.current || pwdForm.next.length < 6) {
-    ElMessage.warning('请填写当前密码，且新密码至少 6 位')
-    return
-  }
-  if (pwdForm.next !== pwdForm.confirm) {
-    ElMessage.warning('两次输入的新密码不一致')
-    return
-  }
-  pwdLoading.value = true
-  try {
-    await authApi.changePassword(pwdForm.current, pwdForm.next)
-    pwdVisible.value = false
-    ElMessage.success('密码已修改，请重新登录')
-    await auth.logout()
-    router.push('/login')
-  } catch (e) {
-    ElMessage.error((e as Error).message)
-  } finally {
-    pwdLoading.value = false
-  }
 }
 </script>
 
@@ -64,7 +36,6 @@ async function submitChangePassword() {
           <div class="who" v-if="auth.user">{{ auth.user.username }}（管理员）</div>
         </div>
         <div>
-          <el-button v-if="auth.token" link size="small" @click="pwdVisible = true">改密码</el-button>
           <el-button v-if="auth.token" link size="small" @click="logout">登出</el-button>
         </div>
       </div>
@@ -73,24 +44,6 @@ async function submitChangePassword() {
       <router-view />
     </el-main>
   </el-container>
-
-  <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
-    <el-form label-width="90px">
-      <el-form-item label="当前密码">
-        <el-input v-model="pwdForm.current" type="password" show-password />
-      </el-form-item>
-      <el-form-item label="新密码">
-        <el-input v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
-      </el-form-item>
-      <el-form-item label="确认新密码">
-        <el-input v-model="pwdForm.confirm" type="password" show-password />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="pwdVisible = false">取消</el-button>
-      <el-button type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <style scoped>

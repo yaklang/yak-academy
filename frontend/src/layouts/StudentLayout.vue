@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 普通端布局：导航只有 教程 | 训练；头部右侧 XP、排行榜与用户区。
 // 仅管理员显示「进入管理端」；普通人完全看不到管理入口。
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+// 改密码在账号信息面板（/profile），布局头部只保留登录态操作。
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
-import { authApi, progressApi, profileApi } from '../api'
+import { progressApi, profileApi } from '../api'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -17,9 +17,6 @@ const xp = ref<number | null>(null)
 const completedRooms = ref<number | null>(null)
 const inProgressRooms = ref<number | null>(null)
 const unreadMails = ref(0)
-const pwdVisible = ref(false)
-const pwdForm = reactive({ current: '', next: '', confirm: '' })
-const pwdLoading = ref(false)
 
 async function refreshUnread() {
   try {
@@ -59,30 +56,6 @@ function logout() {
   auth.logout()
   router.push('/login')
 }
-
-async function submitChangePassword() {
-  if (!pwdForm.current || pwdForm.next.length < 6) {
-    ElMessage.warning('请填写当前密码，且新密码至少 6 位')
-    return
-  }
-  if (pwdForm.next !== pwdForm.confirm) {
-    ElMessage.warning('两次输入的新密码不一致')
-    return
-  }
-  pwdLoading.value = true
-  try {
-    await authApi.changePassword(pwdForm.current, pwdForm.next)
-    pwdVisible.value = false
-    ElMessage.success('密码已修改，请重新登录')
-    // 改密后全部 token 失效：清本地态回登录页
-    await auth.logout()
-    router.push('/login')
-  } catch (e) {
-    ElMessage.error((e as Error).message)
-  } finally {
-    pwdLoading.value = false
-  }
-}
 </script>
 
 <template>
@@ -106,31 +79,12 @@ async function submitChangePassword() {
         <el-badge v-if="unreadMails > 0" :value="unreadMails" :max="99" class="mail-badge" />
       </router-link>
       <router-link v-if="displayName" to="/profile" class="user-link">{{ displayName }}（{{ roleLabel }}）</router-link>
-      <el-button v-if="auth.token" link @click="pwdVisible = true">改密码</el-button>
       <el-button v-if="auth.token" link @click="logout">登出</el-button>
     </el-header>
     <el-main>
       <router-view />
     </el-main>
   </el-container>
-
-  <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
-    <el-form label-width="90px">
-      <el-form-item label="当前密码">
-        <el-input v-model="pwdForm.current" type="password" show-password />
-      </el-form-item>
-      <el-form-item label="新密码">
-        <el-input v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
-      </el-form-item>
-      <el-form-item label="确认新密码">
-        <el-input v-model="pwdForm.confirm" type="password" show-password />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="pwdVisible = false">取消</el-button>
-      <el-button type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <style scoped>

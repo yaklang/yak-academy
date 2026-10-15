@@ -51,8 +51,10 @@ html.dark {
   --el-box-shadow-lighter: 0 0 0 1px rgba(0, 230, 118, 0.25);
 }
 
-/* 主色按钮：荧光绿底配深色文字保证对比度 */
-html.dark .el-button--primary {
+/* 主色实底按钮：荧光绿底配深色文字保证对比度。
+   link/text 按钮（.is-link/.is-text，透明底，如表格「操作」列）不适用——
+   近黑文字落在暗色表格上不可见，保持荧光绿文字色。 */
+html.dark .el-button--primary:not(.is-link):not(.is-text) {
   --el-button-text-color: #0a0e14;
   --el-button-hover-text-color: #0a0e14;
   --el-button-active-text-color: #0a0e14;
