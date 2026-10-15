@@ -99,9 +99,14 @@ type Submission struct {
 	ID          uint             `gorm:"primaryKey" json:"id"`
 	UserID      uint             `gorm:"index" json:"user_id"`
 	ChallengeID uint             `gorm:"index" json:"challenge_id"`
-	Answer      string           `json:"-"`
-	Status      SubmissionStatus `gorm:"size:16;index" json:"status"`
-	Score       int              `json:"score"` // 判定通过后写入（submission.judged 事件派生）
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	// CompetitionID 竞赛提交的作用域（0 = 训练场）：防重复计分/动态计分/
+	// 竞赛排行榜派生均按此分组，竞赛首通不影响训练场首通判定。
+	CompetitionID uint `gorm:"index;default:0" json:"competition_id"`
+	// SourceIP 提交来源 IP（竞赛反作弊 IP 异常检测用；训练场提交不记录）。
+	SourceIP string             `gorm:"size:64" json:"-"`
+	Answer   string             `json:"-"`
+	Status   SubmissionStatus   `gorm:"size:16;index" json:"status"`
+	Score    int                `json:"score"` // 判定通过后写入（submission.judged 事件派生）
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
 }

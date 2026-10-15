@@ -73,8 +73,10 @@ async function downloadBlob(path: string) {
 export const http = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
-  del: <T>(path: string) => request<T>('DELETE', path),
+  // body 可选：契约中个别 DELETE 携带请求体（如竞赛题目解绑的 slugs）。
+  del: <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
   upload: <T>(path: string, form: FormData) => request<T>('POST', path, form),
   download: (path: string) => downloadBlob(path),
 }

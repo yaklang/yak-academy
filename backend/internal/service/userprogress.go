@@ -83,23 +83,35 @@ func (s *UserProgressService) Leaderboard(ctx context.Context, offset, limit int
 	return entries, total, nil
 }
 
-// Deriver 事件派生器：消费事件 → 增量更新 ScoreRecord/Progress。
+// Deriver 事件派生器：消费事件 → 增量更新 ScoreRecord/Progress/CompetitionScore。
 // 派生表唯一的合法写入者（架构文档 §3.7）。
 type Deriver struct {
-	scores   repo.ScoreRepo
-	progress repo.ProgressRepo
+	scores       repo.ScoreRepo
+	progress     repo.ProgressRepo
+	competitions repo.CompetitionRepo
+	// teams 队伍名查询（CompetitionScore 派生行冗余队伍快照用）。
+	teams func(ctx context.Context, competitionID uint) (map[uint]string, error)
 }
 
 func NewDeriver(s repo.ScoreRepo, p repo.ProgressRepo) *Deriver {
 	return &Deriver{scores: s, progress: p}
 }
 
+// SetCompetitionStores 竞赛派生依赖（AddScore 首通行 + 队伍快照）。
+// 由 main 组装时注入，避免 service 横向依赖（deriver 不 import competition service）。
+func (d *Deriver) SetCompetitionStores(competitions repo.CompetitionRepo, teams func(ctx context.Context, competitionID uint) (map[uint]string, error)) {
+	d.competitions = competitions
+	d.teams = teams
+}
+
 // judgedPayload submission.judged 事件的 payload 结构。
 type judgedPayload struct {
-	Correct      bool `json:"correct"`
-	Score        int  `json:"score"`
-	SubmissionID uint `json:"submission_id"`
-	ChallengeID  uint `json:"challenge_id"`
+	Correct       bool   `json:"correct"`
+	Score         int    `json:"score"`
+	SubmissionID  uint   `json:"submission_id"`
+	ChallengeID   uint   `json:"challenge_id"`
+	CompetitionID uint   `json:"competition_id"`
+	SourceIP      string `json:"source_ip"`
 }
 
 // completedPayload room.completed 事件的 payload 结构。
@@ -130,6 +142,11 @@ func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 		if err := d.scores.UpdateScore(ctx, ev.UserID, p.Score, 1); err != nil {
 			log.Printf("deriver: update score: %v", err)
 		}
+		// 竞赛提交：同事件另派生竞赛积分（CompetitionScore，event-sourcing-rules：
+		// 同一事实源 submission.judged 派生两份视图，训练场 XP 与竞赛榜互不串扰）。
+		if p.CompetitionID > 0 && d.competitions != nil {
+			d.deriveCompetitionScore(ctx, ev, p)
+		}
 	case model.EventHintUnlocked:
 		var p hintUnlockedPayload
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
@@ -152,6 +169,28 @@ func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 			log.Printf("deriver: mark completed: %v", err)
 		}
 	default:
+	}
+}
+
+// deriveCompetitionScore 竞赛首通 → CompetitionScore 派生行（AddScore 幂等：
+// 已有行 0 rows，事件重复消费安全）。队伍快照（TeamID）取自参赛记录所属队伍。
+// 派生失败只记日志：Event 表仍是事实源，重放可修复。
+func (d *Deriver) deriveCompetitionScore(ctx context.Context, ev model.Event, p judgedPayload) {
+	rec := &model.CompetitionScore{
+		CompetitionID: p.CompetitionID,
+		UserID:        ev.UserID,
+		ChallengeID:   p.ChallengeID,
+		Score:         p.Score,
+		SolvedAt:      ev.CreatedAt,
+	}
+	// 队伍快照：参赛记录是运营态而非派生表，直接读。
+	if part, err := d.competitions.FindParticipant(ctx, p.CompetitionID, ev.UserID); err != nil {
+		log.Printf("deriver: competition participant: %v", err)
+	} else if part != nil {
+		rec.TeamID = part.TeamID
+	}
+	if _, err := d.competitions.AddScore(ctx, rec); err != nil {
+		log.Printf("deriver: competition score: %v", err)
 	}
 }
 

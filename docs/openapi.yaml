@@ -15,6 +15,7 @@ tags:
   - name: admin
   - name: env
   - name: public
+  - name: competitions
 
 components:
   securitySchemes:
@@ -315,6 +316,183 @@ components:
         endpoint: { type: string }
         expire_at: { type: string }
         created_at: { type: string }
+    Competition:
+      type: object
+      description: 竞赛实体（管理端创建/配置；状态由当前时刻与起止时间派生）
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string, description: 竞赛说明（Markdown） }
+        start_time: { type: string, format: date-time, description: 开赛时间（RFC3339） }
+        end_time: { type: string, format: date-time, description: 结束时间（RFC3339）；结束后解除参赛锁定、开放 WP 提交 }
+        status: { type: string, enum: [scheduled, running, ended], description: scheduled=未开始 / running=进行中 / ended=已结束 }
+        created_at: { type: string }
+    CompetitionDetail:
+      type: object
+      description: 管理端竞赛详情（实体 + 计数统计）
+      allOf:
+        - $ref: '#/components/schemas/Competition'
+        - type: object
+          properties:
+            stats:
+              type: object
+              properties:
+                teams: { type: integer, description: 战队数 }
+                participants: { type: integer, description: 参赛人数 }
+                entered: { type: integer, description: 已入场人数 }
+                challenges: { type: integer, description: 题目数 }
+                instances: { type: integer, description: 竞赛容器数（全部状态） }
+                warnings: { type: integer, description: 反作弊警告数 }
+                writeups: { type: integer, description: 已提交 WP 人数 }
+    CompetitionChallengeItem:
+      type: object
+      description: 竞赛题目条目（参赛者视角含描述与通关状态）
+      properties:
+        id: { type: integer, description: challenge_id }
+        slug: { type: string }
+        title: { type: string }
+        category: { type: string }
+        difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+        score: { type: integer, description: 初始分值（竞赛内动态计分） }
+        has_env: { type: boolean, description: 是否定义容器环境 }
+        description_md: { type: string, description: 题目描述 Markdown（参赛者视角返回） }
+        solved: { type: boolean, description: 当前用户（队内）是否已通关 }
+    CompetitionParticipantItem:
+      type: object
+      description: 参赛人员条目（管理端；含队伍与入场状态）
+      properties:
+        id: { type: integer, description: participant_id }
+        user_id: { type: integer }
+        username: { type: string }
+        team_id:
+          type: integer
+          nullable: true
+          description: 所属战队（个人参赛为 null）
+        team_name:
+          type: string
+          nullable: true
+        invite_code: { type: string, description: 入场邀请码（管理员可重新分发） }
+        entered: { type: boolean, description: 是否已入场 }
+        entered_at:
+          type: string
+          nullable: true
+        last_ip: { type: string, description: 最近提交来源 IP（反作弊 IP 异常检测基线） }
+        created_at: { type: string }
+    CheatWarningItem:
+      type: object
+      description: 反作弊警告（只在管理端展示：原因、人员、战队）
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        username: { type: string }
+        team_id:
+          type: integer
+          nullable: true
+        team_name:
+          type: string
+          nullable: true
+        kind: { type: string, enum: [cross_team_flag, ip_anomaly], description: cross_team_flag=提交其他队伍 flag / ip_anomaly=来源 IP 异常 }
+        reason: { type: string, description: 命中说明（含证据要素） }
+        created_at: { type: string }
+    WriteupItem:
+      type: object
+      description: WP 提交条目（管理端；单位 = 题目 × 队伍/个人）
+      properties:
+        id: { type: integer }
+        challenge_id: { type: integer }
+        challenge_title: { type: string }
+        user_id: { type: integer, description: 最近一次提交/修改人（队伍模式为提交队员） }
+        username: { type: string }
+        team_name:
+          type: string
+          nullable: true
+          description: null = 个人参赛者
+        submitted_at: { type: string }
+        content: { type: string, description: WP 正文 Markdown }
+        zip_name: { type: string, description: 附带 zip 原文件名（未上传为空字符串） }
+    MyWriteupItem:
+      type: object
+      description: 本队/本人某题的 WP（参赛端）
+      properties:
+        challenge_id: { type: integer }
+        content_md: { type: string }
+        zip_name: { type: string, description: 已上传 zip 原文件名（未上传为空字符串） }
+        updated_at: { type: string }
+        updated_by: { type: string, description: 最近一次提交/修改人用户名 }
+    TeamLeaderboardEntry:
+      type: object
+      description: 战队排行榜条目（同分并列同名次）
+      properties:
+        rank: { type: integer }
+        team_id: { type: integer }
+        team_name: { type: string }
+        score: { type: integer, description: 队内成员得分合计（事件派生） }
+        solved_count: { type: integer, description: 队内成员通关题数 }
+        members: { type: array, items: { type: string }, description: 成员用户名列表 }
+        last_solve_at: { type: string, nullable: true, description: 最近一次通关时间（同分先达者靠前） }
+    CompLeaderboardEntry:
+      type: object
+      description: 竞赛个人排行榜条目（同分并列同名次）
+      properties:
+        rank: { type: integer }
+        user_id: { type: integer }
+        username: { type: string }
+        team_name:
+          type: string
+          nullable: true
+        score: { type: integer }
+        solved_count: { type: integer }
+        last_solve_at: { type: string, nullable: true, description: 最近一次通关时间（同分先达者靠前） }
+    ParticipantImportRequest:
+      type: object
+      description: |
+        参赛人员与队伍批量导入（JSON）。成员按用户名引用：
+        不存在的用户自动创建（随机初始密码，响应中返回供管理员分发）。
+      properties:
+        teams:
+          type: array
+          items:
+            type: object
+            required: [name, members]
+            properties:
+              name: { type: string, description: 战队名（竞赛内唯一） }
+              members: { type: array, items: { type: string }, description: 成员用户名 }
+        individuals: { type: array, items: { type: string }, description: 个人参赛者用户名（不编队） }
+    ParticipantImportResult:
+      type: object
+      description: 批量导入结果：新建账号（含初始密码）与全部参赛者邀请码
+      properties:
+        created_accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              username: { type: string }
+              initial_password: { type: string, description: 自动创建账号的随机初始密码（仅本次响应返回） }
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              username: { type: string }
+              team_name: { type: string, nullable: true }
+              invite_code: { type: string }
+              mail_delivered: { type: boolean, description: 站内邀请邮件是否投递成功 }
+    MyCompetitionEntry:
+      type: object
+      description: 当前用户参赛/锁定状态（前端路由守卫用）
+      properties:
+        competition:
+          allOf:
+            - $ref: '#/components/schemas/Competition'
+          nullable: true
+          description: 已入场的进行中竞赛（null = 未锁定）
+        locked: { type: boolean, description: true = 已入场且竞赛未结束，平台其余入口锁定 }
+        entered: { type: boolean, description: 是否已入场（该竞赛） }
+        team_name:
+          type: string
+          nullable: true
+          description: 所属战队（个人参赛为 null）
 
   responses:
     ErrorResp:
@@ -1337,3 +1515,506 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions:
+    get:
+      tags: [admin]
+      summary: 竞赛列表（分页，含派生状态 scheduled/running/ended）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Competition' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 创建竞赛（name/起止时间；描述可选）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, start_time, end_time]
+              properties:
+                name: { type: string, minLength: 1 }
+                description: { type: string }
+                start_time: { type: string, format: date-time }
+                end_time: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Competition' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}:
+    get:
+      tags: [admin]
+      summary: 竞赛详情（含 teams/participants/entered/challenges/instances/warnings/writeups 计数）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionDetail' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    patch:
+      tags: [admin]
+      summary: 修改竞赛配置（name/description/起止时间；至少一项）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { type: string }
+                description: { type: string }
+                start_time: { type: string, format: date-time }
+                end_time: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionDetail' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/challenges:
+    get:
+      tags: [admin]
+      summary: 竞赛题目列表
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/TrainingItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: |
+        竞赛题目绑定：批量导入题目 JSON（数组，challenge.json 格式，
+        单题失败整体拒绝）或绑定既有题目 slug。单题上传与批量导入统一走本接口。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: '#/components/schemas/ChallengeJSON' }
+                - type: array
+                  items: { $ref: '#/components/schemas/ChallengeJSON' }
+                - type: object
+                  required: [slugs]
+                  properties:
+                    slugs: { type: array, items: { type: string }, description: 绑定既有题目的 slug 列表 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added: { type: integer, description: 本次新增绑定的题目数 }
+                  items: { type: array, items: { $ref: '#/components/schemas/TrainingItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [admin]
+      summary: 解绑题目（body 传 slugs；运行中的竞赛不允许）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slugs]
+              properties:
+                slugs: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: integer }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/participants:
+    get:
+      tags: [admin]
+      summary: 参赛人员与队伍（分页：队伍富化进条目，含入场状态与最近提交 IP）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      teams: { type: array, items: { $ref: '#/components/schemas/TeamLeaderboardEntry' }, description: 队伍总览（含成员名） }
+                      items: { type: array, items: { $ref: '#/components/schemas/CompetitionParticipantItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 参赛人员与队伍批量导入（用户不存在自动创建；邀请邮件投递到站内邮箱）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParticipantImportRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParticipantImportResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/instances:
+    get:
+      tags: [admin]
+      summary: 本竞赛容器实例（该竞赛全部题目，分页；竞赛容器管理独立）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AdminLabInstance' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/warnings:
+    get:
+      tags: [admin]
+      summary: 反作弊警告列表（原因/人员/战队；只在管理端展示）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CheatWarningItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/writeups:
+    get:
+      tags: [admin]
+      summary: WP 提交情况（按题目一份；队伍模式全队共享，管理端按队伍/个人聚合查看）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/WriteupItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/writeups/{wid}/zip:
+    get:
+      tags: [admin]
+      summary: 下载某份 WP 的附带 zip（multipart 上传的原包）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: wid, in: path, required: true, schema: { type: integer, description: WP 条目 id } }
+      responses:
+        '200':
+          description: zip 文件流
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/leaderboard:
+    get:
+      tags: [admin]
+      summary: 竞赛排行榜（管理端可见；mode=team 按战队 / mode=individual 按个人）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: mode, in: query, schema: { type: string, enum: [team, individual], default: team } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [team, individual] }
+                  items: { type: array, items: { $ref: '#/components/schemas/TeamLeaderboardEntry' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/me:
+    get:
+      tags: [competitions]
+      summary: 当前用户参赛状态（已入场未结束 → locked=true，前端据此锁定平台入口）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyCompetitionEntry' }
+
+  /competitions/{id}/enter:
+    post:
+      tags: [competitions]
+      summary: 竞赛入场（站内邀请邮件携带邀请码；成功后锁定至比赛结束）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyCompetitionEntry' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/view:
+    get:
+      tags: [competitions]
+      summary: 竞赛首页（参赛者视角：题目列表、我的队伍、我的提交、倒计时）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  competition: { $ref: '#/components/schemas/Competition' }
+                  team_name: { type: string, nullable: true }
+                  teammates: { type: array, items: { type: string } }
+                  challenges: { type: array, items: { $ref: '#/components/schemas/CompetitionChallengeItem' } }
+                  my_submissions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        status: { type: string, enum: [pending, correct, incorrect] }
+                        score: { type: integer }
+                        created_at: { type: string }
+                  writeup_submitted: { type: boolean, description: 是否已提交任一题 WP（结束后；队伍模式任一队员提交即为 true） }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/challenges/{slug}/instance:
+    post:
+      tags: [competitions]
+      summary: 启动竞赛题目容器（单容器约束：仅限本竞赛题目）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabInstance' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '409':
+          description: 单容器冲突（同时只允许一个活跃容器）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/submissions:
+    post:
+      tags: [competitions]
+      summary: 竞赛内提交 flag（异步判定；提交其他队伍 flag 触发反作弊警告）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_slug, answer]
+              properties:
+                challenge_slug: { type: string }
+                answer: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/leaderboard:
+    get:
+      tags: [competitions]
+      summary: 竞赛排行榜（参赛者可见；mode=team / individual）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: mode, in: query, schema: { type: string, enum: [team, individual], default: team } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [team, individual] }
+                  items: { type: array, items: { $ref: '#/components/schemas/TeamLeaderboardEntry' } }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/writeups:
+    get:
+      tags: [competitions]
+      summary: 本队/本人全部 WP（比赛结束后；按题目一份，队伍模式任一队员可读改）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/MyWriteupItem' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/writeups/{challengeId}:
+    put:
+      tags: [competitions]
+      summary: 提交/修改某题 WP 文字（比赛结束后；队伍模式全队共享一份，可反复修改）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: challengeId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_md]
+              properties:
+                # 空串 = 仅保留已上传 zip、清空文字；文字与 zip 至少一项存在（否则 422）。
+                content_md: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/writeups/{challengeId}/zip:
+    post:
+      tags: [competitions]
+      summary: 上传/替换某题 WP 附带 zip（脚本与截图打包，≤20MB，需为合法 zip；覆盖旧包）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: challengeId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  zip_name: { type: string, description: 保存的原文件名 }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }

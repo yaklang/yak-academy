@@ -29,45 +29,61 @@ const autoAnswer = "__env_checkpoint_solved__"
 // JudgeService 异步判题。提交只入队并返回 pending；判定在 worker 内完成，
 // HTTP 请求路径禁止同步判定（event-sourcing-rules skill）。
 type JudgeService struct {
-	submissions repo.SubmissionRepo
-	challenges  repo.ChallengeRepo
-	instances   repo.LabInstanceRepo // flag_mode=instance 时读运行中实例 FlagValue
-	events      repo.EventRepo
-	bus         *eventbus.Bus
+	submissions  repo.SubmissionRepo
+	challenges   repo.ChallengeRepo
+	instances    repo.LabInstanceRepo // flag_mode=instance 时读运行中实例 FlagValue
+	events       repo.EventRepo
+	competitions repo.CompetitionRepo // 竞赛提交：队伍归属 + 反作弊检测
+	bus          *eventbus.Bus
 	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
 	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
 	queue chan uint
+	now   func() time.Time
 }
 
-func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances repo.LabInstanceRepo, ev repo.EventRepo, bus *eventbus.Bus) *JudgeService {
+func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances repo.LabInstanceRepo, ev repo.EventRepo, comp repo.CompetitionRepo, bus *eventbus.Bus) *JudgeService {
 	return &JudgeService{
-		submissions: sub,
-		challenges:  chal,
-		instances:   instances,
-		events:      ev,
-		bus:         bus,
-		queue:       make(chan uint, 256),
+		submissions:  sub,
+		challenges:   chal,
+		instances:    instances,
+		events:       ev,
+		competitions: comp,
+		bus:          bus,
+		queue:        make(chan uint, 256),
+		now:          time.Now,
 	}
 }
 
 // Submit 提交答案：写 submission(pending) + submission.created 事件，立即返回。
 // 哨兵答案保留给检测点自动判定，用户提交一律拒绝（防伪造环境判定）。
 func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint, answer string) (*model.Submission, error) {
+	return s.SubmitScoped(ctx, userID, challengeID, 0, answer, "")
+}
+
+// SubmitScoped 带作用域提交：competitionID>0 即竞赛提交（记录来源 IP，
+// 判定/计分/派生全部按竞赛分组）。训练场提交走 Submit（competitionID=0）。
+func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, competitionID uint, answer, sourceIP string) (*model.Submission, error) {
 	if answer == autoAnswer {
 		return nil, fmt.Errorf("%w: reserved answer", ErrValidation)
 	}
 	sub := &model.Submission{
-		UserID:      userID,
-		ChallengeID: challengeID,
-		Answer:      answer,
-		Status:      model.SubmissionPending,
+		UserID:        userID,
+		ChallengeID:   challengeID,
+		CompetitionID: competitionID,
+		SourceIP:      sourceIP,
+		Answer:        answer,
+		Status:        model.SubmissionPending,
 	}
 	if err := s.submissions.Create(ctx, sub); err != nil {
 		return nil, err
 	}
-	s.appendEvent(ctx, userID, model.EventSubmissionCreated, map[string]any{
+	created := map[string]any{
 		"submission_id": sub.ID, "challenge_id": challengeID,
-	})
+	}
+	if competitionID > 0 {
+		created["competition_id"] = competitionID
+	}
+	s.appendEvent(ctx, userID, model.EventSubmissionCreated, created)
 	// 队列满静默丢弃：submission 已落库（pending），由 pending 轮询兜底重投。
 	select {
 	case s.queue <- sub.ID:
@@ -113,7 +129,7 @@ func (s *JudgeService) AutoSolve(ctx context.Context, inst *model.LabInstance) (
 
 // IsSolved 当前用户该题是否已通关（Room 详情 Lab.solved 字段用）。
 func (s *JudgeService) IsSolved(ctx context.Context, userID, challengeID uint) bool {
-	solved, err := s.submissions.HasCorrect(ctx, userID, challengeID)
+	solved, err := s.submissions.HasCorrect(ctx, userID, challengeID, 0)
 	return err == nil && solved
 }
 
@@ -198,18 +214,27 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 			return
 		}
 	}
-	// 同一用户同一题已 correct → 不重复计分（score=0），派生器跳过零分。
+	// 同一用户同一题在相同作用域已 correct → 不重复计分（score=0），派生器跳过零分。
+	// 作用域 = competition_id：竞赛首通与训练场首通相互独立。
 	if correct {
-		if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID); err == nil && solved {
+		if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID, sub.CompetitionID); err == nil && solved {
 			s.finish(ctx, sub, model.SubmissionCorrect, 0)
 			return
 		}
 	}
 	if !correct {
+		// 竞赛提交：判定前跑反作弊检测（flag 命中他人实例 / 来源 IP 异常）。
+		if sub.CompetitionID > 0 {
+			s.detectCheat(ctx, sub, chal)
+		}
 		s.finish(ctx, sub, model.SubmissionIncorrect, 0)
 		return
 	}
-	score, err := s.dynamicScore(ctx, sub.ChallengeID)
+	// 竞赛提交：答对也检测（正确 flag 可能是"借来"的，跨队来源仍要告警）。
+	if sub.CompetitionID > 0 {
+		s.detectCheat(ctx, sub, chal)
+	}
+	score, err := s.dynamicScore(ctx, sub.ChallengeID, sub.CompetitionID)
 	if err != nil {
 		log.Printf("judge: dynamic score: %v", err)
 		s.finish(ctx, sub, model.SubmissionCorrect, 0)
@@ -246,16 +271,24 @@ func (s *JudgeService) matchAnswer(ctx context.Context, sub *model.Submission, c
 	return matchAnyFlag(flags, sub.Answer), nil
 }
 
-// finish 写回判定结果 + submission.judged 事件。
+// finish 写回判定结果 + submission.judged 事件。竞赛提交在 payload 中
+// 附带 competition_id 与来源 IP（竞赛派生器据此写 CompetitionScore 表）。
 func (s *JudgeService) finish(ctx context.Context, sub *model.Submission, status model.SubmissionStatus, score int) {
 	if err := s.submissions.UpdateStatus(ctx, sub.ID, status, score); err != nil {
 		log.Printf("judge: update status: %v", err)
 		return
 	}
-	s.appendEvent(ctx, sub.UserID, model.EventSubmissionJudged, map[string]any{
+	payload := map[string]any{
 		"submission_id": sub.ID, "challenge_id": sub.ChallengeID,
 		"correct": status == model.SubmissionCorrect, "score": score,
-	})
+	}
+	if sub.CompetitionID > 0 {
+		payload["competition_id"] = sub.CompetitionID
+		if sub.SourceIP != "" {
+			payload["source_ip"] = sub.SourceIP
+		}
+	}
+	s.appendEvent(ctx, sub.UserID, model.EventSubmissionJudged, payload)
 }
 
 // AppendRoomCompleted 判定首通（correct 且计分）后写 room.completed 事件
@@ -285,17 +318,120 @@ func matchAnyFlag(flags []model.Flag, answer string) bool {
 }
 
 // dynamicScore linear 衰减：value = max(initial - decay*n, minimum)，
-// n 为该题已通过人数（solve_count）。
-func (s *JudgeService) dynamicScore(ctx context.Context, challengeID uint) (int, error) {
+// n 为该题在指定作用域的已通过人数（solve_count 按竞赛分组）。
+func (s *JudgeService) dynamicScore(ctx context.Context, challengeID, competitionID uint) (int, error) {
 	chal, err := s.challenges.FindByID(ctx, challengeID)
 	if err != nil {
 		return 0, err
 	}
-	n, err := s.challenges.CountSolves(ctx, challengeID)
+	var n int64
+	if competitionID > 0 {
+		n, err = s.submissions.CountCorrectSolves(ctx, challengeID, competitionID)
+	} else {
+		n, err = s.challenges.CountSolves(ctx, challengeID)
+	}
 	if err != nil {
 		return 0, err
 	}
 	return linearDecay(chal.Score, int(n)), nil
+}
+
+// detectCheat 竞赛反作弊检测（只在管理端产生警告，不打断提交/判定本身）：
+//  1. cross_team_flag：提交串恰好命中"本竞赛其他队伍成员"的运行中实例 flag
+//     （flag_mode=instance 的题，flag 按实例生成，跨队共享即违规信号）；
+//  2. ip_anomaly：来源 IP 与本人参赛记录上的最近 IP 基线不一致
+//     （可能账号被他人代打/共享）。
+// 检测失败只记日志，不阻断判题主流程。
+func (s *JudgeService) detectCheat(ctx context.Context, sub *model.Submission, chal *model.Challenge) {
+	if s.competitions == nil {
+		return
+	}
+	part, err := s.competitions.FindParticipant(ctx, sub.CompetitionID, sub.UserID)
+	if err != nil {
+		log.Printf("judge: cheat detect participant: %v", err)
+		return
+	}
+	if part == nil {
+		return
+	}
+	// IP 异常：有基线且本次来源不同 → 告警并推进基线。
+	if sub.SourceIP != "" && part.LastIP != "" && part.LastIP != sub.SourceIP {
+		if err := s.competitions.CreateWarning(ctx, &model.CheatWarning{
+			CompetitionID: sub.CompetitionID,
+			UserID:        sub.UserID,
+			TeamID:        part.TeamID,
+			Kind:          model.WarningIPAnomaly,
+			Reason:        fmt.Sprintf("来源 IP 变化：上次 %s，本次 %s", part.LastIP, sub.SourceIP),
+		}); err != nil {
+			log.Printf("judge: create ip warning: %v", err)
+		}
+	}
+	if part.LastIP != sub.SourceIP {
+		if err := s.competitions.UpdateParticipantIP(ctx, sub.CompetitionID, sub.UserID, sub.SourceIP); err != nil {
+			log.Printf("judge: update participant ip: %v", err)
+		}
+	}
+	// 跨队 flag：仅 instance 模式题目有意义（每实例 flag 唯一）。
+	if chal.FlagMode != model.FlagModeInstance {
+		return
+	}
+	teams, err := s.competitions.ListTeams(ctx, sub.CompetitionID)
+	if err != nil {
+		log.Printf("judge: cheat detect teams: %v", err)
+		return
+	}
+	var rivalTeams []uint
+	for _, t := range teams {
+		if t.ID != part.TeamID {
+			rivalTeams = append(rivalTeams, t.ID)
+		}
+	}
+	if len(rivalTeams) == 0 {
+		return // 无队伍区分（全员个人参赛），跳过跨队检测
+	}
+	members, _, err := s.competitions.ListParticipants(ctx, sub.CompetitionID, 0, 1<<30)
+	if err != nil {
+		log.Printf("judge: cheat detect members: %v", err)
+		return
+	}
+	for _, m := range members {
+		if m.UserID == sub.UserID || m.TeamID == part.TeamID {
+			continue // 本人 / 同队不算
+		}
+		if !containsUint(rivalTeams, m.TeamID) {
+			continue
+		}
+		inst, err := s.instances.FindActive(ctx, m.UserID, sub.ChallengeID)
+		if err != nil {
+			log.Printf("judge: cheat detect instance: %v", err)
+			continue
+		}
+		if inst == nil || inst.Status != model.InstanceRunning || inst.FlagValue == "" {
+			continue
+		}
+		if compareFlag(sub.Answer, inst.FlagValue) {
+			if err := s.competitions.CreateWarning(ctx, &model.CheatWarning{
+				CompetitionID: sub.CompetitionID,
+				UserID:        sub.UserID,
+				TeamID:        part.TeamID,
+				Kind:          model.WarningCrossTeamFlag,
+				Reason: fmt.Sprintf("提交串命中其他队伍成员(user_id=%d)题目 %s 运行中实例的 flag",
+					m.UserID, chal.Slug),
+			}); err != nil {
+				log.Printf("judge: create cross-team warning: %v", err)
+			}
+			return // 一次提交最多记一条跨队警告
+		}
+	}
+}
+
+func containsUint(list []uint, v uint) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // linearDecay 计分公式（纯函数，便于测试）。

@@ -97,6 +97,12 @@ func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, ch
 // 无则按题目 env 定义创建（并发上限校验 → DB 落 creating → driver.Create → 回写 running）。
 // driver 失败回滚 DB 记录（status→stopped），不留半成品。
 func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uint) (*model.LabInstance, error) {
+	return s.EnsureInstanceScoped(ctx, userID, challengeID, 0)
+}
+
+// EnsureInstanceScoped 带竞赛作用域启动：competitionID>0 时实例归属该竞赛
+// （竞赛容器独立面板），单容器约束仍全局生效（一人一活跃容器）。
+func (s *EnvService) EnsureInstanceScoped(ctx context.Context, userID, challengeID, competitionID uint) (*model.LabInstance, error) {
 	if inst, err := s.instances.FindActive(ctx, userID, challengeID); err != nil {
 		return nil, err
 	} else if inst != nil {
@@ -141,6 +147,7 @@ func (s *EnvService) EnsureInstance(ctx context.Context, userID, challengeID uin
 	envVars["CHECKPOINT_URL"] = fmt.Sprintf("%s/api/v1/checkpoints/%s", s.publicURL, checkpointToken)
 	inst := &model.LabInstance{
 		UserID: userID, ChallengeID: challengeID,
+		CompetitionID:   competitionID,
 		Status:          model.InstanceCreating,
 		CheckpointToken: checkpointToken,
 	}
@@ -279,6 +286,24 @@ type AdminLabInstance struct {
 // ListInstances 全量实例分页（管理端容器面板；批量富化用户名与题目名）。
 func (s *EnvService) ListInstances(ctx context.Context, offset, limit int) ([]AdminLabInstance, int64, error) {
 	list, total, err := s.instances.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	userName, chals, err := s.lookupUsersAndChallenges(ctx, list)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]AdminLabInstance, 0, len(list))
+	for _, inst := range list {
+		out = append(out, buildAdminLabInstance(inst, userName, chals))
+	}
+	return out, total, nil
+}
+
+// ListCompetitionInstances 竞赛容器分页（管理端竞赛容器独立面板）：
+// 只含该竞赛绑定题目上启动的实例（competition_id = 指定竞赛）。
+func (s *EnvService) ListCompetitionInstances(ctx context.Context, competitionID uint, offset, limit int) ([]AdminLabInstance, int64, error) {
+	list, total, err := s.instances.ListByCompetition(ctx, competitionID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}

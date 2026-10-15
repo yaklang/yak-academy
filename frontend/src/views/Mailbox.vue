@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // 站内邮箱：只收不发——系统投递的竞赛邀请等通知。点开标记已读。
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { profileApi, type MailItem } from '../api'
 
+const router = useRouter()
 const mails = ref<MailItem[]>([])
 const total = ref(0)
 const unread = ref(0)
@@ -51,6 +53,12 @@ function rowClass({ row }: { row: MailItem }) {
 
 function kindLabel(kind: string) {
   return kind === 'invite' ? '竞赛邀请' : '通知'
+}
+
+// 邀请邮件 → 入场页（预填邀请码）。
+function goEnter() {
+  if (!current.value?.competition_id) return
+  router.push(`/competitions/enter/${current.value.competition_id}?code=${encodeURIComponent(current.value.invite_code ?? '')}`)
 }
 
 function fmt(ts: string) {
@@ -121,6 +129,13 @@ onMounted(load)
         :closable="false"
         class="invite"
       />
+      <!-- 竞赛邀请直达：邮件携带竞赛 ID + 邀请码，一键进入入场页（预填邀请码） -->
+      <el-button
+        v-if="current.kind === 'invite' && current.competition_id && current.invite_code"
+        type="primary"
+        class="enter-btn"
+        @click="goEnter"
+      >进入竞赛</el-button>
     </div>
   </el-dialog>
 </template>
@@ -133,4 +148,5 @@ onMounted(load)
 .mail-meta { display: flex; align-items: center; gap: 0.8rem; color: var(--el-text-color-secondary); font-size: 0.85rem; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .invite { margin-top: 0.5rem; }
+.enter-btn { margin-top: 0.8rem; }
 </style>
