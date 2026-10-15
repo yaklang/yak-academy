@@ -195,7 +195,7 @@ func parseLinks(s string) []model.ChallengeLink {
 // markSolved 逐题算当前用户是否已通关。
 func (s *TopicService) markSolved(ctx context.Context, userID uint, items []TrainingItem) {
 	for i := range items {
-		if solved, err := s.submissions.HasCorrect(ctx, userID, items[i].ID); err == nil {
+		if solved, err := s.submissions.HasCorrect(ctx, userID, items[i].ID, 0); err == nil {
 			items[i].Solved = solved
 		}
 	}
@@ -277,7 +277,7 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 		Hints:         toHintViews(hints, unlocked),
 		DescriptionMD: chal.Description,
 	}
-	if solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID); err == nil {
+	if solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID, 0); err == nil {
 		detail.Solved = solved
 	}
 	// enrichTutorial 按值传切片，这里原地拼回（单题场景）。

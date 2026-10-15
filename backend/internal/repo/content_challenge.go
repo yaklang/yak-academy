@@ -326,12 +326,34 @@ func (r *submissionRepo) ListPending(ctx context.Context) ([]uint, error) {
 	return ids, err
 }
 
-func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error) {
+// HasCorrect 防重复计分：作用域 = competition_id（0 = 训练场）。
+// 竞赛内首通与训练场首通相互独立，互不挤占计分。
+func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID, competitionID uint) (bool, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.Submission{}).
-		Where("user_id = ? AND challenge_id = ? AND status = ?", userID, challengeID, model.SubmissionCorrect).
+		Where("user_id = ? AND challenge_id = ? AND competition_id = ? AND status = ?",
+			userID, challengeID, competitionID, model.SubmissionCorrect).
 		Count(&n).Error
 	return n > 0, err
+}
+
+// CountCorrectSolves 指定作用域内该题的通过人数（动态计分 solve_count）。
+func (r *submissionRepo) CountCorrectSolves(ctx context.Context, challengeID, competitionID uint) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("challenge_id = ? AND competition_id = ? AND status = ?",
+			challengeID, competitionID, model.SubmissionCorrect).
+		Count(&n).Error
+	return n, err
+}
+
+// ListByCompetitionUser 参赛者本人的竞赛提交（最新在前，竞赛首页展示）。
+func (r *submissionRepo) ListByCompetitionUser(ctx context.Context, competitionID, userID uint, limit int) ([]model.Submission, error) {
+	var list []model.Submission
+	err := r.db.WithContext(ctx).
+		Where("competition_id = ? AND user_id = ?", competitionID, userID).
+		Order("id DESC").Limit(limit).Find(&list).Error
+	return list, err
 }
 
 func (r *submissionRepo) UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error {

@@ -112,6 +112,21 @@ func (r *labInstanceRepo) ListActiveByChallenge(ctx context.Context, challengeID
 	return list, err
 }
 
+// ListByCompetition 竞赛容器分页（管理端竞赛容器独立面板）。
+func (r *labInstanceRepo) ListByCompetition(ctx context.Context, competitionID uint, offset, limit int) ([]model.LabInstance, int64, error) {
+	var (
+		list  []model.LabInstance
+		total int64
+	)
+	if err := r.db.WithContext(ctx).Model(&model.LabInstance{}).
+		Where("competition_id = ?", competitionID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}
+
 func (r *labInstanceRepo) FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error) {
 	var i model.LabInstance
 	err := r.db.WithContext(ctx).

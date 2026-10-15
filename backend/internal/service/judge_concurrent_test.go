@@ -44,7 +44,7 @@ func TestJudgeConcurrentSubmitsScoreExactlyOnce(t *testing.T) {
 
 	bus := eventbus.New()
 	judge := NewJudgeService(repo.NewSubmissionRepo(gdb), chalRepo,
-		repo.NewLabInstanceRepo(gdb), repo.NewEventRepo(gdb), bus)
+		repo.NewLabInstanceRepo(gdb), repo.NewEventRepo(gdb), repo.NewCompetitionRepo(gdb), bus)
 	// 真实派生器订阅同一总线：并发事件流下 ScoreRecord 只允许落一次结算。
 	deriver := NewDeriver(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
 	bus.Subscribe(deriver.Handle)

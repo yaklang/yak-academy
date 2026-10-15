@@ -20,6 +20,36 @@ type Router struct {
 	mux    *http.ServeMux
 	auth   *service.AuthService
 	routes []RouteInfo
+	// entryLock 竞赛入场锁定检查（可选注入；nil = 未启用，测试/早期装配兼容）。
+	entryLock EntryLockChecker
+}
+
+// EntryLockChecker 竞赛入场锁：已入场且竞赛未结束的参赛者，
+// 平台其余接口一律 403（锁定直到比赛结束，登出重进同样受控）。
+type EntryLockChecker interface {
+	// LockedCompetition 返回 (竞赛ID, true) 表示该用户当前被锁定。
+	LockedCompetition(ctx context.Context, userID uint) (uint, bool)
+}
+
+// SetEntryLock 注入入场锁检查（main 装配后调用一次）。
+func (r *Router) SetEntryLock(c EntryLockChecker) { r.entryLock = c }
+
+// lockedAllowlist 锁定期间仍可访问的路径前缀：
+// /me*（登录态维持、账号面板、头像、站内邮箱邀请回看）、
+// /auth/logout（登出后重进仍被锁——锁定状态在服务端）、/competitions*（竞赛域）。
+var lockedAllowlist = []string{
+	"/api/v1/me",
+	"/api/v1/auth/logout",
+	"/api/v1/competitions",
+}
+
+func lockedPathAllowed(path string) bool {
+	for _, p := range lockedAllowlist {
+		if path == p || strings.HasPrefix(path, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // RouteInfo 单条路由的注册元数据（Routes() 快照，契约测试比对 openapi.yaml 用）。
@@ -46,6 +76,14 @@ func (r *Router) Handle(method, pattern string, required model.GlobalRole, h htt
 		}
 		if !r.authorize(w, req, user, required) {
 			return
+		}
+		// 竞赛入场锁：已入场未结束的参赛者只放行竞赛域接口（管理员不受限，
+		// 管理端需要跨域操作）。锁定与角色判定不同层：状态检查而非权限。
+		if r.entryLock != nil && user.GlobalRole.Normalize() != model.GlobalRoleAdmin {
+			if _, locked := r.entryLock.LockedCompetition(req.Context(), user.ID); locked && !lockedPathAllowed(req.URL.Path) {
+				writeError(w, &apiError{"FORBIDDEN", http.StatusForbidden, "competition in progress: only competition endpoints are accessible"})
+				return
+			}
 		}
 		ctx := context.WithValue(req.Context(), userKey, user)
 		h(w, req.WithContext(ctx))

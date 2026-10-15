@@ -17,7 +17,9 @@ type LabInstance struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	UserID      uint           `gorm:"index" json:"user_id"`
 	ChallengeID uint           `gorm:"index" json:"challenge_id"`
-	Status      InstanceStatus `gorm:"size:16;index" json:"status"`
+	// CompetitionID 所属竞赛（0 = 训练场实例）。竞赛容器走独立管理面板。
+	CompetitionID uint           `gorm:"index;default:0" json:"competition_id"`
+	Status        InstanceStatus `gorm:"size:16;index" json:"status"`
 	Endpoint    string         `json:"endpoint"`               // 实例访问地址
 	ExpireAt    time.Time      `gorm:"index" json:"expire_at"` // TTL 回收时间
 	// ExtendCount 已续期次数（治理上限 2 次：初始 1h + 2×1h = 最长 3h 占用）。

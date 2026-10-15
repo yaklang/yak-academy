@@ -46,7 +46,7 @@ func newCheckpointTestEnv(t *testing.T) (*Router, *gorm.DB, *service.EnvService)
 	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{real}"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	judge := service.NewJudgeService(subRepo, chalRepo, instanceRepo, evRepo, bus)
+	judge := service.NewJudgeService(subRepo, chalRepo, instanceRepo, evRepo, repo.NewCompetitionRepo(gdb), bus)
 	judge.StartWorker(ctx)
 	envSvc := service.NewEnvService(
 		instanceRepo, repo.NewInstanceLogRepo(gdb), chalRepo,
@@ -55,7 +55,7 @@ func newCheckpointTestEnv(t *testing.T) (*Router, *gorm.DB, *service.EnvService)
 	badges := service.NewBadgeService(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
 	auth := service.NewAuthService(repo.NewUserRepo(gdb), "test-secret")
 	router := NewRouter(auth)
-	NewHandlers(auth, nil, nil, judge, nil, nil, envSvc, badges, nil).Register(router)
+	NewHandlers(auth, nil, nil, judge, nil, nil, envSvc, badges, nil, nil).Register(router)
 	return router, gdb, envSvc
 }
 

@@ -14,20 +14,21 @@ import (
 
 // Handlers 持有全部 service 依赖。handler 只做参数解析 → 调 service → 统一响应。
 type Handlers struct {
-	Auth      *service.AuthService
-	Content   *service.ContentService
-	Challenge *service.ChallengeService
-	Judge     *service.JudgeService
-	Progress  *service.UserProgressService
-	Topics    *service.TopicService
-	Env       *service.EnvService
-	Badges    *service.BadgeService
-	Profile   *service.ProfileService
+	Auth         *service.AuthService
+	Content      *service.ContentService
+	Challenge    *service.ChallengeService
+	Judge        *service.JudgeService
+	Progress     *service.UserProgressService
+	Topics       *service.TopicService
+	Env          *service.EnvService
+	Badges       *service.BadgeService
+	Profile      *service.ProfileService
+	Competitions *service.CompetitionService
 }
 
 // NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -91,6 +92,30 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
 	r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
+
+	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions", "admin", h.adminCreateCompetition)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}", "admin", h.adminCompetitionDetail)
+	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}", "admin", h.adminUpdateCompetition)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/challenges", "admin", h.adminCompetitionChallenges)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/challenges", "admin", h.adminBindChallenges)
+	r.Handle(http.MethodDelete, "/api/v1/admin/competitions/{id}/challenges", "admin", h.adminUnbindChallenges)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/participants", "admin", h.adminCompetitionParticipants)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/participants", "admin", h.adminImportParticipants)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/instances", "admin", h.adminCompetitionInstances)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/warnings", "admin", h.adminCompetitionWarnings)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups", "admin", h.adminCompetitionWriteups)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/leaderboard", "admin", h.adminCompetitionLeaderboard)
+
+	// 竞赛：参赛者（入场/首页/容器/提交/榜单/WP——登录即可，入场校验在 service）
+	r.Handle(http.MethodGet, "/api/v1/competitions/me", "", h.myCompetitionEntry)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/enter", "", h.enterCompetition)
+	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/view", "", h.competitionView)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/challenges/{slug}/instance", "", h.competitionStartInstance)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/submissions", "", h.competitionSubmitFlag)
+	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/leaderboard", "", h.competitionLeaderboard)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/writeup", "", h.competitionSubmitWriteup)
 }
 
 // health 存活探针：无鉴权静态响应（部署编排健康检查用，不暴露内部状态）。

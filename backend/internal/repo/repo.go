@@ -97,8 +97,13 @@ type SubmissionRepo interface {
 	FindByID(ctx context.Context, id uint) (*model.Submission, error)
 	// ListPending 扫描滞留 pending 的提交（worker 启动补偿用）。
 	ListPending(ctx context.Context) ([]uint, error)
-	// HasCorrect 判定"该用户该题是否已通过"（防重复计分）。
-	HasCorrect(ctx context.Context, userID, challengeID uint) (bool, error)
+	// HasCorrect 判定"该用户该题（指定作用域）是否已通过"（防重复计分）。
+	// competitionID=0 表示训练场作用域；竞赛内首通与训练场首通相互独立。
+	HasCorrect(ctx context.Context, userID, challengeID, competitionID uint) (bool, error)
+	// CountCorrectSolves 该题在指定作用域的通过人数（动态计分 solve_count）。
+	CountCorrectSolves(ctx context.Context, challengeID, competitionID uint) (int64, error)
+	// ListByCompetitionUser 参赛者本人在该竞赛的提交（竞赛首页我的提交）。
+	ListByCompetitionUser(ctx context.Context, competitionID, userID uint, limit int) ([]model.Submission, error)
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
 }
 
@@ -163,6 +168,8 @@ type LabInstanceRepo interface {
 	ListActive(ctx context.Context) ([]model.LabInstance, error)
 	// ListActiveByChallenge 某题目全部用户的活跃实例（删除题目前销毁容器用）。
 	ListActiveByChallenge(ctx context.Context, challengeID uint) ([]model.LabInstance, error)
+	// ListByCompetition 竞赛容器分页（competition_id = 指定竞赛；管理端独立面板）。
+	ListByCompetition(ctx context.Context, competitionID uint, offset, limit int) ([]model.LabInstance, int64, error)
 	// FindByCheckpointToken 检测点回调解析：token 命中且实例仍活跃（creating/running），
 	// 无则返回 nil（回调 404 语义）。
 	FindByCheckpointToken(ctx context.Context, token string) (*model.LabInstance, error)
@@ -173,3 +180,50 @@ type InstanceLogRepo interface {
 	Create(ctx context.Context, l *model.InstanceLog) error
 	List(ctx context.Context, offset, limit int) ([]model.InstanceLog, int64, error)
 }
+
+// CompetitionRepo 竞赛域聚合仓库（competition/team/participant/binding/
+// warning/writeup/派生积分七表；SQLite 唯一实现）。
+type CompetitionRepo interface {
+	Create(ctx context.Context, c *model.Competition) error
+	FindByID(ctx context.Context, id uint) (*model.Competition, error)
+	List(ctx context.Context, offset, limit int) ([]model.Competition, int64, error)
+	// UpdateSelective 局部更新（map 形式字段，零值可更新）。
+	UpdateSelective(ctx context.Context, id uint, fields map[string]any) error
+
+	CreateTeam(ctx context.Context, t *model.Team) error
+	// FindTeamByName 竞赛内战队名查重（nil = 不存在）。
+	FindTeamByName(ctx context.Context, competitionID uint, name string) (*model.Team, error)
+	ListTeams(ctx context.Context, competitionID uint) ([]model.Team, error)
+
+	CreateParticipant(ctx context.Context, p *model.Participant) error
+	// FindParticipant 该竞赛该用户的参赛记录（nil = 未参赛）。
+	FindParticipant(ctx context.Context, competitionID, userID uint) (*model.Participant, error)
+	// FindParticipantByCode 邀请码解析（nil = 无效邀请码）。
+	FindParticipantByCode(ctx context.Context, code string) (*model.Participant, error)
+	ListParticipants(ctx context.Context, competitionID uint, offset, limit int) ([]model.Participant, int64, error)
+	CountEntered(ctx context.Context, competitionID uint) (int64, error)
+	// MarkEntered 入场（幂等：已入场返回 0）。
+	MarkEntered(ctx context.Context, id uint) (int64, error)
+	// UpdateParticipantIP 记录最近提交来源 IP（IP 异常检测基线）。
+	UpdateParticipantIP(ctx context.Context, competitionID, userID uint, ip string) error
+
+	// BindChallenges 幂等绑定题目（已绑定跳过），返回新增数。
+	BindChallenges(ctx context.Context, competitionID uint, challengeIDs []uint) (int64, error)
+	UnbindChallenges(ctx context.Context, competitionID uint, challengeIDs []uint) (int64, error)
+	ListBoundChallengeIDs(ctx context.Context, competitionID uint) ([]uint, error)
+
+	CreateWarning(ctx context.Context, w *model.CheatWarning) error
+	ListWarnings(ctx context.Context, competitionID uint) ([]model.CheatWarning, error)
+
+	UpsertWriteup(ctx context.Context, w *model.Writeup) error
+	ListWriteups(ctx context.Context, competitionID uint) ([]model.Writeup, error)
+
+	// AddScore 竞赛派生积分首通插入（重复返回 0 行）。仅事件派生器调用。
+	AddScore(ctx context.Context, rec *model.CompetitionScore) (int64, error)
+	// ListScores 竞赛全部派生积分行（排行榜聚合）。
+	ListScores(ctx context.Context, competitionID uint) ([]model.CompetitionScore, error)
+
+	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
+	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
+}
+

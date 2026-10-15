@@ -40,7 +40,7 @@ func newJudgeTestEnv(t *testing.T) *judgeEnv {
 	subRepo := repo.NewSubmissionRepo(gdb)
 	evRepo := repo.NewEventRepo(gdb)
 	bus := eventbus.New()
-	judge := NewJudgeService(subRepo, chalRepo, repo.NewLabInstanceRepo(gdb), evRepo, bus)
+	judge := NewJudgeService(subRepo, chalRepo, repo.NewLabInstanceRepo(gdb), evRepo, repo.NewCompetitionRepo(gdb), bus)
 	// 造两道题：static（100 分）与 regex（200 分）。
 	if err := chalRepo.Upsert(context.Background(), &model.Challenge{
 		Slug: "chal-static", Title: "静态题", Type: model.ChallengeStatic, Score: 100,
