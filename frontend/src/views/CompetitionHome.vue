@@ -210,6 +210,10 @@ onMounted(async () => {
 })
 
 async function checkEnded() {
+  if (!running.value) return
+  // running/ended 均派生自页面持有的旧 view，需先重取才能感知结束；
+  // 首请求后 view 已是 ended，第二次起直接短路，不重复触发刷新。
+  await loadView()
   if (!running.value || !ended.value) return
   if (compStore.lockedCompetitionId === compId) {
     await refreshAfterEnd()
