@@ -82,6 +82,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges", "admin", h.adminListChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin", "admin", h.importBuiltinChallenges)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodPatch, "/api/v1/admin/challenges/{slug}/visibility", "admin", h.updateChallengeVisibility)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.listAttachments)
@@ -703,6 +704,16 @@ func (h *Handlers) uploadChallengePackage(w http.ResponseWriter, req *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
+}
+
+// importBuiltinChallenges 管理端：一键导入内置训练题集（vulinbox；重复调用 = 更新）。
+func (h *Handlers) importBuiltinChallenges(w http.ResponseWriter, req *http.Request) {
+	res, err := h.Content.ImportBuiltinChallenges(req.Context())
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // adminListChallenges 管理端：题目全量列表（题目管理表格）。

@@ -1271,6 +1271,31 @@ paths:
                   slugs: { type: array, items: { type: string } }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/challenges/builtin:
+    post:
+      tags: [admin]
+      summary: 一键导入内置训练题集（vulinbox；重复调用 = 更新已导入题目）
+      description: |-
+        导入随后端二进制分发的官方内置训练集（基于 yaklang vulinbox 靶场引擎）。
+        行为：Docker 可用时先构建 vulinbox 基础镜像（失败则整体 422 不入库，
+        与题目包"构建失败不入库"语义一致），再逐题 upsert（slug 重复 = 更新）；
+        未配置 Docker 驱动（noop）时跳过镜像构建仅导入题目定义，image_built=false。
+      responses:
+        '200':
+          description: OK（返回题集版本、新增/更新计数与镜像构建状态）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string, description: 内置题集版本 }
+                  created: { type: integer, description: 本次新增题数 }
+                  updated: { type: integer, description: 本次更新题数 }
+                  slugs: { type: array, items: { type: string } }
+                  image_built: { type: boolean, description: 本次是否构建了基础镜像 }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/challenges/{slug}:
     delete:
       tags: [admin]
