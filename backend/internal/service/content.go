@@ -187,6 +187,12 @@ func (s *ContentService) parseZip(data []byte) (*parsedPackage, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.parseFiles(files)
+}
+
+// parseFiles 对"文件名 → 内容"map 解析 manifest/topics/rooms（与 zip 载体解耦：
+// 上传包与内置训练集教程共用；内置侧由 embed.FS 构造同名 map）。
+func (s *ContentService) parseFiles(files map[string][]byte) (*parsedPackage, error) {
 	raw, ok := files["manifest.yaml"]
 	if !ok {
 		return nil, errors.New("manifest.yaml is required")
@@ -284,6 +290,33 @@ func splitFrontMatter(raw []byte) (front, body []byte, err error) {
 
 // validate 管线第 3 步：字段与冲突校验。
 func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
+	if err := validateParsed(p); err != nil {
+		return err
+	}
+	for _, t := range p.Topics {
+		exists, err := s.topics.ExistsBySlug(ctx, t.Slug)
+		if err != nil {
+			return err
+		}
+		if exists && !s.ownedTopics[t.Slug] {
+			return fmt.Errorf("topic slug %q already exists", t.Slug)
+		}
+	}
+	for _, r := range p.Rooms {
+		exists, err := s.rooms.ExistsBySlug(ctx, r.Slug)
+		if err != nil {
+			return err
+		}
+		if exists && !s.ownedRooms[r.Slug] {
+			return fmt.Errorf("room slug %q already exists", r.Slug)
+		}
+	}
+	return nil
+}
+
+// validateParsed 静态校验（无 DB 依赖）：manifest 必填、slug 格式与去重、
+// title/difficulty——上传包与内置训练集教程共用；DB 归属检查见 validate。
+func validateParsed(p *parsedPackage) error {
 	if p.Name == "" {
 		return errors.New("manifest name is required")
 	}
@@ -305,13 +338,6 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		if t.Title == "" {
 			return fmt.Errorf("topic %s: title is required", t.Slug)
 		}
-		exists, err := s.topics.ExistsBySlug(ctx, t.Slug)
-		if err != nil {
-			return err
-		}
-		if exists && !s.ownedTopics[t.Slug] {
-			return fmt.Errorf("topic slug %q already exists", t.Slug)
-		}
 	}
 	seenRooms := map[string]bool{}
 	for _, r := range p.Rooms {
@@ -327,13 +353,6 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		}
 		if err := validateDifficulty(r.Difficulty); err != nil {
 			return fmt.Errorf("room %s: %w", r.Slug, err)
-		}
-		exists, err := s.rooms.ExistsBySlug(ctx, r.Slug)
-		if err != nil {
-			return err
-		}
-		if exists && !s.ownedRooms[r.Slug] {
-			return fmt.Errorf("room slug %q already exists", r.Slug)
 		}
 	}
 	return nil

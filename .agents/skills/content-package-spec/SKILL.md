@@ -9,7 +9,7 @@ description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内�
 
 - **禁止任何内置/硬编码教程内容**。所有教程与题目都来自管理员上传（教程 zip 包 / 题目 challenge.json）。代码里不得出现示例课程数据、demo 文章常量。
 - 唯一例外一：数据库迁移可以创建初始管理员账号，但**不得**创建任何 Topic/Room/Challenge 初始数据。
-- 唯一例外二：官方内置训练题集（基于 yaklang vulinbox 靶场引擎，`service/builtin/vulinbox/`，随二进制 go:embed 分发）。**仅**经管理员在管理端显式「一键导入」（`POST /admin/challenges/builtin`）走同一 `UploadChallenges` 校验 + upsert 管线生效，重复导入 = 更新；不得绕过该入口在迁移/启动时自动写入。这是平台唯一允许的随二进制分发的题目资产，新增其他内置题集必须先修订 docs/architecture.md 决策 2。
+- 唯一例外二：官方内置训练集（配套教程 + 题目，基于 yaklang vulinbox 靶场引擎，`service/builtin/vulinbox/`，随二进制 go:embed 分发）。**仅**经管理员在管理端显式「一键导入」（`POST /admin/challenges/builtin`）生效，重复导入 = 更新；不得绕过该入口在迁移/启动时自动写入。题目走同一 `UploadChallenges` 校验 + upsert 管线；配套教程（`tutorials/` 子目录，同一 manifest/topic.md/lesson.md front matter 解析规则）复用 `parseFiles` 解析与静态校验后**直接 upsert Topic/Room**——绕过包状态机，无 draft/publish，也不产生 ContentPackage 行。这是平台唯一允许的随二进制分发的内容资产，新增其他内置内容必须先修订 docs/architecture.md 决策 2。
 - **教程包只含教程**（文字 + 视频）；题目不经教程包上传——旧 lab.yaml 模式已废弃（解析代码仅为旧版本 Payload 回放兼容保留，apply 时忽略），新题目走 challenge.yml 包 zip 或兼容 challenge.json。
 
 ## 教程包结构（zip）
@@ -66,11 +66,12 @@ package.zip
 - `image: .`：平台解压构建上下文并 `docker build -t yak-academy/<slug>:latest`；Docker 不可用 → 422，禁止悬空 tag。
 - 远程镜像（非 `.`）不构建，仍要求包内含 Dockerfile + compose（文档/本地复现用）。
 
-### C. 内置训练题集（vulinbox，仅经管理端一键导入）
+### C. 内置训练集（vulinbox 教程 + 题目，仅经管理端一键导入）
 
-`POST /admin/challenges/builtin`（无 body）导入随二进制嵌入的 vulinbox 题集（`service/builtin/vulinbox/challenges.json`，schema 同 challenge.json）：
+`POST /admin/challenges/builtin`（无 body）导入随二进制嵌入的 vulinbox 训练集（题目 `service/builtin/vulinbox/challenges.json`，schema 同 challenge.json；配套教程 `tutorials/` 子目录，结构同教程包）：
 
-- Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败 → 422，整体不入库）；Noop 驱动跳过构建（`image_built=false`，仅导入定义）。
+- Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败 → 422，整体零写入）；Noop 驱动跳过构建（`image_built=false`，仅导入定义）。
+- 配套教程先于题目导入：`parseFiles` + 静态校验后直接 upsert Topic/Room（幂等，无 draft/publish、无 ContentPackage 行）；**一教程对一题**（`challenges.json` 每题 `tutorial_slug` 指向配套 Room，`yakit-` 前缀 slug 命名空间）。
 - 全题集 `flag_mode: shared` + 同一 `env`（vulinbox 单进程按路径路由多靶机，不消费 FLAG 环境变量，instance 模式无效）。
 - 全题集导入时统一注入 `bank: tutorial`（上传路径已禁 tutorial，此为唯一写入方），并带 `is_builtin=true` 来源标记（普通上传更新这些题时标记保留）。
 - vulinbox 二进制为 AGPL-3.0 上游独立程序（镜像内附 NOTICE），修改 Dockerfile 锁定的 sha256 前先读 docs/architecture.md 决策 2 的例外边界。

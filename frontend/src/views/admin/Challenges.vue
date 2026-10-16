@@ -200,7 +200,7 @@ const builtinImporting = ref(false)
 async function onImportBuiltin() {
   try {
     await ElMessageBox.confirm(
-      '将导入随平台分发的内置训练题集（基于 yaklang vulinbox 靶场引擎）。已导入的同名题目会被更新；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
+      '将导入随平台分发的内置训练集（基于 yaklang vulinbox 靶场引擎）：配套教程（一个教程对应一道题目）+ 11 道题目。已导入的同名内容会被更新；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
       '导入内置训练',
       { type: 'info', confirmButtonText: '导入/更新', cancelButtonText: '取消' },
     )
@@ -210,7 +210,7 @@ async function onImportBuiltin() {
   builtinImporting.value = true
   try {
     const resp = await adminChallengeApi.importBuiltin()
-    const summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题`
+    const summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题、教程 ${resp.rooms} 篇`
     if (resp.image_built) {
       ElMessage.success(`${summary}；靶场镜像已构建`)
     } else {

@@ -11,20 +11,20 @@ test.describe('内置训练一键导入', () => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
 
-    // 首次导入：确认弹窗 → 汇总提示（全新库为新增 11；KEEP_STATE 复跑可能全量更新，故只锚定句式）
+    // 首次导入：确认弹窗 → 汇总提示（全新库为新增 11 + 教程 11；KEEP_STATE 复跑可能全量更新，故只锚定句式）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
-    await expect(page.locator('.el-message', { hasText: /内置训练 v1\.0\.0：新增 \d+ 题、更新 \d+ 题/ })).toBeVisible()
+    await expect(page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ })).toBeVisible()
 
     // 管理表格出现内置题（覆盖 regex 判定题与 static 问答题各抽一）
     const table = page.locator('.el-table')
     await expect(table.locator('tr', { hasText: 'vulinbox-ssrf-basic' })).toBeVisible()
     await expect(table.locator('tr', { hasText: 'vulinbox-jwt-none' })).toBeVisible()
 
-    // 重复导入 = 更新：本次运行首轮已全量落库，第二轮必然新增 0、更新 11
+    // 重复导入 = 更新：本次运行首轮已全量落库，第二轮必然新增 0、更新 11、教程 11 篇（upsert 不重复）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
-    await expect(page.locator('.el-message', { hasText: '新增 0 题、更新 11 题' })).toBeVisible()
+    await expect(page.locator('.el-message', { hasText: '新增 0 题、更新 11 题、教程 11 篇' })).toBeVisible()
 
     // 学生题库：「教程题目」tab 专属内置题集，vulinbox 分类分组可见
     await loginAsStudent(page)
@@ -62,5 +62,19 @@ test.describe('内置训练一键导入', () => {
     await expect(
       page.getByRole('heading', { name: 'SSRF 基础：让服务器替你访问内网接口' }),
     ).toBeVisible()
+
+    // 配套教程（一教程对一题）：题目详情反向入口 → Room 详情正文与「前往题目」闭环
+    await page.getByRole('link', { name: /配套教程/ }).click()
+    await expect(page).toHaveURL(/\/topics\/yakit-server-side\/rooms\/yakit-ssrf-first$/)
+    await expect(page.locator('.lesson')).toContainText('Web Fuzzer')
+    await page.getByRole('link', { name: /前往配套题目练习/ }).click()
+    await expect(page).toHaveURL(/\/training\/vulinbox-ssrf-basic$/)
+
+    // 教程首页出现内置专题（与 global-setup 上传的种子教程包并存）
+    await page.getByRole('link', { name: '教程', exact: true }).click()
+    await expect(page.locator('.card-link', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
+    await expect(page.locator('.card-link', { hasText: 'SQL 注入实战' })).toBeVisible()
+    await page.locator('.card-link', { hasText: 'Yakit 上手与流量操控' }).click()
+    await expect(page.locator('.card-link', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
   })
 })
