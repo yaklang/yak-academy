@@ -55,13 +55,9 @@ type BuiltinImportResult struct {
 // 镜像构建失败则整体拒绝（与题目包「构建失败不入库」语义一致）；
 // 未配置 Docker 驱动（noop）时跳过构建仅导入定义，ImageBuilt=false。
 func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinImportResult, error) {
-	manifestRaw, err := fs.ReadFile(builtinFS, path.Join(builtinSetDir, "manifest.json"))
+	manifest, err := readBuiltinManifest()
 	if err != nil {
-		return nil, fmt.Errorf("%w: builtin manifest missing: %v", ErrValidation, err)
-	}
-	var manifest builtinManifest
-	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
-		return nil, fmt.Errorf("%w: builtin manifest corrupt: %v", ErrValidation, err)
+		return nil, err
 	}
 	challengesRaw, err := fs.ReadFile(builtinFS, path.Join(builtinSetDir, "challenges.json"))
 	if err != nil {
@@ -112,6 +108,64 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 		Rooms:      rooms,
 		Slugs:      slugs,
 		ImageBuilt: imageBuilt,
+	}, nil
+}
+
+// readBuiltinManifest 读取嵌入的训练集清单（manifest.json）。
+func readBuiltinManifest() (*builtinManifest, error) {
+	manifestRaw, err := fs.ReadFile(builtinFS, path.Join(builtinSetDir, "manifest.json"))
+	if err != nil {
+		return nil, fmt.Errorf("%w: builtin manifest missing: %v", ErrValidation, err)
+	}
+	var manifest builtinManifest
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		return nil, fmt.Errorf("%w: builtin manifest corrupt: %v", ErrValidation, err)
+	}
+	return &manifest, nil
+}
+
+// BuiltinImageStatus 管理端 vulinbox 基础镜像状态
+// （GET /admin/challenges/builtin/image；契约见 docs/openapi.yaml）。
+type BuiltinImageStatus struct {
+	Driver       string `json:"driver"`
+	ImageTag     string `json:"image_tag"`
+	ImagePresent bool   `json:"image_present"`
+	CanBuild     bool   `json:"can_build"`
+}
+
+// BuiltinImageStatus 查询基础镜像状态：驱动由 builder 装配类型推断
+// （NoopDriver = noop）；镜像存在性只在 Docker 驱动下探测（noop 恒缺失）。
+func (s *ContentService) BuiltinImageStatus(ctx context.Context) (*BuiltinImageStatus, error) {
+	manifest, err := readBuiltinManifest()
+	if err != nil {
+		return nil, err
+	}
+	canBuild := s.builtinBuildable()
+	return &BuiltinImageStatus{
+		Driver:       map[bool]string{true: "docker", false: "noop"}[canBuild],
+		ImageTag:     manifest.ImageTag,
+		ImagePresent: canBuild && dockerImageExists(ctx, manifest.ImageTag),
+		CanBuild:     canBuild,
+	}, nil
+}
+
+// BuildBuiltinImageOnly 仅构建基础镜像、不写任何内容表
+// （POST /admin/challenges/builtin/image；与一键导入的镜像构建步骤同一实现：
+// 解包嵌入 image/ 上下文 → docker build 内从官方 OSS 下载 vulinbox 二进制）。
+// noop 驱动（无 Docker）返回 ErrValidation（对外 422）。
+func (s *ContentService) BuildBuiltinImageOnly(ctx context.Context) (*BuiltinImageStatus, error) {
+	manifest, err := readBuiltinManifest()
+	if err != nil {
+		return nil, err
+	}
+	if !s.builtinBuildable() {
+		return nil, fmt.Errorf("%w: docker driver unavailable; cannot build builtin image", ErrValidation)
+	}
+	if err := s.buildBuiltinImage(ctx, manifest.ImageTag); err != nil {
+		return nil, err
+	}
+	return &BuiltinImageStatus{
+		Driver: "docker", ImageTag: manifest.ImageTag, ImagePresent: true, CanBuild: true,
 	}, nil
 }
 

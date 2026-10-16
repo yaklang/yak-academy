@@ -596,3 +596,19 @@ func (DockerDriver) Build(ctx context.Context, tag, contextDir string) error {
 	}
 	return nil
 }
+
+// DockerAvailable 探测 docker CLI 与守护进程是否可用（EnvDriver=auto 的选择依据）。
+// 超时 5s：Windows 上进程内首次 docker CLI 调用冷启动可超 2s。
+func DockerAvailable(ctx context.Context) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(probeCtx, "docker", "info").Run() == nil
+}
+
+// dockerImageExists 探测本地镜像是否已构建（vulinbox 镜像状态展示）。
+// 包级 var 缝隙：单测替换为受控实现，不依赖真实 docker。
+var dockerImageExists = func(ctx context.Context, tag string) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(probeCtx, "docker", "image", "inspect", tag).Run() == nil
+}

@@ -70,7 +70,7 @@ package.zip
 
 `POST /admin/challenges/builtin`（无 body）导入随二进制嵌入的 vulinbox 训练集（题目 `service/builtin/vulinbox/challenges.json`，schema 同 challenge.json；配套教程 `tutorials/` 子目录，结构同教程包）：
 
-- Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败 → 422，整体零写入）；Noop 驱动跳过构建（`image_built=false`，仅导入定义）。
+- Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败 → 422，整体零写入）；Noop 驱动跳过构建（`image_built=false`，仅导入定义）。镜像也可独立构建/查状态：`GET/POST /admin/challenges/builtin/image`（管理端题目页镜像状态卡；POST 仅构建不写内容表）。
 - 配套教程先于题目导入：`parseFiles` + 静态校验后直接 upsert Topic/Room（幂等，无 draft/publish、无 ContentPackage 行）；**一教程对一题**（`challenges.json` 每题 `tutorial_slug` 指向配套 Room，`yakit-` 前缀 slug 命名空间）。
 - 全题集 `flag_mode: shared` + 同一 `env`（vulinbox 单进程按路径路由多靶机，不消费 FLAG 环境变量，instance 模式无效）。
 - 全题集导入时统一注入 `bank: tutorial`（上传路径已禁 tutorial，此为唯一写入方），并带 `is_builtin=true` 来源标记（普通上传更新这些题时标记保留）。

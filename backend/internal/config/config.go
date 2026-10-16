@@ -12,7 +12,8 @@ type Config struct {
 	AdminUsername string
 	AdminPassword string
 
-	// EnvDriver 实例驱动：noop（默认，接口 501）/ docker（docker CLI 需可用）。
+	// EnvDriver 实例驱动：auto（默认，启动时探测 docker CLI，可用即 docker，否则 noop）/
+	// docker（显式要求 docker CLI 可用）/ noop（环境接口 501）。
 	EnvDriver string
 
 	// AttachmentsDir 题目附件落盘根目录（<dir>/<slug>/<filename>）。
@@ -45,7 +46,7 @@ func Load() *Config {
 		JWTSecret:      getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
 		AdminUsername:  getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
 		AdminPassword:  getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
-		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "noop"),
+		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "auto"),
 		AttachmentsDir:  getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
 		AvatarsDir:     getenv("ACADEMY_AVATARS_DIR", "avatars"),
 		WriteupsDir:    getenv("ACADEMY_WRITEUPS_DIR", "writeups"),

@@ -8,7 +8,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminChallengeApi, BANK_LABELS,
-  type ChallengeAttachment, type ChallengeBank, type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
+  type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -262,6 +262,42 @@ async function onImportBuiltin() {
   }
 }
 
+// ===== vulinbox 靶场镜像状态（OSS 构建） =====
+// 状态卡数据源 GET /admin/challenges/builtin/image；构建走 docker build
+// （内从官方 OSS 下载二进制，约 1-3 分钟），noop 驱动不可构建。
+const imageStatus = ref<BuiltinImageStatus | null>(null)
+const imageBuilding = ref(false)
+
+async function loadImageStatus() {
+  try {
+    imageStatus.value = await adminChallengeApi.builtinImageStatus()
+  } catch {
+    imageStatus.value = null // 状态查询失败不阻塞页面
+  }
+}
+
+async function onBuildBuiltinImage() {
+  try {
+    await ElMessageBox.confirm(
+      '将从官方 OSS 下载 vulinbox 二进制并构建靶场基础镜像（约 165MB，需联网，耗时约 1-3 分钟）。构建期间请勿关闭页面。是否继续？',
+      '构建 vulinbox 镜像',
+      { type: 'info', confirmButtonText: '开始构建', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  imageBuilding.value = true
+  try {
+    const resp = await adminChallengeApi.buildBuiltinImage()
+    ElMessage.success(`镜像已构建：${resp.image_tag}`)
+    await loadImageStatus()
+  } catch (e) {
+    ElMessage.error({ message: `镜像构建失败：${(e as Error).message}`, duration: 8000 })
+  } finally {
+    imageBuilding.value = false
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -375,7 +411,10 @@ function difficultyType(d: TrainingItem['difficulty']) {
   return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadImageStatus()
+})
 </script>
 
 <template>
@@ -415,6 +454,36 @@ onMounted(load)
       {{ specVisible ? '收起格式规范' : '查看格式规范' }}
     </el-button>
   </div>
+
+  <!-- vulinbox 靶场镜像状态：学生端启动实验环境的前提（驱动 + 本地镜像 + 从 OSS 构建） -->
+  <el-card v-if="imageStatus" class="image-card" shadow="never">
+    <div class="image-status">
+      <span class="image-label">vulinbox 靶场镜像</span>
+      <el-tag :type="imageStatus.driver === 'docker' ? 'success' : 'info'" size="small">
+        驱动：{{ imageStatus.driver === 'docker' ? 'Docker' : '未启用（noop，环境启动 501）' }}
+      </el-tag>
+      <el-tag
+        :type="imageStatus.image_present ? 'success' : imageStatus.can_build ? 'warning' : 'danger'"
+        size="small"
+      >
+        {{ imageStatus.image_present ? '镜像已就绪' : imageStatus.can_build ? '镜像缺失' : '镜像未构建（需 Docker）' }}
+      </el-tag>
+      <code class="image-tag">{{ imageStatus.image_tag }}</code>
+      <el-button
+        size="small"
+        type="primary"
+        :loading="imageBuilding"
+        :disabled="!imageStatus.can_build"
+        :title="imageStatus.can_build
+          ? 'docker build 内从官方 OSS 下载二进制（约 165MB，1-3 分钟）'
+          : '服务端未装配 Docker 驱动（ACADEMY_ENV_DRIVER），无法构建镜像'"
+        @click="onBuildBuiltinImage"
+      >
+        从 OSS 构建镜像
+      </el-button>
+      <el-button size="small" text @click="loadImageStatus">刷新</el-button>
+    </div>
+  </el-card>
 
   <el-collapse-transition>
     <el-card v-show="specVisible" class="spec">
@@ -627,6 +696,11 @@ onMounted(load)
 <style scoped>
 .hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
 .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+.image-card { margin-bottom: 1rem; }
+.image-card :deep(.el-card__body) { padding: 0.6rem 1rem; }
+.image-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.image-label { font-weight: 600; }
+.image-tag { color: var(--el-text-color-secondary); font-size: 0.82rem; }
 .spec h3 { margin-top: 0; }
 .spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
 .spec .json { line-height: 1.5; font-family: Consolas, monospace; }

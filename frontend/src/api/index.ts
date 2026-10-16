@@ -304,6 +304,14 @@ export interface BuiltinImportResult {
   image_built: boolean
 }
 
+// vulinbox 基础镜像状态：driver=noop 时环境接口 501、不可构建。
+export interface BuiltinImageStatus {
+  driver: 'docker' | 'noop'
+  image_tag: string
+  image_present: boolean
+  can_build: boolean
+}
+
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
@@ -315,6 +323,11 @@ export const adminChallengeApi = {
   // 一键导入内置训练集（教程 + 题目，一教程对一题）。幂等：重复调用 = 更新。
   importBuiltin: () =>
     http.post<BuiltinImportResult>('/admin/challenges/builtin'),
+  // vulinbox 基础镜像：状态查询 / 仅构建（docker build 内从官方 OSS 下载二进制，约 1-3 分钟）。
+  builtinImageStatus: () =>
+    http.get<BuiltinImageStatus>('/admin/challenges/builtin/image'),
+  buildBuiltinImage: () =>
+    http.post<BuiltinImageStatus>('/admin/challenges/builtin/image'),
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
   // 单题完整定义（编辑回填；含 flag 值，仅 admin）。
   getJSON: (slug: string) => http.get<ChallengeFullJSON>(`/admin/challenges/${slug}`),

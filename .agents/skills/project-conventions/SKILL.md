@@ -23,6 +23,16 @@ api → service → repo → model
 - 禁止绕过 repo 直接开 DB 连接。
 - 禁止引入 Casbin / Redis / Kafka 等中间件（第一版自实现 + 进程内广播，见 docs/architecture.md）。
 
+## Git 提交信息（强制）
+
+- commit message（subject 与 body）一律**英文**。Conventional Commits 前缀保留，描述用英文，例：`feat(challenge): trim admin ops column to edit/delete`。
+- 历史中文 commit 保持原样，**禁止**为统一语言重写已有历史。
+
+## Git 冲突解决（强制）
+
+- 分支与 main 冲突时一律 **rebase**（`git fetch && git rebase origin/main`，解冲突后 `push --force-with-lease`），**禁止**用 merge commit 方式合并 main 进特性分支——保持分支历史线性、PR diff 干净。
+- rebase 后必须重跑受影响的检查（go test / vue-tsc 等）再推送。
+
 ## 目录职责表
 
 | 目录 | 职责 |
