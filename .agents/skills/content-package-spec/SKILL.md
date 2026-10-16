@@ -60,7 +60,7 @@ package.zip
 | `type` + `flags` | flag 匹配类型 static/regex；取首个 flag |
 | `flag_mode` | `shared`（默认，题目级共享）/ `instance`（每实例唯一，模板含 `{token}`） |
 | `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` 且**上传时 docker build** |
-| `hints` / `tutorial_slug` | 可选 |
+| `hints` / `tutorial_slug` / `bank` | 可选；bank = 题库 tab（tutorial 默认 / ctf / acm），见 B 节 |
 
 - `flag_mode: instance` **必须**同时声明容器（image/port）；模板示例：`flag{lab-{token}}`。
 - `image: .`：平台解压构建上下文并 `docker build -t yak-academy/<slug>:latest`；Docker 不可用 → 422，禁止悬空 tag。
@@ -72,6 +72,7 @@ package.zip
 
 - Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败 → 422，整体不入库）；Noop 驱动跳过构建（`image_built=false`，仅导入定义）。
 - 全题集 `flag_mode: shared` + 同一 `env`（vulinbox 单进程按路径路由多靶机，不消费 FLAG 环境变量，instance 模式无效）。
+- 全题集 `bank: tutorial`，导入后带 `is_builtin=true` 来源标记（普通上传更新这些题时标记保留）。
 - vulinbox 二进制为 AGPL-3.0 上游独立程序（镜像内附 NOTICE），修改 Dockerfile 锁定的 sha256 前先读 docs/architecture.md 决策 2 的例外边界。
 
 参考样例（不自动加载）：`examples/challenges/vulinbox-xss-reflected/`。
@@ -89,6 +90,7 @@ package.zip
   "description_md": "# 背景\n任务目标……",
   "score": 100,
   "flag_mode": "shared",
+  "bank": "tutorial",
   "challenge": { "type": "static", "flag": "flag{answer}" },
   "env": { "image": "vulnapp:1.0", "port": 80 },
   "hints": [ { "title": "提示一", "content": "看 UNION", "cost": 10 } ],
@@ -96,7 +98,9 @@ package.zip
 }
 ```
 
-- 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug`/`flag_mode` 可选。
+- 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug`/`flag_mode`/`bank` 可选。
+- `bank`：`tutorial`（默认，教程题目/内部题库）/ `ctf` / `acm`——题库页三 tab 的分组键，每次 upsert 整体重写。
+- `is_builtin` 不是上传字段：它是导入来源标记，仅 `POST /admin/challenges/builtin` 置 true（题库页「是否内置」过滤依据），普通上传/编辑 upsert 不触碰、也不清除。
 - `challenge.type`：`static`（明文 flag）/ `regex`（可编译正则）。
 - `flag_mode`：`shared`|`instance`；`instance` 时 flag 为含 `{token}` 的模板，且必须有 env。
 - `env` 整段可选；**要么都填要么都不填**。image 非空即 `has_env: true`。

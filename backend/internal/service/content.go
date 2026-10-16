@@ -481,10 +481,11 @@ func readZipFile(f *zip.File) ([]byte, error) {
 
 // challengeJSON 管理员上传的题目定义固定格式（单对象或对象数组）。
 type challengeJSON struct {
-	Slug          string           `json:"slug"`
-	Title         string           `json:"title"`
-	Category      string           `json:"category"`
-	Difficulty    model.Difficulty `json:"difficulty"`
+	Slug          string             `json:"slug"`
+	Title         string             `json:"title"`
+	Category      string             `json:"category"`
+	Bank          model.ChallengeBank `json:"bank"`
+	Difficulty    model.Difficulty   `json:"difficulty"`
 	DescriptionMD string           `json:"description_md"`
 	Score         int              `json:"score"`
 	FlagMode      model.FlagMode   `json:"flag_mode"`
@@ -533,6 +534,7 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 		}
 		chal := &model.Challenge{
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
+			Bank: resolveBank(c.Bank),
 			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
 			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
@@ -567,6 +569,9 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	}
 	if !slugPattern.MatchString(c.Category) {
 		return fmt.Errorf("%w: %s: category must match [a-z0-9-]+", ErrValidation, where)
+	}
+	if c.Bank != "" && c.Bank != model.BankTutorial && c.Bank != model.BankCTF && c.Bank != model.BankACM {
+		return fmt.Errorf("%w: %s: bank must be tutorial, ctf or acm", ErrValidation, where)
 	}
 	if err := validateDifficulty(c.Difficulty); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrValidation, where, err)
@@ -642,6 +647,14 @@ func resolveFlagMode(m model.FlagMode) model.FlagMode {
 	return m
 }
 
+// resolveBank 题库 tab 缺省教程题目（内部题库默认归置）。
+func resolveBank(b model.ChallengeBank) model.ChallengeBank {
+	if b == "" {
+		return model.BankTutorial
+	}
+	return b
+}
+
 // DeleteChallenge 删除题目：存在通关记录拒绝（409）；
 // 否则先销毁全部运行中容器，再级联删 flags/hints/lab_instances 行。
 // 提交事件历史 append-only 保留（event-sourcing-rules skill），题目行删除后
@@ -677,11 +690,12 @@ func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) err
 // challengeYML 实训常用 challenge.yml（扩展 difficulty/port/tutorial_slug/slug/flag_mode）。
 // 容器题必须同时提供 Dockerfile 与 docker-compose.yml（或 compose.yml）。
 type challengeYML struct {
-	Slug          string           `yaml:"slug"`
-	Name          string           `yaml:"name"`
-	Title         string           `yaml:"title"` // 兼容 name/title
-	Category      string           `yaml:"category"`
-	Difficulty    model.Difficulty `yaml:"difficulty"`
+	Slug          string             `yaml:"slug"`
+	Name          string             `yaml:"name"`
+	Title         string             `yaml:"title"` // 兼容 name/title
+	Category      string             `yaml:"category"`
+	Bank          model.ChallengeBank `yaml:"bank"`
+	Difficulty    model.Difficulty   `yaml:"difficulty"`
 	Description   string           `yaml:"description"`
 	DescriptionMD string           `yaml:"description_md"`
 	Value         int              `yaml:"value"`
@@ -830,6 +844,7 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 		out.Title = y.Name
 	}
 	out.Category = y.Category
+	out.Bank = y.Bank
 	out.Difficulty = y.Difficulty
 	out.DescriptionMD = y.DescriptionMD
 	if out.DescriptionMD == "" {

@@ -116,12 +116,14 @@ func (s *TopicService) FindChallengeBySlug(ctx context.Context, slug string) (*m
 	return chal, nil
 }
 
-// TrainingItem 训练场条目：独立题目资源的列表视角（含当前用户状态与可选教程关联）。
+// TrainingItem 题库条目：独立题目资源的列表视角（含当前用户状态与可选教程关联）。
 type TrainingItem struct {
 	ID            uint             `json:"id"`
 	Slug          string           `json:"slug"`
 	Title         string           `json:"title"`
 	Category      string           `json:"category"`
+	Bank          string           `json:"bank"`
+	IsBuiltin     bool             `json:"is_builtin"`
 	Difficulty    model.Difficulty `json:"difficulty"`
 	Score         int              `json:"score"`
 	Solved        bool             `json:"solved"`
@@ -133,7 +135,7 @@ type TrainingItem struct {
 	TutorialSlug  string           `json:"tutorial_slug"`
 	TutorialTitle string           `json:"tutorial_title"`
 	// TutorialTopicSlug 关联教程所属 topic（前端 Room 详情路由需要 topic 段）。
-	TutorialTopicSlug string `json:"tutorial_topic_slug"`
+	TutorialTopicSlug string         `json:"tutorial_topic_slug"`
 }
 
 // ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints（未解锁正文为空）。
@@ -174,6 +176,7 @@ func (s *TopicService) enrichTutorial(ctx context.Context, items []TrainingItem)
 func toTrainingItem(c model.Challenge) TrainingItem {
 	return TrainingItem{
 		ID: c.ID, Slug: c.Slug, Title: c.Title, Category: c.Category,
+		Bank: string(resolveBank(c.Bank)), IsBuiltin: c.IsBuiltin,
 		Difficulty: c.Difficulty, Score: c.Score, HasEnv: c.Image != "",
 		IsVisible: c.IsVisible, ReleaseAt: c.ReleaseAt,
 		Links: parseLinks(c.Links), TutorialSlug: c.TutorialSlug,
@@ -201,9 +204,11 @@ func (s *TopicService) markSolved(ctx context.Context, userID uint, items []Trai
 	}
 }
 
-// ListTraining 训练场列表：仅对学生可见（is_visible 且已到发布时间）的题目分页。
-func (s *TopicService) ListTraining(ctx context.Context, userID uint, offset, limit int) ([]TrainingItem, int64, error) {
-	chals, total, err := s.challenges.ListVisible(ctx, s.now(), offset, limit)
+// ListTraining 题库列表：仅对学生可见（is_visible 且已到发布时间）的题目分页。
+// bank 空 = 全部题库 tab；builtin nil = 不限来源。
+func (s *TopicService) ListTraining(ctx context.Context, userID uint, bank string, builtin *bool, offset, limit int) ([]TrainingItem, int64, error) {
+	filter := repo.ChallengeListFilter{Bank: bank, IsBuiltin: builtin}
+	chals, total, err := s.challenges.ListVisible(ctx, s.now(), filter, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -227,7 +232,7 @@ type AdminChallengeItem struct {
 
 // AdminListChallenges 管理端：题目全量列表（分页，含 has_env 与教程关联富化）。
 func (s *TopicService) AdminListChallenges(ctx context.Context, offset, limit int) ([]AdminChallengeItem, int64, error) {
-	chals, total, err := s.challenges.List(ctx, offset, limit)
+	chals, total, err := s.challenges.List(ctx, repo.ChallengeListFilter{}, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 普通端布局：导航只有 教程 | 训练；头部右侧 XP、排行榜与用户区。
+// 普通端布局：导航只有 教程 | 题库；头部右侧 XP、排行榜与用户区。
 // 仅管理员显示「进入管理端」；普通人完全看不到管理入口。
 // 改密码在账号信息面板（/profile），布局头部只保留登录态操作。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -64,7 +64,7 @@ function logout() {
       <span class="brand"><span class="prompt">$</span> yak-academy</span>
       <nav>
         <router-link to="/">教程</router-link>
-        <router-link to="/training">训练</router-link>
+        <router-link to="/training">题库</router-link>
       </nav>
       <div class="spacer" />
       <span v-if="xp !== null" class="xp">XP: {{ xp }}</span>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// 管理端布局：教程 | 训练 | 资源管理 三组导航（资源管理含教程管理、题目管理、
+// 管理端布局：教程 | 题库 | 资源管理 三组导航（资源管理含教程管理、题目管理、
 // 容器管理、竞赛管理——教程与题目是两类独立上传资源）。
 // 用户与角色不再提供管理页：两档角色模型下角色是账号固有属性，
 // 管理员建号入口在竞赛「导入参赛者」（自动建号+初始密码）。
 // 改密码在账号信息面板（/profile）。底部提供"返回普通端"入口。
-// 教程/训练与管理端预览共用普通端视图。
+// 教程/题库与管理端预览共用普通端视图。
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 
@@ -23,7 +23,7 @@ function logout() {
       <div class="brand"><span class="prompt">#</span> yak-academy 管理端</div>
       <nav>
         <router-link to="/admin/tutorials">教程</router-link>
-        <router-link to="/admin/training">训练</router-link>
+        <router-link to="/admin/training">题库</router-link>
         <div class="group-title">资源管理</div>
         <router-link to="/admin/panel/tutorials" class="sub">教程管理</router-link>
         <router-link to="/admin/panel/challenges" class="sub">题目管理</router-link>

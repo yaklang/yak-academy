@@ -18,13 +18,27 @@ const (
 	FlagModeInstance FlagMode = "instance"
 )
 
+// ChallengeBank 题库 tab 分类（题库页 教程题目/CTF 题目/ACM 题目）。
+type ChallengeBank string
+
+const (
+	// BankTutorial 教程题目：内部题库默认归置（含官方内置训练题集）。
+	BankTutorial ChallengeBank = "tutorial"
+	// BankCTF CTF 题目。
+	BankCTF ChallengeBank = "ctf"
+	// BankACM ACM 题目。
+	BankACM ChallengeBank = "acm"
+)
+
 // Challenge 独立题目资源（管理员经 challenge.json / challenge.yml 上传）。
 // tutorial_slug 可选关联教程 Room；不关联的纯题目也合法。
 type Challenge struct {
 	ID       uint          `gorm:"primaryKey" json:"id"`
 	Slug     string        `gorm:"uniqueIndex;size:128" json:"slug"`
 	Title    string        `gorm:"size:256" json:"title"`
-	Category string        `gorm:"index;size:128" json:"category"` // 分类 slug，训练场分组键
+	Category string        `gorm:"index;size:128" json:"category"` // 分类 slug，题库页分组键
+	// Bank 题库 tab（tutorial/ctf/acm）；历史行迁移时由列默认值补 tutorial。
+	Bank      ChallengeBank `gorm:"index;size:16;default:tutorial" json:"bank"`
 	Difficulty Difficulty `gorm:"size:16" json:"difficulty"`
 	// Description 题目描述 Markdown（背景/任务目标）。
 	Description string `gorm:"type:text" json:"description_md"`
@@ -41,6 +55,8 @@ type Challenge struct {
 	TutorialSlug string `gorm:"index;size:128" json:"tutorial_slug"`
 	// IsVisible 可见性开关（管理端控制；false 时学生端训练场/详情/实例/提交全部 404）。
 	IsVisible bool `gorm:"default:true" json:"is_visible"`
+	// IsBuiltin 来自官方内置训练题集（导入时标记；普通上传/编辑不改写此来源标记）。
+	IsBuiltin bool `json:"is_builtin"`
 	// ReleaseAt 定时发布时间（nil = 不限，立即语义；未来时间学生端隐藏，到期自动可见）。
 	ReleaseAt *time.Time `json:"release_at"`
 	CreatedAt time.Time      `json:"created_at"`

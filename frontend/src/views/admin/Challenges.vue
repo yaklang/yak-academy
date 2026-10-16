@@ -5,8 +5,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  adminChallengeApi,
-  type ChallengeAttachment, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
+  adminChallengeApi, BANK_LABELS,
+  type ChallengeAttachment, type ChallengeBank, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -28,6 +28,7 @@ const form = reactive({
   slug: '',
   title: '',
   category: '',
+  bank: 'tutorial' as ChallengeBank,
   difficulty: 'apprentice' as ChallengeJSON['difficulty'],
   score: 100,
   flag_mode: 'shared' as Required<ChallengeJSON>['flag_mode'],
@@ -48,6 +49,7 @@ function buildPayload(): ChallengeJSON {
     slug: form.slug.trim(),
     title: form.title.trim(),
     category: form.category.trim(),
+    bank: form.bank,
     difficulty: form.difficulty,
     score: form.score,
     flag_mode: form.flag_mode,
@@ -74,6 +76,7 @@ function fillForm(chal: ChallengeJSON) {
   form.slug = chal.slug ?? ''
   form.title = chal.title ?? ''
   form.category = chal.category ?? ''
+  form.bank = chal.bank ?? 'tutorial'
   form.difficulty = chal.difficulty ?? 'apprentice'
   form.score = chal.score ?? 100
   form.flag_mode = chal.flag_mode ?? 'shared'
@@ -424,6 +427,7 @@ onMounted(load)
   "slug": "sqli-login-bypass",        // 必填 [a-z0-9-]+
   "title": "SQL 注入登录绕过",          // 必填
   "category": "sql-injection",         // 必填 [a-z0-9-]+
+  "bank": "tutorial",                  // 题库 tab：tutorial（默认）| ctf | acm
   "difficulty": "apprentice",          // apprentice | practitioner | expert
   "description_md": "# 背景…",         // Markdown 描述（可选）
   "score": 100,
@@ -446,6 +450,12 @@ onMounted(load)
     <el-table-column prop="slug" label="Slug" width="180" show-overflow-tooltip />
     <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
     <el-table-column prop="category" label="分类" width="140" show-overflow-tooltip />
+    <el-table-column label="题库" width="130">
+      <template #default="{ row }">
+        <span>{{ BANK_LABELS[row.bank as ChallengeBank] ?? '教程题目' }}</span>
+        <el-tag v-if="row.is_builtin" size="small" class="builtin-tag">内置</el-tag>
+      </template>
+    </el-table-column>
     <el-table-column label="难度" width="110">
       <template #default="{ row }">
         <el-tag :type="difficultyType(row.difficulty)" size="small">{{ row.difficulty }}</el-tag>
@@ -509,6 +519,11 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="分类" required>
           <el-input v-model="form.category" placeholder="sql-injection" />
+        </el-form-item>
+        <el-form-item label="题库">
+          <el-select v-model="form.bank">
+            <el-option v-for="(label, b) in BANK_LABELS" :key="b" :value="b" :label="`${label}（${b}）`" />
+          </el-select>
         </el-form-item>
         <el-form-item label="难度" required>
           <el-select v-model="form.difficulty">

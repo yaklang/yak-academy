@@ -92,6 +92,12 @@ func (s *ChallengeService) UpsertChallenge(ctx context.Context, c *model.Challen
 	return s.challenges.Upsert(ctx, c, flags, hints)
 }
 
+// MarkBuiltin 批量改写题目来源标记（内置题集导入置 true；返回受影响行数）。
+// 普通上传路径不经此方法，管理端编辑内置题不会丢失来源标记。
+func (s *ChallengeService) MarkBuiltin(ctx context.Context, slugs []string, builtin bool) (int64, error) {
+	return s.challenges.MarkBuiltin(ctx, slugs, builtin)
+}
+
 // compareFlag 恒时比较，防时序侧信道。
 // 禁止改为 == 比较（event-sourcing-rules skill）。
 func compareFlag(got, want string) bool {

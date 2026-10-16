@@ -81,6 +81,10 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 	if err != nil {
 		return nil, err
 	}
+	// 普通上传路径不触碰来源标记；内置导入在此显式置 true（题库页「是否内置」过滤依据）。
+	if _, err := s.challenge.MarkBuiltin(ctx, slugs, true); err != nil {
+		return nil, err
+	}
 	return &BuiltinImportResult{
 		Version:    manifest.Version,
 		Created:    created,

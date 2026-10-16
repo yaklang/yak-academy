@@ -95,7 +95,7 @@ func (r *challengeRepo) Upsert(ctx context.Context, c *model.Challenge, flags []
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "slug"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"title", "category", "difficulty", "description", "type", "score", "flag_mode", "image", "port", "links", "tutorial_slug",
+				"title", "category", "bank", "difficulty", "description", "type", "score", "flag_mode", "image", "port", "links", "tutorial_slug",
 			}),
 		}).Create(c).Error; err != nil {
 			return err
@@ -158,34 +158,59 @@ func (r *challengeRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.Cha
 	return list, err
 }
 
-func (r *challengeRepo) List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error) {
+func (r *challengeRepo) List(ctx context.Context, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error) {
 	var (
 		list  []model.Challenge
 		total int64
 	)
-	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Scopes(challengeFilterScope(filter)).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
+	err := r.db.WithContext(ctx).Scopes(challengeFilterScope(filter)).Order("id").Offset(offset).Limit(limit).Find(&list).Error
 	return list, total, err
 }
 
-// ListVisible 学生端训练场列表：is_visible 且（无发布时间 或 已到发布时间）。
+// ListVisible 学生端题库列表：is_visible 且（无发布时间 或 已到发布时间）。
 // release_at 存 TEXT（驱动序列化为带时区偏移的字符串），SQL 比较走字典序：
 // 写入与查询必须统一 UTC，否则跨时区字符串比较会把未到期的题判为可见。
-func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, offset, limit int) ([]model.Challenge, int64, error) {
+func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error) {
 	visible := "is_visible = ? AND (release_at IS NULL OR release_at <= ?)"
 	now = now.UTC()
 	var (
 		list  []model.Challenge
 		total int64
 	)
-	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Where(visible, true, now).Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.Challenge{}).Where(visible, true, now).
+		Scopes(challengeFilterScope(filter)).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	err := r.db.WithContext(ctx).Where(visible, true, now).
+		Scopes(challengeFilterScope(filter)).
 		Order("id").Offset(offset).Limit(limit).Find(&list).Error
 	return list, total, err
+}
+
+// challengeFilterScope 题库过滤条件（零值字段不参与 WHERE）。
+func challengeFilterScope(f ChallengeListFilter) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if f.Bank != "" {
+			db = db.Where("bank = ?", f.Bank)
+		}
+		if f.IsBuiltin != nil {
+			db = db.Where("is_builtin = ?", *f.IsBuiltin)
+		}
+		return db
+	}
+}
+
+// MarkBuiltin 批量改写来源标记（内置题集导入置 true）。slugs 为空直接返回。
+func (r *challengeRepo) MarkBuiltin(ctx context.Context, slugs []string, builtin bool) (int64, error) {
+	if len(slugs) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Model(&model.Challenge{}).
+		Where("slug IN ?", slugs).Update("is_builtin", builtin)
+	return res.RowsAffected, res.Error
 }
 
 // UpdateVisibility 更新可见性/发布时间。三态：isVisible/releaseAt 为 nil = 不改；

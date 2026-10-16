@@ -17,7 +17,7 @@ test.describe('认证旅程', () => {
   test('student 登录：核心导航可达、无管理入口', async ({ page }) => {
     await loginAsStudent(page)
     await expect(page.getByRole('link', { name: '教程' })).toBeVisible()
-    await expect(page.getByRole('link', { name: '训练' })).toBeVisible()
+    await expect(page.getByRole('link', { name: '题库' })).toBeVisible()
     await expect(page.getByRole('link', { name: '进入管理端' })).toHaveCount(0)
     // 普通人直入管理路由被守卫弹回普通端
     await page.goto('/admin/panel/challenges')

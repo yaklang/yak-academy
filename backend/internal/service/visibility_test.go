@@ -55,7 +55,7 @@ func TestSetVisibilityHidesFromStudents(t *testing.T) {
 	ctx := context.Background()
 
 	// 初始全部可见。
-	items, total, err := topicSvc.ListTraining(ctx, 1, 0, 20)
+	items, total, err := topicSvc.ListTraining(ctx, 1, "", nil, 0, 20)
 	if err != nil || total != 3 || len(items) != 3 {
 		t.Fatalf("initial list: %v %d %d", err, total, len(items))
 	}
@@ -64,7 +64,7 @@ func TestSetVisibilityHidesFromStudents(t *testing.T) {
 	if _, err := chalSvc.SetVisibility(ctx, "vis-a", VisibilityUpdate{IsVisible: boolPtr(false)}); err != nil {
 		t.Fatal(err)
 	}
-	items, total, err = topicSvc.ListTraining(ctx, 1, 0, 20)
+	items, total, err = topicSvc.ListTraining(ctx, 1, "", nil, 0, 20)
 	if err != nil || total != 2 || len(items) != 2 {
 		t.Fatalf("list after hide: %v %d %d", err, total, len(items))
 	}
@@ -101,7 +101,7 @@ func TestReleaseAtFutureHidesUntilDue(t *testing.T) {
 	if _, err := topicSvc.FindChallengeBySlug(ctx, "vis-b"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("future release visible: %v", err)
 	}
-	_, total, err := topicSvc.ListTraining(ctx, 1, 0, 20)
+	_, total, err := topicSvc.ListTraining(ctx, 1, "", nil, 0, 20)
 	if err != nil || total != 2 {
 		t.Fatalf("list with future release: %v %d", err, total)
 	}
@@ -204,7 +204,7 @@ func TestReleaseAtUTCStoredAgainstLocalNow(t *testing.T) {
 	}
 
 	// 未到期：列表 SQL 比较（release_at <= now）不得把未来题误判为可见。
-	_, total, err := topicSvc.ListTraining(ctx, 1, 0, 20)
+	_, total, err := topicSvc.ListTraining(ctx, 1, "", nil, 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
