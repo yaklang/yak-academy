@@ -5,10 +5,10 @@
 FROM alpine:3.21
 
 ARG VULINBOX_BIN_URL=https://oss-qn.yaklang.com/vulinbox/latest/vulinbox_linux_amd64
-ARG VULINBOX_SHA256=e3bb30a813546c0ca1e0b59cbde16e5490eda4e7dc7b655f9db2edf7a12e43ba
+ARG VULINBOX_SHA256=8d113c86ef8ca852db330063a6273f62cfde1594238fc7362905d8e0266907fc
 
 RUN apk add --no-cache ca-certificates wget \
-    && wget -q -O /usr/local/bin/vulinbox "${VULINBOX_BIN_URL}" \
+    && wget -q --tries=3 --timeout=60 -O /usr/local/bin/vulinbox "${VULINBOX_BIN_URL}" \
     && echo "${VULINBOX_SHA256}  /usr/local/bin/vulinbox" | sha256sum -c - \
     && chmod +x /usr/local/bin/vulinbox
 

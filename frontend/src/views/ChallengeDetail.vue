@@ -131,6 +131,9 @@ async function startInstance() {
     const err = e as ApiError
     if (err.status === 409 && err.data?.current) {
       promptInstanceConflict(err.data.current as AdminLabInstance)
+    } else if (err.status === 501) {
+      // 驱动未装配（noop stub）：给管理员可行动的提示，而非裸 "not implemented yet"。
+      ElMessage.error('平台未启用容器环境：服务端未装配 Docker 驱动（ACADEMY_ENV_DRIVER），请联系管理员')
     } else {
       ElMessage.error(`环境启动失败：${err.message}`)
     }

@@ -99,7 +99,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 单用户同时仅一个活跃容器；TTL 默认 1h，`POST .../instance/extend` 续期不重建。
 - `flag_mode=instance`：启动时生成唯一 flag 写入 `LabInstance.flag_value` 并注入容器；判题只接受 running 实例上的值。
 - 每实例生成 `checkpoint_token`（`LabInstance.checkpoint_token` 列，API JSON 隐藏）：注入 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL`（`ACADEMY_PUBLIC_URL` 前缀，默认 `host.docker.internal`）；实例销毁 token 即失效。
-- Docker 驱动实现；未配置 daemon 时 noop（启动/构建返回明确错误）。
+- Docker 驱动实现；驱动选择 `ACADEMY_ENV_DRIVER`：`auto`（默认，启动探测 docker CLI，可用即 docker，否则 noop）/ `docker` / `noop`。noop（启动/构建返回明确错误 501/422）。
+- vulinbox 基础镜像可独立于「一键导入」构建：`GET/POST /admin/challenges/builtin/image`（状态查询 / 仅构建——docker build 内从官方 OSS 下载二进制；管理端题目页镜像状态卡）。
 
 ### 3.6 userprogress — 进度
 
@@ -190,6 +191,8 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `DELETE /content/packages/{id}` | admin | 删除内容包（历代版本写入的教程一并清扫，不可恢复；事件历史保留） |
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
 | `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新） |
+| `GET /admin/challenges/builtin/image` | admin | vulinbox 基础镜像状态（驱动 / 镜像是否就绪 / 可否构建） |
+| `POST /admin/challenges/builtin/image` | admin | 仅构建基础镜像（docker build 内从官方 OSS 下载二进制；noop 422） |
 | `GET /admin/challenges` | admin | 题目管理表格 |
 | `GET /admin/challenges/{slug}` | admin | 读取单题完整定义（上传 JSON 同构，管理端行内编辑回填用；含完整 flag 列表） |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |

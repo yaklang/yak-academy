@@ -222,3 +222,76 @@ func TestUploadDoesNotClearBuiltinMark(t *testing.T) {
 		t.Fatalf("re-upload should take effect: %+v", chal)
 	}
 }
+
+// noop 驱动下镜像状态：driver=noop、不可构建、恒缺失（不触碰 docker CLI）。
+func TestBuiltinImageStatusNoopDriver(t *testing.T) {
+	svc, _ := newBuiltinTestService(t, NoopDriver{})
+	st, err := svc.BuiltinImageStatus(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if st.Driver != "noop" || st.CanBuild || st.ImagePresent {
+		t.Fatalf("noop status = %+v, want driver=noop can_build=false present=false", st)
+	}
+	if st.ImageTag != "yak-academy/vulinbox:latest" {
+		t.Fatalf("image_tag = %q, want manifest tag", st.ImageTag)
+	}
+}
+
+// Docker 驱动下镜像存在性走 dockerImageExists 探测（seam 替换为受控实现）。
+func TestBuiltinImageStatusDockerProbe(t *testing.T) {
+	orig := dockerImageExists
+	t.Cleanup(func() { dockerImageExists = orig })
+	svc, _ := newBuiltinTestService(t, &builtinBuildRecorder{})
+
+	dockerImageExists = func(ctx context.Context, tag string) bool { return true }
+	st, err := svc.BuiltinImageStatus(context.Background())
+	if err != nil {
+		t.Fatalf("status(present): %v", err)
+	}
+	if st.Driver != "docker" || !st.CanBuild || !st.ImagePresent {
+		t.Fatalf("status = %+v, want docker/present", st)
+	}
+
+	dockerImageExists = func(ctx context.Context, tag string) bool { return false }
+	st, err = svc.BuiltinImageStatus(context.Background())
+	if err != nil {
+		t.Fatalf("status(missing): %v", err)
+	}
+	if st.ImagePresent {
+		t.Fatalf("status = %+v, want present=false when probe misses", st)
+	}
+}
+
+// 仅构建镜像：复用一键导入的构建上下文，不写内容表。
+func TestBuildBuiltinImageOnlyBuilds(t *testing.T) {
+	rec := &builtinBuildRecorder{}
+	svc, gdb := newBuiltinTestService(t, rec)
+	st, err := svc.BuildBuiltinImageOnly(context.Background())
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if st.Driver != "docker" || !st.ImagePresent {
+		t.Fatalf("build status = %+v, want docker/present", st)
+	}
+	if rec.calls != 1 || rec.tag != "yak-academy/vulinbox:latest" {
+		t.Fatalf("recorder = calls %d tag %q", rec.calls, rec.tag)
+	}
+	if !slices.Contains(rec.files, "Dockerfile") {
+		t.Fatalf("build context files = %v, want Dockerfile", rec.files)
+	}
+	var n int64
+	gdb.Model(&model.Challenge{}).Count(&n)
+	if n != 0 {
+		t.Fatalf("build-only wrote %d challenges, want 0", n)
+	}
+}
+
+// noop 驱动拒绝构建（对外 422）。
+func TestBuildBuiltinImageOnlyNoopRefused(t *testing.T) {
+	svc, _ := newBuiltinTestService(t, NoopDriver{})
+	_, err := svc.BuildBuiltinImageOnly(context.Background())
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+}

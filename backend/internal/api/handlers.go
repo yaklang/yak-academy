@@ -84,6 +84,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin", "admin", h.importBuiltinChallenges)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges/builtin/image", "admin", h.getBuiltinImageStatus)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin/image", "admin", h.buildBuiltinImage)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}", "admin", h.getChallengeJSON)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodPatch, "/api/v1/admin/challenges/{slug}/visibility", "admin", h.updateChallengeVisibility)
@@ -725,6 +727,27 @@ func (h *Handlers) uploadChallengePackage(w http.ResponseWriter, req *http.Reque
 // importBuiltinChallenges 管理端：一键导入内置训练题集（vulinbox；重复调用 = 更新）。
 func (h *Handlers) importBuiltinChallenges(w http.ResponseWriter, req *http.Request) {
 	res, err := h.Content.ImportBuiltinChallenges(req.Context())
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// getBuiltinImageStatus 管理端：vulinbox 基础镜像状态（驱动/是否就绪/可否构建）。
+func (h *Handlers) getBuiltinImageStatus(w http.ResponseWriter, req *http.Request) {
+	res, err := h.Content.BuiltinImageStatus(req.Context())
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// buildBuiltinImage 管理端：仅构建 vulinbox 基础镜像（docker build 内从官方 OSS
+// 下载二进制）；同步接口，耗时约 1-3 分钟。
+func (h *Handlers) buildBuiltinImage(w http.ResponseWriter, req *http.Request) {
+	res, err := h.Content.BuildBuiltinImageOnly(req.Context())
 	if err != nil {
 		mapError(w, err)
 		return

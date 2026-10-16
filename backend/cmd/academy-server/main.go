@@ -84,15 +84,28 @@ func main() {
 	}
 	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo, eventRepo, scoreRepo, bus)
 	challengeSvc.SetAttachmentStore(repo.NewChallengeAttachmentRepo(gdb), cfg.AttachmentsDir)
-	// env 实例生命周期：驱动按配置选择（noop 默认 / docker 需 docker CLI 可用）。
+	// env 实例生命周期：驱动按配置选择——auto（默认）探测 docker CLI，
+	// 可用即 docker 否则 noop；docker/noop 显式值按字面生效。
 	instanceRepo := repo.NewLabInstanceRepo(gdb)
 	instanceLogRepo := repo.NewInstanceLogRepo(gdb)
+	useDocker := false
+	switch cfg.EnvDriver {
+	case "docker":
+		useDocker = true
+	case "noop":
+	default: // auto
+		useDocker = service.DockerAvailable(ctx)
+		if !useDocker {
+			log.Println("env driver: docker unavailable, falling back to noop (lab APIs return 501); set ACADEMY_ENV_DRIVER=docker to force")
+		}
+	}
 	var driver service.InstanceDriver = service.NoopDriver{}
 	var builder service.ImageBuilder = service.NoopDriver{}
-	if cfg.EnvDriver == "docker" {
+	if useDocker {
 		dd := service.NewDockerDriver(cfg.InstanceMemory, cfg.InstanceCPUs)
 		driver = dd
 		builder = dd
+		log.Printf("env driver: docker (memory=%s cpus=%s)", cfg.InstanceMemory, cfg.InstanceCPUs)
 	}
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder, progressRepo)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, instanceRepo, eventRepo, competitionRepo, bus)
