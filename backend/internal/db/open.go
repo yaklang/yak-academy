@@ -36,6 +36,9 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateChallengeBuiltinFlag(db); err != nil {
 		return err
 	}
+	if err := migrateChallengeBankOwnership(db); err != nil {
+		return err
+	}
 	if err := migrateWriteupScope(db); err != nil {
 		return err
 	}
@@ -89,6 +92,20 @@ func migrateChallengeBuiltinFlag(db *gorm.DB) error {
 	}
 	if res.RowsAffected > 0 {
 		log.Printf("migrate challenges: backfilled is_builtin for %d legacy rows", res.RowsAffected)
+	}
+	return nil
+}
+
+// migrateChallengeBankOwnership 一次性迁移：教程题目 tab 收敛为专属内置题集，
+// 迁移前已上传到 tutorial 题库的普通题整体改判 ctf（独立夺旗式题目）。
+// 幂等：无匹配行为空操作。依赖 is_builtin 已物化（COALESCE 兜底 NULL）。
+func migrateChallengeBankOwnership(db *gorm.DB) error {
+	res := db.Exec(`UPDATE challenges SET bank = 'ctf' WHERE bank = 'tutorial' AND COALESCE(is_builtin, 0) = 0`)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("migrate challenges: moved %d uploaded challenges from tutorial bank to ctf", res.RowsAffected)
 	}
 	return nil
 }

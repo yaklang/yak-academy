@@ -183,8 +183,7 @@ components:
         bank:
           type: string
           enum: [tutorial, ctf, acm]
-          default: tutorial
-          description: 题库 tab（tutorial=教程题目/内部题库；ctf=CTF 题目；acm=ACM 题目）
+          description: 题库 tab（tutorial=教程题目，专属内置题集，仅一键导入写入；ctf=CTF 题目，上传缺省；acm=ACM 题目）
         is_builtin: { type: boolean, description: 是否来自官方内置训练题集（一键导入标记；普通上传不改动） }
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         score: { type: integer }
@@ -260,9 +259,12 @@ components:
         category: { type: string }
         bank:
           type: string
-          enum: [tutorial, ctf, acm]
-          default: tutorial
-          description: 题库 tab（教程题目/CTF 题目/ACM 题目；缺省 tutorial）
+          enum: [ctf, acm]
+          default: ctf
+          description: |
+            题库 tab。上传路径仅可选 ctf / acm（传 tutorial 一律 422——教程题目 tab
+            专属官方内置题集，仅 POST /admin/challenges/builtin 一键导入写入）。
+            缺省：新建题默认 ctf；重传已有题保留原值。
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         description_md: { type: string }
         score: { type: integer }
@@ -1020,7 +1022,7 @@ paths:
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
-        - { name: bank, in: query, description: 题库 tab（缺省 = 全部）, schema: { type: string, enum: [tutorial, ctf, acm] } }
+        - { name: bank, in: query, description: 题库 tab（tutorial=内置题集；缺省 = 全部）, schema: { type: string, enum: [tutorial, ctf, acm] } }
         - { name: builtin, in: query, description: 是否内置题集（缺省 = 全部）, schema: { type: boolean } }
       responses:
         '200':

@@ -78,7 +78,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 - 题目以自有 `slug` 为主键入口，管理员经实训常用题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
 - `category` 为自由分类 slug（题库分组键）；`description_md` 承载背景与任务目标。
-- `bank`（tutorial/ctf/acm，默认 tutorial）：题库页三 tab（教程题目/CTF 题目/ACM 题目）的分组键，属管理员可编辑内容属性，每次 upsert 重写；`is_builtin` 为导入来源标记——仅内置导入置 true（`MarkBuiltin`），普通上传/编辑 upsert 不触碰（学生端 `GET /challenges` 按 bank/builtin 过滤）。
+- `bank`（tutorial/ctf/acm）：题库页三 tab（教程题目/CTF 题目/ACM 题目）的分组键。**教程题目 tab 专属官方内置题集**——上传路径仅接受 ctf/acm（显式 tutorial 一律 422），缺省时新建默认 ctf、重传保留原值；内置导入统一注入 tutorial（历史误入 tutorial 的上传题由迁移改判 ctf）。`is_builtin` 为导入来源标记——仅内置导入置 true（`MarkBuiltin`），普通上传/编辑 upsert 不触碰（学生端 `GET /challenges` 按 bank/builtin 过滤）。
 - Challenge 多态 `type` 列（v1：static / regex flag）。
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。

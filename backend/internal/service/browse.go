@@ -172,11 +172,19 @@ func (s *TopicService) enrichTutorial(ctx context.Context, items []TrainingItem)
 	return nil
 }
 
+// bankOrDefault 读侧兜底：历史空 bank 按教程题目展示（迁移后不应再出现空值）。
+func bankOrDefault(b model.ChallengeBank) model.ChallengeBank {
+	if b == "" {
+		return model.BankTutorial
+	}
+	return b
+}
+
 // toTrainingItem model.Challenge → TrainingItem（不含 solved 与教程标题）。
 func toTrainingItem(c model.Challenge) TrainingItem {
 	return TrainingItem{
 		ID: c.ID, Slug: c.Slug, Title: c.Title, Category: c.Category,
-		Bank: string(resolveBank(c.Bank)), IsBuiltin: c.IsBuiltin,
+		Bank: string(bankOrDefault(c.Bank)), IsBuiltin: c.IsBuiltin,
 		Difficulty: c.Difficulty, Score: c.Score, HasEnv: c.Image != "",
 		IsVisible: c.IsVisible, ReleaseAt: c.ReleaseAt,
 		Links: parseLinks(c.Links), TutorialSlug: c.TutorialSlug,

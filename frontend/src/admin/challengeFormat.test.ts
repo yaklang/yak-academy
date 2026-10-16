@@ -26,11 +26,14 @@ describe('validateChallenge', () => {
     expect(validateChallenge(base({ difficulty: 'expert' }))).toEqual([])
   })
 
-  it('bank 只允许 tutorial/ctf/acm，缺省合法', () => {
-    // 'web' 是故意的非法值，绕过类型层测运行时校验（镜像后端枚举）。
+  it('bank 上传仅可选 ctf/acm，tutorial 为内置题集专属', () => {
+    // 'web' / 'tutorial' 是故意的非法值，绕过类型层测运行时校验（镜像后端枚举）。
     const bad = 'web' as unknown as ChallengeJSON['bank']
+    const tutorial = 'tutorial' as unknown as ChallengeJSON['bank']
     expect(validateChallenge(base({ bank: bad })).join('\n')).toContain('bank')
+    expect(validateChallenge(base({ bank: tutorial })).join('\n')).toContain('bank')
     expect(validateChallenge(base({ bank: 'ctf' }))).toEqual([])
+    expect(validateChallenge(base({ bank: 'acm' }))).toEqual([])
     expect(validateChallenge(base({ bank: undefined }))).toEqual([])
   })
 

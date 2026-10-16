@@ -12,6 +12,12 @@ import { BANK_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from 
 const route = useRoute()
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
 const activeBank = ref<ChallengeBank>('tutorial')
+// 教程题目 tab 专属内置题集，空态文案与上传型 tab 区分。
+const emptyHint: Record<ChallengeBank, string> = {
+  tutorial: '暂无教程题目：内置题集尚未导入，请联系管理员在管理端一键导入内置训练（vulinbox）',
+  ctf: '暂无CTF题目：等待管理员上传',
+  acm: '暂无ACM题目：等待管理员上传',
+}
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
 const loading = ref(true)
@@ -104,7 +110,7 @@ onMounted(load)
   <el-skeleton v-if="loading" :rows="6" animated />
   <el-empty
     v-else-if="groups.length === 0"
-    :description="`暂无${BANK_LABELS[activeBank]}：等待管理员上传`"
+    :description="emptyHint[activeBank]"
   />
   <template v-else>
     <section v-for="g in groups" :key="g.category" class="group">
