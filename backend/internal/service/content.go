@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -822,7 +822,11 @@ func (s *ContentService) buildChallengeImage(ctx context.Context, tag string, fi
 	}
 	defer os.RemoveAll(dir)
 	for name, content := range files {
-		dest := filepath.Join(dir, filepath.FromSlash(name))
+		// name 已过 normalizeZipEntries；SafeJoin 纵深防御（条目名终究是外部输入）。
+		dest, err := pathutil.SafeJoin(dir, name)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
@@ -919,18 +923,20 @@ func unzipToMap(zipBytes []byte) (map[string][]byte, error) {
 }
 
 // normalizeZipEntries 条目路径规范化：
-//   - 分隔符统一 `\` → `/`，剥 `./` 前缀与首部 `/`；
+//   - 归一化与 zip slip 校验（\→/、剥前缀、拒绝 ../盘符/UNC）统一走
+//     pathutil.CleanEntry（project-conventions skill「路径处理」）；
 //   - 忽略 `__MACOSX/` 垃圾条目（Mac 打包工具产物）；
 //   - 全部条目共享唯一首段时视为顶层包裹目录，整体剥掉
-//     （多顶层 = 平铺结构，不剥）；
-//   - 结果中禁止 `..` 与绝对路径（zip slip 防护）。
+//     （多顶层 = 平铺结构，不剥）。
 func normalizeZipEntries(raw map[string][]byte) (map[string][]byte, error) {
 	cleaned := make(map[string][]byte, len(raw))
 	firsts := map[string]bool{}
 	for name, content := range raw {
-		p := strings.TrimPrefix(strings.ReplaceAll(name, "\\", "/"), "/")
-		p = strings.TrimPrefix(p, "./")
-		if p == "" || strings.HasPrefix(p, "__MACOSX/") || strings.HasPrefix(p, "__MACOSX") {
+		p, err := pathutil.CleanEntry(name)
+		if err != nil {
+			return nil, fmt.Errorf("illegal entry path: %s", name)
+		}
+		if strings.HasPrefix(p, "__MACOSX") {
 			continue
 		}
 		cleaned[p] = content
@@ -955,10 +961,6 @@ func normalizeZipEntries(raw map[string][]byte) (map[string][]byte, error) {
 		}
 		if name == "" {
 			continue
-		}
-		// 防路径穿越（zip slip）。
-		if strings.HasPrefix(name, "../") || path.IsAbs(name) {
-			return nil, fmt.Errorf("illegal entry path: %s", p)
 		}
 		files[name] = content
 	}

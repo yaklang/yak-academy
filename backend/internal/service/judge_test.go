@@ -167,16 +167,25 @@ func TestJudgeDynamicDecay(t *testing.T) {
 	env := newJudgeTestEnv(t)
 	ctx := context.Background()
 	env.judge.StartWorker(ctx)
-	id := env.chalID(t, "chal-static")
+	// 共享内存库偶尔会泄漏到下个测试（t.Cleanup 关闭连接的时序竞态），
+	// 绝对计数会被累积的正确提交污染：本用例用专属题目 + 全新用户，
+	// 保证 solve 计数只由本用例产生（无论库是否泄漏）。
+	chalRepo := repo.NewChallengeRepo(env.gdb)
+	if err := chalRepo.Upsert(ctx, &model.Challenge{
+		Slug: "chal-decay", Title: "衰减题", Type: model.ChallengeStatic, Score: 100,
+	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{decay}"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	id := env.chalID(t, "chal-decay")
 	// 三个用户先通关（solve_count=3）。
-	for user := uint(1); user <= 3; user++ {
-		sub, _ := env.judge.Submit(ctx, user, id, "flag{static}")
+	for user := uint(201); user <= 203; user++ {
+		sub, _ := env.judge.Submit(ctx, user, id, "flag{decay}")
 		if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
 			t.Fatalf("user %d = %s", user, got)
 		}
 	}
 	// 第四个用户：n=3 → value = 100 - 10*3 = 70。
-	sub, _ := env.judge.Submit(ctx, 99, id, "flag{static}")
+	sub, _ := env.judge.Submit(ctx, 299, id, "flag{decay}")
 	if got := env.waitStatus(t, sub.ID); got != model.SubmissionCorrect {
 		t.Fatalf("status = %s", got)
 	}

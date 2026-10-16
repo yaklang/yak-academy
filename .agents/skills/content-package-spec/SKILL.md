@@ -120,6 +120,8 @@ Upload → Parse → Validate → Persist → Publish
 4. **Persist**：写入 ContentPackage/ContentVersion，状态 = draft；
 5. **Publish**：管理员显式发布，draft → published；已发布包再上传新版本 = 新 ContentVersion，旧版本可回滚（archived）。
 
+条目名安全（zip slip / 盘符 / UNC / `..` 段）统一由 `backend/internal/pathutil.CleanEntry` 校验（规则见 project-conventions skill「路径处理」），业务层不得手写归一化。
+
 ## 状态机（唯一合法迁移，仅教程包）
 
 包级：`draft → published → archived`。**禁止** draft 直接跳 archived；archived 为终态（包冻结，拒绝再发布/回滚）。

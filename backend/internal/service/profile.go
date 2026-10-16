@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -94,12 +95,12 @@ func (s *ProfileService) UploadAvatar(ctx context.Context, userID uint, origName
 	if !avatarExts[ext] {
 		return nil, fmt.Errorf("%w: avatar must be png/jpg/gif/webp", ErrValidation)
 	}
-	dir := filepath.Join(s.avatars, fmt.Sprint(userID))
+	dir := pathutil.Join(s.avatars, fmt.Sprint(userID))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	name := "avatar" + ext
-	path := filepath.Join(dir, name)
+	path := pathutil.Join(dir, name)
 	tmp := path + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
@@ -141,7 +142,7 @@ func (s *ProfileService) OpenAvatar(ctx context.Context, userID uint) (*os.File,
 	if !avatarExts[ext] {
 		return nil, "", ErrNotFound
 	}
-	f, err := os.Open(filepath.Join(s.avatars, fmt.Sprint(userID), u.AvatarFile))
+	f, err := os.Open(pathutil.Join(s.avatars, fmt.Sprint(userID), u.AvatarFile))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, "", ErrNotFound

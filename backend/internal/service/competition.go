@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -1310,7 +1311,11 @@ func (s *CompetitionService) OpenWriteupZip(ctx context.Context, competitionID, 
 	if w == nil || w.CompetitionID != competitionID || w.ZipFile == "" {
 		return nil, "", ErrNotFound
 	}
-	f, err := os.Open(filepath.Join(s.writeupDir, w.ZipFile))
+	abs, err := pathutil.SafeJoin(s.writeupDir, w.ZipFile)
+	if err != nil {
+		return nil, "", ErrNotFound
+	}
+	f, err := os.Open(abs)
 	if err != nil {
 		return nil, "", ErrNotFound
 	}
@@ -1422,7 +1427,7 @@ func (s *CompetitionService) UploadWriteupZip(ctx context.Context, userID, id, c
 	name := sanitizeZipName(filename)
 	// 落盘名 = <compID>/<wpID>.zip：同一份 WP 永远同一路径，覆盖即替换。
 	rel := fmt.Sprintf("%d/%d.zip", id, existingID(existing))
-	abs := filepath.Join(s.writeupDir, rel)
+	abs := pathutil.Join(s.writeupDir, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return "", err
 	}
@@ -1431,7 +1436,7 @@ func (s *CompetitionService) UploadWriteupZip(ctx context.Context, userID, id, c
 	}
 	// 旧包在其他路径（历史上传）时清理，避免孤儿文件。
 	if existing != nil && existing.ZipFile != "" && existing.ZipFile != rel {
-		os.Remove(filepath.Join(s.writeupDir, existing.ZipFile))
+		os.Remove(pathutil.Join(s.writeupDir, existing.ZipFile))
 	}
 	if err := s.comps.UpsertWriteup(ctx, &model.Writeup{
 		CompetitionID: id, ChallengeID: challengeID, TeamID: part.TeamID, UserID: userID,
