@@ -1138,6 +1138,31 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ContentPackage' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [admin]
+      summary: 删除内容包及其教程内容（不可恢复）
+      description: |
+        删除包记录与全部版本，并移除该包历代版本 Payload 写入过的
+        Topic/Room（上传时的 slug 归属校验保证不会误删他包内容）。
+        级联清理：指向被删 Room 的题目 tutorial_slug 置空、被删 Room 的
+        Progress 行删除（deriver 对不存在 Room 的 room.completed 事件跳过，
+        重放不复活）。Event 表 append-only 不动，提交/解锁历史保留。
+        draft 包（从未发布）删除仅移除包记录与版本。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, topics, rooms]
+                properties:
+                  deleted: { type: boolean, description: 包是否已删除 }
+                  topics: { type: integer, description: 移除的 Topic 数 }
+                  rooms: { type: integer, description: 移除的 Room 数 }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /content/packages/{id}/publish:
     post:

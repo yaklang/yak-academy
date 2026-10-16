@@ -30,4 +30,14 @@ export const E2E = {
     roomSlug: 'sqli-basics',
     roomTitle: 'SQL 注入基础',
   },
+  // 删除旅程专用包（独立 slug，避免与 e2e-test 种子冲突）：
+  // spec 内经 UI 上传→发布→删除，验证两侧消失。
+  deletePkg: {
+    name: 'e2e-delete-me',
+    zip: 'delete-package.zip',
+    topicSlug: 'e2e-del-topic',
+    topicTitle: '待删除专题',
+    roomSlug: 'e2e-del-room',
+    roomTitle: '待删除教程',
+  },
 } as const

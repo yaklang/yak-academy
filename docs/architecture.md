@@ -74,6 +74,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 状态机：`draft → published → archived`（详见 `.agents/skills/content-package-spec`）。
 
+**删除**（`DELETE /content/packages/{id}`，管理员显式清理，不可恢复）：删除包记录与全部版本，并按**历代版本 Payload 的 slug 并集**清扫内容表（applyPayload 只 upsert 不删行，v2 移除的教程也须清掉）；同时清空指向被删 Room 的 `challenges.tutorial_slug`（题目本体保留）并删除被删 Room 的 `progresses` 行。事件表 append-only 不动；配套守卫：派生器处理 `room.completed` 时 Room 已不存在则跳过（`SetRoomLookup` 注入查询），启动重放不会复活已删进度。内置训练集不走内容包记录，无删除入口（重新一键导入即恢复）。
+
 ### 3.3 challenge — 题目域（独立资源）
 
 - 题目以自有 `slug` 为主键入口，管理员经实训常用题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
@@ -185,6 +187,7 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `POST /content/packages` | admin | 上传教程包（进入管线） |
 | `GET /content/packages/{id}` | admin | 包状态与版本 |
 | `POST /content/packages/{id}/publish` | admin | 发布 |
+| `DELETE /content/packages/{id}` | admin | 删除内容包（历代版本写入的教程一并清扫，不可恢复；事件历史保留） |
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
 | `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新） |
 | `GET /admin/challenges` | admin | 题目管理表格 |

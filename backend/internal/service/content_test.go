@@ -53,6 +53,7 @@ func newContentTestServiceWithBuilder(t *testing.T, builder ImageBuilder) (*Cont
 		repo.NewRoomRepo(gdb),
 		NewChallengeService(repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb), repo.NewEventRepo(gdb), repo.NewScoreRepo(gdb), nil),
 		builder,
+		repo.NewProgressRepo(gdb),
 	)
 	return svc, gdb
 }
@@ -702,5 +703,237 @@ func TestUploadChallengePackageRequiresYMLAndContainerFiles(t *testing.T) {
 	}
 	if imported != 1 || slugs[0] != "static-only" {
 		t.Fatalf("imported=%d slugs=%v", imported, slugs)
+	}
+}
+
+// ---------- 内容包删除（DELETE /content/packages/{id}） ----------
+
+// otherPackage 另一作者的包（不同 name/topic/room slug），删除隔离性用。
+func otherPackage() map[string]string {
+	return map[string]string{
+		"manifest.yaml": `
+name: other-package
+version: 1.0.0
+language: zh
+topics:
+  - mobile-security
+`,
+		"topics/mobile-security/topic.md": `---
+title: 移动安全
+---
+## Topic 首页`,
+		"topics/mobile-security/rooms/api-basics/lesson.md": `---
+title: API 基础
+difficulty: practitioner
+---
+API 是……`,
+	}
+}
+
+// versionWithoutXssPackage v2 删掉 xss-intro 教程：applyPayload 只 upsert 不删行，
+// xss-intro 残留在内容表，删除时须靠历代版本 union 清扫。
+func versionWithoutXssPackage() map[string]string {
+	files := validPackage()
+	files["manifest.yaml"] = `
+name: test-package
+version: 2.0.0
+language: zh
+topics:
+  - web-security
+`
+	delete(files, "topics/web-security/rooms/xss-intro/lesson.md")
+	return files
+}
+
+func TestDeletePackageRemovesContentAndReferences(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	// 关联题目（tutorial_slug 软引用）与无关题目各一题。
+	if _, _, err := svc.UploadChallenges(ctx, []byte(`[{
+		"slug":"linked-1","title":"关联题","category":"web","difficulty":"apprentice",
+		"score":100,"challenge":{"type":"static","flag":"flag{a}"},
+		"tutorial_slug":"sqli-basics"
+	},{
+		"slug":"plain-1","title":"无关题","category":"misc","difficulty":"apprentice",
+		"score":100,"challenge":{"type":"static","flag":"flag{b}"}
+	}]`)); err != nil {
+		t.Fatalf("upload challenges: %v", err)
+	}
+	// 完成进度走真实事件路径产生（不在测试里直改派生表）。
+	events := repo.NewEventRepo(gdb)
+	deriver := NewDeriver(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
+	ev := model.Event{UserID: 7, Type: model.EventRoomCompleted, Payload: `{"room_slug":"sqli-basics"}`}
+	if err := events.Append(ctx, &ev); err != nil {
+		t.Fatal(err)
+	}
+	deriver.Handle(ctx, ev)
+	var progressRows int64
+	gdb.Model(&model.Progress{}).Where("user_id = ?", 7).Count(&progressRows)
+	if progressRows != 1 {
+		t.Fatalf("progress rows before delete = %d, want 1", progressRows)
+	}
+
+	res, err := svc.DeletePackage(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !res.Deleted || res.Topics != 1 || res.Rooms != 2 {
+		t.Fatalf("res = %+v, want deleted/1 topic/2 rooms", res)
+	}
+	for _, tc := range []struct {
+		model any
+		want  int64
+		name  string
+	}{
+		{&model.ContentPackage{}, 0, "packages"},
+		{&model.ContentVersion{}, 0, "versions"},
+		{&model.Topic{}, 0, "topics"},
+		{&model.Room{}, 0, "rooms"},
+		{&model.Progress{}, 0, "progress"},
+		{&model.Event{}, 1, "events"},
+		{&model.Challenge{}, 2, "challenges"},
+	} {
+		var n int64
+		gdb.Model(tc.model).Count(&n)
+		if n != tc.want {
+			t.Fatalf("%s = %d, want %d", tc.name, n, tc.want)
+		}
+	}
+	// 事件 append-only 保留、题目本体保留但软引用清空。
+	var linked model.Challenge
+	if err := gdb.Where("slug = ?", "linked-1").First(&linked).Error; err != nil {
+		t.Fatal(err)
+	}
+	if linked.TutorialSlug != "" {
+		t.Fatalf("tutorial_slug = %q, want cleared", linked.TutorialSlug)
+	}
+	// 二次删除：包已不存在 → 记录缺失。
+	if _, err := svc.DeletePackage(ctx, pkg.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("second delete err = %v, want gorm.ErrRecordNotFound", err)
+	}
+}
+
+func TestDeleteDraftPackageOnlyRemovesRecord(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	// draft 包从未发布：内容表无行，删除只清包与版本记录。
+	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	res, err := svc.DeletePackage(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("delete draft: %v", err)
+	}
+	if !res.Deleted || res.Topics != 0 || res.Rooms != 0 {
+		t.Fatalf("res = %+v, want deleted/0/0", res)
+	}
+	for _, tc := range []struct {
+		model any
+		want  int64
+		name  string
+	}{
+		{&model.ContentPackage{}, 0, "packages"},
+		{&model.ContentVersion{}, 0, "versions"},
+		{&model.Topic{}, 0, "topics"},
+		{&model.Room{}, 0, "rooms"},
+	} {
+		var n int64
+		gdb.Model(tc.model).Count(&n)
+		if n != tc.want {
+			t.Fatalf("%s = %d, want %d", tc.name, n, tc.want)
+		}
+	}
+}
+
+func TestDeletePackageSweepsRoomsFromOldVersions(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	pkg, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload v1: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
+		t.Fatalf("publish v1: %v", err)
+	}
+	pkg, err = svc.Upload(ctx, buildZip(t, versionWithoutXssPackage()))
+	if err != nil {
+		t.Fatalf("upload v2: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+	// v2 已不含 xss-intro，但 applyPayload 不删行 → 内容表仍是 2 个 Room。
+	var rooms int64
+	gdb.Model(&model.Room{}).Count(&rooms)
+	if rooms != 2 {
+		t.Fatalf("rooms after v2 publish = %d, want 2", rooms)
+	}
+	res, err := svc.DeletePackage(ctx, pkg.ID)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if res.Rooms != 2 || res.Topics != 1 {
+		t.Fatalf("res = %+v, want 1 topic/2 rooms（union 清扫）", res)
+	}
+	gdb.Model(&model.Room{}).Count(&rooms)
+	if rooms != 0 {
+		t.Fatalf("rooms after delete = %d, want 0（v1 独有的 xss-intro 一并移除）", rooms)
+	}
+}
+
+func TestDeletePackageKeepsOtherPackageContent(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	pkgA, err := svc.Upload(ctx, buildZip(t, validPackage()))
+	if err != nil {
+		t.Fatalf("upload A: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkgA.ID); err != nil {
+		t.Fatalf("publish A: %v", err)
+	}
+	pkgB, err := svc.Upload(ctx, buildZip(t, otherPackage()))
+	if err != nil {
+		t.Fatalf("upload B: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkgB.ID); err != nil {
+		t.Fatalf("publish B: %v", err)
+	}
+	// 题目软引用 B 包的教程，删除 A 不得清空。
+	if _, _, err := svc.UploadChallenges(ctx, []byte(`{
+		"slug":"other-linked","title":"B包关联题","category":"mobile","difficulty":"practitioner",
+		"score":100,"challenge":{"type":"static","flag":"flag{c}"},
+		"tutorial_slug":"api-basics"
+	}`)); err != nil {
+		t.Fatalf("upload challenges: %v", err)
+	}
+	if _, err := svc.DeletePackage(ctx, pkgA.ID); err != nil {
+		t.Fatalf("delete A: %v", err)
+	}
+	var (
+		packages, topics, rooms int64
+	)
+	gdb.Model(&model.ContentPackage{}).Count(&packages)
+	gdb.Model(&model.Topic{}).Count(&topics)
+	gdb.Model(&model.Room{}).Count(&rooms)
+	if packages != 1 || topics != 1 || rooms != 1 {
+		t.Fatalf("packages=%d topics=%d rooms=%d, want 1/1/1（B 包完整保留）", packages, topics, rooms)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "other-linked").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chal.TutorialSlug != "api-basics" {
+		t.Fatalf("tutorial_slug = %q, want api-basics（他包引用不动）", chal.TutorialSlug)
+	}
+	if _, err := svc.DeletePackage(ctx, pkgB.ID); err != nil {
+		t.Fatalf("delete B after A: %v", err)
 	}
 }

@@ -46,6 +46,14 @@ func (r *topicRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error)
 	return n > 0, err
 }
 
+func (r *topicRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error) {
+	if len(slugs) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Where("slug IN ?", slugs).Delete(&model.Topic{})
+	return res.RowsAffected, res.Error
+}
+
 type roomRepo struct{ db *gorm.DB }
 
 func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
@@ -84,6 +92,14 @@ func (r *roomRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error) 
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.Room{}).Where("slug = ?", slug).Count(&n).Error
 	return n > 0, err
+}
+
+func (r *roomRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error) {
+	if len(slugs) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Where("slug IN ?", slugs).Delete(&model.Room{})
+	return res.RowsAffected, res.Error
 }
 
 type challengeRepo struct{ db *gorm.DB }
@@ -263,6 +279,17 @@ func (r *challengeRepo) CountSolves(ctx context.Context, challengeID uint) (int6
 		Where("challenge_id = ? AND status = ?", challengeID, model.SubmissionCorrect).
 		Count(&n).Error
 	return n, err
+}
+
+// ClearTutorialSlugs 教程 Room 删除后清空指向它的 tutorial_slug（软引用置空，题目本体保留）。
+func (r *challengeRepo) ClearTutorialSlugs(ctx context.Context, roomSlugs []string) (int64, error) {
+	if len(roomSlugs) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Model(&model.Challenge{}).
+		Where("tutorial_slug IN ?", roomSlugs).
+		Update("tutorial_slug", "")
+	return res.RowsAffected, res.Error
 }
 
 func (r *challengeRepo) Delete(ctx context.Context, slug string) error {

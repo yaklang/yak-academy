@@ -147,6 +147,8 @@ export interface ContentVersion {
   checksum: string
   created_at: string
 }
+// 删除内容包的结果（教程内容连带移除，事件历史按 append-only 保留）。
+export interface PackageDeleteResult { deleted: boolean; topics: number; rooms: number }
 
 // 用户与角色管理页已下线（两档模型角色为账号固有属性，无独立管理入口），
 // 但管理 API 保留：竞赛「导入参赛者」建号、E2E 账号生命周期重置密码仍走这些接口。
@@ -288,6 +290,7 @@ export const contentApi = {
   archive: (id: number) => http.post<ContentPackage>(`/content/packages/${id}/archive`),
   rollback: (id: number, versionId: number) =>
     http.post<ContentPackage>(`/content/packages/${id}/rollback`, { version_id: versionId }),
+  remove: (id: number) => http.del<PackageDeleteResult>(`/content/packages/${id}`),
 }
 
 // 题目管理（challenge.json / 题目包 zip 上传 / 表格 / 附件 / 删除）。
