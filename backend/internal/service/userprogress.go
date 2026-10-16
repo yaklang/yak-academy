@@ -91,6 +91,9 @@ type Deriver struct {
 	competitions repo.CompetitionRepo
 	// teams 队伍名查询（CompetitionScore 派生行冗余队伍快照用）。
 	teams func(ctx context.Context, competitionID uint) (map[uint]string, error)
+	// roomExists 教程 Room 存在性查询（内容包删除守卫：被删 Room 的
+	// room.completed 事件跳过，重放不复活已清进度）。nil = 不设防（单测）。
+	roomExists func(ctx context.Context, roomSlug string) bool
 }
 
 func NewDeriver(s repo.ScoreRepo, p repo.ProgressRepo) *Deriver {
@@ -102,6 +105,11 @@ func NewDeriver(s repo.ScoreRepo, p repo.ProgressRepo) *Deriver {
 func (d *Deriver) SetCompetitionStores(competitions repo.CompetitionRepo, teams func(ctx context.Context, competitionID uint) (map[uint]string, error)) {
 	d.competitions = competitions
 	d.teams = teams
+}
+
+// SetRoomLookup 注入 Room 存在性查询（内容包删除守卫，见 ContentService.DeletePackage）。
+func (d *Deriver) SetRoomLookup(roomExists func(ctx context.Context, roomSlug string) bool) {
+	d.roomExists = roomExists
 }
 
 // judgedPayload submission.judged 事件的 payload 结构。
@@ -163,6 +171,11 @@ func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 		var p completedPayload
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
 			log.Printf("deriver: bad room.completed payload: %v", err)
+			return
+		}
+		// 内容包删除守卫：Room 已不存在（含历代版本移除的 slug）时跳过，
+		// 防启动重放为已清理的进度行"复活"（event-sourcing-rules「内容包删除例外」）。
+		if d.roomExists != nil && !d.roomExists(ctx, p.RoomSlug) {
 			return
 		}
 		if err := d.progress.MarkCompleted(ctx, ev.UserID, p.RoomSlug); err != nil {

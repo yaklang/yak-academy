@@ -8,7 +8,7 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 ## 硬性原则
 
 1. **Event 表 append-only**：只允许 INSERT，**禁止**任何 UPDATE / DELETE（包括"修正数据"场景——修正本身就是一条新事件）。
-2. **派生表只读于事件**：Progress（进度）、ScoreRecord（积分）、排行榜全部是事件的物化视图，**禁止**任何业务代码直接改写派生表。刷新 = 重放或增量消费事件。
+2. **派生表只读于事件**：Progress（进度）、ScoreRecord（积分）、排行榜全部是事件的物化视图，**禁止**任何业务代码直接改写派生表。刷新 = 重放或增量消费事件。**唯一例外**：`ProgressRepo.DeleteByRoomSlugs`（内容包删除时清理被删教程的进度行，见 content-package-spec「删除」）——必须与 deriver 的 Room 存在性守卫（`SetRoomLookup`，room.completed 对已删 Room 跳过）成对存在，否则启动重放会复活已删进度；新增类似例外必须先修订本 skill 并说明重放一致性依据。
 3. **判题必须异步**：提交接口只做"入队 + 返回 pending"，判定由 worker 完成。**禁止**在提交的 HTTP 请求路径里同步判定。
 
 ## 事件类型（第一版枚举，新增需更新本 skill）

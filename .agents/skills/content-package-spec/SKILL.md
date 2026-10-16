@@ -132,3 +132,11 @@ Upload → Parse → Validate → Persist → Publish
 - Publish：目标版本 → published，包内其余版本 → archived（同时至多一个 published 版本）；
 - Rollback（admin，`POST /content/packages/{id}/rollback`）：published 包回滚到某个 archived 版本——目标版本 Payload 覆盖重写内容表（只写 Topic/Room，含 video；旧 Payload 中的 Labs 段忽略），目标 → published、当前 → archived，`latest_version` 更新，包级保持 published。禁止回滚当前版本/draft 版本；
 - 同名包重传新版本：既有版本 Payload 中的 slug 视为自有，不判 slug 冲突（他包占用的 slug 仍拒绝）。
+
+**删除**（admin，`DELETE /content/packages/{id}`，任何包状态可用，不可恢复）：
+
+- 删包记录 + 全部版本记录；内容表按**历代版本 Payload 的 slug 并集**清扫 Topic/Room（applyPayload 只 upsert 不删行，新版本移除的教程靠并集兜底清扫）；
+- 连带清理：指向被删 Room 的 `challenges.tutorial_slug` 置空（题目本体保留）；被删 Room 的 `progresses` 行删除（派生表唯一例外写路径，见 event-sourcing-rules）；
+- Event 表 append-only 不动（事件历史保留）；派生器 `room.completed` 有 Room 存在性守卫，重放不复活已删进度；
+- draft 包从未发布、内容表无行，删除即仅清包与版本记录（同一入口，无需特判）；
+- 内置训练集（vulinbox）不走内容包记录，无删除入口——重新一键导入即恢复。

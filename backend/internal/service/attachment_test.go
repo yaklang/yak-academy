@@ -41,7 +41,7 @@ func newAttachmentTestEnv(t *testing.T) (*ChallengeService, *ContentService, *go
 	dir := t.TempDir()
 	chalSvc.SetAttachmentStore(repo.NewChallengeAttachmentRepo(gdb), dir)
 	contentSvc := NewContentService(repo.NewContentPackageRepo(gdb), repo.NewTopicRepo(gdb),
-		repo.NewRoomRepo(gdb), chalSvc, NoopDriver{})
+		repo.NewRoomRepo(gdb), chalSvc, NoopDriver{}, repo.NewProgressRepo(gdb))
 	_ = ctx
 	return chalSvc, contentSvc, gdb, dir
 }

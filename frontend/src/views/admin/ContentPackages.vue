@@ -2,7 +2,7 @@
 // 教程管理：教程内容包（zip）上传与版本管理（draft → publish / 归档 / 回滚）。
 // 包内只有教程（文字 + 视频）；题目是独立资源，经"题目管理"用 challenge.json 上传。
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { contentApi, type ContentPackage, type ContentVersion } from '../../api'
 import { useAuthStore } from '../../stores/auth'
 
@@ -65,6 +65,27 @@ async function archive(pkg: ContentPackage) {
     await load()
   } catch (e) {
     ElMessage.error(`归档失败：${(e as Error).message}`)
+  }
+}
+
+// 删除不可恢复：包 + 历代版本写入的教程内容一并移除，
+// 题目本体与学生完成进度/事件历史保留（进度行随被删教程清理）。
+async function removePackage(pkg: ContentPackage) {
+  try {
+    await ElMessageBox.confirm(
+      `将删除内容包「${pkg.name}」及其历代版本写入的全部教程（专题 + 教程页），学生的完成进度随之清空，事件历史按审计要求保留。此操作不可恢复，确定删除？`,
+      '删除内容包',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  try {
+    const res = await contentApi.remove(pkg.id)
+    ElMessage.success(`已删除 ${pkg.name}（移除 ${res.topics} 个专题 / ${res.rooms} 篇教程）`)
+    await load()
+  } catch (e) {
+    ElMessage.error(`删除失败：${(e as Error).message}`)
   }
 }
 
@@ -161,7 +182,7 @@ video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed
       </template>
     </el-table-column>
     <el-table-column prop="error" label="错误" show-overflow-tooltip />
-    <el-table-column label="操作" width="220">
+    <el-table-column label="操作" width="280">
       <template #default="{ row }">
         <el-button
           v-if="auth.user?.global_role === 'admin' && row.status === 'draft'"
@@ -176,6 +197,12 @@ video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed
           @click="archive(row)"
         >归档</el-button>
         <el-button size="small" @click="openDetail(row)">版本</el-button>
+        <el-button
+          v-if="auth.user?.global_role === 'admin'"
+          size="small"
+          type="danger"
+          @click="removePackage(row)"
+        >删除</el-button>
       </template>
     </el-table-column>
   </el-table>

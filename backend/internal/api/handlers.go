@@ -75,6 +75,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/content/packages", "admin", h.uploadPackage)
 	r.Handle(http.MethodGet, "/api/v1/content/packages", "admin", h.listPackages)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}", "admin", h.getPackage)
+	r.Handle(http.MethodDelete, "/api/v1/content/packages/{id}", "admin", h.deletePackage)
 	r.Handle(http.MethodGet, "/api/v1/content/packages/{id}/versions", "admin", h.listVersions)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/publish", "admin", h.publishPackage)
 	r.Handle(http.MethodPost, "/api/v1/content/packages/{id}/archive", "admin", h.archivePackage)
@@ -912,6 +913,22 @@ func (h *Handlers) getPackage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pkg)
+}
+
+// deletePackage 删除内容包及其教程内容（级联语义见 openapi 描述与
+// ContentService.DeletePackage）。422 = id 非数字。
+func (h *Handlers) deletePackage(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.ParseUint(req.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	res, err := h.Content.DeletePackage(req.Context(), uint(id))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (h *Handlers) publishPackage(w http.ResponseWriter, req *http.Request) {

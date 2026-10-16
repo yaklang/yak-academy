@@ -144,6 +144,70 @@ func TestDeriverMarkInProgressThenCompleted(t *testing.T) {
 	}
 }
 
+// 内容包删除守卫：不存在 Room 的 room.completed 事件跳过；
+// 删除后重放不得为已清进度"复活"（event-sourcing-rules「内容包删除例外」）。
+func TestDeriverRoomCompletedSkipsDeletedRoom(t *testing.T) {
+	deriver, _, progress, events, gdb := newDeriverTestEnv(t)
+	ctx := context.Background()
+	rooms := repo.NewRoomRepo(gdb)
+	if err := rooms.Upsert(ctx, &model.Room{
+		Slug: "room-keep", TopicSlug: "topic-a", Title: "保留的教程",
+		Difficulty: model.DifficultyApprentice,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lookup := func(ctx context.Context, slug string) bool {
+		exists, err := rooms.ExistsBySlug(ctx, slug)
+		return err == nil && exists
+	}
+	deriver.SetRoomLookup(lookup)
+
+	evs := []model.Event{
+		{UserID: 9, Type: model.EventRoomCompleted, Payload: `{"room_slug":"room-keep"}`},
+		{UserID: 9, Type: model.EventRoomCompleted, Payload: `{"room_slug":"room-gone"}`}, // 从未存在的 Room
+	}
+	for i := range evs {
+		if err := events.Append(ctx, &evs[i]); err != nil {
+			t.Fatal(err)
+		}
+		deriver.Handle(ctx, evs[i])
+	}
+	completed, _, err := progress.Stats(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed != 1 {
+		t.Fatalf("completed = %d, want 1（room-gone 应被守卫跳过）", completed)
+	}
+
+	// 模拟内容包删除：Room 与进度行清理，事件 append-only 保留。
+	if _, err := rooms.DeleteBySlugs(ctx, "room-keep"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := progress.DeleteByRoomSlugs(ctx, []string{"room-keep"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 启动重放：两个事件都因 Room 不存在被跳过，进度不复活。
+	replayer := NewDeriver(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
+	replayer.SetRoomLookup(lookup)
+	if err := replayer.Replay(ctx, events); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	completed, _, err = progress.Stats(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed != 0 {
+		t.Fatalf("completed after replay = %d, want 0（已删进度不得复活）", completed)
+	}
+	var eventRows int64
+	gdb.Model(&model.Event{}).Count(&eventRows)
+	if eventRows != 2 {
+		t.Fatalf("events = %d, want 2（append-only 不得删除）", eventRows)
+	}
+}
+
 func TestLeaderboardAssemblesEntries(t *testing.T) {
 	gdb, err := gorm.Open(sqlite.Open("file:lbrdtest?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

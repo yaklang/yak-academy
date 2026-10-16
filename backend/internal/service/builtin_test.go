@@ -57,6 +57,7 @@ func newBuiltinTestService(t *testing.T, builder ImageBuilder) (*ContentService,
 		repo.NewRoomRepo(gdb),
 		NewChallengeService(repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb), repo.NewEventRepo(gdb), repo.NewScoreRepo(gdb), nil),
 		builder,
+		repo.NewProgressRepo(gdb),
 	)
 	return svc, gdb
 }

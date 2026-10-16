@@ -192,6 +192,17 @@ func (r *contentPackageRepo) List(ctx context.Context, offset, limit int) ([]mod
 	return list, total, err
 }
 
+// Delete 删除内容包与全部版本行（事务）。内容表/派生表的级联清理由
+// ContentService.DeletePackage 按历代 Payload 编排（本层只管包自身的行）。
+func (r *contentPackageRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("package_id = ?", id).Delete(&model.ContentVersion{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ContentPackage{}, id).Error
+	})
+}
+
 // smsCodeRepo 注册验证码表实现。核销走条件更新（used=0 → 1）保证一次性。
 type smsCodeRepo struct{ db *gorm.DB }
 
