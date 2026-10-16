@@ -23,9 +23,11 @@ api → service → repo → model
 - 禁止绕过 repo 直接开 DB 连接。
 - 禁止引入 Casbin / Redis / Kafka 等中间件（第一版自实现 + 进程内广播，见 docs/architecture.md）。
 
-## Git 提交信息（强制）
+## Git 提交信息与 PR 语言（强制）
 
 - commit message（subject 与 body）一律**英文**。Conventional Commits 前缀保留，描述用英文，例：`feat(challenge): trim admin ops column to edit/delete`。
+- **PR 标题与描述、PR review comment 一律中文**（面向协作者阅读，commit 是面向仓库历史的英文记录）；PR 标题保留 Conventional Commits 前缀，例：`feat(deploy): 部署约定标准化为 Linux 容器化`。
+- squash 合并时最终落库的 commit message 用英文（不直接沿用中文 PR 标题）；rebase/普通合并保持分支内英文 commit 原样。
 - 历史中文 commit 保持原样，**禁止**为统一语言重写已有历史。
 
 ## Git 冲突解决（强制）
