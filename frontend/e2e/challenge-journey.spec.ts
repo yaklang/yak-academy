@@ -97,4 +97,49 @@ test.describe('题目全链路', () => {
     // 关联教程列展示 Room 标题
     await expect(table.locator('tr', { hasText: C.linkedSlug })).toContainText(E2E.tutorial.roomTitle)
   })
+
+  test('管理端行内编辑：回填库内完整定义，改标题保存生效', async ({ page }) => {
+    await loginAsAdmin(page)
+    await page.goto('/admin/panel/challenges')
+    const row = page.locator('.el-table tr', { hasText: C.attachSlug })
+    const ops = row.locator('.el-table__cell').last()
+
+    // 操作列仅 编辑/删除
+    await expect(ops.getByRole('button', { name: '编辑' })).toBeVisible()
+    await expect(ops.getByRole('button', { name: '删除' })).toBeVisible()
+    await expect(ops.getByRole('button')).toHaveCount(2)
+
+    // 行内编辑：弹窗回填库内完整定义（GET /admin/challenges/{slug}）
+    await ops.getByRole('button', { name: '编辑' }).click()
+    const dialog = page.locator('.el-dialog', { hasText: `编辑题目：${C.attachSlug}` })
+    await expect(dialog).toBeVisible()
+    const titleInput = dialog.locator('.el-form-item', { hasText: '标题' }).locator('input')
+    await expect(titleInput).toHaveValue(C.attachTitle)
+    await expect(dialog.getByPlaceholder('flag{answer}')).toHaveValue(C.attachFlag)
+
+    // 附件管理并入编辑弹窗：种子附件在列表中
+    await expect(dialog.locator('.el-table')).toContainText(C.attachFile)
+
+    // 改标题保存：管理表格与学生端同时生效
+    const editedTitle = `${C.attachTitle}（已编辑）`
+    await titleInput.fill(editedTitle)
+    await dialog.getByRole('button', { name: '确认上传' }).click()
+    await expect(page.locator('.el-message', { hasText: '已导入题目' })).toBeVisible()
+    await expect(page.locator('.el-table tr', { hasText: C.attachSlug })).toContainText(editedTitle)
+
+    await loginAsStudent(page)
+    await page.goto('/training')
+    await page.getByRole('tab', { name: 'CTF 题目' }).click()
+    await expect(page.getByRole('link', { name: editedTitle })).toBeVisible()
+
+    // 还原标题（后续用例与种子常量依赖初始标题）
+    await loginAsAdmin(page)
+    await page.goto('/admin/panel/challenges')
+    const row2 = page.locator('.el-table tr', { hasText: C.attachSlug })
+    await row2.getByRole('button', { name: '编辑' }).click()
+    const dialog2 = page.locator('.el-dialog', { hasText: `编辑题目：${C.attachSlug}` })
+    await dialog2.locator('.el-form-item', { hasText: '标题' }).locator('input').fill(C.attachTitle)
+    await dialog2.getByRole('button', { name: '确认上传' }).click()
+    await expect(page.locator('.el-table tr', { hasText: C.attachSlug })).toContainText(C.attachTitle)
+  })
 })

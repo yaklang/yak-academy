@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // 题目管理：主流程为「选择 challenge.json → 前端校验 → 编辑弹窗确认 → 一键上传」
 // （打包即把表单数据规范化回 JSON 后 POST /admin/challenges）。
+// 行内「编辑」拉取库内完整定义回填同一弹窗（GET /admin/challenges/{slug}），
+// 附件管理也并入了该弹窗；操作列只保留 编辑 / 删除。
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminChallengeApi, BANK_LABELS,
-  type ChallengeAttachment, type ChallengeBank, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
+  type ChallengeAttachment, type ChallengeBank, type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -23,6 +25,12 @@ const specVisible = ref(false)
 const editVisible = ref(false)
 const editSaving = ref(false)
 const editSourceFile = ref('')
+// 行内编辑来源：非空 = 正在编辑已入库题目（附件区随之显示）。
+const editExistingSlug = ref('')
+const editLoading = ref('')
+// tutorial 题库为内置题集专属：行内编辑该类题时锁定题库选择，
+// 提交省略 bank（后端缺省 = 保留原值），避免把内置题挤出教程题目 tab。
+const bankLocked = ref(false)
 // 表单模型：env 用 has_env 开关承载（env 段要么都填要么都不填）。
 const form = reactive({
   slug: '',
@@ -44,17 +52,18 @@ const form = reactive({
 })
 
 // 表单 → 规范化题目 JSON（"自动打包"）。
+// bankLocked（编辑内置 tutorial 题）时省略 bank：后端缺省 = 保留原值。
 function buildPayload(): ChallengeJSON {
   const payload: ChallengeJSON = {
     slug: form.slug.trim(),
     title: form.title.trim(),
     category: form.category.trim(),
-    bank: form.bank,
     difficulty: form.difficulty,
     score: form.score,
     flag_mode: form.flag_mode,
     challenge: { type: form.type, flag: form.flag.trim() },
   }
+  if (!bankLocked.value) payload.bank = form.bank
   if (form.description_md.trim()) payload.description_md = form.description_md
   if (form.has_env && form.image.trim()) payload.env = { image: form.image.trim(), port: form.port }
   if (form.tutorial_slug.trim()) payload.tutorial_slug = form.tutorial_slug.trim()
@@ -77,7 +86,9 @@ function fillForm(chal: ChallengeJSON) {
   form.title = chal.title ?? ''
   form.category = chal.category ?? ''
   // 教程题目 tab 专属内置题集：上传只允许 ctf/acm，其余（tutorial/空）归 ctf。
-  form.bank = chal.bank === 'acm' ? 'acm' : 'ctf'
+  // 行内编辑 tutorial 题时 bankLocked 置位，保留 tutorial 展示并在提交时省略。
+  bankLocked.value = chal.bank === 'tutorial'
+  form.bank = chal.bank === 'acm' ? 'acm' : chal.bank === 'tutorial' ? 'tutorial' : 'ctf'
   form.difficulty = chal.difficulty ?? 'apprentice'
   form.score = chal.score ?? 100
   form.flag_mode = chal.flag_mode ?? 'shared'
@@ -136,6 +147,7 @@ async function onImport(file: File) {
   }
   const chal = list[0]
   if (chal.bank === 'tutorial') {
+    // 文件导入不允许 tutorial：解锁题库选择并归 ctf（上传显式 tutorial 一律 422）。
     ElMessage.warning({ message: '教程题目 tab 专属内置题集：该文件声明的 bank=tutorial 不再接受上传，将按表单所选题库（ctf/acm）入库', duration: 5000 })
   }
   const errs = validateChallenge(chal)
@@ -144,9 +156,35 @@ async function onImport(file: File) {
     ElMessage.warning({ message: `题目格式有 ${errs.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
   }
   fillForm(chal)
+  if (bankLocked.value) {
+    bankLocked.value = false
+    form.bank = 'ctf'
+  }
+  editExistingSlug.value = ''
   editSourceFile.value = file.name
   editVisible.value = true
   return false // 阻止 el-upload 默认行为
+}
+
+// 行内「编辑」：拉取库内完整定义回填弹窗（含 flag/hints/env），
+// 多 flag（题目包上传）时提醒保存只保留表单那一个；附件区随弹窗加载。
+async function openRowEdit(row: TrainingItem) {
+  editLoading.value = row.slug
+  try {
+    const full: ChallengeFullJSON = await adminChallengeApi.getJSON(row.slug)
+    fillForm(full)
+    if (full.flags.length > 1) {
+      ElMessage.warning({ message: `该题有 ${full.flags.length} 个 flag（题目包上传），保存后只保留表单中的这一个`, duration: 6000 })
+    }
+    editSourceFile.value = ''
+    editExistingSlug.value = row.slug
+    editVisible.value = true
+    await loadAttachments()
+  } catch (e) {
+    ElMessage.error(`读取题目定义失败：${(e as Error).message}`)
+  } finally {
+    editLoading.value = ''
+  }
 }
 
 async function doUpload(list: ChallengeJSON[]) {
@@ -262,8 +300,9 @@ async function remove(row: TrainingItem) {
   }
 }
 
-// ===== 可见性开关 + 定时发布 =====
-// 状态语义：隐藏或未到发布时间的题目学生端整体 404；到期自动可见。
+// ===== 可见性开关 =====
+// 状态语义：隐藏的题目学生端整体 404。定时发布功能已随操作列精简移除
+//（PATCH visibility 的 release_at 能力仍在契约中保留）。
 const visSaving = ref('')
 
 async function toggleVisible(row: TrainingItem) {
@@ -279,64 +318,17 @@ async function toggleVisible(row: TrainingItem) {
   }
 }
 
-const releaseDialog = ref(false)
-const releaseRow = ref<TrainingItem | null>(null)
-const releaseForm = reactive({ mode: 'now' as 'now' | 'at', datetime: '' })
-const releaseSaving = ref(false)
-
-function openReleaseDialog(row: TrainingItem) {
-  releaseRow.value = row
-  releaseForm.mode = 'now'
-  releaseForm.datetime = ''
-  releaseDialog.value = true
-}
-
-async function saveRelease() {
-  if (!releaseRow.value) return
-  releaseSaving.value = true
-  try {
-    // mode=now → release_at: null（清空定时，立即语义）；mode=at → RFC3339（前端本地时区）。
-    const body = releaseForm.mode === 'now'
-      ? { release_at: null }
-      : { release_at: new Date(releaseForm.datetime).toISOString() }
-    const updated = await adminChallengeApi.updateVisibility(releaseRow.value.slug, body)
-    Object.assign(releaseRow.value, { release_at: updated.release_at, is_visible: updated.is_visible })
-    ElMessage.success(releaseForm.mode === 'now'
-      ? '已清除定时，题目立即按可见性开关开放'
-      : `已设定发布时间：${new Date(releaseForm.datetime).toLocaleString()}`)
-    releaseDialog.value = false
-  } catch (e) {
-    ElMessage.error(`定时发布设置失败：${(e as Error).message}`)
-  } finally {
-    releaseSaving.value = false
-  }
-}
-
-function releaseText(row: TrainingItem) {
-  if (!row.release_at) return ''
-  const d = new Date(row.release_at)
-  return d.getTime() <= Date.now() ? `已发布（${d.toLocaleString()}）` : `定时 ${d.toLocaleString()}`
-}
-
-// ===== 附件管理（题目级：pcap/exe 等配套文件，学生端凭 JWT 下载）=====
-const attachDialog = ref(false)
-const attachSlug = ref('')
-const attachTitle = ref('')
+// ===== 附件管理（并入编辑弹窗：pcap/exe 等配套文件，学生端凭 JWT 下载）=====
+// 挂在 editExistingSlug（行内编辑已入库题目）上；文件导入新建流程不显示。
 const attachments = ref<ChallengeAttachment[]>([])
 const attachLoading = ref(false)
 const attachUploading = ref(false)
 
-async function openAttachments(row: TrainingItem) {
-  attachSlug.value = row.slug
-  attachTitle.value = row.title
-  attachDialog.value = true
-  await loadAttachments()
-}
-
 async function loadAttachments() {
+  if (!editExistingSlug.value) return
   attachLoading.value = true
   try {
-    attachments.value = await adminChallengeApi.listAttachments(attachSlug.value)
+    attachments.value = await adminChallengeApi.listAttachments(editExistingSlug.value)
   } catch (e) {
     ElMessage.error(`附件列表加载失败：${(e as Error).message}`)
   } finally {
@@ -348,7 +340,7 @@ async function loadAttachments() {
 async function onUploadAttachment(file: File) {
   attachUploading.value = true
   try {
-    await adminChallengeApi.uploadAttachment(attachSlug.value, file)
+    await adminChallengeApi.uploadAttachment(editExistingSlug.value, file)
     ElMessage.success(`已上传附件：${file.name}`)
     await loadAttachments()
   } catch (e) {
@@ -366,7 +358,7 @@ async function removeAttachment(filename: string) {
     return
   }
   try {
-    await adminChallengeApi.deleteAttachment(attachSlug.value, filename)
+    await adminChallengeApi.deleteAttachment(editExistingSlug.value, filename)
     await loadAttachments()
   } catch (e) {
     ElMessage.error(`附件删除失败：${(e as Error).message}`)
@@ -442,7 +434,7 @@ onMounted(load)
   "links": [ { "name": "Wireshark", "url": "https://…" } ],  // 可选外链
   "tutorial_slug": "sqli-basics"       // 可选关联教程
 }</pre>
-      <p class="dim">附件（pcap/exe 等文件）不走 JSON：题目列表「附件」按钮单独上传，学生端凭登录态下载。</p>
+      <p class="dim">附件（pcap/exe 等文件）不走 JSON：经行内「编辑」弹窗的附件区上传，学生端凭登录态下载。</p>
       <p class="dim">上传接口：POST /admin/challenges（单对象或数组，逐题校验、整体拒绝）。</p>
       <h3>题目包 zip（image: . 容器题）</h3>
       <pre class="json">challenge.yml + Dockerfile + docker-compose.yml + src/…</pre>
@@ -478,7 +470,7 @@ onMounted(load)
         <span v-else>—</span>
       </template>
     </el-table-column>
-    <el-table-column label="可见性" width="170">
+    <el-table-column label="可见性" width="90">
       <template #default="{ row }">
         <el-switch
           :model-value="row.is_visible !== false"
@@ -488,13 +480,11 @@ onMounted(load)
           inactive-text="隐藏"
           @change="toggleVisible(row)"
         />
-        <div v-if="releaseText(row)" class="release-note">{{ releaseText(row) }}</div>
       </template>
     </el-table-column>
-    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="210">
+    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
       <template #default="{ row }">
-        <el-button size="small" @click="openReleaseDialog(row)">定时</el-button>
-        <el-button size="small" @click="openAttachments(row)">附件</el-button>
+        <el-button size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</el-button>
         <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
       </template>
     </el-table-column>
@@ -508,8 +498,13 @@ onMounted(load)
     @current-change="load"
   />
 
-  <!-- 题目编辑弹窗：选择 challenge.json 后展示，可修正再上传 -->
-  <el-dialog v-model="editVisible" :title="`编辑题目${editSourceFile ? `（${editSourceFile}）` : ''}`" width="680px" top="4vh">
+  <!-- 题目编辑弹窗：行内「编辑」回填库内定义，或选择 challenge.json 后确认上传 -->
+  <el-dialog
+    v-model="editVisible"
+    :title="editExistingSlug ? `编辑题目：${editExistingSlug}` : `编辑题目${editSourceFile ? `（${editSourceFile}）` : ''}`"
+    width="680px"
+    top="4vh"
+  >
     <el-alert v-if="formErrors.length" type="error" :closable="false" class="form-errors">
       <p v-for="err in formErrors" :key="err" class="err-line">{{ err }}</p>
     </el-alert>
@@ -525,7 +520,8 @@ onMounted(load)
           <el-input v-model="form.category" placeholder="sql-injection" />
         </el-form-item>
         <el-form-item label="题库">
-          <el-select v-model="form.bank">
+          <el-select v-model="form.bank" :disabled="bankLocked">
+            <el-option v-if="bankLocked" value="tutorial" label="教程题目（内置，不可改）" />
             <el-option value="ctf" label="CTF 题目（ctf，默认）" />
             <el-option value="acm" label="ACM 题目（acm）" />
           </el-select>
@@ -591,60 +587,39 @@ onMounted(load)
           <el-button size="small" @click="addLink">添加外链</el-button>
         </div>
       </el-form-item>
+      <!-- 附件区：仅行内编辑已入库题目时显示（文件导入新建流程题目尚未落库） -->
+      <template v-if="editExistingSlug">
+        <el-divider content-position="left">附件（不经 JSON，学生端凭登录态下载）</el-divider>
+        <div class="attach-toolbar">
+          <el-upload
+            :show-file-list="false"
+            :before-upload="onUploadAttachment"
+            :disabled="attachUploading"
+          >
+            <el-button type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</el-button>
+          </el-upload>
+        </div>
+        <el-table :data="attachments" v-loading="attachLoading" size="small" empty-text="暂无附件">
+          <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
+          <el-table-column label="大小" width="100">
+            <template #default="{ row }">{{ attachSize(row.size) }}</template>
+          </el-table-column>
+          <el-table-column label="上传时间" width="150">
+            <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="70">
+            <template #default="{ row }">
+              <el-button size="small" type="danger" link @click="removeAttachment(row.filename)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
     </el-form>
     <template #footer>
       <el-button @click="editVisible = false">取消</el-button>
       <el-button type="primary" :loading="editSaving" :disabled="formErrors.length > 0" @click="saveFromEdit">
         确认上传
       </el-button>
-    </template>
-  </el-dialog>
-
-  <!-- 附件管理弹窗：题目级文件上传/列表/删除 -->
-  <el-dialog v-model="attachDialog" :title="`附件管理：${attachTitle}`" width="560px">
-    <div class="attach-toolbar">
-      <el-upload
-        :show-file-list="false"
-        :before-upload="onUploadAttachment"
-        :disabled="attachUploading"
-      >
-        <el-button type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</el-button>
-      </el-upload>
-    </div>
-    <el-table :data="attachments" v-loading="attachLoading" size="small" empty-text="暂无附件">
-      <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
-      <el-table-column label="大小" width="100">
-        <template #default="{ row }">{{ attachSize(row.size) }}</template>
-      </el-table-column>
-      <el-table-column label="上传时间" width="150">
-        <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="70">
-        <template #default="{ row }">
-          <el-button size="small" type="danger" link @click="removeAttachment(row.filename)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-dialog>
-
-  <!-- 定时发布设置：now = 清除定时（立即语义）；at = 指定未来时间到期自动可见 -->
-  <el-dialog v-model="releaseDialog" :title="`定时发布：${releaseRow?.title ?? ''}`" width="480px">
-    <el-radio-group v-model="releaseForm.mode">
-      <el-radio value="now">立即语义（清除定时，只受可见性开关约束）</el-radio>
-      <el-radio value="at">定时发布</el-radio>
-    </el-radio-group>
-    <div v-if="releaseForm.mode === 'at'" class="release-input">
-      <el-date-picker
-        v-model="releaseForm.datetime"
-        type="datetime"
-        placeholder="选择发布时间"
-        :disabled-date="(d: Date) => d.getTime() < Date.now() - 60000"
-      />
-    </div>
-    <p class="dim">定时到期前学生端看不到该题（列表/详情/提交/实例全部 404）；到期自动开放。</p>
-    <template #footer>
-      <el-button @click="releaseDialog = false">取消</el-button>
-      <el-button type="primary" :loading="releaseSaving" @click="saveRelease">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -667,8 +642,6 @@ onMounted(load)
 .hint-content { flex: 1; }
 .hint-cost { flex: none; }
 .attach-toolbar { margin-bottom: 0.8rem; }
-.release-note { font-size: 0.78rem; color: var(--el-text-color-secondary); margin-top: 2px; }
-.release-input { margin-top: 0.8rem; }
 .form-hint { line-height: 1.4; margin-top: 2px; }
 .dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

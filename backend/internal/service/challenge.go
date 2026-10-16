@@ -99,6 +99,85 @@ func (s *ChallengeService) MarkBuiltin(ctx context.Context, slugs []string, buil
 	return s.challenges.MarkBuiltin(ctx, slugs, builtin)
 }
 
+// ChallengeFullJSON 管理端单题完整定义（GET /admin/challenges/{slug}），
+// 与上传 JSON 同构供编辑回填；flag 值仅在 admin 路由暴露（上传时管理员本就提供）。
+type ChallengeFullJSON struct {
+	Slug          string                `json:"slug"`
+	Title         string                `json:"title"`
+	Category      string                `json:"category"`
+	Bank          model.ChallengeBank   `json:"bank"`
+	Difficulty    model.Difficulty      `json:"difficulty"`
+	DescriptionMD string                `json:"description_md"`
+	Score         int                   `json:"score"`
+	FlagMode      model.FlagMode        `json:"flag_mode"`
+	Challenge     fullJSONJudge         `json:"challenge"`
+	Env           *fullJSONEnv          `json:"env"`
+	Hints         []fullJSONHint        `json:"hints"`
+	Links         []model.ChallengeLink `json:"links"`
+	TutorialSlug  string                `json:"tutorial_slug"`
+	// Flags 完整 flag 值列表（题目包 zip 可多 flag）；表单单 flag 用 Challenge.Flag=flags[0]，
+	// 多 flag 时前端需提示保存只保留表单那一个。
+	Flags []string `json:"flags"`
+}
+
+type fullJSONJudge struct {
+	Type model.ChallengeType `json:"type"`
+	Flag string              `json:"flag"`
+}
+
+type fullJSONEnv struct {
+	Image string `json:"image"`
+	Port  int    `json:"port"`
+}
+
+type fullJSONHint struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Cost    int    `json:"cost"`
+}
+
+// GetFullJSON 管理端读取单题完整定义（编辑弹窗回填）。题目不存在 → ErrNotFound。
+func (s *ChallengeService) GetFullJSON(ctx context.Context, slug string) (*ChallengeFullJSON, error) {
+	chal, err := s.challenges.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	flagRows, err := s.challenges.FindFlags(ctx, chal.ID)
+	if err != nil {
+		return nil, err
+	}
+	hintRows, err := s.challenges.FindHints(ctx, chal.ID)
+	if err != nil {
+		return nil, err
+	}
+	flags := make([]string, 0, len(flagRows))
+	for _, f := range flagRows {
+		flags = append(flags, f.Value)
+	}
+	firstFlag := ""
+	if len(flags) > 0 {
+		firstFlag = flags[0]
+	}
+	hints := make([]fullJSONHint, 0, len(hintRows))
+	for _, h := range hintRows {
+		hints = append(hints, fullJSONHint{Title: h.Title, Content: h.Content, Cost: h.Cost})
+	}
+	out := &ChallengeFullJSON{
+		Slug: chal.Slug, Title: chal.Title, Category: chal.Category,
+		Bank: chal.Bank, Difficulty: chal.Difficulty, DescriptionMD: chal.Description,
+		Score: chal.Score, FlagMode: chal.FlagMode,
+		Challenge:    fullJSONJudge{Type: chal.Type, Flag: firstFlag},
+		Hints:        hints,
+		Links:        parseLinks(chal.Links),
+		TutorialSlug: chal.TutorialSlug,
+		Flags:        flags,
+	}
+	if chal.Image != "" {
+		out.Env = &fullJSONEnv{Image: chal.Image, Port: chal.Port}
+	}
+	return out, nil
+}
+
 // ClearTutorialSlugs 教程 Room 被删除时清空指向它的题目软引用（题目本体保留；
 // 返回受影响行数）。由 ContentService.DeletePackage 编排调用。
 func (s *ChallengeService) ClearTutorialSlugs(ctx context.Context, roomSlugs []string) (int64, error) {

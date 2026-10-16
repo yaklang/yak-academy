@@ -1342,6 +1342,68 @@ paths:
         '500': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/challenges/{slug}:
+    get:
+      tags: [admin]
+      summary: 读取题目完整定义（管理端编辑回填用）
+      description: |-
+        返回与上传 JSON（POST /admin/challenges）同构的单题完整定义：
+        含 flag 值、flag_mode、判定类型、容器环境、提示与外链。
+        这是唯一暴露 flag 值的读接口（仅 admin；flag 由管理员上传时提供）。
+        challenge.flag = flags[0] 供单 flag 表单回填；多 flag（题目包 zip 能力）
+        时 flags 数组完整返回，前端保存需提示「只保留表单中这一个」。
+        bank=tutorial（内置题集）原样返回，重传时省略 bank 即保留。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK（与上传 JSON 同构的完整定义）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, title, category, bank, difficulty, description_md, score, flag_mode, challenge, hints, links, tutorial_slug, flags]
+                properties:
+                  slug: { type: string }
+                  title: { type: string }
+                  category: { type: string }
+                  bank: { type: string, enum: [tutorial, ctf, acm] }
+                  difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+                  description_md: { type: string }
+                  score: { type: integer }
+                  flag_mode: { type: string, enum: [shared, instance] }
+                  challenge:
+                    type: object
+                    properties:
+                      type: { type: string, enum: [static, regex] }
+                      flag: { type: string, description: 'flags[0]，表单回填用' }
+                  env:
+                    type: object
+                    nullable: true
+                    description: 无容器环境时为 null
+                    properties:
+                      image: { type: string }
+                      port: { type: integer }
+                  hints:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title: { type: string }
+                        content: { type: string }
+                        cost: { type: integer }
+                  links:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        url: { type: string }
+                  tutorial_slug: { type: string }
+                  flags:
+                    type: array
+                    description: 完整 flag 值列表（题目包 zip 可多 flag）
+                    items: { type: string }
+        '404': { $ref: '#/components/responses/ErrorResp' }
     delete:
       tags: [admin]
       summary: 删除题目（级联删除 flags/hints/attachments；存在通关记录时拒绝）

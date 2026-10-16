@@ -191,6 +191,7 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
 | `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新） |
 | `GET /admin/challenges` | admin | 题目管理表格 |
+| `GET /admin/challenges/{slug}` | admin | 读取单题完整定义（上传 JSON 同构，管理端行内编辑回填用；含完整 flag 列表） |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
 | `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（管理页已下线；API 保留供竞赛批量建号与账号运维） |
 | `POST /admin/competitions` 等 13 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD/题目绑定/参赛者批量导入（自动建号+邀请码）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |

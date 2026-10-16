@@ -84,6 +84,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges", "admin", h.uploadChallenges)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/package", "admin", h.uploadChallengePackage)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin", "admin", h.importBuiltinChallenges)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}", "admin", h.getChallengeJSON)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodPatch, "/api/v1/admin/challenges/{slug}/visibility", "admin", h.updateChallengeVisibility)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}/attachments", "admin", h.listAttachments)
@@ -742,6 +743,17 @@ func (h *Handlers) adminListChallenges(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total": total, "page": page, "page_size": pageSize, "items": items,
 	})
+}
+
+// getChallengeJSON 管理端：单题完整定义（编辑弹窗回填用）。
+// 唯一暴露 flag 值的读接口，仅 admin 路由可达。
+func (h *Handlers) getChallengeJSON(w http.ResponseWriter, req *http.Request) {
+	res, err := h.Challenge.GetFullJSON(req.Context(), req.PathValue("slug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // deleteChallenge 管理端：删除题目（级联 flags/hints）。

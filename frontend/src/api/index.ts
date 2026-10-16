@@ -96,6 +96,13 @@ export interface ChallengeJSON {
   links?: ChallengeLink[]
   tutorial_slug?: string
 }
+// 管理端单题完整定义（GET /admin/challenges/{slug}，编辑回填用）：
+// 与上传 JSON 同构，另含完整 flag 值列表（题目包 zip 可多 flag，表单只回填首个）。
+export interface ChallengeFullJSON extends ChallengeJSON {
+  bank: ChallengeBank
+  flag_mode: 'shared' | 'instance'
+  flags: string[]
+}
 export interface AdminLabInstance {
   id: number
   user_id: number
@@ -309,6 +316,8 @@ export const adminChallengeApi = {
   importBuiltin: () =>
     http.post<BuiltinImportResult>('/admin/challenges/builtin'),
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
+  // 单题完整定义（编辑回填；含 flag 值，仅 admin）。
+  getJSON: (slug: string) => http.get<ChallengeFullJSON>(`/admin/challenges/${slug}`),
   remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),
   listAttachments: (slug: string) =>
     http.get<ChallengeAttachment[]>(`/admin/challenges/${slug}/attachments`),
