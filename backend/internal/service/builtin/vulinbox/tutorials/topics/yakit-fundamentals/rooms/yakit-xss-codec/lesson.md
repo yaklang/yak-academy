@@ -15,7 +15,7 @@ difficulty: apprentice
 
 **Web Fuzzer 看响应原文**：
 
-1. 进入 Web Fuzzer，构造 `GET /xss/echo?name=xxx` 请求（Host 指向靶机）发送；
+1. 进入 Web Fuzzer，构造 `GET /xss/echo?name=xxx` 请求（`Host` 只写 `主机:端口`，不带 `http://`）发送；
 2. 在响应 body 里找到 `name` 参数出现的位置，确认它是否被转义。
 
 **Codec 编解码对照**：
@@ -26,12 +26,52 @@ difficulty: apprentice
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：
+点击 **前往配套题目练习**，启动环境后：请求 `/xss/echo` 确认输入被原样反射（这就是反射型 XSS），再请求安全版 `/xss/safe`，观察 `<script>` 被转义后的输出**原文**——题目要提交的正是这个转义结果（以 `&` 开头、`;` 结尾的完整片段）。
 
-1. 在 Web Fuzzer 里请求 `/xss/echo?name=<script>alert(1)</script>`（或经浏览器直访），确认脚本能"注入"进页面——这就是反射型 XSS；
-2. 再请求安全版 `/xss/safe?name=<script>`，观察 `<script>` 被转义后的输出**原文**；
-3. 题目要求提交的正是这个转义结果：以 `&` 开头、`;` 结尾的完整片段。用 Codec 的 HTML 实体解码验证一遍你抄对了；
-4. 思考：为什么 echo 版本 dangerous、safe 版本无害？差异只在一个转义函数。
+<details>
+<summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
+
+以下以实例地址 `http://127.0.0.1:36870` 为例——**端口每次启动环境都随机分配，请替换成你题目页显示的端口**。
+
+**第 1 步：启动实验环境**
+
+题目详情页点「启动实验环境」，等状态 running，复制访问地址（形如 `http://127.0.0.1:36870`）。
+
+**第 2 步：请求危险版 /xss/echo，确认原样反射**
+
+在 Web Fuzzer 发送（URL 里的特殊字符已编码，可整行照抄）：
+
+```http
+GET /xss/echo?name=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+在响应 body 里搜索 `name` 的位置：你输入的 `<script>alert(1)</script>` **原样**出现在页面里——浏览器渲染时会把它当脚本执行，这就是反射型 XSS。（用浏览器直接访问该 URL 并关闭拦截也可能弹出弹窗，效果相同。）
+
+**第 3 步：请求安全版 /xss/safe，读取转义后的原文**
+
+```http
+GET /xss/safe?name=%3Cscript%3E HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+这次 `name` 的位置输出的是：
+
+```
+&lt;script&gt;
+```
+
+`<` 变成了 `&lt;`、`>` 变成了 `&gt;`——浏览器只把它当普通文本渲染，脚本永远不执行。
+
+**第 4 步：用 Codec 验证你抄对了**
+
+打开 Codec，把 `&lt;script&gt;` 做 HTML 实体**解码**，得到 `<script>`——与你第 3 步的输入一致，说明转义片段抄写无误。
+
+**第 5 步：提交答案**
+
+回到题目详情页，提交 `&lt;script&gt;`（以 `&` 开头、`;` 结尾的完整原文）。
+
+</details>
 
 ## 延伸：自动化对照
 
