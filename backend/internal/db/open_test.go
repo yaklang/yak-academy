@@ -132,7 +132,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	roomSlug := "sqli-basics"
 	legacyRow(t, gdb, &roomSlug, "找 flag")
 	if err := migrateChallengeSlug(gdb); err != nil {
-		t.Fatal(err)
+		t.Fatalf("second migrate: %v", err)
 	}
 	// 二次迁移：已派生 slug 的行不再命中，无重复操作、不报错。
 	if err := migrateChallengeSlug(gdb); err != nil {
@@ -142,5 +142,45 @@ func TestMigrateIdempotent(t *testing.T) {
 	gdb.Model(&model.Challenge{}).Where("slug = ?", "sqli-basics").Count(&n)
 	if n != 1 {
 		t.Fatalf("rows with migrated slug = %d, want 1", n)
+	}
+}
+
+// 真实故障形态：is_builtin 列曾在无默认值/非空约束下 ADD COLUMN（裸 numeric），
+// 迁移前已存在的旧行为 NULL，「非内置」过滤（is_builtin = 0）按三值逻辑匹配不到
+// 它们。新模型已带 not null 约束（NULL 插不进），故先 DROP 再按旧 DDL 重建列复现。
+func TestMigrateBackfillsNullBuiltinFlag(t *testing.T) {
+	gdb := newTestDB(t, false)
+	if err := gdb.Exec(`ALTER TABLE challenges DROP COLUMN is_builtin`).Error; err != nil {
+		t.Fatalf("drop column: %v", err)
+	}
+	if err := gdb.Exec(`ALTER TABLE challenges ADD COLUMN is_builtin numeric`).Error; err != nil {
+		t.Fatalf("re-add legacy column: %v", err)
+	}
+	if err := gdb.Exec(
+		`INSERT INTO challenges (slug, title, type, score, is_builtin, created_at) VALUES ('legacy-upload', '旧上传题', ?, 100, NULL, datetime('now'))`,
+		model.ChallengeStatic,
+	).Error; err != nil {
+		t.Fatalf("seed NULL row: %v", err)
+	}
+
+	if err := migrateChallengeBuiltinFlag(gdb); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "legacy-upload").First(&chal).Error; err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if chal.IsBuiltin {
+		t.Fatal("is_builtin = true after backfill, want false")
+	}
+	// 修复目标：等值过滤能命中回填后的行。
+	var n int64
+	gdb.Model(&model.Challenge{}).Where("is_builtin = ?", false).Count(&n)
+	if n != 1 {
+		t.Fatalf("rows matched by is_builtin = 0: %d, want 1", n)
+	}
+	// 幂等：二次执行无 NULL 行，空操作不报错。
+	if err := migrateChallengeBuiltinFlag(gdb); err != nil {
+		t.Fatalf("second migrate: %v", err)
 	}
 }
