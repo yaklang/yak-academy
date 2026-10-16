@@ -16,6 +16,7 @@ import (
 
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -152,11 +153,11 @@ func (s *ChallengeService) UploadAttachment(ctx context.Context, slug, origName 
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(s.attachDir, slug)
+	dir := pathutil.Join(s.attachDir, slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, filename)
+	path := pathutil.Join(dir, filename)
 	tmp := path + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
@@ -235,7 +236,7 @@ func (s *ChallengeService) OpenAttachment(ctx context.Context, slug, filename st
 	if att == nil {
 		return nil, "", ErrNotFound
 	}
-	f, err := os.Open(filepath.Join(s.attachDir, slug, filename))
+	f, err := os.Open(pathutil.Join(s.attachDir, slug, filename))
 	if err != nil {
 		return nil, "", ErrNotFound
 	}
@@ -258,7 +259,7 @@ func (s *ChallengeService) DeleteAttachment(ctx context.Context, slug, filename 
 	if err := s.attachments.Delete(ctx, att.ID); err != nil {
 		return err
 	}
-	os.Remove(filepath.Join(s.attachDir, slug, filename))
+	os.Remove(pathutil.Join(s.attachDir, slug, filename))
 	return nil
 }
 
@@ -275,7 +276,7 @@ func (s *ChallengeService) DeleteChallengeAttachments(ctx context.Context, slug 
 	if err := s.attachments.DeleteByChallenge(ctx, chal.ID); err != nil {
 		return err
 	}
-	os.RemoveAll(filepath.Join(s.attachDir, slug))
+	os.RemoveAll(pathutil.Join(s.attachDir, slug))
 	return nil
 }
 

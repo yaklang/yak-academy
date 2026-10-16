@@ -33,7 +33,21 @@ api → service → repo → model
 | `backend/internal/model` | gorm 实体 |
 | `backend/internal/eventbus` | 进程内事件总线 |
 | `backend/internal/config` | 配置加载 |
+| `backend/internal/pathutil` | 磁盘路径统一入口（`Join` / `SafeJoin` / `CleanEntry`） |
 | `frontend/src/api` | 按契约手写的请求封装（唯一允许发 HTTP 的地方） |
+
+## 路径处理（强制，跨 Windows / macOS / Linux）
+
+磁盘路径拼接一律走 `backend/internal/pathutil`，业务代码**禁止新写裸 `filepath.Join`**：
+
+- `pathutil.Join(elems...)`：拼接服务端自有段（slug、ID、配置目录）。
+- `pathutil.SafeJoin(base, name)` / `pathutil.CleanEntry(name)`：任何来自 zip 条目、上传文件名等**不可信路径段**必须先过这两个函数——zip slip 防护（拒绝 `..` 段、盘符、UNC）集中在这一处，业务层不得手写归一化。错误哨兵 `pathutil.ErrUnsafePath`。
+- 例外：`embed.FS` 等包内虚拟路径是 `/` 分隔的另一套语义，仍用标准库 `path.Join`（见 `service/builtin.go`），不经 pathutil。
+- `filepath.Base/Ext/Dir/ToSlash` 等非拼接函数可直接使用。
+
+### 跨 shell 传路径（脚本与命令行，Windows 开发环境必读）
+
+git-bash 的 `/tmp`、`/c/...` 是 MSYS 虚拟路径，Windows 原生程序（python / node / go 构建产物等）**看不到**。给非 bash 程序传路径时用相对路径或 Windows 原生写法（`C:\...`、`$(cygpath -w ...)`）；脚本里禁止硬编码 `/tmp`，临时目录用 `"$TEMP"` 或 `mktemp` 后立即转换。
 
 ## 正反例
 
@@ -79,3 +93,4 @@ api → service → repo → model
 
 - **禁止复用同一 struct 变量做多次 First/查询**：struct 里残留的旧主键 ID 会成为隐式条件，查不到或查错行。每查一次用新变量（`var room model.Room`）。
 - 共享内存库的表跨测试累积：断言**增量**（before/after 计数对比），不假设表为空。
+- **`cache=shared` 内存库偶尔会泄漏到下个测试**（`t.Cleanup` 关闭连接的时序竞态，"下个测试重建"并非绝对保证）：断言**绝对计数/绝对状态**的用例必须用专属资源（独立 slug + 全新用户/ID），保证计数只由本用例产生（教训：`TestJudgeDynamicDecay` 曾随机 `score=50, want 70`）。
