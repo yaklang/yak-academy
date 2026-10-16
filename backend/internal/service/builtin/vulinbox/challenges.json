@@ -1,6 +1,7 @@
 [
   {
     "slug": "vulinbox-ssrf-basic",
+    "tutorial_slug": "yakit-ssrf-first",
     "title": "SSRF 基础：让服务器替你访问内网接口",
     "category": "ssrf",
     "difficulty": "apprentice",
@@ -20,6 +21,7 @@
   },
   {
     "slug": "vulinbox-ssrf-json",
+    "tutorial_slug": "yakit-ssrf-json",
     "title": "SSRF 进阶：藏在 JSON 参数里的跳板",
     "category": "ssrf",
     "difficulty": "practitioner",
@@ -38,6 +40,7 @@
   },
   {
     "slug": "vulinbox-sqli-union",
+    "tutorial_slug": "yakit-union-dump",
     "title": "SQL 注入：UNION 拖库取出 root 密码",
     "category": "sql-injection",
     "difficulty": "apprentice",
@@ -54,6 +57,7 @@
   },
   {
     "slug": "vulinbox-sqli-count",
+    "tutorial_slug": "yakit-closure-technique",
     "title": "SQL 注入：模糊查询点的精确统计",
     "category": "sql-injection",
     "difficulty": "practitioner",
@@ -69,6 +73,7 @@
   },
   {
     "slug": "vulinbox-login-bypass",
+    "tutorial_slug": "yakit-universal-login",
     "title": "万能密码：登录绕过",
     "category": "sql-injection",
     "difficulty": "apprentice",
@@ -84,6 +89,7 @@
   },
   {
     "slug": "vulinbox-session-fixed",
+    "tutorial_slug": "yakit-session-replay",
     "title": "预置会话：不登录冒充管理员",
     "category": "logic",
     "difficulty": "practitioner",
@@ -100,6 +106,7 @@
   },
   {
     "slug": "vulinbox-authz-cmd",
+    "tutorial_slug": "yakit-fuzzer-first",
     "title": "未授权 API：白拿的命令执行",
     "category": "access-control",
     "difficulty": "apprentice",
@@ -115,6 +122,7 @@
   },
   {
     "slug": "vulinbox-mall-price-tamper",
+    "tutorial_slug": "yakit-mitm-intercept",
     "title": "商城逻辑漏洞：一分钱买走购物车",
     "category": "logic",
     "difficulty": "practitioner",
@@ -130,6 +138,7 @@
   },
   {
     "slug": "vulinbox-jwt-none",
+    "tutorial_slug": "yakit-jwt-forge",
     "title": "JWT 算法混淆：alg=none 免签冒充",
     "category": "jwt",
     "difficulty": "practitioner",
@@ -146,6 +155,7 @@
   },
   {
     "slug": "vulinbox-upload-fileheader",
+    "tutorial_slug": "yakit-upload-magic",
     "title": "文件上传：魔数校验绕过",
     "category": "file-upload",
     "difficulty": "practitioner",
@@ -161,6 +171,7 @@
   },
   {
     "slug": "vulinbox-xss-escape",
+    "tutorial_slug": "yakit-xss-codec",
     "title": "反射型 XSS：危险拼接与安全转义",
     "category": "xss",
     "difficulty": "apprentice",

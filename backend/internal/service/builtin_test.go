@@ -110,6 +110,33 @@ func TestImportBuiltinChallengesFirstImport(t *testing.T) {
 	if chal.Bank != model.BankTutorial || !chal.IsBuiltin {
 		t.Fatalf("bank/is_builtin = %q/%v, want tutorial/true", chal.Bank, chal.IsBuiltin)
 	}
+	// 配套教程同批导入：4 Topic / 11 Room，与题目 1:1。
+	if res.Topics != 4 || res.Rooms != 11 {
+		t.Fatalf("topics/rooms = %d/%d, want 4/11", res.Topics, res.Rooms)
+	}
+	var room model.Room
+	if err := gdb.Where("slug = ?", "yakit-jwt-forge").First(&room).Error; err != nil {
+		t.Fatalf("find builtin room: %v", err)
+	}
+	if room.TopicSlug != "yakit-session-authz" || room.LessonMD == "" ||
+		room.Difficulty != model.DifficultyPractitioner || room.Title == "" {
+		t.Fatalf("builtin room fields wrong: %+v", room)
+	}
+	// 1:1 关联：每道内置题的 tutorial_slug 都能反查到配套 Room。
+	for _, slug := range res.Slugs {
+		var chal model.Challenge
+		if err := gdb.Where("slug = ?", slug).First(&chal).Error; err != nil {
+			t.Fatal(err)
+		}
+		if chal.TutorialSlug == "" {
+			t.Fatalf("builtin challenge %s: tutorial_slug is empty", slug)
+		}
+		var n int64
+		gdb.Model(&model.Room{}).Where("slug = ?", chal.TutorialSlug).Count(&n)
+		if n != 1 {
+			t.Fatalf("builtin challenge %s: tutorial room %q not found", slug, chal.TutorialSlug)
+		}
+	}
 }
 
 func TestImportBuiltinChallengesReimportUpdates(t *testing.T) {
@@ -133,6 +160,13 @@ func TestImportBuiltinChallengesReimportUpdates(t *testing.T) {
 	gdb.Model(&model.Challenge{}).Count(&count)
 	if int(count) != len(first.Slugs) {
 		t.Fatalf("challenge rows = %d, want %d (upsert 不应产生重复)", count, len(first.Slugs))
+	}
+	// 教程同样幂等：重导入不新增 Topic/Room 行。
+	var topics, rooms int64
+	gdb.Model(&model.Topic{}).Count(&topics)
+	gdb.Model(&model.Room{}).Count(&rooms)
+	if topics != 4 || rooms != 11 {
+		t.Fatalf("topics/rooms after reimport = %d/%d, want 4/11 (upsert 不应产生重复)", topics, rooms)
 	}
 }
 

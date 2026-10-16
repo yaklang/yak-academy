@@ -288,6 +288,8 @@ export interface BuiltinImportResult {
   version: string
   created: number
   updated: number
+  topics: number
+  rooms: number
   slugs: string[]
   image_built: boolean
 }
@@ -300,7 +302,7 @@ export const adminChallengeApi = {
     form.append('package', file)
     return http.upload<{ imported: number; slugs: string[] }>('/admin/challenges/package', form)
   },
-  // 一键导入内置训练题集（vulinbox）。幂等：重复调用 = 更新已导入题目。
+  // 一键导入内置训练集（教程 + 题目，一教程对一题）。幂等：重复调用 = 更新。
   importBuiltin: () =>
     http.post<BuiltinImportResult>('/admin/challenges/builtin'),
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),

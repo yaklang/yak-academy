@@ -1,7 +1,7 @@
 {
   "name": "vulinbox",
-  "version": "1.0.0",
-  "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS，共 11 题。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由）。",
+  "version": "1.1.0",
+  "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：配套教程（yakit 实战教学，一个教程对应一道题）+ 11 道题目（SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS）。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由）。",
   "image_tag": "yak-academy/vulinbox:latest",
   "port": 8787,
   "source": "https://github.com/yaklang/yaklang/tree/main/common/vulinbox",

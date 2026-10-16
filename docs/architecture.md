@@ -17,7 +17,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 **核心架构决策**（均在 skill 中有对应纠偏规则）：
 
 1. **教程与题目两类独立资源**：教程包只含教程（文字+视频），题目用固定格式 challenge.json 单独上传；题目可选 `tutorial_slug` 关联配套教程（双向入口），不关联的纯题目也合法（`.agents/skills/teaching-integration`）。
-2. **内容只来源于管理员上传**：内容包 zip + 五步上传管线，禁止内置内容（`.agents/skills/content-package-spec`）。**唯一例外**：官方内置训练题集（基于 yaklang vulinbox 靶场引擎）随后端二进制 go:embed 分发，但仅在管理员于管理端显式「一键导入」（`POST /admin/challenges/builtin`）时经同一上传管线写入内容库（upsert，重复导入即更新）——内容生效仍是管理员动作，vulinbox 二进制为 AGPL-3.0 的上游独立程序，平台不引用其源码（镜像内附 NOTICE，见 `backend/internal/service/builtin/vulinbox/image/`）。
+2. **内容只来源于管理员上传**：内容包 zip + 五步上传管线，禁止内置内容（`.agents/skills/content-package-spec`）。**唯一例外**：官方内置训练集（配套教程 + 题目，基于 yaklang vulinbox 靶场引擎）随后端二进制 go:embed 分发，但仅在管理员于管理端显式「一键导入」（`POST /admin/challenges/builtin`）时写入内容库——题目经同一上传管线 upsert，教程直接 upsert Topic/Room（重复导入即更新）——内容生效仍是管理员动作，vulinbox 二进制为 AGPL-3.0 的上游独立程序，平台不引用其源码（镜像内附 NOTICE，见 `backend/internal/service/builtin/vulinbox/image/`）。
 3. **两档角色**：普通人(`student`) / 管理员(`admin`)，声明式中间件鉴权（`.agents/skills/rbac-model`）。
 4. **事件溯源**：积分/进度/排行榜从 append-only 事件派生，判题异步（`.agents/skills/event-sourcing-rules`）。
 5. **契约先行**：openapi.yaml 是接口唯一契约源（`.agents/skills/api-contract`）。
@@ -83,7 +83,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。
 - Hint 扣分解锁：详情页折叠；`POST .../hints/{id}/unlock` 写 `hint.unlocked` 事件，派生器扣分；未解锁正文不返回。
-- **内置训练题集（vulinbox）**：题目定义与基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422，与题目包语义一致），再复用 `UploadChallenges` 逐题 upsert；noop 驱动下跳过构建仅导入定义。全题集共用单容器（vulinbox 单进程多靶机、按路径路由），`flag_mode=shared`（vulinbox 不消费 FLAG 环境变量）；SSRF 两题为 regex 判定（flag{uuid}），其余为基于靶场确定性种子数据的人工设计 static 判定。
+- **内置训练集（vulinbox，配套教程 + 题目）**：教程与题目定义、基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`，教程在 `tutorials/` 子目录），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422、零写入，与题目包语义一致），再导入配套教程（`importBuiltinTutorials`：复用 `parseFiles` 解析与静态校验，绕过包状态机直接 upsert Topic/Room，幂等），最后复用 `UploadChallenges` 逐题 upsert——**教程先、题目后**，题目落库时 `tutorial_slug` 指向的 Room 已存在，双向入口即刻生效；noop 驱动下跳过构建仅导入定义。**一教程对一题**：`challenges.json` 每题带 `tutorial_slug`，11 篇教程（`yakit-` 前缀 slug 命名空间，避免与上传教程包碰撞）分属 4 个专题，覆盖 Web Fuzzer/MITM/Codec 等核心 Yakit 功能。全题集共用单容器（vulinbox 单进程多靶机、按路径路由），`flag_mode=shared`（vulinbox 不消费 FLAG 环境变量）；SSRF 两题为 regex 判定（flag{uuid}），其余为基于靶场确定性种子数据的人工设计 static 判定。
 
 ### 3.4 judge — 异步判题
 
@@ -186,7 +186,7 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `GET /content/packages/{id}` | admin | 包状态与版本 |
 | `POST /content/packages/{id}/publish` | admin | 发布 |
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
-| `POST /admin/challenges/builtin` | admin | 一键导入内置训练题集（vulinbox；重复导入 = 更新） |
+| `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新） |
 | `GET /admin/challenges` | admin | 题目管理表格 |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
 | `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（管理页已下线；API 保留供竞赛批量建号与账号运维） |
@@ -228,7 +228,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
 - **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
 - **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（手机验证码，开发投递器通道）。
-- **Phase 3.6** ✅ 已完成：内置训练题集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 + shared/regex 判定）。
+- **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 + shared/regex 判定）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 10. 当前边界（明确不做）

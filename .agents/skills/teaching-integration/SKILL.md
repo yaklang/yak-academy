@@ -25,5 +25,6 @@ description: yak-academy 教程与题目两类资源的内容模型约束。涉�
 ## 正反例
 
 ✅ 正确：题目 JSON 带 `tutorial_slug` 指向配套教程 Room，两边详情页互给入口。
+✅ 正确：内置训练集一个教程对应一道内置题目（11 篇 Yakit 教程 ↔ 11 道 vulinbox 题），`tutorial_slug` 由内置导入的 challenges.json 注入；教程先于题目落库保证双向入口即刻生效（见 content-package-spec 例外二）。
 ✅ 正确：训练场列表只读展示（标题/难度/分值/容器/通关），交互集中在题目详情页。
 ❌ 错误：在教程包里恢复 lab.yaml / 让 Challenge 携带 room_id 外键（回退到内嵌模式）。

@@ -16,14 +16,15 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/model"
 )
 
-// 内置训练题集（官方内容，随二进制分发）。
-// 这是「内容只来源于管理员上传」原则的唯一例外：题集虽然随后端二进制分发，
+// 内置训练集（官方内容，随二进制分发：配套教程 + 题目，一教程对一题）。
+// 这是「内容只来源于管理员上传」原则的唯一例外：训练集虽然随后端二进制分发，
 // 但只有管理员在管理端显式一键导入才会写入内容库（见 docs/architecture.md 决策 2）。
 //
 //go:embed builtin/vulinbox
 var builtinFS embed.FS
 
 const builtinSetDir = "builtin/vulinbox"
+const builtinTutorialsDir = "builtin/vulinbox/tutorials"
 
 // builtinManifest 内置题集清单。
 type builtinManifest struct {
@@ -41,15 +42,18 @@ type BuiltinImportResult struct {
 	Version    string   `json:"version"`
 	Created    int      `json:"created"`
 	Updated    int      `json:"updated"`
+	Topics     int      `json:"topics"`
+	Rooms      int      `json:"rooms"`
 	Slugs      []string `json:"slugs"`
 	ImageBuilt bool     `json:"image_built"`
 }
 
-// ImportBuiltinChallenges 一键导入内置训练题集（幂等：重复调用 = 更新已导入题目）。
-// 流程：解析嵌入资产 → 预统计新增/更新 → 构建基础镜像（Docker 可用时）→
-// 复用 UploadChallenges 完成校验与逐题 upsert。
+// ImportBuiltinChallenges 一键导入内置训练集（教程 + 题目；幂等：重复调用 = 更新）。
+// 流程：解析嵌入资产 → 先导入配套教程（Topic/Room，与题目 1:1）→ 预统计新增/更新 →
+// 构建基础镜像（Docker 可用时）→ 复用 UploadChallenges 完成校验与逐题 upsert。
+// 任一步失败整体拒绝（题目/教程同批生效，不出现有题无教程或反之的半成品）。
 // 镜像构建失败则整体拒绝（与题目包「构建失败不入库」语义一致）；
-// 未配置 Docker 驱动（noop）时跳过构建仅导入题目定义，ImageBuilt=false。
+// 未配置 Docker 驱动（noop）时跳过构建仅导入定义，ImageBuilt=false。
 func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinImportResult, error) {
 	manifestRaw, err := fs.ReadFile(builtinFS, path.Join(builtinSetDir, "manifest.json"))
 	if err != nil {
@@ -83,6 +87,13 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 		imageBuilt = true
 	}
 
+	// 镜像构建不碰内容表，放在最前保证失败时零写入；教程先于题目落库，
+	// 题目落库时 tutorial_slug 指向的 Room 已存在，双向入口即刻生效。
+	topics, rooms, err := s.importBuiltinTutorials(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// 内部路径放行 tutorial：markBuiltinBank 已把全题集注入 tutorial，
 	// 走公共 UploadChallenges 会被「上传禁入教程题库」校验拒绝。
 	_, slugs, err := s.uploadChallenges(ctx, challengesRaw, true)
@@ -97,9 +108,57 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 		Version:    manifest.Version,
 		Created:    created,
 		Updated:    updated,
+		Topics:     topics,
+		Rooms:      rooms,
 		Slugs:      slugs,
 		ImageBuilt: imageBuilt,
 	}, nil
+}
+
+// importBuiltinTutorials 导入内置训练集的配套教程（Topic/Room）。
+// 复用教程包解析与静态校验（parseFiles/validateParsed）；绕过包状态机
+// 直接 Upsert——与题目同语义的幂等写入，重复导入 = 更新。
+// Room slug 统一 yakit- 前缀命名空间；challenges.json 每题 tutorial_slug
+// 指向配套 Room（1:1），详见 docs/architecture.md 决策 2 例外。
+func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, rooms int, err error) {
+	files := map[string][]byte{}
+	if err := fs.WalkDir(builtinFS, builtinTutorialsDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := builtinFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		files[strings.TrimPrefix(p, builtinTutorialsDir+"/")] = data
+		return nil
+	}); err != nil {
+		return 0, 0, fmt.Errorf("%w: builtin tutorials unreadable: %v", ErrValidation, err)
+	}
+	parsed, err := s.parseFiles(files)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: builtin tutorials corrupt: %v", ErrValidation, err)
+	}
+	if err := validateParsed(parsed); err != nil {
+		return 0, 0, fmt.Errorf("%w: builtin tutorials invalid: %v", ErrValidation, err)
+	}
+	for i := range parsed.Topics {
+		if err := s.topics.Upsert(ctx, &parsed.Topics[i]); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, rp := range parsed.Rooms {
+		if err := s.rooms.Upsert(ctx, &model.Room{
+			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
+			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
+		}); err != nil {
+			return 0, 0, err
+		}
+	}
+	return len(parsed.Topics), len(parsed.Rooms), nil
 }
 
 // markBuiltinBank 内置题集统一归入教程题目 tab：上传路径已禁用 tutorial，
