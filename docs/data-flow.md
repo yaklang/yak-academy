@@ -55,7 +55,7 @@ DELETE → destroy；reaper 按 expire_at 回收
 
 要点：
 - `checkpoint_token` 每实例随机生成，存 `LabInstance.checkpoint_token`（API JSON 隐藏）；实例销毁 token 即失效。
-- `CHECKPOINT_URL = $ACADEMY_PUBLIC_URL/api/v1/checkpoints/<token>`（容器内经 host.docker.internal 回达宿主）。
+- `CHECKPOINT_URL = $ACADEMY_PUBLIC_URL/api/v1/checkpoints/<token>`（容器内经 host.docker.internal 回达宿主；Linux 由 `DockerDriver.Create` 的 `--add-host host-gateway` 注入解析，默认值开箱即用）。
 
 ## 2c. 检测点自动判定流（容器回调，参考 PortSwigger）
 

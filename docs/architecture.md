@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.4（Phase 2/3 完成 + 竞赛系统 + 自助注册）
+> 版本：v0.5（Phase 2/3 完成 + 竞赛系统 + 自助注册 + 部署约定）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -229,7 +229,14 @@ channel（零下载），串行 worker（共享 DB 与账号），改全局状�
 E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题、改密后 1 秒内
 重登被拒），是回归防线的重要组成部分。
 
-## 9. 演进路线
+## 9. 部署约定（容器化 Linux 单机）
+
+- **唯一受支持的部署形态**：Docker Compose 容器化部署于 **Linux 宿主**（amd64，受 vulinbox 基础镜像架构限制）。部署入口为根目录 `docker-compose.yml`（backend + frontend/nginx），配置样例 `deploy/env.example`；生产必改 `ACADEMY_JWT_SECRET` / `ACADEMY_ADMIN_PASSWORD`（启动告警兜底）。数据（SQLite/附件/头像/WP）统一持久化在 `./data` 卷：升级 = 重新 `docker compose up -d --build`，备份 = 备份 `./data`。环境要求 Docker Engine ≥ 20.10（`host-gateway` 支持）+ compose 插件。
+- **题目容器治理**：后端容器内置 docker CLI 并挂载宿主 `/var/run/docker.sock`，题目容器创建在宿主 daemon 上（兄弟容器，非嵌套）；compose 显式 `ACADEMY_ENV_DRIVER=docker`。
+- **检测点回达**：`DockerDriver.Create` 以 `--add-host host.docker.internal:host-gateway` 注入解析，`ACADEMY_PUBLIC_URL` 默认值（`http://host.docker.internal:8080`）在 Linux 宿主开箱即用（Docker Desktop 兼容，显式条目不冲突）；仅当宿主防火墙拦截容器→宿主流量时改为宿主 LAN IP。题目容器端口固定发布 `127.0.0.1`（单机边界，多用户远程访问属 Phase 4）。
+- **非部署形态**：Docker Desktop（Win/Mac）仅本地体验；裸跑后端二进制（start.sh / start.bat）仅本地开发（env 驱动默认 auto：探测到 Docker 即 docker，否则 noop 501）。
+
+## 10. 演进路线
 
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
@@ -238,7 +245,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 + shared/regex 判定）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
-## 10. 当前边界（明确不做）
+## 11. 当前边界（明确不做）
 
 - 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
 - 排行榜未按赛季切片；单机部署假设（docker 驱动仅绑 127.0.0.1）。

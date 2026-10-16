@@ -1,13 +1,17 @@
 # yak-academy 平台部署（单机）。
 #
+# 部署约定（docs/architecture.md §9）：以 Docker Compose 容器化部署于 Linux 宿主
+# （amd64）为唯一受支持形态；Docker Desktop（Win/Mac）仅供本地体验。
+#
 # 架构边界（docs/architecture.md 演进路线：第一版单机边界）：
 # - 后端通过挂载宿主 /var/run/docker.sock + 容器内 docker CLI 管理题目容器；
 #   题目容器创建在宿主 daemon 上，与本服务是兄弟容器（非 in-docker 嵌套）。
 # - 题目容器端口固定发布到宿主 127.0.0.1（DockerDriver.Create），
 #   因此学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围。
 # - CHECKPOINT_URL 由 ACADEMY_PUBLIC_URL 拼出：题目容器需回达后端 8080 端口。
-#   Docker Desktop（Win/Mac）默认 host.docker.internal 可用；
-#   Linux 上需改为宿主 LAN IP 或 docker0 网桥 IP（通常 172.17.0.1）。
+#   DockerDriver.Create 以 --add-host host-gateway 注入 host.docker.internal 解析，
+#   Linux 与 Docker Desktop 默认值均开箱即用；仅当宿主防火墙拦截容器→宿主
+#   流量（如 firewalld 默认拦 docker0）时改为宿主 LAN IP。
 #
 # 可通过 .env / 环境变量覆盖：ACADEMY_JWT_SECRET、ACADEMY_ADMIN_PASSWORD 必改，
 # ACADEMY_PUBLIC_URL 按宿主网络环境调整。
