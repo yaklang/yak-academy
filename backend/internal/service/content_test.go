@@ -267,6 +267,75 @@ func TestUploadChallengesUpsertAndBatch(t *testing.T) {
 	}
 }
 
+// 教程题目 tab 专属内置题集，上传路径的题库归属规则：
+// 新建缺省 → ctf；重传缺省 → 保留原值（不漂移不重置）；显式仅接受 ctf/acm，
+// tutorial 一律 422（内置导入在 builtin.go 注入，绕过上传校验）。
+func TestUploadChallengesBankRules(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+
+	bankOf := func(slug string) model.ChallengeBank {
+		t.Helper()
+		var chal model.Challenge
+		if err := gdb.Where("slug = ?", slug).First(&chal).Error; err != nil {
+			t.Fatal(err)
+		}
+		return chal.Bank
+	}
+	upload := func(bank string) error {
+		payload := `{"slug":"bank-1","title":"题库题","category":"web","difficulty":"apprentice",
+			"score":100,"challenge":{"type":"static","flag":"flag{a}"}}`
+		if bank != "" {
+			payload = `{"slug":"bank-1","title":"题库题","category":"web","difficulty":"apprentice",
+			"score":100,"challenge":{"type":"static","flag":"flag{a}"},"bank":"` + bank + `"}`
+		}
+		_, _, err := svc.UploadChallenges(ctx, []byte(payload))
+		return err
+	}
+
+	// 新建缺省 → ctf。
+	if err := upload(""); err != nil {
+		t.Fatalf("create default: %v", err)
+	}
+	if got := bankOf("bank-1"); got != model.BankCTF {
+		t.Fatalf("create default bank = %q, want ctf", got)
+	}
+	// 重传缺省 → 保留 ctf。
+	if err := upload(""); err != nil {
+		t.Fatalf("re-upload default: %v", err)
+	}
+	if got := bankOf("bank-1"); got != model.BankCTF {
+		t.Fatalf("re-upload default bank = %q, want ctf preserved", got)
+	}
+	// 显式 acm → 切换；再缺省重传 → 保留 acm（保留原值而非重置 ctf）。
+	if err := upload("acm"); err != nil {
+		t.Fatalf("switch acm: %v", err)
+	}
+	if got := bankOf("bank-1"); got != model.BankACM {
+		t.Fatalf("explicit acm bank = %q, want acm", got)
+	}
+	if err := upload(""); err != nil {
+		t.Fatalf("re-upload after acm: %v", err)
+	}
+	if got := bankOf("bank-1"); got != model.BankACM {
+		t.Fatalf("re-upload after acm bank = %q, want acm preserved", got)
+	}
+	// 显式 tutorial → 拒绝且不入库。
+	var before int64
+	gdb.Model(&model.Challenge{}).Count(&before)
+	if err := upload("tutorial"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("tutorial bank err = %v, want ErrValidation", err)
+	}
+	if got := bankOf("bank-1"); got != model.BankACM {
+		t.Fatalf("rejected upload must not touch existing rows, bank = %q", got)
+	}
+	var after int64
+	gdb.Model(&model.Challenge{}).Count(&after)
+	if after != before {
+		t.Fatalf("tutorial upload must not persist, before=%d after=%d", before, after)
+	}
+}
+
 func TestPublishWritesContentTables(t *testing.T) {
 	svc, gdb := newContentTestService(t)
 	ctx := context.Background()

@@ -5,7 +5,8 @@ import type { ChallengeHintInput, ChallengeJSON, ChallengeLink } from '../api'
 
 const slugPattern = /^[a-z0-9-]+$/
 const difficulties = ['apprentice', 'practitioner', 'expert'] as const
-const banks = ['tutorial', 'ctf', 'acm'] as const
+// 教程题目 tab 专属内置题集：上传只接受 ctf/acm（tutorial 由内置导入注入）。
+const banks = ['ctf', 'acm'] as const
 
 // 校验单个题目定义；返回错误消息数组（空 = 通过）。
 export function validateChallenge(chal: ChallengeJSON): string[] {
@@ -20,7 +21,7 @@ export function validateChallenge(chal: ChallengeJSON): string[] {
   else if (!slugPattern.test(chal.category)) where('category', '格式同 slug，[a-z0-9-]+')
 
   if (chal.bank && !(banks as readonly string[]).includes(chal.bank))
-    where('bank', '必须为 tutorial / ctf / acm（缺省 tutorial）')
+    where('bank', '上传仅可选 ctf / acm（tutorial 为内置题集专属，缺省 ctf）')
 
   if (!chal.difficulty || !(difficulties as readonly string[]).includes(chal.difficulty))
     where('difficulty', '必须为 apprentice / practitioner / expert')
@@ -94,7 +95,7 @@ export const SAMPLE_CHALLENGE_JSON: ChallengeJSON = {
   slug: 'sqli-login-bypass',
   title: 'SQL 注入登录绕过',
   category: 'sql-injection',
-  bank: 'tutorial',
+  bank: 'ctf',
   difficulty: 'apprentice',
   description_md:
     '# 背景\n\n某站点的登录接口直接把用户名拼进 SQL 语句，没有做任何过滤。\n\n# 任务目标\n\n启动容器后访问题目 endpoint（`/login`），用 SQL 注入绕过登录校验。当后端确认「admin 身份登录成功」，题目自动判定通关——无需手动提交 flag。',

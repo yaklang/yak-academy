@@ -39,6 +39,8 @@ test.describe('可见性旅程', () => {
 
     await loginAsStudent(page)
     await page.goto('/training')
+    // 上传的种子题归 CTF 题目 tab（教程题目专属内置题集）
+    await page.getByRole('tab', { name: 'CTF 题目' }).click()
     await expect(page.getByRole('link', { name: C.title })).toBeVisible()
   })
 

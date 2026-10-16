@@ -184,3 +184,46 @@ func TestMigrateBackfillsNullBuiltinFlag(t *testing.T) {
 		t.Fatalf("second migrate: %v", err)
 	}
 }
+
+// 教程题目 tab 收敛为专属内置题集：迁移把已上传到 tutorial 题库的普通题
+// 改判 ctf，内置行原样保留；is_builtin 为 NULL 的历史裸列行按 COALESCE
+// 兜底视作普通上传题。幂等：二次执行空操作。
+func TestMigrateReclassifiesUploadedTutorialBank(t *testing.T) {
+	gdb := newTestDB(t, false)
+	seed := func(slug string, isBuiltin any) {
+		t.Helper()
+		if err := gdb.Exec(
+			`INSERT INTO challenges (slug, title, type, score, bank, is_builtin, created_at)
+			 VALUES (?, ?, ?, 100, 'tutorial', ?, datetime('now'))`,
+			slug, slug, model.ChallengeStatic, isBuiltin,
+		).Error; err != nil {
+			t.Fatalf("seed %s: %v", slug, err)
+		}
+	}
+	seed("vulinbox-keep", 1)   // 内置行：保留 tutorial
+	seed("uploaded-move", 0)   // 上传行：改判 ctf
+	seed("legacy-null", nil)   // 历史裸列 NULL：兜底按上传处理
+
+	if err := migrateChallengeBankOwnership(gdb); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	assertBank := func(slug, want string) {
+		t.Helper()
+		var bank string
+		if err := gdb.Model(&model.Challenge{}).Where("slug = ?", slug).Pluck("bank", &bank).Error; err != nil {
+			t.Fatal(err)
+		}
+		if bank != want {
+			t.Fatalf("%s bank = %q, want %q", slug, bank, want)
+		}
+	}
+	assertBank("vulinbox-keep", "tutorial")
+	assertBank("uploaded-move", "ctf")
+	assertBank("legacy-null", "ctf")
+
+	// 幂等：二次执行无 tutorial 普通行，空操作不报错。
+	if err := migrateChallengeBankOwnership(gdb); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	assertBank("vulinbox-keep", "tutorial")
+}

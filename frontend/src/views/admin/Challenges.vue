@@ -28,7 +28,7 @@ const form = reactive({
   slug: '',
   title: '',
   category: '',
-  bank: 'tutorial' as ChallengeBank,
+  bank: 'ctf' as ChallengeBank,
   difficulty: 'apprentice' as ChallengeJSON['difficulty'],
   score: 100,
   flag_mode: 'shared' as Required<ChallengeJSON>['flag_mode'],
@@ -76,7 +76,8 @@ function fillForm(chal: ChallengeJSON) {
   form.slug = chal.slug ?? ''
   form.title = chal.title ?? ''
   form.category = chal.category ?? ''
-  form.bank = chal.bank ?? 'tutorial'
+  // 教程题目 tab 专属内置题集：上传只允许 ctf/acm，其余（tutorial/空）归 ctf。
+  form.bank = chal.bank === 'acm' ? 'acm' : 'ctf'
   form.difficulty = chal.difficulty ?? 'apprentice'
   form.score = chal.score ?? 100
   form.flag_mode = chal.flag_mode ?? 'shared'
@@ -134,6 +135,9 @@ async function onImport(file: File) {
     return false
   }
   const chal = list[0]
+  if (chal.bank === 'tutorial') {
+    ElMessage.warning({ message: '教程题目 tab 专属内置题集：该文件声明的 bank=tutorial 不再接受上传，将按表单所选题库（ctf/acm）入库', duration: 5000 })
+  }
   const errs = validateChallenge(chal)
   if (errs.length) {
     // 格式不合法也允许进弹窗修正（错误先展示，修正后才可上传）。
@@ -427,7 +431,7 @@ onMounted(load)
   "slug": "sqli-login-bypass",        // 必填 [a-z0-9-]+
   "title": "SQL 注入登录绕过",          // 必填
   "category": "sql-injection",         // 必填 [a-z0-9-]+
-  "bank": "tutorial",                  // 题库 tab：tutorial（默认）| ctf | acm
+  "bank": "ctf",                      // 题库 tab：ctf（默认）| acm；tutorial 为内置题集专属，上传传即 422
   "difficulty": "apprentice",          // apprentice | practitioner | expert
   "description_md": "# 背景…",         // Markdown 描述（可选）
   "score": 100,
@@ -522,8 +526,10 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="题库">
           <el-select v-model="form.bank">
-            <el-option v-for="(label, b) in BANK_LABELS" :key="b" :value="b" :label="`${label}（${b}）`" />
+            <el-option value="ctf" label="CTF 题目（ctf，默认）" />
+            <el-option value="acm" label="ACM 题目（acm）" />
           </el-select>
+          <div class="dim form-hint">教程题目 tab 为内置题集专属，经「导入内置训练」写入</div>
         </el-form-item>
         <el-form-item label="难度" required>
           <el-select v-model="form.difficulty">
@@ -663,5 +669,6 @@ onMounted(load)
 .attach-toolbar { margin-bottom: 0.8rem; }
 .release-note { font-size: 0.78rem; color: var(--el-text-color-secondary); margin-top: 2px; }
 .release-input { margin-top: 0.8rem; }
+.form-hint { line-height: 1.4; margin-top: 2px; }
 .dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>

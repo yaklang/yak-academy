@@ -509,7 +509,13 @@ type challengeJSON struct {
 
 // UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
 // 逐题校验、整体拒绝（单题失败全部不入库）；slug 冲突视为 upsert（重传更新）。
+// 普通上传禁入教程题库（bank 仅 ctf/acm）；内置导入走 allowTutorialBank=true
+// 的内部路径注入 tutorial（见 builtin.go）。
 func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (imported int, slugs []string, err error) {
+	return s.uploadChallenges(ctx, raw, false)
+}
+
+func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allowTutorialBank bool) (imported int, slugs []string, err error) {
 	var single challengeJSON
 	var batch []challengeJSON
 	if json.Unmarshal(raw, &single) == nil && single.Slug != "" {
@@ -523,7 +529,7 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 	// 先整体校验，再逐题 upsert（失败前置，避免部分入库）。
 	seen := map[string]bool{}
 	for i, c := range batch {
-		if err := s.validateChallengeJSON(i, c, seen); err != nil {
+		if err := s.validateChallengeJSON(i, c, seen, allowTutorialBank); err != nil {
 			return 0, nil, err
 		}
 	}
@@ -534,7 +540,7 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 		}
 		chal := &model.Challenge{
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
-			Bank: resolveBank(c.Bank),
+			Bank: s.resolveUploadBank(ctx, c.Slug, c.Bank),
 			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
 			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
@@ -549,7 +555,8 @@ func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (impo
 }
 
 // validateChallengeJSON 单题字段校验（枚举/slug/flag/env 成对/hint cost）。
-func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[string]bool) error {
+// allowTutorialBank 仅内置导入路径为 true（其 bank 已由 markBuiltinBank 注入 tutorial）。
+func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[string]bool, allowTutorialBank bool) error {
 	where := fmt.Sprintf("challenge[%d]", i)
 	if c.Slug == "" {
 		return fmt.Errorf("%w: %s: slug is required", ErrValidation, where)
@@ -570,8 +577,9 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	if !slugPattern.MatchString(c.Category) {
 		return fmt.Errorf("%w: %s: category must match [a-z0-9-]+", ErrValidation, where)
 	}
-	if c.Bank != "" && c.Bank != model.BankTutorial && c.Bank != model.BankCTF && c.Bank != model.BankACM {
-		return fmt.Errorf("%w: %s: bank must be tutorial, ctf or acm", ErrValidation, where)
+	if c.Bank != "" && c.Bank != model.BankCTF && c.Bank != model.BankACM &&
+		!(allowTutorialBank && c.Bank == model.BankTutorial) {
+		return fmt.Errorf("%w: %s: bank must be ctf or acm (tutorial 题库专属内置题集)", ErrValidation, where)
 	}
 	if err := validateDifficulty(c.Difficulty); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrValidation, where, err)
@@ -647,12 +655,17 @@ func resolveFlagMode(m model.FlagMode) model.FlagMode {
 	return m
 }
 
-// resolveBank 题库 tab 缺省教程题目（内部题库默认归置）。
-func resolveBank(b model.ChallengeBank) model.ChallengeBank {
-	if b == "" {
-		return model.BankTutorial
+// resolveUploadBank 上传路径的题库归置：显式指定（仅 ctf/acm，校验已拒 tutorial）
+// 原样生效；缺省时更新保留原值、新建默认 ctf——教程题目 tab 专属内置题集，
+// 普通上传不得进入（内置导入在 builtin.go 显式注入 tutorial）。
+func (s *ContentService) resolveUploadBank(ctx context.Context, slug string, b model.ChallengeBank) model.ChallengeBank {
+	if b != "" {
+		return b
 	}
-	return b
+	if existing, err := s.challenge.challenges.FindBySlug(ctx, slug); err == nil && existing.Bank != "" {
+		return existing.Bank
+	}
+	return model.BankCTF
 }
 
 // DeleteChallenge 删除题目：存在通关记录拒绝（409）；
@@ -789,7 +802,7 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		}
 	}
 	seen := map[string]bool{}
-	if err := s.validateChallengeJSON(0, cj, seen); err != nil {
+	if err := s.validateChallengeJSON(0, cj, seen, false); err != nil {
 		return 0, nil, err
 	}
 	if buildLocal {

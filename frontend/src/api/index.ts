@@ -26,7 +26,8 @@ export interface LabInstance {
 export interface Paged<T> { total: number; page: number; page_size: number; items: T[] }
 export interface RoomSummary { slug: string; title: string; difficulty: 'apprentice' | 'practitioner' | 'expert' }
 export interface TopicDetail extends Topic { rooms: RoomSummary[] }
-// 题库 tab（bank）：教程题目=内部题库默认；CTF/ACM 为扩展题库。
+// 题库 tab（bank）：教程题目 = 内置题集专属（仅一键导入写入，上传传 tutorial 一律 422）；
+// CTF（上传缺省）/ ACM 为管理员上传题库。
 export type ChallengeBank = 'tutorial' | 'ctf' | 'acm'
 export const BANK_LABELS: Record<ChallengeBank, string> = {
   tutorial: '教程题目',

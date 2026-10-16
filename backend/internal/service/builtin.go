@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+
+	"github.com/yaklang/yak-academy/backend/internal/model"
 )
 
 // 内置训练题集（官方内容，随二进制分发）。
@@ -61,6 +63,10 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 	if err != nil {
 		return nil, fmt.Errorf("%w: builtin challenges missing: %v", ErrValidation, err)
 	}
+	challengesRaw, err = markBuiltinBank(challengesRaw)
+	if err != nil {
+		return nil, err
+	}
 
 	created, updated, err := s.countBuiltinDiff(ctx, challengesRaw)
 	if err != nil {
@@ -77,7 +83,9 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 		imageBuilt = true
 	}
 
-	_, slugs, err := s.UploadChallenges(ctx, challengesRaw)
+	// 内部路径放行 tutorial：markBuiltinBank 已把全题集注入 tutorial，
+	// 走公共 UploadChallenges 会被「上传禁入教程题库」校验拒绝。
+	_, slugs, err := s.uploadChallenges(ctx, challengesRaw, true)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +100,23 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 		Slugs:      slugs,
 		ImageBuilt: imageBuilt,
 	}, nil
+}
+
+// markBuiltinBank 内置题集统一归入教程题目 tab：上传路径已禁用 tutorial，
+// 这里显式注入，保证「教程题目 = 内置题集」不被普通上传稀释。
+func markBuiltinBank(raw []byte) ([]byte, error) {
+	var batch []challengeJSON
+	if err := json.Unmarshal(raw, &batch); err != nil {
+		return nil, fmt.Errorf("%w: builtin challenges corrupt: %v", ErrValidation, err)
+	}
+	for i := range batch {
+		batch[i].Bank = model.BankTutorial
+	}
+	out, err := json.Marshal(batch)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // countBuiltinDiff 预统计本次导入的新增/更新题数（按 slug 存在性判定）。

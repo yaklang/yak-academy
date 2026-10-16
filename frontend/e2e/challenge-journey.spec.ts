@@ -18,8 +18,10 @@ test.describe('题目全链路', () => {
   test('题库按分类分组，详情可通题', async ({ page }) => {
     await loginAsStudent(page)
 
-    // 题库列表（默认「教程题目」tab）按 category 分组出现种子题
+    // 题库列表：上传的种子题归「CTF 题目」tab（教程题目 tab 专属内置题集），
+    // 按 category 分组出现
     await page.getByRole('link', { name: '题库' }).click()
+    await page.getByRole('tab', { name: 'CTF 题目' }).click()
     await expect(page.locator('h3.cat', { hasText: C.category })).toBeVisible()
     await page.getByRole('link', { name: C.title }).click()
     await expect(page).toHaveURL(new RegExp(`/training/${C.slug}`))
