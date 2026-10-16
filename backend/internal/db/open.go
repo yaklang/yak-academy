@@ -33,6 +33,9 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateChallengeSlug(db); err != nil {
 		return err
 	}
+	if err := migrateChallengeBuiltinFlag(db); err != nil {
+		return err
+	}
 	if err := migrateWriteupScope(db); err != nil {
 		return err
 	}
@@ -72,6 +75,20 @@ func migrateTwoRoleModel(db *gorm.DB) error {
 	}
 	if err := db.Exec(`DELETE FROM course_roles`).Error; err != nil {
 		return err
+	}
+	return nil
+}
+
+// migrateChallengeBuiltinFlag 一次性回填：is_builtin 列曾在无默认值约束下加入
+// （列 DDL 为裸 numeric），迁移前已存在的旧行为 NULL；「管理员上传」过滤
+// （is_builtin = 0）按 SQL 三值逻辑匹配不到 NULL，旧库会漏题。幂等：无 NULL 行时空操作。
+func migrateChallengeBuiltinFlag(db *gorm.DB) error {
+	res := db.Exec(`UPDATE challenges SET is_builtin = 0 WHERE is_builtin IS NULL`)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("migrate challenges: backfilled is_builtin for %d legacy rows", res.RowsAffected)
 	}
 	return nil
 }

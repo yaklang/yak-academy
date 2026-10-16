@@ -56,7 +56,11 @@ type Challenge struct {
 	// IsVisible 可见性开关（管理端控制；false 时学生端训练场/详情/实例/提交全部 404）。
 	IsVisible bool `gorm:"default:true" json:"is_visible"`
 	// IsBuiltin 来自官方内置训练题集（导入时标记；普通上传/编辑不改写此来源标记）。
-	IsBuiltin bool `json:"is_builtin"`
+	// 带默认值（不带 not null，与 is_visible 一致）：无默认值时 ADD COLUMN 给旧行
+	// 落 NULL，而「非内置」过滤（is_builtin = 0）按 SQL 三值逻辑匹配不到 NULL
+	// （db.Migrate 另有回填兜底旧库）。not null 会让 AutoMigrate 的整表重建在
+	// 回填前就撞上旧行 NULL，迁移直接失败，故不加。
+	IsBuiltin bool `gorm:"default:false" json:"is_builtin"`
 	// ReleaseAt 定时发布时间（nil = 不限，立即语义；未来时间学生端隐藏，到期自动可见）。
 	ReleaseAt *time.Time `json:"release_at"`
 	CreatedAt time.Time      `json:"created_at"`
