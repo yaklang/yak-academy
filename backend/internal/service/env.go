@@ -525,9 +525,14 @@ func containerName(instanceID uint) string {
 }
 
 // Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，可选 -e 环境变量与资源限额，读回实际端口生成 endpoint。
+// --add-host host-gateway：Linux 宿主上容器内默认解析不了 host.docker.internal，
+// 显式映射到网关 IP 后 CHECKPOINT_URL 默认值跨平台开箱即用（Docker Desktop
+// 自带该解析，显式条目与其不冲突）。
 func (d DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
 	name := containerName(spec.InstanceID)
-	args := []string{"run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1::%d", spec.Port)}
+	args := []string{"run", "-d", "--name", name,
+		"-p", fmt.Sprintf("127.0.0.1::%d", spec.Port),
+		"--add-host", "host.docker.internal:host-gateway"}
 	if d.Memory != "" {
 		args = append(args, "--memory", d.Memory)
 	}

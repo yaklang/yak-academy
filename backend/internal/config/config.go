@@ -28,7 +28,8 @@ type Config struct {
 	InstanceCPUs   string
 
 	// PublicURL 平台对外可达地址：注入题目容器的 CHECKPOINT_URL 前缀
-	// （容器内经 host.docker.internal 回达宿主）。
+	// （容器内经 host.docker.internal 回达宿主；Linux 宿主由 DockerDriver
+	// 的 --add-host host-gateway 注入解析，默认值开箱即用）。
 	PublicURL string
 }
 

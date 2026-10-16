@@ -12,16 +12,19 @@ bash start.sh        # Git Bash / Linux / macOS；Windows 可双击 start.bat
 - 停止：Ctrl+C 或 `bash stop.sh`
 - 默认管理员账号 `admin / admin123`（users 表为空时启动自动创建，请尽快修改）
 
-## 部署（Docker Compose，单机）
+## 部署（Docker Compose，Linux 宿主）
+
+部署约定：**以 Docker Compose 容器化部署于 Linux 宿主（amd64）为唯一受支持形态**；Docker Desktop（Win/Mac）仅用于本地体验，裸跑后端二进制（`start.sh` / `start.bat`）仅限本地开发。环境要求：Linux x86_64 + Docker Engine ≥ 20.10（`host-gateway` 支持）+ compose 插件。
 
 ```bash
 cp deploy/env.example .env   # 编辑：设置 ACADEMY_JWT_SECRET / ACADEMY_ADMIN_PASSWORD
 docker compose up -d --build
 ```
 
-- 前端入口 `http://127.0.0.1:8081`（nginx 托管 SPA 并将 `/api` 反代到后端），后端直接暴露 `:8080`
-- **docker.sock 方案**：后端容器挂载宿主 `/var/run/docker.sock` 并内置 docker CLI，题目容器创建在宿主 daemon 上（与平台是兄弟容器，非嵌套）；SQLite 与上传内容持久化在 `./data/`
-- **边界**：题目容器端口固定发布到宿主 `127.0.0.1`（`DockerDriver.Create`），学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围；`ACADEMY_PUBLIC_URL` 决定题目容器检测点回调地址，Docker Desktop（Win/Mac）用默认 `host.docker.internal` 即可，Linux 需改为宿主 IP 或 docker0 网桥 IP（通常 `172.17.0.1`）
+- 前端入口 `http://<宿主IP>:8081`（nginx 托管 SPA 并将 `/api` 反代到后端），后端直接暴露 `:8080`
+- **docker.sock 方案**：后端容器挂载宿主 `/var/run/docker.sock` 并内置 docker CLI，题目容器创建在宿主 daemon 上（与平台是兄弟容器，非嵌套）；SQLite 与上传内容持久化在 `./data/`（升级 = 重新 `up -d --build`，备份 = 备份 `./data`）
+- **检测点回调**：题目容器经 `host.docker.internal` 回达后端——`DockerDriver.Create` 以 `--add-host host-gateway` 注入解析，Linux 与 Docker Desktop 默认值均开箱即用；仅当宿主防火墙拦截容器→宿主 8080（如 firewalld 默认拦 docker0）时改 `ACADEMY_PUBLIC_URL` 为宿主 LAN IP
+- **边界**：题目容器端口固定发布到宿主 `127.0.0.1`（`DockerDriver.Create`），学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围
 
 ## 环境搭建与镜像加速（本地开发）
 
