@@ -26,11 +26,21 @@ export interface LabInstance {
 export interface Paged<T> { total: number; page: number; page_size: number; items: T[] }
 export interface RoomSummary { slug: string; title: string; difficulty: 'apprentice' | 'practitioner' | 'expert' }
 export interface TopicDetail extends Topic { rooms: RoomSummary[] }
+// 题库 tab（bank）：教程题目=内部题库默认；CTF/ACM 为扩展题库。
+export type ChallengeBank = 'tutorial' | 'ctf' | 'acm'
+export const BANK_LABELS: Record<ChallengeBank, string> = {
+  tutorial: '教程题目',
+  ctf: 'CTF 题目',
+  acm: 'ACM 题目',
+}
+
 export interface TrainingItem {
   id: number
   slug: string
   title: string
   category: string
+  bank: ChallengeBank
+  is_builtin: boolean
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   score: number
   solved: boolean
@@ -72,6 +82,8 @@ export interface ChallengeJSON {
   slug: string
   title: string
   category: string
+  // 题库 tab；缺省 tutorial（教程题目/内部题库）。
+  bank?: ChallengeBank
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   description_md?: string
   score: number
@@ -221,7 +233,17 @@ export const instanceApi = {
 }
 
 export const trainingApi = {
-  list: (page = 1, pageSize = 20) => http.get<Paged<TrainingItem>>(`/challenges?page=${page}&page_size=${pageSize}`),
+  // bank/builtin 为题库页 tab 与「是否内置」过滤器（缺省 = 全部）。
+  list: (
+    page = 1,
+    pageSize = 20,
+    filter?: { bank?: ChallengeBank; builtin?: boolean },
+  ) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+    if (filter?.bank) params.set('bank', filter.bank)
+    if (filter?.builtin !== undefined) params.set('builtin', String(filter.builtin))
+    return http.get<Paged<TrainingItem>>(`/challenges?${params}`)
+  },
   detail: (challengeSlug: string) => http.get<ChallengeDetail>(`/challenges/${challengeSlug}`),
   unlockHint: (challengeSlug: string, hintId: number) =>
     http.post<HintUnlockResponse>(`/challenges/${challengeSlug}/hints/${hintId}/unlock`),

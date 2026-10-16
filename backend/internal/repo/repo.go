@@ -79,12 +79,15 @@ type ChallengeRepo interface {
 	FindByID(ctx context.Context, id uint) (*model.Challenge, error)
 	// FindByIDs 批量查题（管理端实例列表富化用）。
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.Challenge, error)
-	// List 全量题目分页（训练场列表用）。
-	List(ctx context.Context, offset, limit int) ([]model.Challenge, int64, error)
-	// ListVisible 学生端训练场分页：仅 is_visible 且已到发布时间的题目。
-	ListVisible(ctx context.Context, now time.Time, offset, limit int) ([]model.Challenge, int64, error)
+	// List 全量题目分页（管理端表格用；filter 零值 = 不过滤）。
+	List(ctx context.Context, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error)
+	// ListVisible 学生端题库分页：仅 is_visible 且已到发布时间的题目（filter 零值 = 不过滤）。
+	ListVisible(ctx context.Context, now time.Time, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error)
 	// UpdateVisibility 管理端更新可见性开关/定时发布时间；返回受影响行数（0 = slug 不存在）。
 	UpdateVisibility(ctx context.Context, slug string, isVisible *bool, releaseAt *time.Time) (int64, error)
+	// MarkBuiltin 批量改写题目来源标记（内置题集导入置 true；普通上传不经此路径）。
+	// 返回受影响行数。
+	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) (int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	// FindHint 按 hint 主键查（解锁接口用）。
@@ -93,6 +96,12 @@ type ChallengeRepo interface {
 	// Delete 删除题目（级联删 flags/hints/lab_instances 行，事务内）。
 	// 调用方负责先销毁运行中容器（service.EnvService）并拦截存在通关记录的删除。
 	Delete(ctx context.Context, slug string) error
+}
+
+// ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源。
+type ChallengeListFilter struct {
+	Bank      string
+	IsBuiltin *bool
 }
 
 // ChallengeAttachmentRepo 题目附件元数据（文件本体由 service 层落盘/删除）。

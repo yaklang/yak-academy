@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -105,6 +106,10 @@ func TestImportBuiltinChallengesFirstImport(t *testing.T) {
 	if chal.Image != "yak-academy/vulinbox:latest" || chal.Port != 8787 {
 		t.Fatalf("image/port = %q/%d", chal.Image, chal.Port)
 	}
+	// 内置题集归教程题目 tab 且带来源标记（题库页过滤依据）。
+	if chal.Bank != model.BankTutorial || !chal.IsBuiltin {
+		t.Fatalf("bank/is_builtin = %q/%v, want tutorial/true", chal.Bank, chal.IsBuiltin)
+	}
 }
 
 func TestImportBuiltinChallengesReimportUpdates(t *testing.T) {
@@ -157,5 +162,28 @@ func TestImportBuiltinChallengesNoopSkipsImage(t *testing.T) {
 	}
 	if res.Created == 0 {
 		t.Fatal("noop driver should still import challenge definitions")
+	}
+}
+
+// 普通上传路径不改写来源标记：管理端编辑/重传内置题后 is_builtin 保持 true。
+func TestUploadDoesNotClearBuiltinMark(t *testing.T) {
+	svc, gdb := newBuiltinTestService(t, &builtinBuildRecorder{})
+	if _, err := svc.ImportBuiltinChallenges(context.Background()); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	edited := fmt.Sprintf(`[{"slug":"vulinbox-xss-escape","title":"改过的标题","category":"xss",`+
+		`"difficulty":"apprentice","score":120,"challenge":{"type":"static","flag":"&lt;script&gt;"}}]`)
+	if _, _, err := svc.UploadChallenges(context.Background(), []byte(edited)); err != nil {
+		t.Fatalf("re-upload: %v", err)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "vulinbox-xss-escape").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !chal.IsBuiltin {
+		t.Fatal("is_builtin cleared by normal upload, want preserved")
+	}
+	if chal.Title != "改过的标题" || chal.Score != 120 {
+		t.Fatalf("re-upload should take effect: %+v", chal)
 	}
 }

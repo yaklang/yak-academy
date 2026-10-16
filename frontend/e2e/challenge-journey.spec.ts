@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { E2E } from './fixtures/consts'
 import { loginAsAdmin, loginAsStudent } from './helpers'
 
-// 题目全链路旅程（本套件最重要的一条）：管理端表格 → 学生训练场分组 →
+// 题目全链路旅程（本套件最重要的一条）：管理端表格 → 学生题库分组 →
 // 详情提示解锁（扣分）→ 错 flag / 对 flag 判定 → 排行榜 → 徽章 → 附件下载。
 // 结算语义：分值只结算一次，重复判对 score=0 不再计分。
 const { challenge: C } = E2E
@@ -15,11 +15,11 @@ async function submitFlag(page: Page, flag: string) {
 }
 
 test.describe('题目全链路', () => {
-  test('训练场按分类分组，详情可通题', async ({ page }) => {
+  test('题库按分类分组，详情可通题', async ({ page }) => {
     await loginAsStudent(page)
 
-    // 训练场列表按 category 分组出现种子题
-    await page.getByRole('link', { name: '训练' }).click()
+    // 题库列表（默认「教程题目」tab）按 category 分组出现种子题
+    await page.getByRole('link', { name: '题库' }).click()
     await expect(page.locator('h3.cat', { hasText: C.category })).toBeVisible()
     await page.getByRole('link', { name: C.title }).click()
     await expect(page).toHaveURL(new RegExp(`/training/${C.slug}`))

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 竞赛首页（参赛者满屏视图，锁定期间的全部可用功能）。
 // 头部仅保留锁定白名单能力：竞赛信息 + 本人（邮箱/资料不可达）+ 登出。
-// 题目抽屉内完成开容器/提 flag（复用训练场交互模式），异步判题后延时刷新。
+// 题目抽屉内完成开容器/提 flag（复用题库详情交互模式），异步判题后延时刷新。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

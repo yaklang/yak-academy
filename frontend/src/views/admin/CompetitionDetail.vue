@@ -710,13 +710,13 @@ onMounted(async () => {
       <el-radio-button value="json">导入题目 JSON</el-radio-button>
     </el-radio-group>
     <template v-if="bindMode === 'slugs'">
-      <p class="dim">填写训练场已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，训练场侧不受影响。</p>
+      <p class="dim">填写题库已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，题库侧不受影响。</p>
       <el-input v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
     </template>
     <template v-else>
       <p class="dim">
         与题目管理上传同一格式：可一次选择多个 .json 文件批量导入，也可选单个逐题导入，或直接粘贴 JSON（单对象或数组）。
-        所有题目先经本地校验进入下方暂存列表，全部通过后一次性导入并绑定进本场（导入的题目同时进入训练场题库，如需修改请到题目管理编辑）。
+        所有题目先经本地校验进入下方暂存列表，全部通过后一次性导入并绑定进本场（导入的题目同时进入题库（教程题目 tab），如需修改请到题目管理编辑）。
       </p>
       <div class="stage-actions">
         <el-upload multiple accept=".json,application/json" :show-file-list="false" :before-upload="onStageFile" :disabled="binding">

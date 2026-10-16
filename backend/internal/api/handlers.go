@@ -528,11 +528,25 @@ func (h *Handlers) unlockHint(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// listChallenges 训练场列表（跨分类全量题目，当前用户视角）。
+// listChallenges 题库列表（跨分类全量题目，当前用户视角；可按题库 tab/是否内置过滤）。
 func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
 	page, pageSize := pageParams(req)
-	items, total, err := h.Topics.ListTraining(req.Context(), user.ID, (page-1)*pageSize, pageSize)
+	bank := req.URL.Query().Get("bank")
+	if bank != "" && bank != string(model.BankTutorial) && bank != string(model.BankCTF) && bank != string(model.BankACM) {
+		writeError(w, errValidation)
+		return
+	}
+	var builtin *bool
+	if raw := req.URL.Query().Get("builtin"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, errValidation)
+			return
+		}
+		builtin = &v
+	}
+	items, total, err := h.Topics.ListTraining(req.Context(), user.ID, bank, builtin, (page-1)*pageSize, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return

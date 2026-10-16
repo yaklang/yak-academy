@@ -3,7 +3,7 @@ import { useAuthStore } from '../stores/auth'
 import { useCompetitionStore } from '../stores/competition'
 
 // 信息架构：两个端。
-//   普通端 /（教程 / 训练）—— 普通人与管理员均可。
+//   普通端 /（教程 / 题库，路由段保留 /training）——普通人与管理员均可。
 //   管理端 /admin —— 仅管理员（global_role === admin）；普通人无入口且路由守卫拦截。
 // 两端复用同一组视图组件（Topics/TopicDetail/RoomDetail/Training）。
 // 竞赛参赛流程为独立满屏布局（入场页 + 竞赛首页），对应"入场后锁定在竞赛页面"。
@@ -24,7 +24,7 @@ const router = createRouter({
         { path: '', name: 'topics', component: () => import('../views/Topics.vue') },
         { path: 'topics/:topicSlug', name: 'topic-detail', component: () => import('../views/TopicDetail.vue') },
         { path: 'topics/:topicSlug/rooms/:roomSlug', name: 'room', component: () => import('../views/RoomDetail.vue') },
-        // 训练板块
+        // 题库板块
         { path: 'training', name: 'training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
         // 徽章（计算型读模型视图）
@@ -46,7 +46,7 @@ const router = createRouter({
         { path: 'tutorials', name: 'admin-tutorials', component: () => import('../views/Topics.vue') },
         { path: 'tutorials/:topicSlug', name: 'admin-topic-detail', component: () => import('../views/TopicDetail.vue') },
         { path: 'tutorials/:topicSlug/rooms/:roomSlug', name: 'admin-room', component: () => import('../views/RoomDetail.vue') },
-        // 训练板块（预览视角）
+        // 题库板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
         // 资源管理（教程管理 / 题目管理 + 容器、竞赛）。

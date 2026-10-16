@@ -55,7 +55,7 @@ func newTrainingTestService(t *testing.T) (*TopicService, *gorm.DB) {
 
 func TestListTrainingFields(t *testing.T) {
 	svc, _ := newTrainingTestService(t)
-	items, total, err := svc.ListTraining(context.Background(), 1, 0, 20)
+	items, total, err := svc.ListTraining(context.Background(), 1, "", nil, 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +84,66 @@ func TestListTrainingFields(t *testing.T) {
 	// 陌生用户：无解题记录 → solved 全 false。
 	if sqli.Solved || crypto.Solved {
 		t.Fatal("fresh user should have no solved items")
+	}
+}
+
+// 题库 tab（bank）与是否内置（builtin）过滤：历史行缺省 tutorial、
+// 标记 ctf 的题只在 ctf tab 出现、builtin 过滤按来源标记筛选。
+func TestListTrainingBankBuiltinFilter(t *testing.T) {
+	svc, gdb := newTrainingTestService(t)
+	ctx := context.Background()
+
+	// 缺省：两道 fixture 题都归教程题目 tab（列默认值迁移补齐）。
+	items, total, err := svc.ListTraining(ctx, 1, "", nil, 0, 20)
+	if err != nil || total != 2 || len(items) != 2 {
+		t.Fatalf("unfiltered: %v %d %d", err, total, len(items))
+	}
+	for _, it := range items {
+		if it.Bank != "tutorial" || it.IsBuiltin {
+			t.Fatalf("default bank/is_builtin = %q/%v, want tutorial/false", it.Bank, it.IsBuiltin)
+		}
+	}
+
+	chalRepo := repo.NewChallengeRepo(gdb)
+	if err := chalRepo.Upsert(ctx, &model.Challenge{
+		Slug: "ctf-misc", Title: "CTF 杂项", Category: "misc", Bank: model.BankCTF,
+		Difficulty: model.DifficultyPractitioner, Type: model.ChallengeStatic, Score: 150,
+	}, []model.Flag{{Type: model.ChallengeStatic, Value: "flag{c}"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := chalRepo.MarkBuiltin(ctx, []string{"sqli-basic"}, true); err != nil || n != 1 {
+		t.Fatalf("mark builtin: rows=%d err=%v", n, err)
+	}
+
+	// bank=ctf：只出现 CTF 题。
+	ctfItems, total, err := svc.ListTraining(ctx, 1, "ctf", nil, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(ctfItems) != 1 || ctfItems[0].Slug != "ctf-misc" || ctfItems[0].Bank != "ctf" {
+		t.Fatalf("ctf filter: total=%d items=%+v", total, ctfItems)
+	}
+	// bank=tutorial：CTF 题被排除。
+	tutItems, total, err := svc.ListTraining(ctx, 1, "tutorial", nil, 0, 20)
+	if err != nil || total != 2 || len(tutItems) != 2 {
+		t.Fatalf("tutorial filter: %v %d %d", err, total, len(tutItems))
+	}
+	// builtin=true：只有被标记的 sqli-basic。
+	yes := true
+	bItems, total, err := svc.ListTraining(ctx, 1, "", &yes, 0, 20)
+	if err != nil || total != 1 || len(bItems) != 1 || bItems[0].Slug != "sqli-basic" || !bItems[0].IsBuiltin {
+		t.Fatalf("builtin=true filter: %v %d %+v", err, total, bItems)
+	}
+	// builtin=false 与 true 互补（ctf-misc + crypto-encode）。
+	no := false
+	nItems, total, err := svc.ListTraining(ctx, 1, "", &no, 0, 20)
+	if err != nil || total != 2 || len(nItems) != 2 {
+		t.Fatalf("builtin=false filter: %v %d %d", err, total, len(nItems))
+	}
+	// bank+builtin 组合：ctf 且内置 = 空。
+	empty, total, err := svc.ListTraining(ctx, 1, "ctf", &yes, 0, 20)
+	if err != nil || total != 0 || len(empty) != 0 {
+		t.Fatalf("ctf+builtin filter: %v %d %d", err, total, len(empty))
 	}
 }
 
@@ -137,7 +197,7 @@ func TestListTrainingSolvedForUser(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	items, _, err := svc.ListTraining(ctx, 5, 0, 20)
+	items, _, err := svc.ListTraining(ctx, 5, "", nil, 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +205,7 @@ func TestListTrainingSolvedForUser(t *testing.T) {
 		t.Fatalf("solved flags = [%v, %v], want [true, false]", items[0].Solved, items[1].Solved)
 	}
 	// 其他用户视角不受影响。
-	other, _, err := svc.ListTraining(ctx, 6, 0, 20)
+	other, _, err := svc.ListTraining(ctx, 6, "", nil, 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +217,7 @@ func TestListTrainingSolvedForUser(t *testing.T) {
 func TestListTrainingPagination(t *testing.T) {
 	svc, _ := newTrainingTestService(t)
 	// page_size=1 的第二页应只有第二题。
-	items, total, err := svc.ListTraining(context.Background(), 1, 1, 1)
+	items, total, err := svc.ListTraining(context.Background(), 1, "", nil, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
