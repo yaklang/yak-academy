@@ -100,6 +100,14 @@ func TestDockerDriverCreateAppliesLimitsAndDestroys(t *testing.T) {
 	if got := dockerInspectFormat(ctx, t, name, "{{.HostConfig.NanoCpus}}"); got != "250000000" {
 		t.Errorf("nano_cpus = %s, want 250000000", got)
 	}
+	// --add-host host-gateway：容器内必须可解析 host.docker.internal
+	// （Linux 宿主默认无此解析，CHECKPOINT_URL 回达依赖它；Docker Desktop 兼容）。
+	if got := dockerInspectFormat(ctx, t, name, "{{.HostConfig.ExtraHosts}}"); !strings.Contains(got, "host.docker.internal:host-gateway") {
+		t.Errorf("extra hosts = %q, want host.docker.internal:host-gateway", got)
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "exec", name, "getent", "hosts", "host.docker.internal").CombinedOutput(); err != nil {
+		t.Errorf("容器内解析 host.docker.internal: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 
 	if err := driver.Destroy(ctx, instanceID); err != nil {
 		t.Fatalf("destroy: %v", err)
