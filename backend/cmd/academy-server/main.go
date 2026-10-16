@@ -65,6 +65,11 @@ func main() {
 		}
 		return out, nil
 	})
+	// 内容包删除守卫：被删 Room 的 room.completed 事件重放时跳过（不复活已清进度）。
+	deriver.SetRoomLookup(func(ctx context.Context, roomSlug string) bool {
+		exists, err := roomRepo.ExistsBySlug(ctx, roomSlug)
+		return err == nil && exists
+	})
 	bus.Subscribe(deriver.Handle)
 	// 启动补偿：重放历史事件修复崩溃窗口丢失的派生（幂等，event-sourcing-rules skill）。
 	if err := deriver.Replay(ctx, eventRepo); err != nil {
@@ -89,7 +94,7 @@ func main() {
 		driver = dd
 		builder = dd
 	}
-	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder)
+	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder, progressRepo)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, instanceRepo, eventRepo, competitionRepo, bus)
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)

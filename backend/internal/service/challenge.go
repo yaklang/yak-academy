@@ -99,6 +99,12 @@ func (s *ChallengeService) MarkBuiltin(ctx context.Context, slugs []string, buil
 	return s.challenges.MarkBuiltin(ctx, slugs, builtin)
 }
 
+// ClearTutorialSlugs 教程 Room 被删除时清空指向它的题目软引用（题目本体保留；
+// 返回受影响行数）。由 ContentService.DeletePackage 编排调用。
+func (s *ChallengeService) ClearTutorialSlugs(ctx context.Context, roomSlugs []string) (int64, error) {
+	return s.challenges.ClearTutorialSlugs(ctx, roomSlugs)
+}
+
 // compareFlag 恒时比较，防时序侧信道。
 // 禁止改为 == 比较（event-sourcing-rules skill）。
 func compareFlag(got, want string) bool {

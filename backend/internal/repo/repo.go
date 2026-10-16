@@ -59,6 +59,8 @@ type TopicRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.Topic, int64, error)
 	FindBySlug(ctx context.Context, slug string) (*model.Topic, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
+	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
+	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
 }
 
 type RoomRepo interface {
@@ -68,6 +70,8 @@ type RoomRepo interface {
 	FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error)
 	ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
+	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
+	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
 }
 
 type ChallengeRepo interface {
@@ -88,6 +92,9 @@ type ChallengeRepo interface {
 	// MarkBuiltin 批量改写题目来源标记（内置题集导入置 true；普通上传不经此路径）。
 	// 返回受影响行数。
 	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) (int64, error)
+	// ClearTutorialSlugs 教程 Room 被删除时批量清空指向它的 tutorial_slug（防死链），
+	// 返回受影响行数。
+	ClearTutorialSlugs(ctx context.Context, roomSlugs []string) (int64, error)
 	FindFlags(ctx context.Context, challengeID uint) ([]model.Flag, error)
 	FindHints(ctx context.Context, challengeID uint) ([]model.Hint, error)
 	// FindHint 按 hint 主键查（解锁接口用）。
@@ -143,6 +150,9 @@ type ContentPackageRepo interface {
 	ArchiveOtherVersions(ctx context.Context, packageID, exceptID uint) error
 	UpdateLatestVersion(ctx context.Context, id uint, version string) error
 	List(ctx context.Context, offset, limit int) ([]model.ContentPackage, int64, error)
+	// Delete 删除内容包（事务内级联删全部版本行）。内容表（topics/rooms）
+	// 与派生表的级联清理由调用方（ContentService.DeletePackage）按 Payload 编排。
+	Delete(ctx context.Context, id uint) error
 }
 
 type EventRepo interface {
@@ -168,6 +178,10 @@ type ProgressRepo interface {
 	MarkCompleted(ctx context.Context, userID uint, roomSlug string) error
 	// MarkInProgress 记录"开始学但未完成"（Room 首次浏览时创建 completed=false 行，幂等）。
 	MarkInProgress(ctx context.Context, userID uint, roomSlug string) error
+	// DeleteByRoomSlugs 删除内容包时清理被删 Room 的进度行（派生表唯一例外写路径，
+	// 见 event-sourcing-rules skill「内容包删除例外」；deriver 对不存在 Room 的
+	// room.completed 事件跳过，重放不复活）。返回受影响行数。
+	DeleteByRoomSlugs(ctx context.Context, roomSlugs []string) (int64, error)
 	Stats(ctx context.Context, userID uint) (completed int, inProgress int, err error)
 }
 

@@ -30,6 +30,9 @@ type ContentService struct {
 	rooms     repo.RoomRepo
 	challenge *ChallengeService
 	builder   ImageBuilder // 题目包 image: . 时构建；可为 NoopDriver
+	// progress 删除内容包时清理被删 Room 的进度行（派生表唯一例外写路径，
+	// 见 event-sourcing-rules skill「内容包删除例外」）。
+	progress repo.ProgressRepo
 	// ownedTopics/ownedRooms 同名包既有版本的 slug 集合（validate 时视为自有，
 	// 不判冲突；仅 Upload 重传路径填充）。
 	ownedTopics map[string]bool
@@ -40,11 +43,11 @@ func (s *ContentService) setOwnedSlugs(topics, rooms map[string]bool) {
 	s.ownedTopics, s.ownedRooms = topics, rooms
 }
 
-func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService, builder ImageBuilder) *ContentService {
+func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomRepo, c *ChallengeService, builder ImageBuilder, progress repo.ProgressRepo) *ContentService {
 	if builder == nil {
 		builder = NoopDriver{}
 	}
-	return &ContentService{packages: p, topics: t, rooms: r, challenge: c, builder: builder}
+	return &ContentService{packages: p, topics: t, rooms: r, challenge: c, builder: builder, progress: progress}
 }
 
 // parsedPackage 管线 Parse 步骤的内存中间产物，序列化后存 ContentVersion.Payload。
@@ -463,6 +466,76 @@ func (s *ContentService) ListVersions(ctx context.Context, packageID uint) ([]mo
 		return nil, err
 	}
 	return s.packages.ListVersions(ctx, packageID)
+}
+
+// PackageDeleteResult 删除结果（契约见 docs/openapi.yaml /content/packages/{id} delete）。
+type PackageDeleteResult struct {
+	Deleted bool `json:"deleted"`
+	Topics  int  `json:"topics"`
+	Rooms   int  `json:"rooms"`
+}
+
+// DeletePackage 删除内容包：包记录 + 全部版本 + 历代版本 Payload 写入过的
+// Topic/Room（union 所有版本——applyPayload 只覆盖不清理，旧版本已移除的
+// slug 也曾在内容表留有行）。上传时的 slug 归属校验保证这些 slug 不属于
+// 其他包，不会误删。级联：指向被删 Room 的题目 tutorial_slug 置空、被删
+// Room 的 Progress 行删除；Event 表 append-only 不动（提交/解锁历史保留）。
+// draft 包（从未发布）内容表无行，删除仅移除包记录与版本。
+// 不设「存在完成记录则拒绝」拦截：内容删除是管理员显式清理动作（对照
+// 题目删除的 solves 拦截，教程侧靠管理端强确认）。
+func (s *ContentService) DeletePackage(ctx context.Context, packageID uint) (*PackageDeleteResult, error) {
+	if _, err := s.packages.FindByID(ctx, packageID); err != nil {
+		return nil, err
+	}
+	versions, err := s.packages.ListVersions(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	topicSlugs, roomSlugs := map[string]bool{}, map[string]bool{}
+	for _, v := range versions {
+		var parsed parsedPackage
+		if err := json.Unmarshal([]byte(v.Payload), &parsed); err != nil {
+			return nil, fmt.Errorf("payload v%s: %w", v.Version, err)
+		}
+		for _, t := range parsed.Topics {
+			topicSlugs[t.Slug] = true
+		}
+		for _, r := range parsed.Rooms {
+			roomSlugs[r.Slug] = true
+		}
+	}
+	topics := make([]string, 0, len(topicSlugs))
+	for slug := range topicSlugs {
+		topics = append(topics, slug)
+	}
+	rooms := make([]string, 0, len(roomSlugs))
+	for slug := range roomSlugs {
+		rooms = append(rooms, slug)
+	}
+
+	// 题目本体保留，只断开与被删教程的软引用（防详情页死链）。
+	if _, err := s.challenge.ClearTutorialSlugs(ctx, rooms); err != nil {
+		return nil, err
+	}
+	if _, err := s.progress.DeleteByRoomSlugs(ctx, rooms); err != nil {
+		return nil, err
+	}
+	deletedTopics, err := s.topics.DeleteBySlugs(ctx, topics...)
+	if err != nil {
+		return nil, err
+	}
+	deletedRooms, err := s.rooms.DeleteBySlugs(ctx, rooms...)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.packages.Delete(ctx, packageID); err != nil {
+		return nil, err
+	}
+	return &PackageDeleteResult{
+		Deleted: true,
+		Topics:  int(deletedTopics),
+		Rooms:   int(deletedRooms),
+	}, nil
 }
 
 // applyPayload 把版本 Payload 写入内容表（Publish 与 Rollback 共用的覆盖式写入）。
