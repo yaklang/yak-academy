@@ -2,6 +2,10 @@
 
 本目录仅供管理员手工上传联调与文档对照，**不是**内置课程内容。
 
+## 第三方二进制分发声明（AGPL-3.0）
+
+平台内置训练的 vulinbox 基础镜像（`backend/internal/service/builtin/vulinbox/image/`）在构建时从 yaklang 官方 CDN 下载 **未修改** 的 vulinbox 二进制（AGPL-3.0，版权归属 yaklang 项目）。yak-academy 以独立程序方式分发该二进制并附 NOTICE（镜像内 `/usr/share/licenses/vulinbox/NOTICE`），不引用、不链接其源码模块；上游源码见 <https://github.com/yaklang/yaklang>（`common/vulinbox`）。本目录的 `vulinbox-xss-reflected` 样例为平台自研的模拟服务，与该二进制无关。
+
 ## 格式
 
 两种形态（见 `.agents/skills/content-package-spec`）：

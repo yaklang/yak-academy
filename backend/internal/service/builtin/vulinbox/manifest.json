@@ -1,0 +1,15 @@
+{
+  "name": "vulinbox",
+  "version": "1.0.0",
+  "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS，共 11 题。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由）。",
+  "image_tag": "yak-academy/vulinbox:latest",
+  "port": 8787,
+  "source": "https://github.com/yaklang/yaklang/tree/main/common/vulinbox",
+  "binary_cdn": "https://oss-qn.yaklang.com/vulinbox/latest/vulinbox_linux_amd64",
+  "license": "AGPL-3.0",
+  "notes": [
+    "镜像由 image/ 目录的 Dockerfile 构建时从官方 CDN 下载二进制并做 sha256 校验（校验失败即构建失败，防止上游更新导致靶机行为漂移；更新题集时需重新锁定 sha256）。",
+    "vulinbox 不消费 FLAG 环境变量，因此题集全部使用 shared 判定（static/regex）。",
+    "vulinbox 仅发布 amd64 二进制，ARM 宿主需模拟运行。"
+  ]
+}

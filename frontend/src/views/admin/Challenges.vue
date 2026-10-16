@@ -186,6 +186,37 @@ async function onUploadPackage(file: File) {
   return false
 }
 
+// ===== 内置训练（vulinbox）一键导入 =====
+// 幂等：已导入的同名题目会被更新；镜像在 Docker 可用时构建（ noop 下跳过并提示）。
+const builtinImporting = ref(false)
+
+async function onImportBuiltin() {
+  try {
+    await ElMessageBox.confirm(
+      '将导入随平台分发的内置训练题集（基于 yaklang vulinbox 靶场引擎）。已导入的同名题目会被更新；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
+      '导入内置训练',
+      { type: 'info', confirmButtonText: '导入/更新', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  builtinImporting.value = true
+  try {
+    const resp = await adminChallengeApi.importBuiltin()
+    const summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题`
+    if (resp.image_built) {
+      ElMessage.success(`${summary}；靶场镜像已构建`)
+    } else {
+      ElMessage.warning({ message: `${summary}；未配置 Docker，镜像未构建（启用 Docker 后重新导入即可）`, duration: 6000 })
+    }
+    await load()
+  } catch (e) {
+    ElMessage.error(`内置训练导入失败：${(e as Error).message}`)
+  } finally {
+    builtinImporting.value = false
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -374,6 +405,13 @@ onMounted(load)
         上传题目包 zip
       </el-button>
     </el-upload>
+    <el-button
+      :loading="builtinImporting"
+      title="导入随平台分发的 vulinbox 内置训练题集（重复导入 = 更新）"
+      @click="onImportBuiltin"
+    >
+      导入内置训练（vulinbox）
+    </el-button>
     <el-button @click="specVisible = !specVisible">
       {{ specVisible ? '收起格式规范' : '查看格式规范' }}
     </el-button>

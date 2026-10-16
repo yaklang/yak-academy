@@ -261,6 +261,14 @@ export const contentApi = {
 }
 
 // 题目管理（challenge.json / 题目包 zip 上传 / 表格 / 附件 / 删除）。
+export interface BuiltinImportResult {
+  version: string
+  created: number
+  updated: number
+  slugs: string[]
+  image_built: boolean
+}
+
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
@@ -269,6 +277,9 @@ export const adminChallengeApi = {
     form.append('package', file)
     return http.upload<{ imported: number; slugs: string[] }>('/admin/challenges/package', form)
   },
+  // 一键导入内置训练题集（vulinbox）。幂等：重复调用 = 更新已导入题目。
+  importBuiltin: () =>
+    http.post<BuiltinImportResult>('/admin/challenges/builtin'),
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
   remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),
   listAttachments: (slug: string) =>

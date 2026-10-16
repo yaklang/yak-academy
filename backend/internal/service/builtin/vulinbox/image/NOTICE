@@ -1,0 +1,15 @@
+NOTICE — 本镜像包含 yaklang vulinbox 漏洞靶场引擎
+====================================================
+
+本镜像中的 /usr/local/bin/vulinbox 二进制来自 yaklang 项目官方发行渠道：
+
+  上游源码:  https://github.com/yaklang/yaklang （common/vulinbox 与 common/vulinboxrunner）
+  下载渠道:  https://oss-qn.yaklang.com/vulinbox/latest/vulinbox_linux_amd64
+  许可证:    GNU Affero General Public License v3.0（AGPL-3.0）
+             https://www.gnu.org/licenses/agpl-3.0.txt
+
+该二进制以**未修改**的原样方式再分发。依据 AGPL-3.0 第 4 条与第 6 条，
+任何获得本镜像的分发对象均可通过上述上游源码地址获取对应完整源码。
+
+yak-academy 平台自身的代码不包含、不链接 vulinbox 的任何源码模块，
+仅以独立子进程（容器内单独进程）方式运行该二进制。
