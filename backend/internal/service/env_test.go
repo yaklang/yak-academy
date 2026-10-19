@@ -507,6 +507,10 @@ func TestEnsureInstanceInjectsCheckpointEnv(t *testing.T) {
 	if e["CHECKPOINT_URL"] != wantURL {
 		t.Fatalf("CHECKPOINT_URL = %q, want %q", e["CHECKPOINT_URL"], wantURL)
 	}
+	// 挑战标识随实例注入（flaggateway 按题 flag 门禁的归属依据）。
+	if e["CHALLENGE_SLUG"] != "chal-env" {
+		t.Fatalf("CHALLENGE_SLUG = %q, want %q", e["CHALLENGE_SLUG"], "chal-env")
+	}
 	// token 不出现在 API JSON（LabInstance 序列化隐藏）。
 	raw, err := json.Marshal(inst)
 	if err != nil {

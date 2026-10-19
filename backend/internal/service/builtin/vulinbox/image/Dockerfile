@@ -4,8 +4,11 @@
 # 这是刻意的（防止靶机行为漂移导致题目失配），更新题集时重新锁定即可。
 #
 # 分层：flaggateway（容器入口，:8787）→ vulinbox（上游，:8788）。
-# 网关只做三件事：把平台按实例注入的 FLAG 写成 /flag.txt、暴露 GET /flag、
-# 给命令模拟接口补 cat（读 flag）；其余路径原样反代上游，不改靶机行为。
+# 网关只做五件事：把平台按实例注入的 FLAG 写成 /flag.txt、给 GET /flag 加
+# 按题门禁（CHALLENGE_SLUG 识别实例：SSRF 题只放行回环自请求、攻击题
+# 观察到攻击成功信号后解锁、authz 题指路 cmd 接口）、给命令模拟接口补
+# cat（仅 authz 题注册）、把 /ssrf/flag 演示接口的随机 uuid 改写为固定假
+# flag{test}；其余路径原样反代上游，不改靶机行为。
 FROM golang:1.26-alpine AS gateway
 
 WORKDIR /src

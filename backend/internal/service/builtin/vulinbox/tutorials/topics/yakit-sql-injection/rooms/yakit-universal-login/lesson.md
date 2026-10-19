@@ -35,7 +35,7 @@ select * from users where username = 'x' or 1=1-- ' and password = '...'
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：定位「购物商城」的登录接口 `POST /mall/user/login`（JSON body 含 `username`、`password`），把 `username` 换成"闭合引号 + 恒真 + 注释"的万能密码形态（数据库是 SQLite，`--` 注释可用）——响应出现 `Login successful` 即登录绕过成立。然后读取靶机 flag（`GET /flag`）并提交，完成本题。
+点击 **前往配套题目练习**，启动环境后：定位「购物商城」的登录接口 `POST /mall/user/login`（JSON body 含 `username`、`password`），把 `username` 换成"闭合引号 + 恒真 + 注释"的万能密码形态（数据库是 SQLite，`--` 注释可用）——响应出现 `Login successful` 即登录绕过成立。然后读取靶机 flag 并提交（`GET /flag` 端点在攻击成功后会自动解锁），完成本题。
 
 **对照实验**：把同样的 payload 发给 Web 后台的 `/logic/user/login`——那里用了参数化查询，万能密码原样失效（返回用户名或密码错误）。同一个 payload，两种命运，这就是拼接与参数化的差别。
 
@@ -90,9 +90,9 @@ Content-Type: application/json
 
 响应是"用户名或密码错误"（`internal error: username or password incorrect`）——payload 整体被当成**字符串值**参与比对，注入完全失效。
 
-**第 4 步：读取本实例 flag**
+**第 5 步：读取本实例 flag**
 
-靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`）。读取端点 `GET /flag` 带门禁：上面的攻击动作成功前直接访问会得到 403（零攻击拿不到 flag）；攻击成功后端点自动解锁，直接请求靶机根路径即可：
 
 ```http
 GET /flag HTTP/1.1
@@ -101,7 +101,7 @@ Host: 127.0.0.1:36870
 
 响应就是 flag 原文（一行，`flag{lab-...}`）。
 
-**第 5 步：提交答案**
+**第 6 步：提交答案**
 
 回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 
