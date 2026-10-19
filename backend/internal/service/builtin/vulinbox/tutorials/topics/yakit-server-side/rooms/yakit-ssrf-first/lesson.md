@@ -23,7 +23,7 @@ difficulty: apprentice
 
 1. 浏览器先用 `localhost` 直连 `http://localhost:<端口>/ssrf/flag` 感受被拒（500）；
 2. 在 Web Fuzzer 里让 `/ssrf/in-get` 替你请求 `http://127.0.0.1:8787/ssrf/flag`（注意端口是 8787）；
-3. 响应原文的 HTML 里就有 `flag{uuid}`——每次请求都会生成新的 uuid，判定为正则匹配，把你拿到的那个原样提交即可。
+3. 响应原文里就是本实例 flag（形如 `flag{lab-...}`）——读取端点 `GET /flag` 与 `/ssrf/flag` 同样只信任 Host 含 `127.0.0.1` 的服务端本机请求；把你拿到的 flag 原样提交即可通关。
 
 环境首页（实例地址根路径）是靶场的路由索引页，先逛一圈能对全部靶机入口有个地图。
 
@@ -53,7 +53,7 @@ Host: 127.0.0.1:36870
 
 响应是 baidu 页面的**完整响应原文**（第一行 `HTTP/1.1 200 OK`，接着响应头，然后 HTML）——确认这个接口是"服务端替你请求，再把结果原样搬回来"。
 
-**第 4 步：SSRF 一跳，让靶机自己请求 /ssrf/flag**
+**第 4 步（演示）：SSRF 一跳，让靶机自己请求 /ssrf/flag**
 
 ```http
 GET /ssrf/in-get?url=http://127.0.0.1:8787/ssrf/flag HTTP/1.1
@@ -68,11 +68,25 @@ Host: 127.0.0.1:36870
 </div>
 ```
 
-`flag{}` 里是你的 uuid（每次请求都不同，属正常现象）。
+`flag{}` 里是上游靶场演示接口生成的随机 uuid（每次请求都不同）——它是**演示用**的，不是本题要提交的 flag。本题 flag 要读靶机根路径的 `/flag`（见下一步）。
 
-**第 5 步：提交答案**
+**第 5 步：用 SSRF 读取本实例 flag**
 
-回到题目详情页，提交你拿到的完整 `flag{uuid}` 原文。
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），读取端点在靶机根路径 `GET /flag`（校验与 `/ssrf/flag` 相同：只信任 Host 含 `127.0.0.1` 的服务端本机请求）。
+
+把攻击请求里的目标从 `/ssrf/flag` 换成 `/flag` 再发一次：
+
+```http
+GET /ssrf/in-get?url=http://127.0.0.1:8787/flag HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+
+响应中就是 flag 原文（`flag{lab-...}`）。
+
+**第 6 步：提交答案**
+
+回到题目详情页，在答案框输入 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 

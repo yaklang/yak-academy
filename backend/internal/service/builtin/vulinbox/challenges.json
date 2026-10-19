@@ -5,17 +5,14 @@
     "title": "SSRF 基础：让服务器替你访问内网接口",
     "category": "ssrf",
     "difficulty": "apprentice",
-    "description_md": "# 背景\n\nvulinbox 靶场的 `/ssrf/in-get` 页面接收 `url` 参数，并在**服务端**直接向该地址发起 HTTP 请求，再把响应原样返回给访问者——这是典型的 SSRF（服务端请求伪造）。\n\n靶场内置了一个敏感接口 `GET /ssrf/flag`：它只对 Host 头包含 `127.0.0.1` 的请求放行并返回一个 `flag{uuid}` 格式的值（每次请求随机生成）；用 `localhost` 域名直连会得到 500——Host 里没有 `127.0.0.1`。这种「自我识别」检查天然挡不住 SSRF：让靶机自己请求自己（Host 必然是 127.0.0.1:8787）即可命中。\n\n# 任务\n\n启动环境后，利用 `/ssrf/in-get` 的 SSRF 漏洞让靶场服务**自己**去请求 `/ssrf/flag`，拿到返回的 flag 并提交。\n\n> 提示：靶场服务在容器内监听 **8787** 端口；环境首页（实例地址根路径）是靶场的路由索引页，可以看到所有靶机入口。",
+    "description_md": "# 背景\n\nvulinbox 靶场的 `/ssrf/in-get` 页面接收 `url` 参数，并在**服务端**直接向该地址发起 HTTP 请求，再把响应原样返回给访问者——这是典型的 SSRF（服务端请求伪造）。\n\n靶场内置了一个敏感接口 `GET /ssrf/flag`：它只对 Host 头包含 `127.0.0.1` 的请求放行并返回一个 `flag{uuid}` 格式的值（每次请求随机生成）；用 `localhost` 域名直连会得到 500——Host 里没有 `127.0.0.1`。这种「自我识别」检查天然挡不住 SSRF：让靶机自己请求自己（Host 必然是 127.0.0.1:8787）即可命中。\n\n# 任务\n\n启动环境后，利用 `/ssrf/in-get` 的 SSRF 漏洞让靶场服务**自己**去请求 `/flag`（flag 读取端点），拿到返回的 flag 并提交。\n\n> 提示：靶场服务在容器内监听 **8787** 端口；环境首页（实例地址根路径）是靶场的路由索引页，可以看到所有靶机入口。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 100,
-    "flag_mode": "shared",
-    "challenge": {
-      "type": "regex",
-      "flag": "^flag\\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\}$"
-    },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
-      { "title": "为什么直接访问拿不到", "content": "flag 接口校验的是请求的 Host 头是否包含 127.0.0.1，即只信任从服务端本机发起的请求。", "cost": 10 },
-      { "title": "payload 方向", "content": "?url=http://127.0.0.1:8787/ssrf/flag —— 让存在 SSRF 的接口去替你访问目标。", "cost": 20 }
+      { "title": "为什么直接访问拿不到", "content": "flag 读取端点校验的是请求的 Host 头是否包含 127.0.0.1，即只信任从服务端本机发起的请求。", "cost": 10 },
+      { "title": "payload 方向", "content": "?url=http://127.0.0.1:8787/flag —— 让存在 SSRF 的接口去替你访问 flag 读取端点。", "cost": 20 }
     ],
     "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   },
@@ -25,16 +22,13 @@
     "title": "SSRF 进阶：藏在 JSON 参数里的跳板",
     "category": "ssrf",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n`/ssrf/json-in-get` 接口的 GET 参数是一段 JSON：\n\n```\n/ssrf/json-in-get?json={\"abc\": 123, \"ref\": \"http://www.baidu.com\"}\n```\n\n服务端解析 JSON 后取出 `ref` 字段作为 URL 发起服务端请求。注入点不再是明文的 `url` 参数，而是 JSON 内部的字段——真实业务中「JSON 传参 + 服务端取值请求」是更常见的 SSRF 形态。\n\n# 任务\n\n构造 `json` 参数，让服务端替你访问 `http://127.0.0.1:8787/ssrf/flag`（该接口只对本机请求返回 `flag{uuid}`），拿到 flag 并提交。\n\n> 注意 JSON 里的引号、花括号在 URL 中需要 URL 编码。",
+    "description_md": "# 背景\n\n`/ssrf/json-in-get` 接口的 GET 参数是一段 JSON：\n\n```\n/ssrf/json-in-get?json={\"abc\": 123, \"ref\": \"http://www.baidu.com\"}\n```\n\n服务端解析 JSON 后取出 `ref` 字段作为 URL 发起服务端请求。注入点不再是明文的 `url` 参数，而是 JSON 内部的字段——真实业务中「JSON 传参 + 服务端取值请求」是更常见的 SSRF 形态。\n\n# 任务\n\n构造 `json` 参数，让服务端替你访问 `http://127.0.0.1:8787/flag`（flag 读取端点），拿到 flag 并提交。\n\n> 注意 JSON 里的引号、花括号在 URL 中需要 URL 编码。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": {
-      "type": "regex",
-      "flag": "^flag\\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\}$"
-    },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
-      { "title": "只需要一个字段", "content": "服务端只读取 ref 字段，其余字段可省略：json={\"ref\":\"http://127.0.0.1:8787/ssrf/flag\"}。", "cost": 20 }
+      { "title": "只需要一个字段", "content": "服务端只读取 ref 字段，其余字段可省略：json={\"ref\":\"http://127.0.0.1:8787/flag\"}。", "cost": 10 }
     ],
     "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   },
@@ -44,10 +38,10 @@
     "title": "SQL 注入：UNION 拖库取出 root 密码",
     "category": "sql-injection",
     "difficulty": "apprentice",
-    "description_md": "# 背景\n\n`/user/id?id=1` 按用户 id 查询用户信息，id 参数被直接拼接进 SQL 语句（数字型注入，无任何闭合边界）。页面会把查询结果以 JSON 渲染出来。\n\n靶场数据库（SQLite）中的用户表名为 `vulin_users`，其中有一个用户名为 `root` 的管理员账号。\n\n# 任务\n\n使用 UNION 注入读出 `root` 用户的密码，提交该密码原文。\n\n> 建议：先用 `ORDER BY` 或 `UNION SELECT NULL,...` 探测列数，再构造 UNION 查询。",
+    "description_md": "# 背景\n\n`/user/id?id=1` 按用户 id 查询用户信息，id 参数被直接拼接进 SQL 语句（数字型注入，无任何闭合边界）。页面会把查询结果以 JSON 渲染出来。\n\n靶场数据库（SQLite）中的用户表名为 `vulin_users`，其中有一个用户名为 `root` 的管理员账号。\n\n# 任务\n\n使用 UNION 注入读出 `root` 用户的密码，证明注入成立。\n\n> 建议：先用 `ORDER BY` 或 `UNION SELECT NULL,...` 探测列数，再构造 UNION 查询。\n\n成功读出密码后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 100,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "p@ssword" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "表与列", "content": "vulin_users 表包含 username、password、age、role 等列，以及 gorm 的 id/created_at/updated_at/deleted_at。", "cost": 10 },
@@ -61,13 +55,14 @@
     "title": "SQL 注入：模糊查询点的精确统计",
     "category": "sql-injection",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n`/user/name/like/2?name=a` 按 username 模糊查询用户（注意路径末尾的 `/2`，这是带括号的版本；不带 `/2` 的 `/user/name/like` 没有括号与附加条件），SQL 形如：\n\n```sql\nselect * from vulin_users where (username LIKE '%name%') AND (age > 20);\n```\n\n注入点被单引号和 `%` 包裹，且闭合后还有括号与附加条件——比裸数字型注入多了几层「包装纸」。\n\n# 任务\n\n靶场启动时会生成一批随机测试账号，用户总数从页面上无从得知。请通过注入对 `vulin_users` 表做 `COUNT(*)` 统计，提交这个数字。\n\n> 你的注入需要先闭合 `'%`，再 UNION 查询，最后注释掉尾部的 `AND (age > 20)`。",
+    "description_md": "# 背景\n\n`/user/name/like/2?name=a` 按 username 模糊查询用户（注意路径末尾的 `/2`，这是带括号的版本；不带 `/2` 的 `/user/name/like` 没有括号与附加条件），SQL 形如：\n\n```sql\nselect * from vulin_users where (username LIKE '%name%') AND (age > 20);\n```\n\n注入点被单引号和 `%` 包裹，且闭合后还有括号与附加条件——比裸数字型注入多了几层「包装纸」。\n\n# 任务\n\n靶场启动时会生成一批随机测试账号，用户总数从页面上无从得知。请通过注入对 `vulin_users` 表做 `COUNT(*)` 统计，验证注入成立。\n\n> 你的注入需要先闭合 `'%`，再 UNION 查询，最后注释掉尾部的 `AND (age > 20)`。\n\n得到正确统计数字后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "26" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
-      { "title": "闭合思路", "content": "name=a%') UNION SELECT count(*) FROM vulin_users-- （注意 URL 编码与列数对齐）。", "cost": 20 }
+      { "title": "闭合思路", "content": "name=a%') UNION SELECT count(*) FROM vulin_users-- （注意 URL 编码与列数对齐）。", "cost": 10 },
+      { "title": "flag 去哪读", "content": "注入验证成功后，直接 GET 实例地址 /flag 即可拿到本实例 flag。", "cost": 20 }
     ],
     "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   },
@@ -77,10 +72,10 @@
     "title": "万能密码：登录绕过",
     "category": "sql-injection",
     "difficulty": "apprentice",
-    "description_md": "# 背景\n\n环境首页进入「购物商城」，其登录接口 `POST /mall/user/login`（JSON：`{\"username\": \"...\", \"password\": \"...\"}`）的校验把用户名密码直接拼进 SQL：\n\n```sql\nselect * from vulin_users where username = '<username>' AND password = '<password>'\n```\n\n> 对照体验：另一个登录接口 `/logic/user/login`（Web 后台）用了参数化查询，同样的万能密码在那里无效——这正是两种写法的差别。\n\n# 任务\n\n你不知道任何账号的密码。对 `/mall/user/login` 用「万能密码」绕过登录校验成功登录，提交响应 JSON 中 `message` 字段的值。\n\n> 数据库为 SQLite，注释符 `--` 可用。",
+    "description_md": "# 背景\n\n环境首页进入「购物商城」，其登录接口 `POST /mall/user/login`（JSON：`{\"username\": \"...\", \"password\": \"...\"}`）的校验把用户名密码直接拼进 SQL：\n\n```sql\nselect * from vulin_users where username = '<username>' AND password = '<password>'\n```\n\n> 对照体验：另一个登录接口 `/logic/user/login`（Web 后台）用了参数化查询，同样的万能密码在那里无效——这正是两种写法的差别。\n\n# 任务\n\n你不知道任何账号的密码。对 `/mall/user/login` 用「万能密码」绕过登录校验成功登录（响应 JSON 中 `message` 字段为 `Login successful` 即成功）。\n\n> 数据库为 SQLite，注释符 `--` 可用。\n\n登录成功后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 100,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "Login successful" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "永真 + 注释", "content": "username 传 admin' -- 之类：闭合引号、用恒真条件、把密码判断注释掉。", "cost": 10 }
@@ -93,10 +88,10 @@
     "title": "预置会话：不登录冒充管理员",
     "category": "logic",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n`/logic/user/*` 系列接口靠 Cookie `_cookie` 识别身份：其值是 sessions 表中的 uuid，服务端用它查出会话对应的用户。数据库中**预置了一条 admin 用户的会话**。\n\n# 任务\n\n1. 复用本题库中 SQL 注入题的技巧（如 `/user/id`），从 `sessions` 表读出这条预置会话的 uuid；\n2. 携带 `Cookie: _cookie=<uuid>` 访问 `/logic/user/profile?id=1`，以 admin 身份查看用户资料，验证会话可用；\n3. 提交该预置会话的 uuid 值。\n\n> sessions 表共 **9 列**（uuid、username、role 及主键/时间戳等）；UNION 列数没对齐时 SQLite 会报 `SELECTs to the left and right of UNION do not have the same number of result columns`，按提示加减占位列即可。",
+    "description_md": "# 背景\n\n`/logic/user/*` 系列接口靠 Cookie `_cookie` 识别身份：其值是 sessions 表中的 uuid，服务端用它查出会话对应的用户。数据库中**预置了一条 admin 用户的会话**。\n\n# 任务\n\n1. 复用本题库中 SQL 注入题的技巧（如 `/user/id`），从 `sessions` 表读出这条预置会话的 uuid；\n2. 携带 `Cookie: _cookie=<uuid>` 访问 `/logic/user/profile?id=1`，以 admin 身份查看用户资料，验证会话可用。\n\n> sessions 表共 **9 列**（uuid、username、role 及主键/时间戳等）；UNION 列数没对齐时 SQLite 会报 `SELECTs to the left and right of UNION do not have the same number of result columns`，按提示加减占位列即可。\n\n验证通过后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "fixedSessionID" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "先拖会话表", "content": "?id=-1 UNION SELECT uuid,username,... FROM sessions LIMIT 1 —— 列数可用 SELECT NULL 试探。", "cost": 20 },
@@ -110,13 +105,14 @@
     "title": "未授权 API：白拿的命令执行",
     "category": "access-control",
     "difficulty": "apprentice",
-    "description_md": "# 背景\n\n靶场的认证绕过模块有一组「安全/不安全」对照接口。其中不安全版本的命令执行接口 **完全没有登录与权限校验**：\n\n```\nPOST /vul/auth-bypass/unsafe/api/cmd\nContent-Type: application/json\n\n{\"command\": \"ls\"}\n```\n\n# 任务\n\n不带任何凭证直接调用该接口执行 `ls`，阅读返回的文件列表，提交其中 `secret.txt` 的文件大小（`ls -l` 风格输出中的字节数）。\n\n> 该接口是靶场模拟实现的命令执行，**仅支持 `ls` 一个命令**（其他命令返回 `bash: <命令>: command not found`），且 `ls` 输出本身就是带大小的长列表。列表里的 `flag.txt` 是无法读取的摆设，本题答案与它无关。\n\n> 对照体验：安全版本 `/vul/auth-bypass/safe/api/cmd` 需要登录且要求 admin 角色。这类「前端按钮藏得好好的、后端接口裸奔」的漏洞在真实业务中极其常见。",
+    "description_md": "# 背景\n\n靶场的认证绕过模块有一组「安全/不安全」对照接口。其中不安全版本的命令执行接口 **完全没有登录与权限校验**：\n\n```\nPOST /vul/auth-bypass/unsafe/api/cmd\nContent-Type: application/json\n\n{\"command\": \"ls\"}\n```\n\n# 任务\n\n不带任何凭证直接调用该接口，先执行 `ls` 阅读返回的文件列表，再执行 `cat flag.txt` 读出靶机内 `/flag.txt` 的内容（本实例 flag）并提交。\n\n> 该接口是靶场模拟实现的命令执行，命令白名单为 `ls` 与 `cat flag.txt`（其余命令返回 `bash: <命令>: command not found`）；`ls` 输出本身就是带大小的长列表，可直接看到 `flag.txt`。\n\n> 对照体验：安全版本 `/vul/auth-bypass/safe/api/cmd` 需要登录且要求 admin 角色。这类「前端按钮藏得好好的、后端接口裸奔」的漏洞在真实业务中极其常见。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 100,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "512" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
-      { "title": "接口没限 method 吗", "content": "注意请求必须是 POST，body 是 JSON；命令字面量就是 ls。", "cost": 10 }
+      { "title": "接口没限 method 吗", "content": "注意请求必须是 POST，body 是 JSON；命令白名单为 ls 与 cat flag.txt。", "cost": 10 },
+      { "title": "flag 在哪", "content": "先 ls 看目录列表找到 flag.txt，再 cat flag.txt 读出内容提交。", "cost": 20 }
     ],
     "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   },
@@ -126,10 +122,10 @@
     "title": "商城逻辑漏洞：一分钱买走购物车",
     "category": "logic",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n靶场内置了一个购物商城（环境首页可见「购物商城」入口）：\n\n- 登录：`POST /mall/user/login`，JSON `{\"username\": \"user1\", \"password\": \"password123\"}`（这是靶场预置的普通账号，可直接使用），登录后获得 `sessionID` Cookie；\n- 提交订单：`POST /mall/order/submit`，请求体形如 `{\"user_id\": <id>, \"order_items\": [{\"product_name\": \"...\", \"quantity\": \"1\", \"total_price\": \"999\"}]}`——商品、数量与**总价全部由客户端提交**（`quantity`/`total_price` 是字符串），服务端不做任何重算。\n\n# 任务\n\n以 `0.01` 元的总价提交一笔订单（任意商品、任意数量），提交接口返回的中文成功提示**原文**作为答案。",
+    "description_md": "# 背景\n\n靶场内置了一个购物商城（环境首页可见「购物商城」入口）：\n\n- 登录：`POST /mall/user/login`，JSON `{\"username\": \"user1\", \"password\": \"password123\"}`（这是靶场预置的普通账号，可直接使用），登录后获得 `sessionID` Cookie；\n- 提交订单：`POST /mall/order/submit`，请求体形如 `{\"user_id\": <id>, \"order_items\": [{\"product_name\": \"...\", \"quantity\": \"1\", \"total_price\": \"999\"}]}`——商品、数量与**总价全部由客户端提交**（`quantity`/`total_price` 是字符串），服务端不做任何重算。\n\n# 任务\n\n以 `0.01` 元的总价提交一笔订单（任意商品、任意数量），接口返回中文成功提示（`订单提交成功`）即代表篡改成立。\n\n成功后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "订单提交成功" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "请求体形状", "content": "order_items 是数组，每项含 product_name、quantity、total_price（后两者为字符串）；user_id 跟随登录账号即可。", "cost": 20 }
@@ -142,10 +138,10 @@
     "title": "JWT 算法混淆：alg=none 免签冒充",
     "category": "jwt",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n`POST /jwt/unsafe-login1`（表单字段 `username`/`password`，可用 `user1` / `password123`）登录成功后签发一个 HS256 的 JWT——**token 展示在返回的 HTML 页面里**，从页面复制即可。对应的资料接口 `/jwt/unsafe-login1/profile`（`Authorization: Bearer <token>`）解析 token 时**接受了 `alg: none`**——即允许无签名令牌。\n\n更妙的是：服务端取身份时读的是 token **header** 里的 `username` 字段，而不是 payload。\n\n# 任务\n\n伪造一个 `alg=none` 的 token，让 header 中的 `username` 为 `root`，访问 `/jwt/unsafe-login1/profile` 拿到 root 的资料，提交格式为 `id:username`（例如返回 `[{\"id\": 9, \"username\": \"root\"}]` 时提交 `9:root`）。",
+    "description_md": "# 背景\n\n`POST /jwt/unsafe-login1`（表单字段 `username`/`password`，可用 `user1` / `password123`）登录成功后签发一个 HS256 的 JWT——**token 展示在返回的 HTML 页面里**，从页面复制即可。对应的资料接口 `/jwt/unsafe-login1/profile`（`Authorization: Bearer <token>`）解析 token 时**接受了 `alg: none`**——即允许无签名令牌。\n\n更妙的是：服务端取身份时读的是 token **header** 里的 `username` 字段，而不是 payload。\n\n# 任务\n\n伪造一个 `alg=none` 的 token，让 header 中的 `username` 为 `root`，访问 `/jwt/unsafe-login1/profile` 拿到 root 的资料（返回形如 `[{\"id\": 2, \"username\": \"root\"}]` 即成功）。\n\n伪造成功后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "2:root" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "token 长什么样", "content": "header.payload.signature 三段用 . 分隔；alg=none 时 signature 为空串（保留末尾的点）。", "cost": 20 },
@@ -159,10 +155,10 @@
     "title": "文件上传：魔数校验绕过",
     "category": "file-upload",
     "difficulty": "practitioner",
-    "description_md": "# 背景\n\n`/upload/case/fileheader`（上传页：`/upload/main?case=fileheader`，字段名 `filename`）不信任扩展名和 Content-Type，而是读取**文件头（魔数）**判断是否为图片，非 `image/*` 一律拒绝。\n\n# 任务\n\n制作一个「GIF + PHP」多态文件：文件头是 GIF 魔数（`GIF89a`），后面跟任意 PHP 代码，文件名随意（如 `shell.php`）。上传成功后，提交结果页 extrainfo 中 `FileTypeHeaderType:` 后面检测出的 MIME 类型值（形如 `image/xxx`）。",
+    "description_md": "# 背景\n\n`/upload/case/fileheader`（上传页：`/upload/main?case=fileheader`，字段名 `filename`）不信任扩展名和 Content-Type，而是读取**文件头（魔数）**判断是否为图片，非 `image/*` 一律拒绝。\n\n# 任务\n\n制作一个「GIF + PHP」多态文件：文件头是 GIF 魔数（`GIF89a`），后面跟任意 PHP 代码，文件名随意（如 `shell.php`）。上传后结果页 extrainfo 中 `FileTypeHeaderType:` 给出检测出的 MIME 类型（形如 `image/gif`）即代表绕过了头检测。\n\n上传成功后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 150,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "image/gif" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "魔数在前", "content": "检测库只看文件开头几个字节：GIF89a + <?php ... 的组合即可被判为图片。", "cost": 20 }
@@ -175,10 +171,10 @@
     "title": "反射型 XSS：危险拼接与安全转义",
     "category": "xss",
     "difficulty": "apprentice",
-    "description_md": "# 背景\n\n同一个参数 `name`，两种命运：\n\n- `/xss/echo?name=xxx`：把参数**直接拼接**进 HTML —— 反射型 XSS；\n- `/xss/safe?name=xxx`：对参数做 HTML 实体转义后再输出 —— 安全写法。\n\n# 任务\n\n1. 在 `/xss/echo` 构造 payload，让页面执行 `alert(1)`（浏览器访问或用工具观察响应即可）；\n2. 访问 `/xss/safe?name=<script>`，观察 `<script>` 被转义后的输出，提交**转义结果的完整原文**（以 `&` 开头、`;` 结尾）。",
+    "description_md": "# 背景\n\n同一个参数 `name`，两种命运：\n\n- `/xss/echo?name=xxx`：把参数**直接拼接**进 HTML —— 反射型 XSS；\n- `/xss/safe?name=xxx`：对参数做 HTML 实体转义后再输出 —— 安全写法。\n\n# 任务\n\n1. 在 `/xss/echo` 构造 payload，让页面执行 `alert(1)`（浏览器访问或用工具观察响应即可）；\n2. 访问 `/xss/safe?name=<script>`，观察 `<script>` 被转义后的输出（`&lt;script&gt;`，以 `&` 开头、`;` 结尾）。\n\n完成两个观察后，读取靶机 flag 并提交（见下方「关于 flag」）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点，靶机文件系统内也有 `/flag.txt`；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。完成上述攻击动作后，读取 flag 并在平台提交框中输入它即可判定。",
     "score": 100,
-    "flag_mode": "shared",
-    "challenge": { "type": "static", "flag": "&lt;script&gt;" },
+    "flag_mode": "instance",
+    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
     "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
     "hints": [
       { "title": "payload", "content": "/xss/echo?name=<script>alert(1)</script>", "cost": 10 },
