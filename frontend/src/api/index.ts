@@ -475,6 +475,8 @@ export const adminCompetitionApi = {
   detail: (id: number) => http.get<CompetitionDetail>(`/admin/competitions/${id}`),
   update: (id: number, body: { name?: string; description?: string; start_time?: string; end_time?: string }) =>
     http.patch<CompetitionDetail>(`/admin/competitions/${id}`, body),
+  // 删除竞赛（running 422 拒绝）；级联清理参赛者/题目绑定/提交/WP（含 zip 落盘）/容器。
+  delete: (id: number) => http.del<{ ok: boolean }>(`/admin/competitions/${id}`),
   challenges: (id: number) =>
     http.get<{ items: TrainingItem[] }>(`/admin/competitions/${id}/challenges`),
   // 双模式绑定：{"slugs":[...]} 绑既有题目；数组=challenge.json 批量导入（单题失败整体拒绝）。

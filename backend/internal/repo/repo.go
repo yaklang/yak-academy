@@ -134,6 +134,8 @@ type SubmissionRepo interface {
 	CountCorrectSolves(ctx context.Context, challengeID, competitionID uint) (int64, error)
 	// ListByCompetitionUser 参赛者本人在该竞赛的提交（竞赛首页我的提交）。
 	ListByCompetitionUser(ctx context.Context, competitionID, userID uint, limit int) ([]model.Submission, error)
+	// DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
+	DeleteByCompetition(ctx context.Context, competitionID uint) error
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
 }
 
@@ -226,6 +228,9 @@ type CompetitionRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.Competition, int64, error)
 	// UpdateSelective 局部更新（map 形式字段，零值可更新）。
 	UpdateSelective(ctx context.Context, id uint, fields map[string]any) error
+	// DeleteCascade 删除竞赛及其全部关联行（参赛者/队伍/题目绑定/反作弊警告/
+	// WP/竞赛积分，一个事务内完成）。仅 scheduled/ended 可调（service 层校验）。
+	DeleteCascade(ctx context.Context, id uint) error
 
 	CreateTeam(ctx context.Context, t *model.Team) error
 	// FindTeamByName 竞赛内战队名查重（nil = 不存在）。

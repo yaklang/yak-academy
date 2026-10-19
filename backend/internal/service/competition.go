@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +43,8 @@ type CompetitionService struct {
 	writeupDir    string
 	deliverInvite func(ctx context.Context, userID uint, title, bodyMd string, competitionID uint, inviteCode string) error
 	createAccount func(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error)
+	// destroyInstances 竞赛删除前销毁该赛运行容器（SetInstanceDestroyer 注入）。
+	destroyInstances instanceDestroyer
 	// now 时钟注入（测试固定时间推进竞赛状态）。
 	now func() time.Time
 }
@@ -262,6 +266,41 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 		return nil, err
 	}
 	return s.buildDetail(ctx, fresh)
+}
+
+// destroyInstance 竞赛删除时销毁运行容器的能力（main 注入 EnvService 适配器，
+// 避免 service 横向 import；nil = 未装配（早期测试），跳过容器销毁）。
+type instanceDestroyer func(ctx context.Context, competitionID uint) error
+
+// SetInstanceDestroyer 注入竞赛容器销毁入口（main 装配后调用一次）。
+func (s *CompetitionService) SetInstanceDestroyer(destroy instanceDestroyer) {
+	s.destroyInstances = destroy
+}
+
+// Delete 删除竞赛（仅 scheduled/ended；running 422 拒绝——与 running 期间
+// 禁改 start_time/禁解绑题目同一保护语义）。容器/落盘 zip 是非事务资源，
+// 先于行删除清理：容器销毁失败中止（防孤儿容器），zip 失败仅记录继续删。
+// 提交事件历史 append-only 保留（event-sourcing-rules）。
+func (s *CompetitionService) Delete(ctx context.Context, id uint) error {
+	c, err := s.find(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Status(s.now()) == model.CompetitionRunning {
+		return fmt.Errorf("%w: cannot delete a running competition; move end_time into the past first", ErrValidation)
+	}
+	if s.destroyInstances != nil {
+		if err := s.destroyInstances(ctx, id); err != nil {
+			return fmt.Errorf("destroy competition instances: %w", err)
+		}
+	}
+	// WP zip 落盘目录 = <writeupDir>/<id>/，整目录删除（不存在不算错）。
+	if s.writeupDir != "" {
+		if err := os.RemoveAll(pathutil.Join(s.writeupDir, strconv.Itoa(int(id)))); err != nil {
+			log.Printf("competition: remove writeup dir for %d failed: %v", id, err)
+		}
+	}
+	return s.comps.DeleteCascade(ctx, id)
 }
 
 // ---------- 管理端：题目绑定与批量导入 ----------
