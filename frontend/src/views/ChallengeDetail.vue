@@ -121,7 +121,7 @@ async function loadInstance() {
   restartAutoSolvePolling()
 }
 
-// 单容器约束：409 时提示关闭上一个容器（显示其题目名并可跳转过去销毁）。
+// 单容器约束：409 时可直接在弹窗中关闭上一题的环境（或跳转过去手动处理）。
 async function startInstance() {
   instanceLoading.value = true
   try {
@@ -142,16 +142,44 @@ async function startInstance() {
   }
 }
 
+// 弹窗内直接销毁冲突实例并接续启动本题环境。
+async function destroyConflictingAndStart(current: AdminLabInstance) {
+  instanceLoading.value = true
+  try {
+    await instanceApi.destroy(current.challenge_slug!)
+    instance.value = await instanceApi.start(slug())
+    ElMessage.success('已关闭上一个环境，本题环境启动成功')
+    restartAutoSolvePolling()
+  } catch (e) {
+    // 接续启动仍 409（极端并发）：重新弹冲突框，让用户再处理一次。
+    const err = e as ApiError
+    if (err.status === 409 && err.data?.current) {
+      promptInstanceConflict(err.data.current as AdminLabInstance)
+    } else {
+      ElMessage.error(`环境启动失败：${err.message}`)
+    }
+  } finally {
+    instanceLoading.value = false
+  }
+}
+
 function promptInstanceConflict(current: AdminLabInstance) {
   const challengeName = current.challenge_title || current.challenge_slug || `题目 #${current.challenge_id}`
   ElMessageBox.confirm(
-    `同一时间只能启动一个容器。请先关闭你正在「${challengeName}」题目上运行的环境，再启动本题。`,
+    `同一时间只能启动一个容器。你在「${challengeName}」题目上还有运行中的环境，关闭后即可启动本题。`,
     '已有运行中的容器',
-    { confirmButtonText: '前往关闭', cancelButtonText: '知道了', type: 'warning' },
+    {
+      confirmButtonText: current.challenge_slug ? '关闭并启动本题' : '前往关闭',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+    },
   )
     .then(() => {
       if (current.challenge_slug) {
-        router.push(`${roomBase}/training/${current.challenge_slug}`)
+        destroyConflictingAndStart(current)
+      } else {
+        router.push(`${roomBase}/training/${current.challenge_id}`)
       }
     })
     .catch(() => {})
