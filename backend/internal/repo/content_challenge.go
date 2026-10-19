@@ -408,6 +408,13 @@ func (r *submissionRepo) ListByCompetitionUser(ctx context.Context, competitionI
 	return list, err
 }
 
+// DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
+func (r *submissionRepo) DeleteByCompetition(ctx context.Context, competitionID uint) error {
+	return r.db.WithContext(ctx).
+		Where("competition_id = ?", competitionID).
+		Delete(&model.Submission{}).Error
+}
+
 func (r *submissionRepo) UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error {
 	return r.db.WithContext(ctx).Model(&model.Submission{}).Where("id = ?", id).
 		Updates(map[string]any{"status": status, "score": score}).Error

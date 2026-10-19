@@ -1832,6 +1832,27 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [admin]
+      summary: |
+        删除竞赛（仅 scheduled/ended 可删，running 期间 422 拒绝）。
+        级联清理：参赛者/队伍/题目绑定/反作弊警告/WP（含落盘 zip）/竞赛积分/
+        竞赛内提交与容器记录；运行中容器先销毁。提交事件历史 append-only 保留。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/competitions/{id}/challenges:
     get:

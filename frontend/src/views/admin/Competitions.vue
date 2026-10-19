@@ -3,7 +3,7 @@
 // 在详情页按标签页组织（/admin/panel/competitions/:id）。
 // 状态由起止时间派生（scheduled/running/ended），无"手动开始/结束"。
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminCompetitionApi, type Competition } from '../../api'
 
 const items = ref<Competition[]>([])
@@ -77,6 +77,37 @@ function statusLabel(s: Competition['status']) {
   return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
 }
 
+const deleting = ref('')
+
+// 删除竞赛：running 期间后端 422 拉回提示，前端直接给出可操作提示
+// （先把结束时间改到过去再删）。
+async function remove(row: Competition) {
+  try {
+    await ElMessageBox.confirm(
+      `删除竞赛「${row.name}」？参赛者、题目绑定、提交、WP 与容器记录将一并清除，不可恢复。`,
+      '删除竞赛',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = String(row.id)
+  try {
+    await adminCompetitionApi.delete(row.id)
+    ElMessage.success(`竞赛「${row.name}」已删除`)
+    // 当前页删空时回退一页（列表不出现空页）。
+    if (items.value.length === 1 && page.value > 1) page.value--
+    await load()
+  } catch (e) {
+    const msg = (e as Error).message || '删除失败'
+    ElMessage.error(
+      row.status === 'running' ? `${msg}（进行中的竞赛不可删除，可先把结束时间改到过去）` : msg,
+    )
+  } finally {
+    deleting.value = ''
+  }
+}
+
 function fmt(ts: string) {
   return ts ? new Date(ts).toLocaleString() : '-'
 }
@@ -111,11 +142,18 @@ onMounted(load)
       <el-table-column label="结束时间" width="170">
         <template #default="{ row }">{{ fmt(row.end_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="110">
+      <el-table-column label="操作" width="170">
         <template #default="{ row }">
           <router-link :to="`/admin/panel/competitions/${row.id}`">
             <el-button size="small" type="primary" link>详情与配置</el-button>
           </router-link>
+          <el-button
+            size="small"
+            type="danger"
+            link
+            :loading="deleting === String(row.id)"
+            @click="remove(row)"
+          >删除</el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -44,6 +44,26 @@ func (r *competitionRepo) UpdateSelective(ctx context.Context, id uint, fields m
 	return r.db.WithContext(ctx).Model(&model.Competition{}).Where("id = ?", id).Updates(fields).Error
 }
 
+// DeleteCascade 删除竞赛及本域全部关联行（participants/teams/bindings/
+// warnings/writeups/scores + 竞赛本体 + 竞赛内提交与容器记录行），单事务。
+// 派生行（CompetitionScore）随聚合删除——事件流 append-only 保留，但
+// 竞赛已删，重放不会复活（deriver 的首通幂等插入无竞赛行可挂靠）。
+// 落盘 WP zip 与运行容器由 service 层在事务外清理（文件/驱动非事务资源）。
+func (r *competitionRepo) DeleteCascade(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, m := range []any{
+			&model.Participant{}, &model.Team{}, &model.CompetitionChallenge{},
+			&model.CheatWarning{}, &model.Writeup{}, &model.CompetitionScore{},
+			&model.Submission{}, &model.LabInstance{},
+		} {
+			if err := tx.Where("competition_id = ?", id).Delete(m).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("id = ?", id).Delete(&model.Competition{}).Error
+	})
+}
+
 func (r *competitionRepo) CreateTeam(ctx context.Context, t *model.Team) error {
 	return r.db.WithContext(ctx).Create(t).Error
 }

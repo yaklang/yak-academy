@@ -722,3 +722,118 @@ func TestCompetitionInstanceScope(t *testing.T) {
 		t.Fatalf("list by competition: total=%d err=%v", total, err)
 	}
 }
+
+// TestCompetitionDeleteLifecycle 删除竞赛：running 拒绝；ended 后删除并级联
+// 清空参赛者/绑定/提交/积分行；已入场者在删除后解除锁定（服务端派生）。
+func TestCompetitionDeleteLifecycle(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	comp := e.createRunningComp(t, "删除赛")
+	chal := e.seedChallenge(t, "c-del", "shared")
+	body, _ := json.Marshal(map[string]any{"slugs": []string{chal.Slug}})
+	e.comps.BindChallenges(ctx, comp.ID, body, nil)
+	user := e.ensureUser(t, "delver")
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"delver"}})
+	compRepo := repo.NewCompetitionRepo(e.gdb)
+	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	if id, locked := e.comps.LockedCompetition(ctx, user.ID); !locked || id != comp.ID {
+		t.Fatalf("locked before delete: id=%d locked=%v", id, locked)
+	}
+
+	// running 期间拒绝删除（与 running 期间禁改 start_time 同一保护语义）。
+	if err := e.comps.Delete(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("delete running: want ErrValidation, got %v", err)
+	}
+
+	// 结束后可删；级联清空关联行。
+	e.comps.now = func() time.Time { return comp.EndTime.Add(time.Minute) }
+	if err := e.comps.Delete(ctx, comp.ID); err != nil {
+		t.Fatalf("delete ended: %v", err)
+	}
+	if _, err := compRepo.FindByID(ctx, comp.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("competition row should be gone, got err=%v", err)
+	}
+	var n int64
+	for _, m := range []any{&model.Participant{}, &model.CompetitionChallenge{}, &model.CompetitionScore{}} {
+		if err := e.gdb.Model(m).Where("competition_id = ?", comp.ID).Count(&n).Error; err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 0 {
+			t.Fatalf("cascade left %d rows in %T", n, m)
+		}
+	}
+	// 已入场者随行删除解除锁定。
+	if _, locked := e.comps.LockedCompetition(ctx, user.ID); locked {
+		t.Fatalf("lock should be gone after delete")
+	}
+	// 重复删除：404。
+	if err := e.comps.Delete(ctx, comp.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete twice: want ErrNotFound, got %v", err)
+	}
+}
+
+// TestCompetitionDeleteDestroysInstancesAndWriteups 删除前回调销毁容器、
+// 清理 WP zip 落盘目录；容器销毁失败中止删除（防孤儿容器）。
+func TestCompetitionDeleteDestroysInstancesAndWriteups(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	comp := e.createRunningComp(t, "清理赛")
+	chal := e.seedChallenge(t, "c-clean", "shared")
+	body, _ := json.Marshal(map[string]any{"slugs": []string{chal.Slug}})
+	e.comps.BindChallenges(ctx, comp.ID, body, nil)
+
+	// destroy 回调探针：记录被要求销毁的竞赛 ID。
+	destroyed := map[uint]bool{}
+	e.comps.SetInstanceDestroyer(func(ctx context.Context, competitionID uint) error {
+		destroyed[competitionID] = true
+		return nil
+	})
+
+	// WP 落盘：<dir>/<compID>/<wpID>.zip。
+	dir := t.TempDir()
+	e.comps.SetWriteupDir(dir)
+	user := e.ensureUser(t, "wper")
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"wper"}})
+	compRepo := repo.NewCompetitionRepo(e.gdb)
+	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	e.comps.now = func() time.Time { return comp.EndTime.Add(time.Minute) }
+	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, "# wp"); err != nil {
+		t.Fatalf("save writeup: %v", err)
+	}
+	// zip 上传后落盘路径 <dir>/<compID>/<wpID>.zip（删除时整目录清理的对象）。
+	if _, err := e.comps.UploadWriteupZip(ctx, user.ID, comp.ID, chal.ID, "s.zip", bytes.NewReader(makeZip(t, "s.sh"))); err != nil {
+		t.Fatalf("upload writeup zip: %v", err)
+	}
+	wps, err := compRepo.ListWriteups(ctx, comp.ID)
+	if err != nil || len(wps) != 1 {
+		t.Fatalf("writeups: len=%d err=%v", len(wps), err)
+	}
+	if wps[0].ZipFile == "" {
+		t.Fatalf("writeup should have zip path")
+	}
+
+	if err := e.comps.Delete(ctx, comp.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !destroyed[comp.ID] {
+		t.Fatalf("instance destroyer not invoked for competition %d", comp.ID)
+	}
+	if _, err := os.Stat(filepath.Join(dir, strconv.Itoa(int(comp.ID)))); !os.IsNotExist(err) {
+		t.Fatalf("writeup dir should be removed, stat err=%v", err)
+	}
+
+	// 容器销毁失败 → 删除中止，竞赛行仍在。
+	comp2 := e.createRunningComp(t, "失败赛")
+	e.comps.now = func() time.Time { return comp2.EndTime.Add(time.Minute) }
+	e.comps.SetInstanceDestroyer(func(ctx context.Context, competitionID uint) error {
+		return fmt.Errorf("docker down")
+	})
+	if err := e.comps.Delete(ctx, comp2.ID); err == nil || !strings.Contains(err.Error(), "docker down") {
+		t.Fatalf("delete should fail on destroy error, got %v", err)
+	}
+	if _, err := compRepo.FindByID(ctx, comp2.ID); err != nil {
+		t.Fatalf("competition should remain after failed delete: %v", err)
+	}
+}

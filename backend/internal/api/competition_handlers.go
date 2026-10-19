@@ -102,6 +102,20 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 	writeJSON(w, http.StatusOK, detail)
 }
 
+// adminDeleteCompetition 删除竞赛（running 422 拒绝；级联清理见 service.Delete）。
+func (h *Handlers) adminDeleteCompetition(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := h.Competitions.Delete(req.Context(), id); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // adminCompetitionChallenges 竞赛题目列表。
 func (h *Handlers) adminCompetitionChallenges(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)

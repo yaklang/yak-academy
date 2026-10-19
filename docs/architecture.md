@@ -198,6 +198,7 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
 | `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（管理页已下线；API 保留供竞赛批量建号与账号运维） |
 | `POST /admin/competitions` 等 13 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD/题目绑定/参赛者批量导入（自动建号+邀请码）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
+| `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/题目绑定/提交/WP/容器记录，事件历史保留） |
 | `GET /competitions/me` | student | 本人参赛与锁定状态（路由守卫轮询） |
 | `POST /competitions/{id}/enter` | student | 凭邀请码入场（running 限定，入场后锁定至结束） |
 | `/competitions/{id}/view`、`.../challenges/{slug}/instance`、`.../submissions`、`.../leaderboard`、`.../writeups*` | 参赛者 | 竞赛内做题闭环：题目列表/容器/提交/双榜/WP 提交与覆盖（ended 后） |

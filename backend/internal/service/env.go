@@ -412,6 +412,24 @@ func (s *EnvService) ListActiveByChallenge(ctx context.Context, challengeID uint
 	return s.instances.ListActiveByChallenge(ctx, challengeID)
 }
 
+// DestroyCompetitionInstances 销毁某竞赛全部运行容器（竞赛删除级联；
+// 逐台 AdminDestroyInstance，失败即返回错误中止删除流程——防孤儿容器）。
+func (s *EnvService) DestroyCompetitionInstances(ctx context.Context, competitionID uint) error {
+	instances, _, err := s.instances.ListByCompetition(ctx, competitionID, 0, 1<<30)
+	if err != nil {
+		return err
+	}
+	for _, inst := range instances {
+		if inst.Status != model.InstanceCreating && inst.Status != model.InstanceRunning {
+			continue
+		}
+		if err := s.AdminDestroyInstance(ctx, inst.ID); err != nil {
+			return fmt.Errorf("destroy instance %d: %w", inst.ID, err)
+		}
+	}
+	return nil
+}
+
 // ListLogs 容器生命周期日志分页（管理端容器日志表格；批量富化用户名与题目）。
 func (s *EnvService) ListLogs(ctx context.Context, offset, limit int) ([]AdminInstanceLog, int64, error) {
 	list, total, err := s.logs.List(ctx, offset, limit)
