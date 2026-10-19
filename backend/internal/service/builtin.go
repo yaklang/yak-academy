@@ -111,6 +111,104 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 	}, nil
 }
 
+// BuiltinTutorialCatalog 内置训练集教程目录（契约见 docs/openapi.yaml
+// /admin/challenges/builtin/tutorials；教程管理页「内置训练集」区块数据源）。
+type BuiltinTutorialCatalog struct {
+	Version        string                    `json:"version"`
+	Topics         []BuiltinTutorialTopic    `json:"topics"`
+	ImportedTopics int                       `json:"imported_topics"`
+	ImportedRooms  int                       `json:"imported_rooms"`
+}
+
+// BuiltinTutorialTopic 目录中的一个专题（教程 → 题目 1:1，Room 数与题数一致）。
+type BuiltinTutorialTopic struct {
+	Slug  string                   `json:"slug"`
+	Title string                   `json:"title"`
+	Rooms []BuiltinTutorialRoom   `json:"rooms"`
+}
+
+// BuiltinTutorialRoom 目录中的一篇教程。
+type BuiltinTutorialRoom struct {
+	Slug       string          `json:"slug"`
+	Title      string          `json:"title"`
+	Difficulty model.Difficulty `json:"difficulty"`
+	// Imported 该 Room 是否已导入（内容表存在同名内置行）。
+	Imported bool `json:"imported"`
+}
+
+// builtinTutorialFiles 嵌入训练集的教程文件 map（与 importBuiltinTutorials 同源）。
+func builtinTutorialFiles() (map[string][]byte, error) {
+	files := map[string][]byte{}
+	err := fs.WalkDir(builtinFS, builtinTutorialsDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := builtinFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		files[strings.TrimPrefix(p, builtinTutorialsDir+"/")] = data
+		return nil
+	})
+	return files, err
+}
+
+// BuiltinTutorialCatalog 返回内置训练集教程目录与导入状态：帐面清单由
+// embed 资产解析（不依赖已导入，未导入时也能展示目录），imported 按内容表
+// slug 存在性逐篇探测；计数为已导入数。教程管理页据此渲染「内置训练集」
+// 区块（内置教程无删除/编辑入口，仅重新一键导入更新）。
+func (s *ContentService) BuiltinTutorialCatalog(ctx context.Context) (*BuiltinTutorialCatalog, error) {
+	manifest, err := readBuiltinManifest()
+	if err != nil {
+		return nil, err
+	}
+	files, err := builtinTutorialFiles()
+	if err != nil {
+		return nil, fmt.Errorf("%w: builtin tutorials unreadable: %v", ErrValidation, err)
+	}
+	parsed, err := s.parseFiles(files)
+	if err != nil {
+		return nil, fmt.Errorf("%w: builtin tutorials corrupt: %v", ErrValidation, err)
+	}
+	roomSlugs := make([]string, 0, len(parsed.Rooms))
+	for _, r := range parsed.Rooms {
+		roomSlugs = append(roomSlugs, r.Slug)
+	}
+	topicSlugs := make([]string, 0, len(parsed.Topics))
+	for _, t := range parsed.Topics {
+		topicSlugs = append(topicSlugs, t.Slug)
+	}
+	importedRooms, err := s.rooms.FindBuiltinBySlugs(ctx, roomSlugs...)
+	if err != nil {
+		return nil, err
+	}
+	importedTopics, err := s.topics.FindBuiltinBySlugs(ctx, topicSlugs...)
+	if err != nil {
+		return nil, err
+	}
+
+	catalog := &BuiltinTutorialCatalog{Version: manifest.Version}
+	for _, t := range parsed.Topics {
+		entry := BuiltinTutorialTopic{Slug: t.Slug, Title: t.Title}
+		for _, r := range parsed.Rooms {
+			if r.TopicSlug != t.Slug {
+				continue
+			}
+			_, roomImported := importedRooms[r.Slug]
+			entry.Rooms = append(entry.Rooms, BuiltinTutorialRoom{
+				Slug: r.Slug, Title: r.Title, Difficulty: r.Difficulty, Imported: roomImported,
+			})
+		}
+		catalog.Topics = append(catalog.Topics, entry)
+	}
+	catalog.ImportedTopics = len(importedTopics)
+	catalog.ImportedRooms = len(importedRooms)
+	return catalog, nil
+}
+
 // readBuiltinManifest 读取嵌入的训练集清单（manifest.json）。
 func readBuiltinManifest() (*builtinManifest, error) {
 	manifestRaw, err := fs.ReadFile(builtinFS, path.Join(builtinSetDir, "manifest.json"))
@@ -174,22 +272,11 @@ func (s *ContentService) BuildBuiltinImageOnly(ctx context.Context) (*BuiltinIma
 // 直接 Upsert——与题目同语义的幂等写入，重复导入 = 更新。
 // Room slug 统一 yakit- 前缀命名空间；challenges.json 每题 tutorial_slug
 // 指向配套 Room（1:1），详见 docs/architecture.md 决策 2 例外。
+// 写入后置 is_builtin 来源标记：内置教程不可经内容包路径改动/删除
+//（validate/DeletePackage 按标记拦截），仅本入口可更新。
 func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, rooms int, err error) {
-	files := map[string][]byte{}
-	if err := fs.WalkDir(builtinFS, builtinTutorialsDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		data, err := builtinFS.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		files[strings.TrimPrefix(p, builtinTutorialsDir+"/")] = data
-		return nil
-	}); err != nil {
+	files, err := builtinTutorialFiles()
+	if err != nil {
 		return 0, 0, fmt.Errorf("%w: builtin tutorials unreadable: %v", ErrValidation, err)
 	}
 	parsed, err := s.parseFiles(files)
@@ -199,20 +286,40 @@ func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, ro
 	if err := validateParsed(parsed); err != nil {
 		return 0, 0, fmt.Errorf("%w: builtin tutorials invalid: %v", ErrValidation, err)
 	}
+	topicSlugs := make([]string, 0, len(parsed.Topics))
 	for i := range parsed.Topics {
+		parsed.Topics[i].IsBuiltin = true
+		topicSlugs = append(topicSlugs, parsed.Topics[i].Slug)
 		if err := s.topics.Upsert(ctx, &parsed.Topics[i]); err != nil {
 			return 0, 0, err
 		}
 	}
+	roomSlugs := make([]string, 0, len(parsed.Rooms))
 	for _, rp := range parsed.Rooms {
 		if err := s.rooms.Upsert(ctx, &model.Room{
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
 			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
+			IsBuiltin: true,
 		}); err != nil {
 			return 0, 0, err
 		}
+		roomSlugs = append(roomSlugs, rp.Slug)
+	}
+	// 回填：既存行若是历史导入（is_builtin 列加入前落库）且 slug 属于内置
+	// 命名空间，本次导入把它标记为内置——重复导入即补齐，无需额外迁移。
+	if err := s.MarkBuiltinTutorials(ctx, topicSlugs, roomSlugs); err != nil {
+		return 0, 0, err
 	}
 	return len(parsed.Topics), len(parsed.Rooms), nil
+}
+
+// MarkBuiltinTutorials 批量置 Topic/Room 的内置来源标记（仅内置导入调用；
+// Upsert 不回写 is_builtin，既有行的标记靠这里显式补齐）。
+func (s *ContentService) MarkBuiltinTutorials(ctx context.Context, topicSlugs, roomSlugs []string) error {
+	if err := s.topics.MarkBuiltin(ctx, topicSlugs, true); err != nil {
+		return err
+	}
+	return s.rooms.MarkBuiltin(ctx, roomSlugs, true)
 }
 
 // markBuiltinBank 内置题集统一归入教程题目 tab：上传路径已禁用 tutorial，

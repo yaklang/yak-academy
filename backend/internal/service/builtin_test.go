@@ -306,3 +306,145 @@ func TestBuildBuiltinImageOnlyNoopRefused(t *testing.T) {
 		t.Fatalf("err = %v, want ErrValidation", err)
 	}
 }
+
+// 内置教程目录：未导入时也能列出全量帐面（imported 全 false），
+// 导入后逐篇 imported=true 且计数与目录总数一致（教程管理页数据源）。
+func TestBuiltinTutorialCatalog(t *testing.T) {
+	svc, _ := newBuiltinTestService(t, NoopDriver{})
+	ctx := context.Background()
+
+	catalog, err := svc.BuiltinTutorialCatalog(ctx)
+	if err != nil {
+		t.Fatalf("catalog before import: %v", err)
+	}
+	if len(catalog.Topics) != 4 {
+		t.Fatalf("catalog topics = %d, want 4", len(catalog.Topics))
+	}
+	totalRooms := 0
+	for _, topic := range catalog.Topics {
+		for _, room := range topic.Rooms {
+			totalRooms++
+			if room.Imported {
+				t.Fatalf("room %s imported before first import", room.Slug)
+			}
+		}
+	}
+	if totalRooms != 11 || catalog.ImportedRooms != 0 || catalog.ImportedTopics != 0 {
+		t.Fatalf("catalog rooms/imported = %d/%d/%d, want 11/0/0", totalRooms, catalog.ImportedRooms, catalog.ImportedTopics)
+	}
+
+	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	catalog, err = svc.BuiltinTutorialCatalog(ctx)
+	if err != nil {
+		t.Fatalf("catalog after import: %v", err)
+	}
+	if catalog.ImportedTopics != len(catalog.Topics) || catalog.ImportedRooms != 11 {
+		t.Fatalf("imported topics/rooms = %d/%d, want %d/11", catalog.ImportedTopics, catalog.ImportedRooms, len(catalog.Topics))
+	}
+	for _, topic := range catalog.Topics {
+		for _, room := range topic.Rooms {
+			if !room.Imported {
+				t.Fatalf("room %s not imported after builtin import", room.Slug)
+			}
+			if err := validateDifficulty(room.Difficulty); err != nil {
+				t.Fatalf("room %s difficulty %q: %v", room.Slug, room.Difficulty, err)
+			}
+		}
+	}
+}
+
+// 内置教程禁编辑：内置导入占据 slug 后，历史同 slug 包的重传（owned 豁免
+// 跳过通用 exists 检查）被 builtin 专项拦截（ErrValidation），内容不被覆盖。
+func TestUploadRejectsBuiltinTutorialSlugs(t *testing.T) {
+	svc, gdb := newBuiltinTestService(t, NoopDriver{})
+	ctx := context.Background()
+	// 1. 内置导入前上传历史包：yakit-jwt-forge 尚未被占用，合法落库。
+	legacy := map[string]string{
+		"manifest.yaml": `
+name: legacy-package
+version: 1.0.0
+language: zh
+topics:
+  - legacy-topic
+`,
+		"topics/legacy-topic/topic.md": "---\ntitle: 历史专题\n---\n正文",
+		"topics/legacy-topic/rooms/yakit-jwt-forge/lesson.md": "---\ntitle: 历史教程\ndifficulty: apprentice\n---\n正文",
+	}
+	if _, err := svc.Upload(ctx, buildZip(t, legacy)); err != nil {
+		t.Fatalf("legacy upload: %v", err)
+	}
+	// 2. 内置导入 upsert 同 slug 行并置来源标记（导入内容覆盖历史行）。
+	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
+		t.Fatalf("builtin import: %v", err)
+	}
+	// 3. 历史包重传新版本：owned 豁免跳过通用冲突检查，必须被 builtin 拦截。
+	reupload := map[string]string{}
+	for k, v := range legacy {
+		reupload[k] = v
+	}
+	reupload["manifest.yaml"] = `
+name: legacy-package
+version: 2.0.0
+language: zh
+topics:
+  - legacy-topic
+`
+	reupload["topics/legacy-topic/rooms/yakit-jwt-forge/lesson.md"] = "---\ntitle: 冒名覆盖\ndifficulty: apprentice\n---\n正文"
+	_, err := svc.Upload(ctx, buildZip(t, reupload))
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+	var room model.Room
+	if err := gdb.Where("slug = ?", "yakit-jwt-forge").First(&room).Error; err != nil {
+		t.Fatal(err)
+	}
+	if room.Title == "冒名覆盖" || !room.IsBuiltin {
+		t.Fatalf("builtin room overwritten: title=%q is_builtin=%v", room.Title, room.IsBuiltin)
+	}
+}
+
+// 内置教程禁删（历史兜底）：内置导入前上传的同 slug 包（合法落库），在内置
+// 导入占据该 slug 后删除——DeletePackage 必须整体拒绝，内置行保持原样。
+func TestDeletePackageRejectsBuiltinTutorials(t *testing.T) {
+	svc, gdb := newBuiltinTestService(t, NoopDriver{})
+	ctx := context.Background()
+	// 1. 先上传普通包：此时 yakit-jwt-forge 尚未被内置占用，上传合法。
+	files := map[string]string{
+		"manifest.yaml": `
+name: legacy-package
+version: 1.0.0
+language: zh
+topics:
+  - legacy-topic
+`,
+		"topics/legacy-topic/topic.md":      "---\ntitle: 历史专题\n---\n正文",
+		"topics/legacy-topic/rooms/yakit-jwt-forge/lesson.md": "---\ntitle: 历史教程\ndifficulty: apprentice\n---\n正文",
+	}
+	pkg, err := svc.Upload(ctx, buildZip(t, files))
+	if err != nil {
+		t.Fatalf("legacy upload: %v", err)
+	}
+	// 2. 内置导入 upsert 同 slug 行并置来源标记（导入内容覆盖历史行）。
+	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
+		t.Fatalf("builtin import: %v", err)
+	}
+	// 3. 删除历史包：payload 含内置 slug，整体拒绝。
+	_, err = svc.DeletePackage(ctx, pkg.ID)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+	var room model.Room
+	if err := gdb.Where("slug = ?", "yakit-jwt-forge").First(&room).Error; err != nil {
+		t.Fatalf("builtin room deleted: %v", err)
+	}
+	if !room.IsBuiltin || room.Title == "历史教程" {
+		t.Fatalf("builtin room altered: title=%q is_builtin=%v", room.Title, room.IsBuiltin)
+	}
+	var n int64
+	gdb.Model(&model.ContentPackage{}).Count(&n)
+	if n != 1 {
+		t.Fatalf("package rows = %d, want 1 (rejected delete keeps package)", n)
+	}
+}

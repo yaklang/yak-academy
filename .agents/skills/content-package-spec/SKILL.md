@@ -10,6 +10,7 @@ description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内�
 - **禁止任何内置/硬编码教程内容**。所有教程与题目都来自管理员上传（教程 zip 包 / 题目 challenge.json）。代码里不得出现示例课程数据、demo 文章常量。
 - 唯一例外一：数据库迁移可以创建初始管理员账号，但**不得**创建任何 Topic/Room/Challenge 初始数据。
 - 唯一例外二：官方内置训练集（配套教程 + 题目，基于 yaklang vulinbox 靶场引擎，`service/builtin/vulinbox/`，随二进制 go:embed 分发）。**仅**经管理员在管理端显式「一键导入」（`POST /admin/challenges/builtin`）生效，重复导入 = 更新；不得绕过该入口在迁移/启动时自动写入。题目走同一 `UploadChallenges` 校验 + upsert 管线；配套教程（`tutorials/` 子目录，同一 manifest/topic.md/lesson.md front matter 解析规则）复用 `parseFiles` 解析与静态校验后**直接 upsert Topic/Room**——绕过包状态机，无 draft/publish，也不产生 ContentPackage 行。这是平台唯一允许的随二进制分发的内容资产，新增其他内置内容必须先修订 docs/architecture.md 决策 2。
+- **内置教程禁删禁编辑**：导入的 Topic/Room 带 `is_builtin` 来源标记（与 Challenge 同模式；内容包 Upsert 不回写该列）。上传内容包认领内置 slug 一律 422（含同名包重传的 owned 豁免路径），删除内容包时版本 Payload 含内置行整体拒绝；更新只走重新一键导入。教程管理页「内置训练集」区块（`GET /admin/challenges/builtin/tutorials`）只读展示目录与导入状态，无删除/编辑操作。
 - **教程包只含教程**（文字 + 视频）；题目不经教程包上传——旧 lab.yaml 模式已废弃（解析代码仅为旧版本 Payload 回放兼容保留，apply 时忽略），新题目走 challenge.yml 包 zip 或兼容 challenge.json。
 
 ## 教程包结构（zip）
@@ -139,4 +140,5 @@ Upload → Parse → Validate → Persist → Publish
 - 连带清理：指向被删 Room 的 `challenges.tutorial_slug` 置空（题目本体保留）；被删 Room 的 `progresses` 行删除（派生表唯一例外写路径，见 event-sourcing-rules）；
 - Event 表 append-only 不动（事件历史保留）；派生器 `room.completed` 有 Room 存在性守卫，重放不复活已删进度；
 - draft 包从未发布、内容表无行，删除即仅清包与版本记录（同一入口，无需特判）；
+- 删除前校验版本 Payload 的 slug 并集：含 `is_builtin` 内置行（历史同 slug 包先于内置导入落库的兜底）整体 422 拒绝；
 - 内置训练集（vulinbox）不走内容包记录，无删除入口——重新一键导入即恢复。

@@ -18,6 +18,11 @@ type Topic struct {
 	Slug      string    `gorm:"uniqueIndex;size:128" json:"slug"`
 	Title     string    `gorm:"size:256" json:"title"`
 	Summary   string    `json:"summary"`
+	// IsBuiltin 来自官方内置训练集（一键导入标记；内容包上传/删除不触碰，
+	// 内置教程禁删禁编辑按它判定）。default 无 not null 的理由同
+	// Challenge.IsBuiltin：旧行 NULL 会让等值过滤三值逻辑漏行
+	//（db.Migrate 回填兜底旧库）。
+	IsBuiltin bool      `gorm:"default:false" json:"is_builtin"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -35,6 +40,8 @@ type Room struct {
 	VideoURL string `gorm:"size:512" json:"video_url"`
 	// Requirements 前置依赖（Room 级解锁图，JSON 数组存 room slug 列表）。
 	Requirements string `gorm:"type:text" json:"requirements,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	// IsBuiltin 同 Topic.IsBuiltin（内置训练集来源标记；管理端禁删禁编辑依据）。
+	IsBuiltin bool      `gorm:"default:false" json:"is_builtin"`
+	CreatedAt    time.Time `gorm:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

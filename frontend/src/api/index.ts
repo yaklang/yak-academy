@@ -312,6 +312,28 @@ export interface BuiltinImageStatus {
   can_build: boolean
 }
 
+// 内置训练集教程目录（教程管理页「内置训练集」区块）：帐面清单来自 embed
+// 资产，imported 按内容表探测——内置教程只读，更新走一键导入。
+export interface BuiltinTutorialRoom {
+  slug: string
+  title: string
+  difficulty: 'apprentice' | 'practitioner' | 'expert'
+  imported: boolean
+}
+
+export interface BuiltinTutorialTopic {
+  slug: string
+  title: string
+  rooms: BuiltinTutorialRoom[]
+}
+
+export interface BuiltinTutorialCatalog {
+  version: string
+  topics: BuiltinTutorialTopic[]
+  imported_topics: number
+  imported_rooms: number
+}
+
 export const adminChallengeApi = {
   upload: (challenges: ChallengeJSON[]) =>
     http.post<{ imported: number; slugs: string[] }>('/admin/challenges', challenges),
@@ -328,6 +350,9 @@ export const adminChallengeApi = {
     http.get<BuiltinImageStatus>('/admin/challenges/builtin/image'),
   buildBuiltinImage: () =>
     http.post<BuiltinImageStatus>('/admin/challenges/builtin/image'),
+  // 内置训练集教程目录与导入状态（教程管理页「内置训练集」区块）。
+  builtinTutorialCatalog: () =>
+    http.get<BuiltinTutorialCatalog>('/admin/challenges/builtin/tutorials'),
   list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
   // 单题完整定义（编辑回填；含 flag 值，仅 admin）。
   getJSON: (slug: string) => http.get<ChallengeFullJSON>(`/admin/challenges/${slug}`),
