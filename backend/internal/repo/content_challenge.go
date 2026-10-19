@@ -14,6 +14,8 @@ type topicRepo struct{ db *gorm.DB }
 func NewTopicRepo(db *gorm.DB) TopicRepo { return &topicRepo{db} }
 
 func (r *topicRepo) Upsert(ctx context.Context, t *model.Topic) error {
+	// OnConflict 不回写 is_builtin：普通包 upsert 不触碰既有行的来源标记，
+	// 内置标记只由内置导入路径（MarkBuiltinTutorials）显式置位。
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "slug"}},
 		DoUpdates: clause.AssignmentColumns([]string{"title", "summary", "updated_at"}),
@@ -46,6 +48,30 @@ func (r *topicRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error)
 	return n > 0, err
 }
 
+func (r *topicRepo) FindBuiltinBySlugs(ctx context.Context, slugs ...string) (map[string]model.Topic, error) {
+	if len(slugs) == 0 {
+		return map[string]model.Topic{}, nil
+	}
+	var list []model.Topic
+	if err := r.db.WithContext(ctx).Where("slug IN ? AND is_builtin = ?", slugs, true).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]model.Topic, len(list))
+	for _, t := range list {
+		out[t.Slug] = t
+	}
+	return out, nil
+}
+
+// MarkBuiltin 批量改写 Topic 来源标记（仅内置导入调用；Upsert 不触碰此列）。
+func (r *topicRepo) MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error {
+	if len(slugs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.Topic{}).
+		Where("slug IN ?", slugs).Update("is_builtin", builtin).Error
+}
+
 func (r *topicRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error) {
 	if len(slugs) == 0 {
 		return 0, nil
@@ -59,6 +85,8 @@ type roomRepo struct{ db *gorm.DB }
 func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
 
 func (r *roomRepo) Upsert(ctx context.Context, room *model.Room) error {
+	// OnConflict 不回写 is_builtin：普通包 upsert 不触碰既有行的来源标记
+	//（同 topicRepo.Upsert）。
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "slug"}},
 		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "video_url", "requirements", "updated_at"}),
@@ -92,6 +120,30 @@ func (r *roomRepo) ExistsBySlug(ctx context.Context, slug string) (bool, error) 
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.Room{}).Where("slug = ?", slug).Count(&n).Error
 	return n > 0, err
+}
+
+func (r *roomRepo) FindBuiltinBySlugs(ctx context.Context, slugs ...string) (map[string]model.Room, error) {
+	if len(slugs) == 0 {
+		return map[string]model.Room{}, nil
+	}
+	var list []model.Room
+	if err := r.db.WithContext(ctx).Where("slug IN ? AND is_builtin = ?", slugs, true).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]model.Room, len(list))
+	for _, room := range list {
+		out[room.Slug] = room
+	}
+	return out, nil
+}
+
+// MarkBuiltin 批量改写 Room 来源标记（仅内置导入调用；Upsert 不触碰此列）。
+func (r *roomRepo) MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error {
+	if len(slugs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.Room{}).
+		Where("slug IN ?", slugs).Update("is_builtin", builtin).Error
 }
 
 func (r *roomRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error) {

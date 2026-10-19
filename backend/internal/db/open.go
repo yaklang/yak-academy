@@ -39,6 +39,9 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateChallengeBankOwnership(db); err != nil {
 		return err
 	}
+	if err := migrateTutorialBuiltinFlag(db); err != nil {
+		return err
+	}
 	if err := migrateWriteupScope(db); err != nil {
 		return err
 	}
@@ -94,6 +97,17 @@ func migrateChallengeBuiltinFlag(db *gorm.DB) error {
 		log.Printf("migrate challenges: backfilled is_builtin for %d legacy rows", res.RowsAffected)
 	}
 	return nil
+}
+
+// migrateTutorialBuiltinFlag 一次性迁移：topics/rooms 的 is_builtin 列为后加，
+// 历史内置导入（列加入前落库）的行按 yakit- 内置命名空间回填 true，其余行
+// （含 NULL 裸列）回填 false——内置教程禁删禁编辑按此标记判定，漏标会让
+// 旧库内置教程失去保护。幂等：无匹配行为空操作。
+func migrateTutorialBuiltinFlag(db *gorm.DB) error {
+	if err := db.Exec(`UPDATE topics SET is_builtin = CASE WHEN slug LIKE 'yakit-%' THEN 1 ELSE 0 END WHERE is_builtin IS NULL OR (is_builtin = 0 AND slug LIKE 'yakit-%')`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`UPDATE rooms SET is_builtin = CASE WHEN slug LIKE 'yakit-%' THEN 1 ELSE 0 END WHERE is_builtin IS NULL OR (is_builtin = 0 AND slug LIKE 'yakit-%')`).Error
 }
 
 // migrateChallengeBankOwnership 一次性迁移：教程题目 tab 收敛为专属内置题集，

@@ -1319,7 +1319,8 @@ paths:
       description: |-
         导入随后端二进制分发的官方内置训练集（基于 yaklang vulinbox 靶场引擎）。
         行为：先导入配套教程（Topic/Room，与题目 1:1——每题 tutorial_slug 指向
-        配套教程 Room；直接 upsert，无 draft/publish），再在 Docker 可用时构建
+        配套教程 Room；直接 upsert，无 draft/publish，写入时标记 is_builtin=true
+        ——内置教程不可经内容包/删除入口改动），再在 Docker 可用时构建
         vulinbox 基础镜像（失败则整体 422 不入库，与题目包"构建失败不入库"
         语义一致），最后逐题 upsert（slug 重复 = 更新）；未配置 Docker 驱动
         （noop）时跳过镜像构建仅导入定义，image_built=false。
@@ -1384,6 +1385,47 @@ paths:
                   built: { type: boolean, description: 恒为 true }
         '422': { $ref: '#/components/responses/ErrorResp' }
         '500': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges/builtin/tutorials:
+    get:
+      tags: [admin]
+      summary: 内置训练集教程目录与导入状态（教程管理页「内置训练集」区块数据源）
+      description: |-
+        返回随二进制嵌入的内置训练集教程目录（topic → rooms，slug/标题/难度，
+        帐面清单由 embed 资产解析，不依赖已导入）与每篇 imported 标志
+        （按内容表 slug 存在性探测；is_builtin 教程行只经一键导入写入）。
+        imported_topics/imported_rooms 为已导入计数，全量导入后与目录总数一致。
+        imported=false 即教程未导入（或曾被删——内置教程不可删，仅可能未导入）。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, topics, imported_topics, imported_rooms]
+                properties:
+                  version: { type: string, description: 内置训练集版本（manifest） }
+                  topics:
+                    type: array
+                    items:
+                      type: object
+                      required: [slug, title, rooms]
+                      properties:
+                        slug: { type: string }
+                        title: { type: string }
+                        rooms:
+                          type: array
+                          items:
+                            type: object
+                            required: [slug, title, difficulty, imported]
+                            properties:
+                              slug: { type: string }
+                              title: { type: string }
+                              difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+                              imported: { type: boolean, description: 该 Room 是否已导入（内容表 slug 存在） }
+                  imported_topics: { type: integer, description: 已导入 Topic 数 }
+                  imported_rooms: { type: integer, description: 已导入 Room 数 }
 
   /admin/challenges/{slug}:
     get:

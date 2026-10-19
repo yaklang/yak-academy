@@ -86,6 +86,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin", "admin", h.importBuiltinChallenges)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/builtin/image", "admin", h.getBuiltinImageStatus)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin/image", "admin", h.buildBuiltinImage)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges/builtin/tutorials", "admin", h.getBuiltinTutorials)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}", "admin", h.getChallengeJSON)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
 	r.Handle(http.MethodPatch, "/api/v1/admin/challenges/{slug}/visibility", "admin", h.updateChallengeVisibility)
@@ -738,6 +739,17 @@ func (h *Handlers) importBuiltinChallenges(w http.ResponseWriter, req *http.Requ
 // getBuiltinImageStatus 管理端：vulinbox 基础镜像状态（驱动/是否就绪/可否构建）。
 func (h *Handlers) getBuiltinImageStatus(w http.ResponseWriter, req *http.Request) {
 	res, err := h.Content.BuiltinImageStatus(req.Context())
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// getBuiltinTutorials 管理端：内置训练集教程目录与导入状态
+//（教程管理页「内置训练集」区块；内置教程只读，更新走一键导入）。
+func (h *Handlers) getBuiltinTutorials(w http.ResponseWriter, req *http.Request) {
+	res, err := h.Content.BuiltinTutorialCatalog(req.Context())
 	if err != nil {
 		mapError(w, err)
 		return

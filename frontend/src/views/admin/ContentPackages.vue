@@ -1,9 +1,19 @@
 <script setup lang="ts">
-// 教程管理：教程内容包（zip）上传与版本管理（draft → publish / 归档 / 回滚）。
+// 教程管理：教程内容包（zip）上传与版本管理（draft → publish / 归档 / 回滚），
+// 以及内置训练集（vulinbox）教程目录展示与重新导入。
 // 包内只有教程（文字 + 视频）；题目是独立资源，经"题目管理"用 challenge.json 上传。
+// 内置教程不走内容包记录（一键导入直接 upsert Topic/Room）：此处仅目录 + 导入
+// 入口，无删除/编辑操作——内置内容只经重新导入更新，普通包也不得覆盖其 slug。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { contentApi, type ContentPackage, type ContentVersion } from '../../api'
+import {
+  contentApi,
+  adminChallengeApi,
+  type BuiltinTutorialCatalog,
+  type BuiltinTutorialRoom,
+  type ContentPackage,
+  type ContentVersion,
+} from '../../api'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -122,7 +132,67 @@ function statusType(s: ContentPackage['status']) {
   return s === 'published' ? 'success' : s === 'draft' ? 'info' : 'warning'
 }
 
-onMounted(load)
+// ===== 内置训练集（vulinbox）教程 =====
+// 目录数据源 GET /admin/challenges/builtin/tutorials（帐面清单来自平台分发
+// 资产，不依赖已导入）；导入/更新走题目管理同一入口 POST /admin/challenges/builtin
+//（教程与题目同批写入，一教程对一题）。
+const builtin = ref<BuiltinTutorialCatalog | null>(null)
+const builtinLoading = ref(false)
+const builtinImporting = ref(false)
+const builtinExpanded = ref(false)
+
+async function loadBuiltin() {
+  builtinLoading.value = true
+  try {
+    builtin.value = await adminChallengeApi.builtinTutorialCatalog()
+  } catch (e) {
+    ElMessage.error(`内置训练集目录加载失败：${(e as Error).message}`)
+  } finally {
+    builtinLoading.value = false
+  }
+}
+
+function builtinRoomCount() {
+  return builtin.value?.topics.reduce((n, t) => n + t.rooms.length, 0) ?? 0
+}
+
+function roomState(room: BuiltinTutorialRoom) {
+  return room.imported ? '已导入' : '未导入'
+}
+
+// 内置教程不可删除/编辑（服务端按 is_builtin 标记拦截覆盖与删除），
+// 更新只能重新一键导入（幂等：重复导入 = 更新）。
+async function reimportBuiltin() {
+  try {
+    await ElMessageBox.confirm(
+      '将重新导入随平台分发的内置训练集（配套教程 + 题目，一个教程对应一道题目）。已导入的内置内容会被更新到当前平台版本；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
+      '重新导入内置训练',
+      { type: 'info', confirmButtonText: '导入/更新', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  builtinImporting.value = true
+  try {
+    const resp = await adminChallengeApi.importBuiltin()
+    const summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题、教程 ${resp.rooms} 篇`
+    if (resp.image_built) {
+      ElMessage.success(`${summary}；靶场镜像已构建`)
+    } else {
+      ElMessage.warning({ message: `${summary}；未配置 Docker，镜像未构建（启用 Docker 后重新导入即可）`, duration: 6000 })
+    }
+    await loadBuiltin()
+  } catch (e) {
+    ElMessage.error(`内置训练导入失败：${(e as Error).message}`)
+  } finally {
+    builtinImporting.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  loadBuiltin()
+})
 </script>
 
 <template>
@@ -172,6 +242,50 @@ video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed
       <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。题目（flag、容器环境、提示）不经教程包——用"题目管理"的 challenge.json 定义。</p>
     </el-card>
   </el-collapse-transition>
+  <el-card v-loading="builtinLoading" class="builtin-card" shadow="never">
+    <template #header>
+      <div class="builtin-header">
+        <span class="builtin-title">
+          内置训练集（vulinbox）
+          <el-tag v-if="builtin" size="small" type="info">v{{ builtin.version }}</el-tag>
+          <el-tag
+            v-if="builtin"
+            size="small"
+            :type="builtin.imported_rooms === builtinRoomCount() && builtinRoomCount() > 0 ? 'success' : 'warning'"
+          >
+            {{ builtin.imported_rooms === builtinRoomCount() && builtinRoomCount() > 0 ? '已导入' : '未完整导入' }}
+          </el-tag>
+        </span>
+        <el-button
+          v-if="auth.user?.global_role === 'admin'"
+          size="small"
+          type="primary"
+          :loading="builtinImporting"
+          @click="reimportBuiltin"
+        >{{ builtin && builtin.imported_rooms > 0 ? '重新导入/更新' : '导入内置训练' }}</el-button>
+      </div>
+    </template>
+    <p v-if="builtin" class="dim">
+      平台自带 {{ builtin.topics.length }} 个专题 / {{ builtinRoomCount() }} 篇教程（一教程对一道配套题目，随平台版本分发）。内置教程不走内容包版本管线，<strong>不支持删除与编辑</strong>——更新随平台升级由「{{ builtin.imported_rooms > 0 ? '重新导入/更新' : '导入内置训练' }}」完成，普通内容包也不得覆盖内置教程。
+    </p>
+    <el-collapse-transition>
+      <div v-show="builtinExpanded && builtin">
+        <div v-for="topic in builtin?.topics" :key="topic.slug" class="builtin-topic">
+          <h4>{{ topic.title }}<span class="dim slug">（{{ topic.slug }}）</span></h4>
+          <ul class="builtin-rooms">
+            <li v-for="room in topic.rooms" :key="room.slug" :class="{ 'not-imported': !room.imported }">
+              <span class="room-title">{{ room.title }}</span>
+              <el-tag size="small" :type="room.imported ? 'success' : 'info'">{{ roomState(room) }}</el-tag>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </el-collapse-transition>
+    <el-button v-if="builtin" link type="primary" @click="builtinExpanded = !builtinExpanded">
+      {{ builtinExpanded ? '收起目录' : `展开目录（${builtin.topics.length} 专题 / ${builtinRoomCount()} 篇）` }}
+    </el-button>
+  </el-card>
+
   <el-table :data="packages" v-loading="loading">
     <el-table-column prop="id" label="ID" width="60" />
     <el-table-column prop="name" label="包名" />
@@ -247,4 +361,13 @@ video: https://cdn.example.com/sqli.mp4   # 可选：mp4/webm 直链或可 embed
 .spec .tree { line-height: 1.5; }
 .spec .yaml { line-height: 1.6; }
 .dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.builtin-card { margin-bottom: 1rem; }
+.builtin-header { display: flex; align-items: center; justify-content: space-between; }
+.builtin-title { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+.builtin-topic h4 { margin: 0.6rem 0 0.3rem; }
+.builtin-topic .slug { font-weight: 400; }
+.builtin-rooms { list-style: none; margin: 0; padding: 0 0 0 0.2rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.3rem 1.2rem; }
+.builtin-rooms li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.15rem 0; }
+.builtin-rooms li.not-imported .room-title { color: var(--el-text-color-secondary); }
+.builtin-rooms .room-title { font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

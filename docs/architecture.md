@@ -85,7 +85,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。
 - Hint 扣分解锁：详情页折叠；`POST .../hints/{id}/unlock` 写 `hint.unlocked` 事件，派生器扣分；未解锁正文不返回。
-- **内置训练集（vulinbox，配套教程 + 题目）**：教程与题目定义、基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`，教程在 `tutorials/` 子目录），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422、零写入，与题目包语义一致），再导入配套教程（`importBuiltinTutorials`：复用 `parseFiles` 解析与静态校验，绕过包状态机直接 upsert Topic/Room，幂等），最后复用 `UploadChallenges` 逐题 upsert——**教程先、题目后**，题目落库时 `tutorial_slug` 指向的 Room 已存在，双向入口即刻生效；noop 驱动下跳过构建仅导入定义。**一教程对一题**：`challenges.json` 每题带 `tutorial_slug`，11 篇教程（`yakit-` 前缀 slug 命名空间，避免与上传教程包碰撞）分属 4 个专题，覆盖 Web Fuzzer/MITM/Codec 等核心 Yakit 功能。全题集共用单容器（vulinbox 单进程多靶机、按路径路由，镜像分层：flaggateway 入口层 :8787 → 上游 vulinbox :8788），**全部题目 `flag_mode=instance`**（`flag{lab-{token}}` 模板，每次启动环境生成唯一 flag）：上游 vulinbox 不消费 FLAG 环境变量，镜像内 flaggateway 层负责把平台注入的 FLAG 写入 `/flag.txt`、暴露 `GET /flag` 读取端点，并为上游命令模拟接口（白名单仅 `ls`）补 `cat flag.txt` 支持；其余路径原样反代上游，不改靶机行为。统一「完成攻击 → 读 flag → 提交 flag」通关形态。
+- **内置训练集（vulinbox，配套教程 + 题目）**：教程与题目定义、基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`，教程在 `tutorials/` 子目录），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422、零写入，与题目包语义一致），再导入配套教程（`importBuiltinTutorials`：复用 `parseFiles` 解析与静态校验，绕过包状态机直接 upsert Topic/Room，幂等），最后复用 `UploadChallenges` 逐题 upsert——**教程先、题目后**，题目落库时 `tutorial_slug` 指向的 Room 已存在，双向入口即刻生效；noop 驱动下跳过构建仅导入定义。**一教程对一题**：`challenges.json` 每题带 `tutorial_slug`，11 篇教程（`yakit-` 前缀 slug 命名空间，避免与上传教程包碰撞）分属 4 个专题，覆盖 Web Fuzzer/MITM/Codec 等核心 Yakit 功能。全题集共用单容器（vulinbox 单进程多靶机、按路径路由，镜像分层：flaggateway 入口层 :8787 → 上游 vulinbox :8788），**全部题目 `flag_mode=instance`**（`flag{lab-{token}}` 模板，每次启动环境生成唯一 flag）：上游 vulinbox 不消费 FLAG 环境变量，镜像内 flaggateway 层负责把平台注入的 FLAG 写入 `/flag.txt`、暴露 `GET /flag` 读取端点，并为上游命令模拟接口（白名单仅 `ls`）补 `cat flag.txt` 支持；另把上游 `/ssrf/flag` 演示接口的随机 `flag{uuid}` 改写为固定假 `flag{test}`（与实例真 flag 形态相近、易误提交，改写后一眼可辨）；其余路径原样反代上游，不改靶机行为。统一「完成攻击 → 读 flag → 提交 flag」通关形态。
 
 ### 3.4 judge — 异步判题
 
@@ -101,6 +101,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 每实例生成 `checkpoint_token`（`LabInstance.checkpoint_token` 列，API JSON 隐藏）：注入 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL`（`ACADEMY_PUBLIC_URL` 前缀，默认 `host.docker.internal`）；实例销毁 token 即失效。
 - Docker 驱动实现；驱动选择 `ACADEMY_ENV_DRIVER`：`auto`（默认，启动探测 docker CLI，可用即 docker，否则 noop）/ `docker` / `noop`。noop（启动/构建返回明确错误 501/422）。
 - vulinbox 基础镜像可独立于「一键导入」构建：`GET/POST /admin/challenges/builtin/image`（状态查询 / 仅构建——docker build 内从官方 OSS 下载二进制；管理端题目页镜像状态卡）。
+- 内置教程带 `is_builtin` 来源标记（Topic/Room 列，与 Challenge 同模式）：**禁删禁编辑**——上传内容包认领内置 slug 一律 422（含同名包重传豁免路径），删除内容包时版本 Payload 含内置行整体拒绝；更新只走重新一键导入。教程管理页「内置训练集」区块展示目录与导入状态（`GET /admin/challenges/builtin/tutorials`：帐面清单来自 embed 资产，`imported` 逐篇探测内容表），无删除/编辑操作；旧库按 `yakit-` 命名空间回填标记（`migrateTutorialBuiltinFlag`）。
 
 ### 3.6 userprogress — 进度
 
@@ -190,7 +191,8 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `POST /content/packages/{id}/publish` | admin | 发布 |
 | `DELETE /content/packages/{id}` | admin | 删除内容包（历代版本写入的教程一并清扫，不可恢复；事件历史保留） |
 | `POST /admin/challenges` | admin | 上传题目 JSON（upsert 即生效） |
-| `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新） |
+| `POST /admin/challenges/builtin` | admin | 一键导入内置训练集（配套教程 + 题目；重复导入 = 更新；教程/题目落库置 `is_builtin` 来源标记——内置教程禁删禁编辑） |
+| `GET /admin/challenges/builtin/tutorials` | admin | 内置训练集教程目录与导入状态（教程管理页「内置训练集」区块） |
 | `GET /admin/challenges/builtin/image` | admin | vulinbox 基础镜像状态（驱动 / 镜像是否就绪 / 可否构建） |
 | `POST /admin/challenges/builtin/image` | admin | 仅构建基础镜像（docker build 内从官方 OSS 下载二进制；noop 422） |
 | `GET /admin/challenges` | admin | 题目管理表格 |

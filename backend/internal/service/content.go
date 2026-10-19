@@ -296,6 +296,31 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 	if err := validateParsed(p); err != nil {
 		return err
 	}
+	// 内置教程禁编辑：内置来源的 slug 不允许被上传包认领——先于通用
+	// exists 检查（报错更精确），且对同名包重传（owned 豁免）同样拦截，
+	// 防止历史同 slug 包把内置教程内容覆盖为普通包版本。
+	topicSlugs := make([]string, 0, len(p.Topics))
+	for _, t := range p.Topics {
+		topicSlugs = append(topicSlugs, t.Slug)
+	}
+	builtinTopics, err := s.topics.FindBuiltinBySlugs(ctx, topicSlugs...)
+	if err != nil {
+		return err
+	}
+	if len(builtinTopics) > 0 {
+		return fmt.Errorf("%w: topic %s is a builtin tutorial and cannot be overwritten; re-import the builtin set to update it", ErrValidation, firstKey(builtinTopics))
+	}
+	roomSlugs := make([]string, 0, len(p.Rooms))
+	for _, r := range p.Rooms {
+		roomSlugs = append(roomSlugs, r.Slug)
+	}
+	builtinRooms, err := s.rooms.FindBuiltinBySlugs(ctx, roomSlugs...)
+	if err != nil {
+		return err
+	}
+	if len(builtinRooms) > 0 {
+		return fmt.Errorf("%w: room %s is a builtin tutorial and cannot be overwritten; re-import the builtin set to update it", ErrValidation, firstKey(builtinRooms))
+	}
 	for _, t := range p.Topics {
 		exists, err := s.topics.ExistsBySlug(ctx, t.Slug)
 		if err != nil {
@@ -315,6 +340,14 @@ func (s *ContentService) validate(ctx context.Context, p *parsedPackage) error {
 		}
 	}
 	return nil
+}
+
+// firstKey 取 map 任一 key 作报错样本（map 无序，任取其一即可）。
+func firstKey[V any](m map[string]V) string {
+	for k := range m {
+		return k
+	}
+	return ""
 }
 
 // validateParsed 静态校验（无 DB 依赖）：manifest 必填、slug 格式与去重、
@@ -511,6 +544,23 @@ func (s *ContentService) DeletePackage(ctx context.Context, packageID uint) (*Pa
 	rooms := make([]string, 0, len(roomSlugs))
 	for slug := range roomSlugs {
 		rooms = append(rooms, slug)
+	}
+
+	// 内置教程禁删：版本 Payload 中出现内置来源的行即整体拒绝（历史库中
+	// 内置导入曾可先于同名包落库，此为兜底；新上传已在 validate 拦截）。
+	builtinTopics, err := s.topics.FindBuiltinBySlugs(ctx, topics...)
+	if err != nil {
+		return nil, err
+	}
+	if len(builtinTopics) > 0 {
+		return nil, fmt.Errorf("%w: topic %s is a builtin tutorial and cannot be deleted; it is managed by the builtin set import", ErrValidation, firstKey(builtinTopics))
+	}
+	builtinRooms, err := s.rooms.FindBuiltinBySlugs(ctx, rooms...)
+	if err != nil {
+		return nil, err
+	}
+	if len(builtinRooms) > 0 {
+		return nil, fmt.Errorf("%w: room %s is a builtin tutorial and cannot be deleted; it is managed by the builtin set import", ErrValidation, firstKey(builtinRooms))
 	}
 
 	// 题目本体保留，只断开与被删教程的软引用（防详情页死链）。

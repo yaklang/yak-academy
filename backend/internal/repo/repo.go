@@ -59,6 +59,11 @@ type TopicRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.Topic, int64, error)
 	FindBySlug(ctx context.Context, slug string) (*model.Topic, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
+	// FindBuiltinBySlugs 查一批 slug 中的内置 Topic 行（一键导入回填标记用；
+	// 返回按 slug 索引，非内置/不存在的 slug 不出现）。
+	FindBuiltinBySlugs(ctx context.Context, slugs ...string) (map[string]model.Topic, error)
+	// MarkBuiltin 批量改写来源标记（仅内置导入调用；Upsert 不触碰此列）。
+	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error
 	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
 	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
 }
@@ -70,6 +75,11 @@ type RoomRepo interface {
 	FindBySlugs(ctx context.Context, slugs ...string) ([]model.Room, error)
 	ListByTopic(ctx context.Context, topicSlug string) ([]model.Room, error)
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
+	// FindBuiltinBySlugs 查一批 slug 中的内置 Room 行（导入回填/管理端目录
+	// imported 探测用；返回按 slug 索引，非内置/不存在的 slug 不出现）。
+	FindBuiltinBySlugs(ctx context.Context, slugs ...string) (map[string]model.Room, error)
+	// MarkBuiltin 批量改写来源标记（仅内置导入调用；Upsert 不触碰此列）。
+	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error
 	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
 	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
 }
