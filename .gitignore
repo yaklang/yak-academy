@@ -35,3 +35,7 @@ backend/avatars/
 
 # 运行时用户数据（竞赛 WP 附带 zip 落盘目录）
 backend/writeups/
+
+# 远端部署本地资产（含内网拓扑，仅本地使用，禁止入库）
+.agents/skills/remote-deploy/
+deploy/worktree-manager.sh
