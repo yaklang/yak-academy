@@ -29,7 +29,7 @@ difficulty: practitioner
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：构造只含 `ref` 字段、指向 `http://127.0.0.1:8787/ssrf/flag` 的 JSON，URL 编码后作为 `json` 参数发给 `/ssrf/json-in-get`，从响应原文里拿到 flag 提交（与上一课同源，正则判定，拿到哪个交哪个）。
+点击 **前往配套题目练习**，启动环境后：构造只含 `ref` 字段、指向 `http://127.0.0.1:8787/ssrf/flag` 的 JSON，URL 编码后作为 `json` 参数发给 `/ssrf/json-in-get`，先拿到演示假 flag（`flag{test}`，一眼假）；再把 `ref` 换成 `http://127.0.0.1:8787/flag` 读出本实例真 flag（形如 `flag{lab-...}`）并提交（与上一课同源，static 判定只认真 flag）。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -80,15 +80,15 @@ Host: 127.0.0.1:36870
 
 ```html
 <div>
-	flag{3aa727b8-1fa3-4570-9f14-759c9905b499}
+	flag{test}
 </div>
 ```
 
-（uuid 每次请求都不同。）这个随机 uuid 是**上游演示接口**的产物，不是本题要提交的 flag——本题 flag 读靶机根路径 `/flag`（见下一步）。
+`flag{test}` 是**演示用**的固定假 flag（一眼假）——它只证明"SSRF 一跳确实打穿了本机检查"，不是本题要提交的答案。本题 flag 读靶机根路径 `/flag`（见下一步）。
 
 **第 5 步：用 SSRF 读取本实例 flag**
 
-靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），读取端点在靶机根路径 `GET /flag`（校验与 `/ssrf/flag` 相同：只信任 Host 含 `127.0.0.1` 的服务端本机请求）。
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），读取端点在靶机根路径 `GET /flag`。它的校验比 `/ssrf/flag` 严格：不看 Host 头，看**连接来源**——只放行由靶机自身（回环地址）发起的请求，浏览器直连实例地址只会得到 403，伪造 Host 也没用；而经 SSRF 一跳，请求的发起方正是靶机自己，天然通过。
 
 把攻击请求里的目标从 `/ssrf/flag` 换成 `/flag`（`ref` 指向靶机根路径的读取端点），整体 URL 编码后发送：
 

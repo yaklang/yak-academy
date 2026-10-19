@@ -30,7 +30,7 @@ JWT 把"身份声明"直接交给客户端保管：`header.payload.signature` �
 2. 用 Codec 拆开 token，确认身份声明写在 header 里；
 3. 构造 `{"alg":"none","username":"root"}` 形态的新 header，base64url 编码后拼出 `新header.原payload.`（末尾保留点）；
 4. 带 `Authorization: Bearer` 头请求 `/jwt/unsafe-login1/profile`，拿到 root 资料；
-5. 返回 root 的资料（`id` 与 `username`）即伪造成功。然后读取靶机 flag（`GET /flag`）并提交，完成本题。
+5. 返回 root 的资料（`id` 与 `username`）即伪造成功。然后读取靶机 flag 并提交（`GET /flag` 端点在攻击成功后会自动解锁），完成本题。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -105,9 +105,9 @@ Authorization: Bearer eyJhbGciOiJub25lIiwidXNlcm5hbWUiOiJyb290In0.eyJ1c2VybmFtZS
 
 ——服务端把 header 里自报的 `username=root` 当成了身份。对照：把同样的伪造 token 发给 `/jwt/safe-login/profile`，只会得到 `invalid auth token`（严格验签）。
 
-**第 5 步：读取本实例 flag**
+**第 6 步：读取本实例 flag**
 
-靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`）。读取端点 `GET /flag` 带门禁：上面的攻击动作成功前直接访问会得到 403（零攻击拿不到 flag）；攻击成功后端点自动解锁，直接请求靶机根路径即可：
 
 ```http
 GET /flag HTTP/1.1
@@ -116,7 +116,7 @@ Host: 127.0.0.1:36870
 
 响应就是 flag 原文（一行，`flag{lab-...}`）。
 
-**第 6 步：提交答案**
+**第 7 步：提交答案**
 
 回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 

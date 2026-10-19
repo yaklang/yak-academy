@@ -74,13 +74,13 @@ const (
 
 type EnvService struct {
 	instances  repo.LabInstanceRepo
-	logs        repo.InstanceLogRepo
-	challenges  repo.ChallengeRepo
-	users       repo.UserRepo
-	events      repo.EventRepo
-	bus         *eventbus.Bus
-	driver      InstanceDriver
-	publicURL   string // CHECKPOINT_URL 前缀（容器内回达平台）
+	logs       repo.InstanceLogRepo
+	challenges repo.ChallengeRepo
+	users      repo.UserRepo
+	events     repo.EventRepo
+	bus        *eventbus.Bus
+	driver     InstanceDriver
+	publicURL  string // CHECKPOINT_URL 前缀（容器内回达平台）
 	// now 时钟注入，测试可固定时间；生产用 time.Now。
 	now func() time.Time
 }
@@ -145,6 +145,9 @@ func (s *EnvService) EnsureInstanceScoped(ctx context.Context, userID, challenge
 	}
 	envVars["CHECKPOINT_TOKEN"] = checkpointToken
 	envVars["CHECKPOINT_URL"] = fmt.Sprintf("%s/api/v1/checkpoints/%s", s.publicURL, checkpointToken)
+	// 挑战标识：靶机入口层（如 vulinbox 镜像的 flaggateway）按题差异化
+	// flag 读取门禁（SSRF 自请求放行 / 按题攻击信号解锁）依赖它识别实例归属。
+	envVars["CHALLENGE_SLUG"] = chal.Slug
 	inst := &model.LabInstance{
 		UserID: userID, ChallengeID: challengeID,
 		CompetitionID:   competitionID,
