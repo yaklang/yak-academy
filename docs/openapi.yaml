@@ -578,6 +578,7 @@ paths:
                 properties:
                   ok: { type: boolean }
                   retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
+                  code: { type: string, description: 验证码原文；仅在服务端开启回显模式（ACADEMY_SMS_SHOW_CODE=1，内网/演示部署）时返回，正式部署不回显 }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
   /auth/register:

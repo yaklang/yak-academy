@@ -91,6 +91,9 @@ export default defineConfig({
         ACADEMY_ADMIN_PASSWORD: 'e2e-admin-pass-1',
         ACADEMY_ENV_DRIVER: useDocker ? 'docker' : 'noop',
         ACADEMY_PUBLIC_URL: apiURL,
+        // 回显模式：发码响应带验证码原文（sms-register 自助注册回归 spec 依赖它；
+        // 日志投递照旧，既有"从 backend.log 取码"的注册用例不受影响）。
+        ACADEMY_SMS_SHOW_CODE: '1',
       },
     },
     {

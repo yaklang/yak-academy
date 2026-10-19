@@ -1,7 +1,10 @@
 // Package config 加载服务配置（环境变量 + 默认值）。
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	Addr      string // HTTP 监听地址
@@ -31,6 +34,11 @@ type Config struct {
 	// （容器内经 host.docker.internal 回达宿主；Linux 宿主由 DockerDriver
 	// 的 --add-host host-gateway 注入解析，默认值开箱即用）。
 	PublicURL string
+
+	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
+	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
+	// 服务日志，学员拿不到码会卡死在注册第一步；正式部署保持关闭。
+	SmsShowCode bool
 }
 
 // 内置默认值仅用于本地开发；生产必须通过环境变量覆盖（main 启动时对照告警）。
@@ -48,12 +56,13 @@ func Load() *Config {
 		AdminUsername:  getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
 		AdminPassword:  getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
 		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "auto"),
-		AttachmentsDir:  getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
+		AttachmentsDir: getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
 		AvatarsDir:     getenv("ACADEMY_AVATARS_DIR", "avatars"),
 		WriteupsDir:    getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
-		InstanceMemory:  getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
-		InstanceCPUs:    getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
+		InstanceMemory: getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
+		InstanceCPUs:   getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
 		PublicURL:      getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
+		SmsShowCode:    getenvBool("ACADEMY_SMS_SHOW_CODE"),
 	}
 }
 
@@ -62,4 +71,14 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// getenvBool 开关型环境变量："1"/"true"（大小写不敏感）为开，其余/未设置为关。
+func getenvBool(key string) bool {
+	switch v := os.Getenv(key); strings.ToLower(v) {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
 }

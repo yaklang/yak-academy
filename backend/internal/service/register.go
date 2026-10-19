@@ -60,49 +60,50 @@ func NewRegisterService(users repo.UserRepo, codes repo.SmsCodeRepo, sms SmsSend
 	return &RegisterService{users: users, codes: codes, sms: sms, now: time.Now}
 }
 
-// SendCode 向手机号发送注册验证码。返回 (retryAfter, err)：
-// retryAfter > 0 表示限频剩余秒数（ErrSmsThrottled）。
-func (s *RegisterService) SendCode(ctx context.Context, phone string) (int, error) {
+// SendCode 向手机号发送注册验证码。返回 (code, retryAfter, err)：
+// code 非空表示本次实际生成并投递了验证码（供 handler 在回显模式下带回响应，
+// 见 config SmsShowCode）；retryAfter > 0 表示限频剩余秒数（ErrSmsThrottled）。
+func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, int, error) {
 	phone = strings.TrimSpace(phone)
 	if !validPhone(phone) {
-		return 0, fmt.Errorf("%w: invalid phone number", ErrValidation)
+		return "", 0, fmt.Errorf("%w: invalid phone number", ErrValidation)
 	}
 	now := s.now()
 	// 60 秒内已发过：直接返回剩余等待时间（不重复发送）。
 	if latest, err := s.codes.LatestByPhone(ctx, phone); err == nil {
 		if wait := smsSendInterval - now.Sub(latest.CreatedAt); wait > 0 {
-			return int(wait.Seconds()) + 1, ErrSmsThrottled
+			return "", int(wait.Seconds()) + 1, ErrSmsThrottled
 		}
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, err
+		return "", 0, err
 	}
 	// 10 分钟窗口内最多 3 条。
 	n, err := s.codes.CountSince(ctx, phone, now.Add(-smsWindow))
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	if n >= smsWindowLimit {
-		return int(smsWindow.Seconds()), ErrSmsThrottled
+		return "", int(smsWindow.Seconds()), ErrSmsThrottled
 	}
 	// 手机号已注册则不再发码（注册前查重前置，避免验证码白白消耗）。
 	if _, err := s.users.FindByPhone(ctx, phone); err == nil {
-		return 0, fmt.Errorf("%w: phone already registered", ErrValidation)
+		return "", 0, fmt.Errorf("%w: phone already registered", ErrValidation)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, err
+		return "", 0, err
 	}
 	code, err := genCode()
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	if err := s.codes.Create(ctx, &model.SmsCode{
 		Phone: phone, Code: code, ExpiresAt: now.Add(smsCodeTTL),
 	}); err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	if err := s.sms.Send(phone, code); err != nil {
-		return 0, err
+		return "", 0, err
 	}
-	return 0, nil
+	return code, 0, nil
 }
 
 // Register 凭验证码建号（角色固定 student）并直接签发登录 token。

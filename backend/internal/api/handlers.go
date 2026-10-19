@@ -25,11 +25,13 @@ type Handlers struct {
 	Profile      *service.ProfileService
 	Competitions *service.CompetitionService
 	RegisterSvc  *service.RegisterService
+	// smsShowCode 验证码回显模式（config SmsShowCode，见 sendSmsCode）。
+	smsShowCode bool
 }
 
-// NewHandlers 构造 handler 集合。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register}
+// NewHandlers 构造 handler 集合；smsShowCode 见 config.SmsShowCode。
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, smsShowCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, smsShowCode: smsShowCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -164,7 +166,7 @@ func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 		writeError(w, errValidation)
 		return
 	}
-	retryAfter, err := h.RegisterSvc.SendCode(req.Context(), body.Phone)
+	code, retryAfter, err := h.RegisterSvc.SendCode(req.Context(), body.Phone)
 	if err != nil {
 		if errors.Is(err, service.ErrSmsThrottled) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "retry_after": retryAfter})
@@ -173,7 +175,13 @@ func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	resp := map[string]any{"ok": true}
+	// 回显模式（内网/演示部署）：验证码直接带回响应，注册页内联显示，
+	// 学员无需访问服务端日志即可完成注册。默认关闭。
+	if h.smsShowCode {
+		resp["code"] = code
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // register 凭验证码建号（公开，角色固定 student），成功即签发登录 token。
@@ -584,8 +592,8 @@ func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
 // （*string 无法区分缺省与 null，用 RawMessage 按 key 判定。）
 func (h *Handlers) updateChallengeVisibility(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		IsVisible *bool             `json:"is_visible"`
-		ReleaseAt json.RawMessage   `json:"release_at"`
+		IsVisible *bool           `json:"is_visible"`
+		ReleaseAt json.RawMessage `json:"release_at"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeError(w, errValidation)
