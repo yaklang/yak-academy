@@ -4,7 +4,7 @@
 // 环境运行中时轮询详情：题目内置 checker 经检测点回调自动判定
 // （CHECKPOINT_URL，服务端直判），通关状态无需用户手动提交。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -41,7 +41,6 @@ function fileSize(n: number) {
 }
 
 const route = useRoute()
-const router = useRouter()
 const challenge = ref<ChallengeDetail | null>(null)
 const loading = ref(true)
 const answer = ref('')
@@ -59,7 +58,8 @@ const renderedDescription = computed(() =>
   DOMPurify.sanitize(marked.parse(challenge.value?.description_md ?? '') as string),
 )
 
-const roomBase = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
+// 管理端教程预览路由是 /admin/tutorials/...（题库侧 /training 两端同名，可共用）。
+const tutorialBase = computed(() => (route.path.startsWith('/admin') ? '/admin/tutorials' : '/topics'))
 
 const instanceAlive = computed(() =>
   instance.value && instance.value.status !== 'destroyed' && instance.value.status !== 'stopped',
@@ -179,7 +179,8 @@ function promptInstanceConflict(current: AdminLabInstance) {
       if (current.challenge_slug) {
         destroyConflictingAndStart(current)
       } else {
-        router.push(`${roomBase}/training/${current.challenge_id}`)
+        // 关联题目已删（无 slug 可寻址，销毁接口也按 slug）：无法自助处理。
+        ElMessage.error('该环境关联的题目已被删除，无法定位与关闭，请联系管理员在容器管理中清理')
       }
     })
     .catch(() => {})
@@ -268,7 +269,7 @@ onUnmounted(stopAutoSolvePolling)
     <router-link
       v-if="challenge.tutorial_slug && challenge.tutorial_topic_slug"
       class="tutorial-link"
-      :to="`${roomBase}/topics/${challenge.tutorial_topic_slug}/rooms/${challenge.tutorial_slug}`"
+      :to="`${tutorialBase}/${challenge.tutorial_topic_slug}/rooms/${challenge.tutorial_slug}`"
     >配套教程：{{ challenge.tutorial_title || challenge.tutorial_slug }} →</router-link>
 
     <div class="description" v-html="renderedDescription" />
