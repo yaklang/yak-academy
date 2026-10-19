@@ -16,7 +16,8 @@
 #
 # 可通过 .env / 环境变量覆盖：ACADEMY_JWT_SECRET、ACADEMY_ADMIN_PASSWORD 必改，
 # ACADEMY_PUBLIC_URL 按宿主网络环境调整；服务器部署（学员远程访问）另设
-# ACADEMY_INSTANCE_PUBLIC_HOST 为宿主对外地址，题目容器端口随之发布全网卡。
+# ACADEMY_INSTANCE_PUBLIC_HOST 为宿主对外地址，题目容器端口随之发布全网卡；
+# 内网/演示部署可设 ACADEMY_SMS_SHOW_CODE=1 让注册页直接显示验证码。
 # 端口与镜像均可参数化以支持同机多实例并行（每个 git worktree 一个实例，
 # 完整流程见 .agents/skills/remote-deploy）：ACADEMY_WEB_PORT 默认 8081、
 # ACADEMY_BACKEND_PORT 默认 8080，被占用时逐实例顺延；ACADEMY_IMAGE_TAG
@@ -44,6 +45,7 @@ services:
       ACADEMY_INSTANCE_MEMORY: ${ACADEMY_INSTANCE_MEMORY:-512m} # 题目容器资源限额（docker --memory）
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
       ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
+      ACADEMY_SMS_SHOW_CODE: ${ACADEMY_SMS_SHOW_CODE:-} # 验证码回显（内网/演示部署）：开启后发码响应带原文、注册页内联显示；正式部署保持空
     restart: unless-stopped
     healthcheck: # GET /health 存活探针（alpine busybox wget）
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
