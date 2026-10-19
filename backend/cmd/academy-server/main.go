@@ -127,7 +127,7 @@ func main() {
 	router.SetEntryLock(competitionSvc)
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
 	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, cfg.SmsShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

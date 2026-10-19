@@ -62,32 +62,32 @@ func TestSendCodeThrottleAndWindow(t *testing.T) {
 	env := newRegEnv(t)
 	ctx := context.Background()
 
-	if _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
 		t.Fatalf("first send: %v", err)
 	}
 	// 60 秒内重复：ErrSmsThrottled + 剩余秒数。
-	retry, err := env.reg.SendCode(ctx, "13800000001")
+	_, retry, err := env.reg.SendCode(ctx, "13800000001")
 	if !errors.Is(err, ErrSmsThrottled) || retry <= 0 {
 		t.Fatalf("want throttled with retry_after, got (%d, %v)", retry, err)
 	}
 	// 出 60 秒但仍在 10 分钟窗口：第 2、3 条放行。
 	env.now = env.now.Add(61 * time.Second)
-	if _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
 		t.Fatalf("second send: %v", err)
 	}
 	env.now = env.now.Add(61 * time.Second)
-	if _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
 		t.Fatalf("third send: %v", err)
 	}
 	// 窗口内第 4 条：限频到窗口结束。
 	env.now = env.now.Add(61 * time.Second)
-	retry, err = env.reg.SendCode(ctx, "13800000001")
+	_, retry, err = env.reg.SendCode(ctx, "13800000001")
 	if !errors.Is(err, ErrSmsThrottled) || retry != int(smsWindow.Seconds()) {
 		t.Fatalf("want window throttle, got (%d, %v)", retry, err)
 	}
 	// 窗口滑出后恢复。
 	env.now = env.now.Add(smsWindow + time.Minute)
-	if _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13800000001"); err != nil {
 		t.Fatalf("send after window: %v", err)
 	}
 	if len(env.sent) != 4 {
@@ -99,7 +99,7 @@ func TestSendCodeInvalidPhoneAndRegistered(t *testing.T) {
 	env := newRegEnv(t)
 	ctx := context.Background()
 	for _, p := range []string{"", "12345678901", "12800000001", "1380000000", "1380000000a"} {
-		if _, err := env.reg.SendCode(ctx, p); !errors.Is(err, ErrValidation) {
+		if _, _, err := env.reg.SendCode(ctx, p); !errors.Is(err, ErrValidation) {
 			t.Fatalf("phone %q: want ErrValidation, got %v", p, err)
 		}
 	}
@@ -107,7 +107,7 @@ func TestSendCodeInvalidPhoneAndRegistered(t *testing.T) {
 	if err := env.users.Create(ctx, &model.User{Username: "taken", PasswordHash: "x", Phone: "13800000002"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.reg.SendCode(ctx, "13800000002"); !errors.Is(err, ErrValidation) {
+	if _, _, err := env.reg.SendCode(ctx, "13800000002"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("registered phone: want ErrValidation, got %v", err)
 	}
 	if len(env.sent) != 0 {
@@ -118,7 +118,7 @@ func TestSendCodeInvalidPhoneAndRegistered(t *testing.T) {
 func TestRegisterHappyPath(t *testing.T) {
 	env := newRegEnv(t)
 	ctx := context.Background()
-	if _, err := env.reg.SendCode(ctx, "13900000001"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13900000001"); err != nil {
 		t.Fatal(err)
 	}
 	token, _, user, err := env.reg.Register(ctx, "13900000001", env.sent[0], "newbie", "pass-123", issueTokenStub)
@@ -147,7 +147,7 @@ func TestRegisterHappyPath(t *testing.T) {
 func TestRegisterWrongOrExpiredCode(t *testing.T) {
 	env := newRegEnv(t)
 	ctx := context.Background()
-	if _, err := env.reg.SendCode(ctx, "13900000002"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13900000002"); err != nil {
 		t.Fatal(err)
 	}
 	// 错误验证码。
@@ -165,7 +165,7 @@ func TestRegisterWrongOrExpiredCode(t *testing.T) {
 	}
 	// 错误验证码不消耗核销：过期前用正确码仍可注册。
 	env2 := newRegEnv(t)
-	if _, err := env2.reg.SendCode(ctx, "13900000004"); err != nil {
+	if _, _, err := env2.reg.SendCode(ctx, "13900000004"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := env2.reg.Register(ctx, "13900000004", "999999", "user2", "pass-123", issueTokenStub); !errors.Is(err, ErrValidation) {
@@ -183,7 +183,7 @@ func TestRegisterDuplicatesAndValidation(t *testing.T) {
 	if err := env.users.Create(ctx, &model.User{Username: "existing", PasswordHash: "x", Phone: "13900000005"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.reg.SendCode(ctx, "13900000006"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13900000006"); err != nil {
 		t.Fatal(err)
 	}
 	code := env.sent[0]
@@ -203,7 +203,7 @@ func TestRegisterDuplicatesAndValidation(t *testing.T) {
 	}
 	// 参数校验：用户名过短 / 密码过短 / 验证码位数。
 	env.now = env.now.Add(61 * time.Second)
-	if _, err := env.reg.SendCode(ctx, "13900000006"); err != nil {
+	if _, _, err := env.reg.SendCode(ctx, "13900000006"); err != nil {
 		t.Fatal(err)
 	}
 	code = env.sent[len(env.sent)-1]
@@ -232,5 +232,23 @@ func TestGenCodeShape(t *testing.T) {
 				t.Fatalf("code %q: non-digit", code)
 			}
 		}
+	}
+}
+
+// TestSendCodeReturnsDeliveredCode 回显模式的取值正确性：SendCode 返回的
+// code 必须与投递器收到的一致（handler 在 SmsShowCode 开启时原样带给前端）。
+func TestSendCodeReturnsDeliveredCode(t *testing.T) {
+	env := newRegEnv(t)
+	code, _, err := env.reg.SendCode(context.Background(), "13800000009")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env.sent) != 1 || code != env.sent[0] {
+		t.Fatalf("returned code %q != delivered %v", code, env.sent)
+	}
+	// 限频路径不回显（retry_after 携带等待秒数，code 为空）。
+	empty, retry, err := env.reg.SendCode(context.Background(), "13800000009")
+	if !errors.Is(err, ErrSmsThrottled) || empty != "" || retry <= 0 {
+		t.Fatalf("throttled send: want empty code + retry_after, got (%q, %d, %v)", empty, retry, err)
 	}
 }
