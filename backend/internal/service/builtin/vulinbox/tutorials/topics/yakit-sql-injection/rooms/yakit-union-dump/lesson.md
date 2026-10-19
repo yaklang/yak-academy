@@ -33,7 +33,7 @@ select * from vulin_users where id = 1
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：探测 `/user/id` 的列数（9 列），构造负数 id + UNION 查询读出 `username='root'` 那一行的密码列，提交密码原文即通关。
+点击 **前往配套题目练习**，启动环境后：探测 `/user/id` 的列数（9 列），构造负数 id + UNION 查询读出 `username='root'` 那一行的密码列——读出 `p@ssword` 即注入成立。然后读取靶机 flag（`GET /flag`）并提交，完成本题。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -85,9 +85,20 @@ Host: 127.0.0.1:36870
 
 密码列的值就是答案。
 
+**第 4 步：读取本实例 flag**
+
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+
+```http
+GET /flag HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应就是 flag 原文（一行，`flag{lab-...}`）。
+
 **第 5 步：提交答案**
 
-回到题目详情页，提交 `p@ssword`。
+回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 

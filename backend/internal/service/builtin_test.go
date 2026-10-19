@@ -107,6 +107,17 @@ func TestImportBuiltinChallengesFirstImport(t *testing.T) {
 	if chal.Image != "yak-academy/vulinbox:latest" || chal.Port != 8787 {
 		t.Fatalf("image/port = %q/%d", chal.Image, chal.Port)
 	}
+	// 全题集 instance 模式（镜像内 flaggateway 层消费平台注入的 FLAG）+ 模板 flag。
+	if chal.FlagMode != model.FlagModeInstance {
+		t.Fatalf("flag_mode = %q, want instance", chal.FlagMode)
+	}
+	var flagRow model.Flag
+	if err := gdb.Where("challenge_id = ?", chal.ID).First(&flagRow).Error; err != nil {
+		t.Fatal(err)
+	}
+	if flagRow.Value != "flag{lab-{token}}" {
+		t.Fatalf("flag template = %q, want flag{lab-{token}}", flagRow.Value)
+	}
 	// 内置题集归教程题目 tab 且带来源标记（题库页过滤依据）。
 	if chal.Bank != model.BankTutorial || !chal.IsBuiltin {
 		t.Fatalf("bank/is_builtin = %q/%v, want tutorial/true", chal.Bank, chal.IsBuiltin)

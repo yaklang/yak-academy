@@ -85,7 +85,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。
 - Hint 扣分解锁：详情页折叠；`POST .../hints/{id}/unlock` 写 `hint.unlocked` 事件，派生器扣分；未解锁正文不返回。
-- **内置训练集（vulinbox，配套教程 + 题目）**：教程与题目定义、基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`，教程在 `tutorials/` 子目录），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422、零写入，与题目包语义一致），再导入配套教程（`importBuiltinTutorials`：复用 `parseFiles` 解析与静态校验，绕过包状态机直接 upsert Topic/Room，幂等），最后复用 `UploadChallenges` 逐题 upsert——**教程先、题目后**，题目落库时 `tutorial_slug` 指向的 Room 已存在，双向入口即刻生效；noop 驱动下跳过构建仅导入定义。**一教程对一题**：`challenges.json` 每题带 `tutorial_slug`，11 篇教程（`yakit-` 前缀 slug 命名空间，避免与上传教程包碰撞）分属 4 个专题，覆盖 Web Fuzzer/MITM/Codec 等核心 Yakit 功能。全题集共用单容器（vulinbox 单进程多靶机、按路径路由），`flag_mode=shared`（vulinbox 不消费 FLAG 环境变量）；SSRF 两题为 regex 判定（flag{uuid}），其余为基于靶场确定性种子数据的人工设计 static 判定。
+- **内置训练集（vulinbox，配套教程 + 题目）**：教程与题目定义、基础镜像 Dockerfile 随后端二进制分发（`service/builtin/vulinbox/`，教程在 `tutorials/` 子目录），管理端一键导入（`ImportBuiltinChallenges`）：Docker 可用时先构建共享镜像 `yak-academy/vulinbox:latest`（构建失败整体 422、零写入，与题目包语义一致），再导入配套教程（`importBuiltinTutorials`：复用 `parseFiles` 解析与静态校验，绕过包状态机直接 upsert Topic/Room，幂等），最后复用 `UploadChallenges` 逐题 upsert——**教程先、题目后**，题目落库时 `tutorial_slug` 指向的 Room 已存在，双向入口即刻生效；noop 驱动下跳过构建仅导入定义。**一教程对一题**：`challenges.json` 每题带 `tutorial_slug`，11 篇教程（`yakit-` 前缀 slug 命名空间，避免与上传教程包碰撞）分属 4 个专题，覆盖 Web Fuzzer/MITM/Codec 等核心 Yakit 功能。全题集共用单容器（vulinbox 单进程多靶机、按路径路由，镜像分层：flaggateway 入口层 :8787 → 上游 vulinbox :8788），**全部题目 `flag_mode=instance`**（`flag{lab-{token}}` 模板，每次启动环境生成唯一 flag）：上游 vulinbox 不消费 FLAG 环境变量，镜像内 flaggateway 层负责把平台注入的 FLAG 写入 `/flag.txt`、暴露 `GET /flag` 读取端点，并为上游命令模拟接口（白名单仅 `ls`）补 `cat flag.txt` 支持；其余路径原样反代上游，不改靶机行为。统一「完成攻击 → 读 flag → 提交 flag」通关形态。
 
 ### 3.4 judge — 异步判题
 
@@ -242,7 +242,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
 - **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
 - **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（手机验证码，开发投递器通道）。
-- **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 + shared/regex 判定）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
+- **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 [flaggateway 入口层 + 上游二进制] + instance 判定：每实例唯一 flag，靶机内 /flag.txt、GET /flag、cat flag.txt 三条读取路径）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 11. 当前边界（明确不做）

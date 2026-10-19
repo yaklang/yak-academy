@@ -1,7 +1,7 @@
 {
   "name": "vulinbox",
-  "version": "1.2.0",
-  "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：配套教程（yakit 实战教学，一个教程对应一道题）+ 11 道题目（SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS）。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由）。",
+  "version": "1.3.0",
+  "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：配套教程（yakit 实战教学，一个教程对应一道题）+ 11 道题目（SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS）。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由；前置 flaggateway 层：每实例唯一 flag 写入 /flag.txt 并暴露 GET /flag，命令模拟接口补 cat flag.txt）。所有题目使用实例 flag 判定（flag_mode=instance），完成攻击后读取 flag 提交。",
   "image_tag": "yak-academy/vulinbox:latest",
   "port": 8787,
   "source": "https://github.com/yaklang/yaklang/tree/main/common/vulinbox",
@@ -9,7 +9,8 @@
   "license": "AGPL-3.0",
   "notes": [
     "镜像由 image/ 目录的 Dockerfile 构建时从官方 CDN 下载二进制并做 sha256 校验（校验失败即构建失败，防止上游更新导致靶机行为漂移；更新题集时需重新锁定 sha256）。",
-    "vulinbox 不消费 FLAG 环境变量，因此题集全部使用 shared 判定（static/regex）。",
+    "上游 vulinbox 不消费 FLAG 环境变量：镜像内 flaggateway 层负责把平台按实例注入的 FLAG 写入 /flag.txt、暴露 GET /flag 读取端点，并为命令模拟接口补 cat flag.txt 支持（上游白名单仅有 ls）；其余路径原样反代上游，不改靶机行为。",
+    "全部题目 flag_mode=instance：flag 形如 flag{lab-<token>}，每次启动环境重新生成，仅当前实例有效。",
     "vulinbox 仅发布 amd64 二进制，ARM 宿主需模拟运行。"
   ]
 }

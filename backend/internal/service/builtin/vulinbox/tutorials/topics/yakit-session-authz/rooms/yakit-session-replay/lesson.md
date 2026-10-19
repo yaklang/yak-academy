@@ -25,7 +25,7 @@ HTTP 无状态，服务端靠**会话凭证**认人：Cookie 里带一个随机�
 
 1. 用 UNION 注入从 `sessions` 表读出预置会话的 uuid（表含 uuid、username、role 及时间戳等共 9 列）；
 2. 带着 `Cookie: _cookie=<uuid>` 请求 `/logic/user/profile?id=1`，响应正常渲染 admin 资料即会话可用；
-3. 提交该 uuid 即通关。
+3. 会话验证可用后，读取靶机 flag（`GET /flag`）并提交，完成本题。
 
 反思：会话凭证一旦可被读出（注入、日志泄露、XSS 窃取），"改密码"都救不了它——服务端要做的是**销毁旧会话 + 签发新 ID**，以及从源头堵住拖库的注入。
 
@@ -67,9 +67,20 @@ Cookie: _cookie=fixedSessionID
 
 （Cookie 名就是 `_cookie`，值是第 2 步拖到的 uuid。）响应正常渲染出 **User Profile** 页面，显示 id=1 用户 admin 的资料——会话冒充成功。对照：不带 Cookie 发同一请求，只会得到 `alert("请先登录")` 的跳转脚本。
 
+**第 3 步：读取本实例 flag**
+
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+
+```http
+GET /flag HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应就是 flag 原文（一行，`flag{lab-...}`）。
+
 **第 4 步：提交答案**
 
-回到题目详情页，提交 `fixedSessionID`。
+回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 

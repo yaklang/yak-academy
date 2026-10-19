@@ -32,7 +32,7 @@ select * from vulin_users where (username LIKE '%<输入>%') and (age > 20);
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：对 `/user/name/like/2` 构造 `a%') UNION SELECT ...-- ` 形态的 payload（URL 编码后发送），先对齐 9 列，再把目标换成 `COUNT(*)` 统计查询——题目要求的是 `vulin_users` 表的**用户总数**，这个数字只能靠注入统计得到，提交响应里出现的数字。
+点击 **前往配套题目练习**，启动环境后：对 `/user/name/like/2` 构造 `a%') UNION SELECT ...-- ` 形态的 payload（URL 编码后发送），先对齐 9 列，再把目标换成 `COUNT(*)` 统计查询——响应里出现 `vulin_users` 表的**用户总数**（一个数字）即注入成立。然后读取靶机 flag（`GET /flag`）并提交，完成本题。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -77,9 +77,20 @@ Host: 127.0.0.1:36870
 
 —— `password` 位置的 `26` 即 `vulin_users` 的用户总数（20 个随机生成的账号 + admin、root、user1 等预置账号）。第一行是 UNION 注入的结果（字段值全是占位数字），后面是原查询命中的真实用户，注意区分。
 
+**第 4 步：读取本实例 flag**
+
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+
+```http
+GET /flag HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应就是 flag 原文（一行，`flag{lab-...}`）。
+
 **第 5 步：提交答案**
 
-回到题目详情页，提交 `26`。
+回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 

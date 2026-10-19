@@ -38,7 +38,7 @@ GIF89a
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后：先发一个纯 PHP 文件看被拒的响应长什么样，再发 GIF 魔数开头的多态文件——题目要求提交结果页里检测出的真实 MIME 类型值（`FileTypeHeaderType:` 后面的 `image/xxx`）。
+点击 **前往配套题目练习**，启动环境后：先发一个纯 PHP 文件看被拒的响应长什么样，再发 GIF 魔数开头的多态文件——结果页 `FileTypeHeaderType:` 给出 `image/gif` 即代表头检测被绕过。上传成功后读取靶机 flag（`GET /flag`）并提交，完成本题。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -104,9 +104,20 @@ MITM TYPE: image/gif FileTypeHeaderType: image/gif(gif)
 
 `MITM TYPE` 是你声明的类型，`FileTypeHeaderType` 是按魔数**检测**出的真实类型——`GIF89a` 开头骗过了检测库，得到 `image/gif`。
 
+**第 4 步：读取本实例 flag**
+
+靶机为本次启动的环境单独生成了唯一 flag（形如 `flag{lab-xxxx}`），存在靶机文件系统的 `/flag.txt`，也可以直接请求靶机根路径的读取端点：
+
+```http
+GET /flag HTTP/1.1
+Host: 127.0.0.1:36870
+```
+
+响应就是 flag 原文（一行，`flag{lab-...}`）。
+
 **第 5 步：提交答案**
 
-回到题目详情页，提交 `image/gif`（`FileTypeHeaderType:` 后面的 MIME 值，不含 `(gif)` 扩展名部分）。
+回到题目详情页，在答案框输入刚读到的 flag 原文（`flag{lab-...}` 整串）提交。
 
 </details>
 
