@@ -30,6 +30,13 @@ export const E2E = {
     roomSlug: 'sqli-basics',
     roomTitle: 'SQL 注入基础',
   },
+  // 竞赛域种子（competition-journey / bugfix-relogin-lock 共用）：
+  // 进行中竞赛只能用例内即时创建（起止时间相对“现在”），名称区分各旅程。
+  competition: {
+    lockName: 'E2E 隔离验证赛',
+    endName: 'E2E 到点解锁赛',
+    reloginName: 'E2E 重登仍锁赛',
+  },
   // 删除旅程专用包（独立 slug，避免与 e2e-test 种子冲突）：
   // spec 内经 UI 上传→发布→删除，验证两侧消失。
   deletePkg: {

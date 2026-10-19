@@ -15,9 +15,10 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('academy_token', t)
   }
 
-  // 参赛锁定缓存随登录态重置（切换账号后由路由守卫重查）。
+  // 参赛锁定缓存随登录态重置（作废缓存，由路由守卫重查服务端——
+  // 重置成 unlock() 会把「未锁定」标记为已检查，锁定者重登后被留在 403 空页）。
   function resetCompetition() {
-    useCompetitionStore().unlock()
+    useCompetitionStore().reset()
   }
 
   async function login(username: string, password: string) {
