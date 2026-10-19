@@ -6,15 +6,17 @@
 # 架构边界（docs/architecture.md 演进路线：第一版单机边界）：
 # - 后端通过挂载宿主 /var/run/docker.sock + 容器内 docker CLI 管理题目容器；
 #   题目容器创建在宿主 daemon 上，与本服务是兄弟容器（非 in-docker 嵌套）。
-# - 题目容器端口固定发布到宿主 127.0.0.1（DockerDriver.Create），
-#   因此学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围。
+# - 题目容器端口默认发布到宿主 127.0.0.1（本地开发，浏览器在宿主上）；
+#   设置 ACADEMY_INSTANCE_PUBLIC_HOST（学员浏览器可达的宿主地址，如内网 IP）
+#   后端口发布全网卡、实例 endpoint 用该地址——远程学员可直连靶机。
 # - CHECKPOINT_URL 由 ACADEMY_PUBLIC_URL 拼出：题目容器需回达后端 8080 端口。
 #   DockerDriver.Create 以 --add-host host-gateway 注入 host.docker.internal 解析，
 #   Linux 与 Docker Desktop 默认值均开箱即用；仅当宿主防火墙拦截容器→宿主
 #   流量（如 firewalld 默认拦 docker0）时改为宿主 LAN IP。
 #
 # 可通过 .env / 环境变量覆盖：ACADEMY_JWT_SECRET、ACADEMY_ADMIN_PASSWORD 必改，
-# ACADEMY_PUBLIC_URL 按宿主网络环境调整。
+# ACADEMY_PUBLIC_URL 按宿主网络环境调整；服务器部署（学员远程访问）另设
+# ACADEMY_INSTANCE_PUBLIC_HOST 为宿主对外地址，题目容器端口随之发布全网卡。
 # 端口与镜像均可参数化以支持同机多实例并行（每个 git worktree 一个实例，
 # 完整流程见 .agents/skills/remote-deploy）：ACADEMY_WEB_PORT 默认 8081、
 # ACADEMY_BACKEND_PORT 默认 8080，被占用时逐实例顺延；ACADEMY_IMAGE_TAG
@@ -41,6 +43,7 @@ services:
       ACADEMY_WRITEUPS_DIR: /data/writeups # 竞赛 WP zip 附件（容器重建不丢）
       ACADEMY_INSTANCE_MEMORY: ${ACADEMY_INSTANCE_MEMORY:-512m} # 题目容器资源限额（docker --memory）
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
+      ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
     restart: unless-stopped
     healthcheck: # GET /health 存活探针（alpine busybox wget）
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]

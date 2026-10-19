@@ -35,6 +35,12 @@ type Config struct {
 	// 的 --add-host host-gateway 注入解析，默认值开箱即用）。
 	PublicURL string
 
+	// InstancePublicHost 题目实例 endpoint 的主机名（学员浏览器直连靶机的
+	// 地址方向，与 PublicURL 的容器回达方向相反）：空（默认）= 127.0.0.1
+	// 且端口仅发布宿主回环（本地开发，浏览器就在宿主上）；部署到服务器时
+	// 设为学员浏览器可达的宿主地址（如内网 IP），端口随之发布全网卡。
+	InstancePublicHost string
+
 	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
 	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
 	// 服务日志，学员拿不到码会卡死在注册第一步；正式部署保持关闭。
@@ -50,19 +56,20 @@ const (
 
 func Load() *Config {
 	return &Config{
-		Addr:           getenv("ACADEMY_ADDR", ":8080"),
-		Database:       getenv("ACADEMY_DB", "academy.db"),
-		JWTSecret:      getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
-		AdminUsername:  getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
-		AdminPassword:  getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
-		EnvDriver:      getenv("ACADEMY_ENV_DRIVER", "auto"),
-		AttachmentsDir: getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
-		AvatarsDir:     getenv("ACADEMY_AVATARS_DIR", "avatars"),
-		WriteupsDir:    getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
-		InstanceMemory: getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
-		InstanceCPUs:   getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
-		PublicURL:      getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
-		SmsShowCode:    getenvBool("ACADEMY_SMS_SHOW_CODE"),
+		Addr:               getenv("ACADEMY_ADDR", ":8080"),
+		Database:           getenv("ACADEMY_DB", "academy.db"),
+		JWTSecret:          getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
+		AdminUsername:      getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
+		AdminPassword:      getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
+		EnvDriver:          getenv("ACADEMY_ENV_DRIVER", "auto"),
+		AttachmentsDir:     getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
+		AvatarsDir:         getenv("ACADEMY_AVATARS_DIR", "avatars"),
+		WriteupsDir:        getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
+		InstanceMemory:     getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
+		InstanceCPUs:       getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
+		PublicURL:          getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
+		InstancePublicHost: getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
+		SmsShowCode:        getenvBool("ACADEMY_SMS_SHOW_CODE"),
 	}
 }
 

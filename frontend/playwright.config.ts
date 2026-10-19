@@ -94,6 +94,9 @@ export default defineConfig({
         // 回显模式：发码响应带验证码原文（sms-register 自助注册回归 spec 依赖它；
         // 日志投递照旧，既有"从 backend.log 取码"的注册用例不受影响）。
         ACADEMY_SMS_SHOW_CODE: '1',
+        // 实例 endpoint 对外主机名（docker project）：localhost 而非 127.0.0.1，
+        // 使 endpoint 回归 spec 能区分「配置的主机名」与「硬编码回环」。
+        ACADEMY_INSTANCE_PUBLIC_HOST: 'localhost',
       },
     },
     {
