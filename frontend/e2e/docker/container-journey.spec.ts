@@ -50,7 +50,9 @@ test.describe('容器生命周期', () => {
     await page.getByRole('button', { name: /续期/ }).click()
     await expect(page.locator('.el-message', { hasText: '已续期 1 小时' })).toBeVisible()
 
-    // 单容器约束：另一道容器题启动被 409 拦（用 API 直接种第二道 + UI 点）
+    // 单容器约束：另一道容器题启动被 409 拦（用 API 直接种第二道 + UI 点）。
+    // 回归（PR #22，2026-10-19）：弹窗主按钮从「前往关闭」改为「关闭并启动本题」——
+    // 修复前要跳去旧题页手动销毁；修复后直接在弹窗内销毁冲突实例并接续启动本题。
     const slug2 = 'docker-nginx-journey-2'
     await request.post(`${E2E.apiURL}/api/v1/admin/challenges`, {
       headers: auth,
@@ -70,10 +72,15 @@ test.describe('容器生命周期', () => {
     await page.getByRole('button', { name: '启动容器' }).click()
     const conflict = page.locator('.el-message-box', { hasText: '已有运行中的容器' })
     await expect(conflict).toBeVisible({ timeout: 30_000 })
-    await conflict.getByRole('button', { name: '知道了' }).click()
+    await expect(conflict).toContainText(`你在「容器旅程：nginx」题目上还有运行中的环境`)
+    // 弹窗内直接关闭上一环境并启动本题（销毁性操作，danger 主按钮）
+    await conflict.getByRole('button', { name: '关闭并启动本题' }).click()
+    await expect(
+      page.locator('.el-message', { hasText: '已关闭上一个环境，本题环境启动成功' }),
+    ).toBeVisible({ timeout: 60_000 })
+    await expect(page.locator('.endpoint')).toBeVisible({ timeout: 60_000 })
 
-    // 销毁环境：回到第一题，销毁后可重新启动
-    await page.goto(`/training/${slug}`)
+    // 销毁环境：当前运行的是本题（第二题，弹窗接续启动的），销毁后可重新启动
     await page.getByRole('button', { name: '销毁环境' }).click()
     await expect(page.getByRole('button', { name: '启动容器' })).toBeVisible({ timeout: 30_000 })
   })
