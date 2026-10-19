@@ -35,5 +35,14 @@ export const useCompetitionStore = defineStore('competition', () => {
     checked = true
   }
 
-  return { lockedCompetitionId, refresh, ensureChecked, lock, unlock }
+  // 登录态切换（登录/注册/登出）时作废缓存：checked 置回 false，
+  // 下次守卫 ensureChecked 强制重查服务端——锁定态跟随账号而非浏览器会话。
+  // 不能复用 unlock()：它标记 checked=true，会让守卫把过期的「未锁定」
+  // 缓存当真，锁定参赛者重登后留在 403 空页。
+  function reset() {
+    lockedCompetitionId.value = null
+    checked = false
+  }
+
+  return { lockedCompetitionId, refresh, ensureChecked, lock, unlock, reset }
 })
