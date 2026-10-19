@@ -15,14 +15,18 @@
 #
 # 可通过 .env / 环境变量覆盖：ACADEMY_JWT_SECRET、ACADEMY_ADMIN_PASSWORD 必改，
 # ACADEMY_PUBLIC_URL 按宿主网络环境调整。
+# 端口与镜像均可参数化以支持同机多实例并行（每个 git worktree 一个实例，
+# 完整流程见 .agents/skills/remote-deploy）：ACADEMY_WEB_PORT 默认 8081、
+# ACADEMY_BACKEND_PORT 默认 8080，被占用时逐实例顺延；ACADEMY_IMAGE_TAG
+# 默认 latest，并行实例建议各用 worktree 目录名做 tag，避免镜像互踩。
 services:
   backend:
     build:
       context: .
       dockerfile: deploy/backend.Dockerfile
-    image: yak-academy/backend:latest
+    image: yak-academy/backend:${ACADEMY_IMAGE_TAG:-latest}
     ports:
-      - "8080:8080" # 题目容器检测点回调经此端口回达（ACADEMY_PUBLIC_URL 指向它）
+      - "${ACADEMY_BACKEND_PORT:-8080}:8080" # 题目容器检测点回调经此端口回达（ACADEMY_PUBLIC_URL 指向它）
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # 题目容器治理（兄弟容器模式）
       - ./data:/data # SQLite 数据库与上传内容持久化
@@ -49,7 +53,7 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile
-    image: yak-academy/frontend:latest
+    image: yak-academy/frontend:${ACADEMY_IMAGE_TAG:-latest}
     depends_on:
       backend:
         condition: service_healthy # 后端健康后前端才启动（反代不再打到未就绪进程）
