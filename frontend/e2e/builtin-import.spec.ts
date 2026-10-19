@@ -11,13 +11,17 @@ test.describe('内置训练一键导入', () => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
 
-    // vulinbox 镜像状态卡（noop 驱动）：驱动/缺失标签 + 构建按钮禁用 + 镜像 tag
+    // vulinbox 镜像状态卡：默认套件为 noop 驱动（未启用提示 + 构建按钮禁用）；
+    // E2E_DOCKER=1 时后端为 docker 驱动，卡片展示 Docker/镜像就绪状态，
+    // noop 专属断言只在默认套件生效。
     const imageCard = page.locator('.image-card')
     await expect(imageCard).toBeVisible()
-    await expect(imageCard).toContainText('驱动：未启用（noop，环境启动 501）')
-    await expect(imageCard).toContainText('镜像未构建（需 Docker）')
-    await expect(imageCard).toContainText('yak-academy/vulinbox:latest')
-    await expect(imageCard.getByRole('button', { name: '从 OSS 构建镜像' })).toBeDisabled()
+    if (process.env.E2E_DOCKER !== '1') {
+      await expect(imageCard).toContainText('驱动：未启用（noop，环境启动 501）')
+      await expect(imageCard).toContainText('镜像未构建（需 Docker）')
+      await expect(imageCard).toContainText('yak-academy/vulinbox:latest')
+      await expect(imageCard.getByRole('button', { name: '从 OSS 构建镜像' })).toBeDisabled()
+    }
 
     // 首次导入：确认弹窗 → 汇总提示（全新库为新增 11 + 教程 11；KEEP_STATE 复跑可能全量更新，故只锚定句式）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()

@@ -31,8 +31,9 @@ test.describe('教程管理内置训练集', () => {
     await expect(roomRow).toBeVisible()
 
     // 导入/更新：确认弹窗 → 幂等更新（全新库新增 11；已导入则更新 11——锚定教程数）
+    // exact：卡片按钮「重新导入/更新」含子串"导入/更新"，非 exact 会同时命中两个。
     await importBtn.click()
-    await page.getByRole('button', { name: '导入/更新' }).click()
+    await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
       page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 11 篇/ }),
     ).toBeVisible()
