@@ -102,10 +102,10 @@ func main() {
 	var driver service.InstanceDriver = service.NoopDriver{}
 	var builder service.ImageBuilder = service.NoopDriver{}
 	if useDocker {
-		dd := service.NewDockerDriver(cfg.InstanceMemory, cfg.InstanceCPUs)
+		dd := service.NewDockerDriver(cfg.InstanceMemory, cfg.InstanceCPUs, cfg.InstancePublicHost)
 		driver = dd
 		builder = dd
-		log.Printf("env driver: docker (memory=%s cpus=%s)", cfg.InstanceMemory, cfg.InstanceCPUs)
+		log.Printf("env driver: docker (memory=%s cpus=%s public_host=%s)", cfg.InstanceMemory, cfg.InstanceCPUs, cfg.InstancePublicHost)
 	}
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder, progressRepo)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, instanceRepo, eventRepo, competitionRepo, bus)

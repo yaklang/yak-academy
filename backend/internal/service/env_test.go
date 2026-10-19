@@ -423,6 +423,31 @@ func TestDockerParseHostPort(t *testing.T) {
 	}
 }
 
+// TestInstanceHostAndPublishBind 对外主机名归一与端口绑定范围（纯函数表驱动）：
+// 回环族保持仅本地暴露；对外主机名（部署的内网 IP 等）绑全网卡；显式配置的
+// localhost 原样展示（回归：曾折成 127.0.0.1，配置主机名在 endpoint 上不可见）。
+func TestInstanceHostAndPublishBind(t *testing.T) {
+	cases := []struct {
+		in         string
+		host, bind string
+	}{
+		{"", "127.0.0.1", "127.0.0.1"},
+		{"localhost", "localhost", "127.0.0.1"},
+		{"127.0.0.1", "127.0.0.1", "127.0.0.1"},
+		{"192.168.3.99", "192.168.3.99", ""},
+		{"academy.corp.local", "academy.corp.local", ""},
+		{"::1", "[::1]", "127.0.0.1"},
+	}
+	for _, c := range cases {
+		if got := instanceHost(c.in); got != c.host {
+			t.Errorf("instanceHost(%q) = %q, want %q", c.in, got, c.host)
+		}
+		if got := publishBind(c.host); got != c.bind {
+			t.Errorf("publishBind(%q) = %q, want %q", c.host, got, c.bind)
+		}
+	}
+}
+
 func TestDockerContainerName(t *testing.T) {
 	if got := containerName(42); got != "yak-lab-42" {
 		t.Fatalf("containerName = %q, want yak-lab-42", got)

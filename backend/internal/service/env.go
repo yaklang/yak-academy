@@ -531,13 +531,19 @@ const maxExtends = 2
 
 // DockerDriver 通过 docker CLI 管理容器（无 SDK 依赖；接口已隔离实现）。
 // Memory/CPUs 为题目容器资源限额（docker --memory/--cpus；空串 = 不限）。
+// PublicHost 为实例 endpoint 主机名（浏览器直连靶机的地址）：空/回环 →
+// 端口仅发布宿主 127.0.0.1（本地开发，浏览器就在宿主上）；对外主机名
+// （服务器部署的内网 IP 等，ACADEMY_INSTANCE_PUBLIC_HOST）→ 端口发布
+// 全网卡，endpoint 用该主机名拼装——否则部署后学员浏览器拿到的
+// 127.0.0.1 指向自己的机器，靶机不可达。
 type DockerDriver struct {
-	Memory string
-	CPUs   string
+	Memory     string
+	CPUs       string
+	PublicHost string
 }
 
-func NewDockerDriver(memory, cpus string) *DockerDriver {
-	return &DockerDriver{Memory: memory, CPUs: cpus}
+func NewDockerDriver(memory, cpus, publicHost string) *DockerDriver {
+	return &DockerDriver{Memory: memory, CPUs: cpus, PublicHost: publicHost}
 }
 
 // containerName 实例容器命名（纯函数便于测试）。
@@ -545,14 +551,40 @@ func containerName(instanceID uint) string {
 	return fmt.Sprintf("yak-lab-%d", instanceID)
 }
 
-// Create 启动容器：随机宿主端口映射 127.0.0.1::<port>，可选 -e 环境变量与资源限额，读回实际端口生成 endpoint。
+// instanceHost 归一 endpoint 主机名：空视作 127.0.0.1，IPv6 加方括号；
+// 显式配置（含 localhost）保持原样展示（纯函数便于测试）。
+func instanceHost(publicHost string) string {
+	host := publicHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return host
+}
+
+// publishBind 按对外主机名决定端口发布的宿主 IP：回环族（127.0.0.1/
+// localhost/::1）只绑 127.0.0.1（本地开发不扩大暴露面），其余对外主机名
+// 绑全网卡（空串 = 0.0.0.0）。
+func publishBind(host string) string {
+	switch host {
+	case "127.0.0.1", "localhost", "[::1]":
+		return "127.0.0.1"
+	}
+	return ""
+}
+
+// Create 启动容器：随机宿主端口（绑定范围见 publishBind），可选 -e 环境变量
+// 与资源限额，读回实际端口按对外主机名拼 endpoint。
 // --add-host host-gateway：Linux 宿主上容器内默认解析不了 host.docker.internal，
 // 显式映射到网关 IP 后 CHECKPOINT_URL 默认值跨平台开箱即用（Docker Desktop
 // 自带该解析，显式条目与其不冲突）。
 func (d DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, error) {
 	name := containerName(spec.InstanceID)
+	host := instanceHost(d.PublicHost)
 	args := []string{"run", "-d", "--name", name,
-		"-p", fmt.Sprintf("127.0.0.1::%d", spec.Port),
+		"-p", fmt.Sprintf("%s::%d", publishBind(host), spec.Port),
 		"--add-host", "host.docker.internal:host-gateway"}
 	if d.Memory != "" {
 		args = append(args, "--memory", d.Memory)
@@ -579,11 +611,12 @@ func (d DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, er
 		_, _ = exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
 		return "", fmt.Errorf("docker port: no mapping for port %d", spec.Port)
 	}
-	return "http://127.0.0.1:" + hostPort, nil
+	return "http://" + host + ":" + hostPort, nil
 }
 
 // parseHostPort 解析 docker port 输出行，纯函数便于测试。
-// 实际输出是单字段 "127.0.0.1:36186"；兼容 "host:port -> 80/tcp" 形式
+// 实际输出是单字段 "<bind>:36186"（回环部署 127.0.0.1、全网卡 0.0.0.0，
+// 后者可能再跟一行 [::]）；兼容 "host:port -> 80/tcp" 形式
 // （docker ps 风格），两种都取首字段的端口。
 func parseHostPort(out string) string {
 	for _, line := range strings.Split(out, "\n") {

@@ -236,7 +236,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 
 - **唯一受支持的部署形态**：Docker Compose 容器化部署于 **Linux 宿主**（amd64，受 vulinbox 基础镜像架构限制）。部署入口为根目录 `docker-compose.yml`（backend + frontend/nginx），配置样例 `deploy/env.example`；生产必改 `ACADEMY_JWT_SECRET` / `ACADEMY_ADMIN_PASSWORD`（启动告警兜底）。数据（SQLite/附件/头像/WP）统一持久化在 `./data` 卷：升级 = 重新 `docker compose up -d --build`，备份 = 备份 `./data`。环境要求 Docker Engine ≥ 20.10（`host-gateway` 支持）+ compose 插件。
 - **题目容器治理**：后端容器内置 docker CLI 并挂载宿主 `/var/run/docker.sock`，题目容器创建在宿主 daemon 上（兄弟容器，非嵌套）；compose 显式 `ACADEMY_ENV_DRIVER=docker`。
-- **检测点回达**：`DockerDriver.Create` 以 `--add-host host.docker.internal:host-gateway` 注入解析，`ACADEMY_PUBLIC_URL` 默认值（`http://host.docker.internal:8080`）在 Linux 宿主开箱即用（Docker Desktop 兼容，显式条目不冲突）；仅当宿主防火墙拦截容器→宿主流量时改为宿主 LAN IP。题目容器端口固定发布 `127.0.0.1`（单机边界，多用户远程访问属 Phase 4）。
+- **检测点回达**：`DockerDriver.Create` 以 `--add-host host.docker.internal:host-gateway` 注入解析，`ACADEMY_PUBLIC_URL` 默认值（`http://host.docker.internal:8080`）在 Linux 宿主开箱即用（Docker Desktop 兼容，显式条目不冲突）；仅当宿主防火墙拦截容器→宿主流量时改为宿主 LAN IP。题目容器端口默认发布宿主 `127.0.0.1`（本地开发，浏览器在宿主上）；`ACADEMY_INSTANCE_PUBLIC_HOST` 设为学员浏览器可达的宿主地址（如内网 IP）时端口发布全网卡、实例 endpoint 用该地址拼装，远程学员可直连靶机。
 - **非部署形态**：Docker Desktop（Win/Mac）仅本地体验；裸跑后端二进制（start.sh / start.bat）仅本地开发（env 驱动默认 auto：探测到 Docker 即 docker，否则 noop 501）。
 
 ## 10. 演进路线
@@ -251,7 +251,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 ## 11. 当前边界（明确不做）
 
 - 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
-- 排行榜未按赛季切片；单机部署假设（docker 驱动仅绑 127.0.0.1）。
+- 排行榜未按赛季切片；实例端口默认仅回环发布，对外直连依赖 `ACADEMY_INSTANCE_PUBLIC_HOST` 显式配置（无自动 NAT/域名分发）。
 - 徽章为计算型读模型：不落库、不产生事件；如未来需要"颁发时间/稀有度"再演进为事件派生表。
 - 短信通道仅有开发投递器（验证码写服务日志）；生产接真实通道前注册不可对外开放。竞赛 WP 的 zip 附件落盘本地目录（`ACADEMY_WRITEUPS_DIR`），未做对象存储。
 - 不引入 Casbin / Redis / K8s；数据层仍为 SQLite。

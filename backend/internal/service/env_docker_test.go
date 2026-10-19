@@ -76,7 +76,7 @@ func containerGone(ctx context.Context, t *testing.T, name string) bool {
 
 func TestDockerDriverCreateAppliesLimitsAndDestroys(t *testing.T) {
 	ctx := requireDocker(t)
-	driver := NewDockerDriver("256m", "0.25")
+	driver := NewDockerDriver("256m", "0.25", "")
 	const instanceID = 94201 // 高位编号，避免与其他测试容器撞名
 	t.Cleanup(func() { _ = driver.Destroy(context.Background(), instanceID) })
 
@@ -118,6 +118,36 @@ func TestDockerDriverCreateAppliesLimitsAndDestroys(t *testing.T) {
 	// 幂等：销毁不存在的实例视为成功。
 	if err := driver.Destroy(ctx, instanceID); err != nil {
 		t.Errorf("重复销毁应幂等: %v", err)
+	}
+}
+
+// TestDockerDriverCreatePublicHostPublishesAllInterfaces 对外主机名部署形态：
+// 端口发布全网卡（0.0.0.0，非仅回环），endpoint 用配置的主机名拼装——
+// 学员浏览器经服务器地址直连靶机（回归：endpoint 曾硬编码 127.0.0.1，
+// 服务器部署后学员拿到的地址指向自己的机器，不可达）。
+func TestDockerDriverCreatePublicHostPublishesAllInterfaces(t *testing.T) {
+	ctx := requireDocker(t)
+	const host = "192.0.2.10" // RFC 5737 文档地址：只验绑定与 endpoint 拼接，无需真实可达
+	driver := NewDockerDriver("128m", "0.25", host)
+	const instanceID = 94202
+	t.Cleanup(func() { _ = driver.Destroy(context.Background(), instanceID) })
+
+	endpoint, err := driver.Create(ctx, InstanceSpec{
+		InstanceID: instanceID, ChallengeID: 1, UserID: 7,
+		Image: dockerTestImage, Port: 80,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !strings.HasPrefix(endpoint, "http://"+host+":") {
+		t.Fatalf("endpoint = %q, want 主机名 %s 而非回环地址", endpoint, host)
+	}
+	out, err := exec.CommandContext(ctx, "docker", "port", containerName(instanceID), "80").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker port: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "0.0.0.0:") || strings.Contains(string(out), "127.0.0.1:") {
+		t.Fatalf("端口绑定 = %q, want 全网卡 0.0.0.0（非仅回环）", strings.TrimSpace(string(out)))
 	}
 }
 
@@ -166,7 +196,7 @@ func TestDockerEnsureInstanceFullSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	driver := NewDockerDriver("128m", "0.2")
+	driver := NewDockerDriver("128m", "0.2", "")
 	env := NewEnvService(
 		repo.NewLabInstanceRepo(gdb), repo.NewInstanceLogRepo(gdb), chalRepo,
 		repo.NewUserRepo(gdb), repo.NewEventRepo(gdb), eventbus.New(), driver,

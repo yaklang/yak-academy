@@ -147,7 +147,7 @@ components:
       properties:
         id: { type: integer }
         status: { type: string, enum: [creating, running, stopped, destroyed] }
-        endpoint: { type: string, description: 实例访问地址 }
+        endpoint: { type: string, description: 实例访问地址（http://<主机>:<随机宿主端口>；主机由 ACADEMY_INSTANCE_PUBLIC_HOST 决定，默认 127.0.0.1 仅宿主本机可达，服务器部署设学员可达的宿主地址） }
         expire_at: { type: string, description: TTL 过期时间（RFC3339，UTC） }
         extend_count: { type: integer, description: 已续期次数（上限 2，达到后续期 422） }
         created_at: { type: string }
