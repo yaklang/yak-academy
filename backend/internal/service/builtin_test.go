@@ -122,9 +122,9 @@ func TestImportBuiltinChallengesFirstImport(t *testing.T) {
 	if chal.Bank != model.BankTutorial || !chal.IsBuiltin {
 		t.Fatalf("bank/is_builtin = %q/%v, want tutorial/true", chal.Bank, chal.IsBuiltin)
 	}
-	// 配套教程同批导入：4 Topic / 11 Room，与题目 1:1。
-	if res.Topics != 4 || res.Rooms != 11 {
-		t.Fatalf("topics/rooms = %d/%d, want 4/11", res.Topics, res.Rooms)
+	// 配套教程同批导入：5 Topic / 14 Room，与题目 1:1。
+	if res.Topics != 5 || res.Rooms != 14 {
+		t.Fatalf("topics/rooms = %d/%d, want 5/14", res.Topics, res.Rooms)
 	}
 	var room model.Room
 	if err := gdb.Where("slug = ?", "yakit-jwt-forge").First(&room).Error; err != nil {
@@ -177,8 +177,8 @@ func TestImportBuiltinChallengesReimportUpdates(t *testing.T) {
 	var topics, rooms int64
 	gdb.Model(&model.Topic{}).Count(&topics)
 	gdb.Model(&model.Room{}).Count(&rooms)
-	if topics != 4 || rooms != 11 {
-		t.Fatalf("topics/rooms after reimport = %d/%d, want 4/11 (upsert 不应产生重复)", topics, rooms)
+	if topics != 5 || rooms != 14 {
+		t.Fatalf("topics/rooms after reimport = %d/%d, want 5/14 (upsert 不应产生重复)", topics, rooms)
 	}
 }
 
@@ -317,8 +317,8 @@ func TestBuiltinTutorialCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog before import: %v", err)
 	}
-	if len(catalog.Topics) != 4 {
-		t.Fatalf("catalog topics = %d, want 4", len(catalog.Topics))
+	if len(catalog.Topics) != 5 {
+		t.Fatalf("catalog topics = %d, want 5", len(catalog.Topics))
 	}
 	totalRooms := 0
 	for _, topic := range catalog.Topics {
@@ -329,8 +329,8 @@ func TestBuiltinTutorialCatalog(t *testing.T) {
 			}
 		}
 	}
-	if totalRooms != 11 || catalog.ImportedRooms != 0 || catalog.ImportedTopics != 0 {
-		t.Fatalf("catalog rooms/imported = %d/%d/%d, want 11/0/0", totalRooms, catalog.ImportedRooms, catalog.ImportedTopics)
+	if totalRooms != 14 || catalog.ImportedRooms != 0 || catalog.ImportedTopics != 0 {
+		t.Fatalf("catalog rooms/imported = %d/%d/%d, want 14/0/0", totalRooms, catalog.ImportedRooms, catalog.ImportedTopics)
 	}
 
 	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
@@ -340,8 +340,8 @@ func TestBuiltinTutorialCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog after import: %v", err)
 	}
-	if catalog.ImportedTopics != len(catalog.Topics) || catalog.ImportedRooms != 11 {
-		t.Fatalf("imported topics/rooms = %d/%d, want %d/11", catalog.ImportedTopics, catalog.ImportedRooms, len(catalog.Topics))
+	if catalog.ImportedTopics != len(catalog.Topics) || catalog.ImportedRooms != 14 {
+		t.Fatalf("imported topics/rooms = %d/%d, want %d/14", catalog.ImportedTopics, catalog.ImportedRooms, len(catalog.Topics))
 	}
 	for _, topic := range catalog.Topics {
 		for _, room := range topic.Rooms {
