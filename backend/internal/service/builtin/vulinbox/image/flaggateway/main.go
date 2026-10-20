@@ -25,6 +25,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -50,8 +51,18 @@ const (
 	demoFlag = "flag{test}"
 
 	// authzCmdSlug 命令模拟题：正路是 cmd 接口 cat flag.txt，是唯一注册
-	// cat 注入的挑战 slug。
-	authzCmdSlug = "vulinbox-authz-cmd"
+	// cat 注入的挑战 slug；fuzzerHeadersSlug（模块专精题）也注册 cat——
+	// 它的教程同样以 cmd 接口为 Fuzzer 重放对象，但 /flag 仍按攻击信号
+	// 解锁（与 authz 的指路解锁不同，走 unlockRules 分支）。
+	authzCmdSlug      = "vulinbox-authz-cmd"
+	fuzzerHeadersSlug = "vulinbox-fuzzer-headers"
+
+	// codecVerifySlug Codec 编码链题：网关注入 GET /academy/codec/verify
+	// 验证端点（token = URL 编码过的 base64 口令），验证通过解锁 /flag。
+	codecVerifySlug = "vulinbox-codec-pipeline"
+	// codecProof 口令原文：base64 后含 '+' 与 '='（Y29kZWN+cHJvb2Y=），
+	// '+' 不做 URL 编码会在 query 解析时变成空格——URL 编码是硬需求。
+	codecProof = "codec~proof"
 )
 
 // upstreamFlagRe 匹配上游 /ssrf/flag 生成的 flag{<uuid>} 演示值。
@@ -91,8 +102,9 @@ func newGatewayMux(flag, slug string, up *url.URL) *http.ServeMux {
 	// GET /flag：按题门禁（见文件头注释第 1 条），三类拒绝文案各自指路。
 	mux.HandleFunc("/flag", func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case unlockRules[slug] != nil:
-			// 攻击题：观察到本题攻击成功信号前，对外一律 403（回环也不豁免）。
+		case unlockRules[slug] != nil || slug == codecVerifySlug:
+			// 攻击题（含 Codec 编码链题）：观察到本题攻击成功信号前，
+			// 对外一律 403（回环也不豁免）。
 			if !gate.unlocked.Load() {
 				writeFlagDenied(w, denyLocked)
 				return
@@ -118,8 +130,9 @@ func newGatewayMux(flag, slug string, up *url.URL) *http.ServeMux {
 	ssrfFlagProxy.ModifyResponse = rewriteDemoFlag
 	mux.Handle("/ssrf/flag", ssrfFlagProxy)
 
-	// 命令模拟接口：注入 cat（上游白名单只有 ls），仅 authz-cmd 与手工容器注册。
-	if slug == "" || slug == authzCmdSlug {
+	// 命令模拟接口：注入 cat（上游白名单只有 ls），仅 authz-cmd、fuzzer-headers
+	// 与手工容器注册。
+	if slug == "" || slug == authzCmdSlug || slug == fuzzerHeadersSlug {
 		mux.HandleFunc("/vul/auth-bypass/unsafe/api/cmd", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				proxy.ServeHTTP(w, r)
@@ -138,6 +151,28 @@ func newGatewayMux(flag, slug string, up *url.URL) *http.ServeMux {
 			}
 			// 其余命令（含 ls 与任意不支持命令）原样转发上游，保留白名单/报错行为。
 			passCmdThrough(w, r, body, proxy)
+		})
+	}
+
+	// Codec 编码链验证端点（仅 codec 题注册）：token 必须是「口令 base64
+	// 编码后再 URL 编码」的两层变换结果。+ 与 = 不做 URL 编码会在 query
+	// 解析时被破坏（+ 变空格）——编码链错一环即 400，端点通过即解锁 /flag。
+	if slug == codecVerifySlug {
+		mux.HandleFunc("/academy/codec/verify", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "GET only", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			token := r.URL.Query().Get("token")
+			decoded, err := base64.StdEncoding.DecodeString(token)
+			if err != nil || string(decoded) != codecProof {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, `{"ok":false,"message":"编码链不正确：token 应为口令 base64 编码后再 URL 编码的结果（+ 与 = 必须转义，否则传输途中被破坏）。用 Codec 编解码工具对照两个方向自查。"}`)
+				return
+			}
+			gate.unlocked.Store(true)
+			fmt.Fprint(w, `{"ok":true,"message":"编码链验证通过：/flag 已解锁，读取本实例 flag 并提交。"}`)
 		})
 	}
 
@@ -312,6 +347,50 @@ var unlockRules = map[string]unlockRule{
 		}
 		return g.seenAll("echo", "safe")
 	},
+
+	// ---- 模块专精题（模块训练扩展集）----
+	// 每题把「用了对应 Yakit 模块的动作形态」定为解锁信号；路径全部
+	// 复用上游既有靶场端点，不改靶机行为。
+
+	// Fuzzer 重放专精：cmd 接口重放 ls，且请求携带浏览器表单发不出的
+	// 自定义标记头 X-Replay（值以 yakit 开头）——手搓/重放器特征。
+	"vulinbox-fuzzer-headers": func(g *flagGate, req reqSnap, resp respSnap) bool {
+		if req.Method != http.MethodPost || req.Path != "/vul/auth-bypass/unsafe/api/cmd" {
+			return false
+		}
+		replay := req.Header.Get("X-Replay")
+		return strings.HasPrefix(strings.ToLower(replay), "yakit") &&
+			strings.Contains(req.Body, "ls") && resp.Status == http.StatusOK
+	},
+	// MITM 会话链专精（观察类，两步缺一不可）：
+	// ① logic 模块真实登录（POST /logic/user/login）拿到动态下发的 _cookie
+	//   会话 uuid（商城登录永远下发固定值 fixedSessionID——那是上一课会话
+	//   固定漏洞的产物，是本题诱饵，不算）；
+	// ② 携带该动态会话访问资料接口成功（渲染出本人 user1 资料；预置的
+	//   fixedSessionID 虽能渲染但被排除）。两步必须同链观察——MITM 的
+	//   教学点就是"先代理观察真实流量、再复用会话改包"。
+	"vulinbox-mitm-session": func(g *flagGate, req reqSnap, resp respSnap) bool {
+		if req.Method == http.MethodPost && req.Path == "/logic/user/login" &&
+			containsFold(req.Body, "user1") {
+			if c := req.Header.Get("Cookie"); !strings.Contains(c, "_cookie=") {
+				// 登录请求本身不带会话（首登）；响应 Set-Cookie 才是链的起点
+				g.markSeen("login")
+			}
+		}
+		if req.Method == http.MethodGet && req.Path == "/logic/user/profile" {
+			if c := req.Header.Get("Cookie"); strings.Contains(c, "_cookie=") {
+				if !strings.Contains(c, "fixedSessionID") &&
+					resp.Status == http.StatusOK && strings.Contains(resp.Body, "user1") {
+					g.markSeen("replay")
+				}
+			}
+		}
+		return g.seenAll("login", "replay")
+	},
+	// 注：vulinbox-codec-pipeline（Codec 编码链题）不在本表——上游 /ssrf/in-get
+	// 只做一次 URL 解码（双重编码实测打不通），其动作验证端点由网关注入
+	// （/academy/codec/verify，见 newGatewayMux），验证通过直接置 gate 解锁，
+	// /flag 门禁按 codecVerifySlug 分支同等收紧。
 }
 
 // unlockRule 单题解锁规则：喂入经手流量的摘要，返回是否命中本题攻击成功信号。
