@@ -13,11 +13,11 @@ test.describe('教程管理内置训练集', () => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/tutorials')
 
-    // 内置训练集卡片：版本 tag + 目录摘要（5 专题 / 14 篇，与二进制资产一致）
+    // 内置训练集卡片：版本 tag + 目录摘要（5 专题 / 12 篇，与二进制资产一致）
     const card = page.locator('.builtin-card')
     await expect(card).toBeVisible()
     await expect(card).toContainText('内置训练集（vulinbox）')
-    await expect(card).toContainText('5 个专题 / 14 篇教程')
+    await expect(card).toContainText('5 个专题 / 12 篇教程')
     await expect(card).toContainText('不支持删除与编辑')
 
     // 区块内除导入/目录外无任何删除/编辑入口
@@ -30,12 +30,12 @@ test.describe('教程管理内置训练集', () => {
     const roomRow = card.locator('.builtin-rooms li', { hasText: 'SSRF 初探：让服务器替你访问内网' })
     await expect(roomRow).toBeVisible()
 
-    // 导入/更新：确认弹窗 → 幂等更新（全新库新增 14；已导入则更新 14——锚定教程数）
+    // 导入/更新：确认弹窗 → 幂等更新（全新库新增 12；已导入则更新 12——锚定教程数）
     // exact：卡片按钮「重新导入/更新」含子串"导入/更新"，非 exact 会同时命中两个。
     await importBtn.click()
     await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 14 篇/ }),
+      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 12 篇/ }),
     ).toBeVisible()
 
     // 导入后：区块状态「已导入」、按钮文案「重新导入/更新」、Room 行逐篇已导入
