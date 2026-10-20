@@ -429,6 +429,37 @@ func TestUnlockRulesTable(t *testing.T) {
 			resp: respSnap{Body: `{"FileTypeHeaderType":"text/x-php"}`},
 			want: false,
 		},
+		{
+			name: "fuzzer-headers hit",
+			slug: "vulinbox-fuzzer-headers",
+			req: reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd",
+				Header: http.Header{"X-Replay": {"yakit-fuzzer"}}, Body: `{"command":"ls"}`},
+			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
+			want: true,
+		},
+		{
+			name: "fuzzer-headers without replay header (plain POST anyone can send)",
+			slug: "vulinbox-fuzzer-headers",
+			req:  reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd", Body: `{"command":"ls"}`},
+			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
+			want: false,
+		},
+		{
+			name: "fuzzer-headers unrelated replay header value",
+			slug: "vulinbox-fuzzer-headers",
+			req: reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd",
+				Header: http.Header{"X-Replay": {"curl"}}, Body: `{"command":"ls"}`},
+			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
+			want: false,
+		},
+		{
+			name: "fuzzer-headers replay header but not the cmd api",
+			slug: "vulinbox-fuzzer-headers",
+			req: reqSnap{Method: "POST", Path: "/other/api",
+				Header: http.Header{"X-Replay": {"yakit-fuzzer"}}, Body: `{"command":"ls"}`},
+			resp: respSnap{Status: http.StatusOK, Body: "file1"},
+			want: false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -452,6 +483,85 @@ func TestXssTwoPathUnlock(t *testing.T) {
 	}
 	if !rule(gate, reqSnap{Path: "/xss/safe?name=x"}, respSnap{}) {
 		t.Fatal("echo + safe must unlock")
+	}
+}
+
+// TestMitmSessionTwoStepUnlock 观察类：logic 模块动态登录 + 动态会话复用
+// 两步都命中才解锁；预置 fixedSessionID（会话固定漏洞产物，能渲染）不算。
+func TestMitmSessionTwoStepUnlock(t *testing.T) {
+	rule := unlockRules["vulinbox-mitm-session"]
+	gate := newFlagGate()
+
+	profileHTML := "<td>user1</td><td>user</td>"
+	// 诱饵：预置 fixedSessionID 渲染成功，但不是动态会话——不算 replay
+	if rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile",
+		Header: http.Header{"Cookie": {"_cookie=fixedSessionID"}}},
+		respSnap{Status: http.StatusOK, Body: profileHTML}) {
+		t.Fatal("preset fixedSessionID must not unlock")
+	}
+	// 半程：动态登录命中，但还没复用
+	if rule(gate, reqSnap{Method: "POST", Path: "/logic/user/login", Body: `{"username":"user1"}`},
+		respSnap{Status: http.StatusOK, Body: `{"id":3,"success":true}`}) {
+		t.Fatal("login alone must not unlock")
+	}
+	// 带着旧会话的登录不算新登录（响应 Set-Cookie 才是链的起点）
+	rule(gate, reqSnap{Method: "POST", Path: "/logic/user/login",
+		Header: http.Header{"Cookie": {"_cookie=stale"}}, Body: `{"username":"user1"}`},
+		respSnap{Status: http.StatusOK, Body: `{"success":true}`})
+	// 无会话访问资料被拦（未登录页）——不算 replay
+	rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile"},
+		respSnap{Status: http.StatusOK, Body: `alert("请先登录")`})
+	// 正例：携带本次动态会话访问资料，渲染出本人资料
+	if !rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile",
+		Header: http.Header{"Cookie": {"_cookie=01846ea4-0e95-4938-b91b-d95263fd356d"}}},
+		respSnap{Status: http.StatusOK, Body: profileHTML}) {
+		t.Fatal("dynamic login + dynamic session replay must unlock")
+	}
+}
+
+// TestCodecVerifyEndpoint Codec 编码链题：网关注入的验证端点，口令
+// codec~proof 需 base64 + URL 双重编码（base64 结果含 + 与 =，裸发会被
+// URL 解析成空格），验证通过即解锁 /flag。
+func TestCodecVerifyEndpoint(t *testing.T) {
+	upSrv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(upSrv.Close)
+	up, _ := url.Parse(upSrv.URL)
+	gw := htttestGateway(t, "flag{lab-codec}", "vulinbox-codec-pipeline", up)
+
+	if resp, err := http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag before verify = %d, want 403", resp.StatusCode)
+	}
+
+	// 裸 base64（+ 未编码）：URL 解析把 + 变空格，还原不出原口令
+	wrong, _ := http.Get(gw + "/academy/codec/verify?token=Y29kZWN+cHJvb2Y=")
+	if wrong == nil || wrong.StatusCode != http.StatusBadRequest {
+		t.Fatalf("raw base64 token = %v, want 400", wrong)
+	}
+	if resp, err := http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after wrong token = %d, want still 403", resp.StatusCode)
+	}
+
+	// 正确编码链：base64 → URL 编码（+ 变 %2B、= 变 %3D）
+	good, err := http.Get(gw + "/academy/codec/verify?token=Y29kZWN%2BcHJvb2Y%3D")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(good.Body)
+	if good.StatusCode != http.StatusOK || !strings.Contains(string(body), `"ok":true`) {
+		t.Fatalf("encoded token = %d %q, want 200 ok:true", good.StatusCode, body)
+	}
+
+	resp, err := http.Get(gw + "/flag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "flag{lab-codec}") {
+		t.Fatalf("GET /flag after verify = %d %q, want 200 flag", resp.StatusCode, body)
 	}
 }
 
