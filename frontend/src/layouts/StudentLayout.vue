@@ -70,9 +70,12 @@ function logout() {
           <span class="name">yak-academy</span>
         </router-link>
         <nav class="main-nav">
-          <router-link to="/">教程</router-link>
-          <router-link to="/training">题库</router-link>
-          <router-link to="/leaderboard">排行榜</router-link>
+          <!-- 「教程」指向根路径 "/"：router-link-active 是前缀匹配，任何路由下都会命中根路径，
+               因此各导航项统一改用精确匹配类 router-link-exact-active 来点亮下划线，
+               否则进了题库/排行榜后「教程」仍然高亮。 -->
+          <router-link to="/" exact-active-class="main-nav-exact">教程</router-link>
+          <router-link to="/training" exact-active-class="main-nav-exact">题库</router-link>
+          <router-link to="/leaderboard" exact-active-class="main-nav-exact">排行榜</router-link>
         </nav>
         <div class="spacer" />
         <div v-if="xp !== null" class="chips" title="事件派生的 Progress：已完成 / 进行中的教程 Room">
@@ -145,7 +148,7 @@ function logout() {
   transition: color 0.15s ease;
 }
 .main-nav a:hover { color: var(--el-text-color-primary); }
-.main-nav a.router-link-active {
+.main-nav a.main-nav-exact {
   color: var(--el-color-primary);
   border-bottom-color: var(--el-color-primary);
   font-weight: 600;
