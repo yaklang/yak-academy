@@ -122,9 +122,9 @@ func TestImportBuiltinChallengesFirstImport(t *testing.T) {
 	if chal.Bank != model.BankTutorial || !chal.IsBuiltin {
 		t.Fatalf("bank/is_builtin = %q/%v, want tutorial/true", chal.Bank, chal.IsBuiltin)
 	}
-	// 配套教程同批导入：5 Topic / 14 Room，与题目 1:1。
-	if res.Topics != 5 || res.Rooms != 14 {
-		t.Fatalf("topics/rooms = %d/%d, want 5/14", res.Topics, res.Rooms)
+	// 配套教程同批导入：5 Topic / 12 Room，与题目 1:1。
+	if res.Topics != 5 || res.Rooms != 12 {
+		t.Fatalf("topics/rooms = %d/%d, want 5/12", res.Topics, res.Rooms)
 	}
 	var room model.Room
 	if err := gdb.Where("slug = ?", "yakit-jwt-forge").First(&room).Error; err != nil {
@@ -177,8 +177,87 @@ func TestImportBuiltinChallengesReimportUpdates(t *testing.T) {
 	var topics, rooms int64
 	gdb.Model(&model.Topic{}).Count(&topics)
 	gdb.Model(&model.Room{}).Count(&rooms)
-	if topics != 5 || rooms != 14 {
-		t.Fatalf("topics/rooms after reimport = %d/%d, want 5/14 (upsert 不应产生重复)", topics, rooms)
+	if topics != 5 || rooms != 12 {
+		t.Fatalf("topics/rooms after reimport = %d/%d, want 5/12 (upsert 不应产生重复)", topics, rooms)
+	}
+	if second.Removed != 0 {
+		t.Fatalf("second import removed = %d, want 0 (目录一致时无清理)", second.Removed)
+	}
+}
+
+// TestImportBuiltinPrunesRemovedEntries 重导入清理目录外残留：历史版本导入的
+// 内置题/Room 已不在当前目录时，重导入按删除级联清理（模块专精 3 题缩成 1 道
+// 综合题后，旧库重导入不应残留旧题）。学生做过的旧内置题同样清理——目录是
+// 内置内容的唯一事实源；提交事件 append-only 保留（event-sourcing）。
+func TestImportBuiltinPrunesRemovedEntries(t *testing.T) {
+	ctx := context.Background()
+	svc, gdb := newBuiltinTestService(t, &builtinBuildRecorder{})
+
+	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+
+	// 伪造旧版本（v1.6.0）残留：目录外的内置题 + 配套内置 Room，题上带通关记录。
+	stale := model.Challenge{
+		Slug: "vulinbox-fuzzer-headers", Title: "旧模块题", Category: "fuzz",
+		Bank: model.BankTutorial, Difficulty: model.DifficultyPractitioner,
+		Type: model.ChallengeStatic, Score: 150, FlagMode: model.FlagModeInstance,
+		TutorialSlug: "yakit-fuzzer-replay", IsBuiltin: true,
+	}
+	if err := gdb.Create(&stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Flag{ChallengeID: stale.ID, Value: "flag{lab-{token}}"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Room{
+		Slug: "yakit-fuzzer-replay", TopicSlug: "yakit-module-mastery", Title: "旧模块教程",
+		Difficulty: model.DifficultyPractitioner, LessonMD: "正文", IsBuiltin: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.NewSubmissionRepo(gdb).Create(ctx, &model.Submission{
+		UserID: 1, ChallengeID: stale.ID, Answer: "flag{lab-x}", Status: model.SubmissionCorrect, Score: 150,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.ImportBuiltinChallenges(ctx)
+	if err != nil {
+		t.Fatalf("reimport: %v", err)
+	}
+	if res.Removed != 1 {
+		t.Fatalf("removed = %d, want 1", res.Removed)
+	}
+
+	// 残留行全部消失；目录内题目不受影响。
+	var errNF = gorm.ErrRecordNotFound
+	if err := gdb.Where("slug = ?", "vulinbox-fuzzer-headers").First(&model.Challenge{}).Error; !errors.Is(err, errNF) {
+		t.Fatalf("stale challenge still present: %v", err)
+	}
+	if err := gdb.Where("slug = ?", "yakit-fuzzer-replay").First(&model.Room{}).Error; !errors.Is(err, errNF) {
+		t.Fatalf("stale room still present: %v", err)
+	}
+	var flagN int64
+	gdb.Model(&model.Flag{}).Where("challenge_id = ?", stale.ID).Count(&flagN)
+	if flagN != 0 {
+		t.Fatalf("stale flags = %d, want 0 (级联清理)", flagN)
+	}
+	var kept model.Challenge
+	if err := gdb.Where("slug = ?", "vulinbox-mall-chain").First(&kept).Error; err != nil {
+		t.Fatalf("catalog challenge missing after prune: %v", err)
+	}
+	var total int64
+	gdb.Model(&model.Challenge{}).Count(&total)
+	if total != 12 {
+		t.Fatalf("challenge rows = %d, want 12 (残留清理后只剩目录题)", total)
+	}
+
+	// 通关记录 append-only 保留（重放派生只按事件流，不随目录演进丢失）。
+	var subN int64
+	gdb.Model(&model.Submission{}).Where("challenge_id = ?", stale.ID).Count(&subN)
+	if subN != 1 {
+		t.Fatalf("submission rows = %d, want 1 (append-only 保留)", subN)
 	}
 }
 
@@ -329,8 +408,8 @@ func TestBuiltinTutorialCatalog(t *testing.T) {
 			}
 		}
 	}
-	if totalRooms != 14 || catalog.ImportedRooms != 0 || catalog.ImportedTopics != 0 {
-		t.Fatalf("catalog rooms/imported = %d/%d/%d, want 14/0/0", totalRooms, catalog.ImportedRooms, catalog.ImportedTopics)
+	if totalRooms != 12 || catalog.ImportedRooms != 0 || catalog.ImportedTopics != 0 {
+		t.Fatalf("catalog rooms/imported = %d/%d/%d, want 12/0/0", totalRooms, catalog.ImportedRooms, catalog.ImportedTopics)
 	}
 
 	if _, err := svc.ImportBuiltinChallenges(ctx); err != nil {
@@ -340,8 +419,8 @@ func TestBuiltinTutorialCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog after import: %v", err)
 	}
-	if catalog.ImportedTopics != len(catalog.Topics) || catalog.ImportedRooms != 14 {
-		t.Fatalf("imported topics/rooms = %d/%d, want %d/14", catalog.ImportedTopics, catalog.ImportedRooms, len(catalog.Topics))
+	if catalog.ImportedTopics != len(catalog.Topics) || catalog.ImportedRooms != 12 {
+		t.Fatalf("imported topics/rooms = %d/%d, want %d/12", catalog.ImportedTopics, catalog.ImportedRooms, len(catalog.Topics))
 	}
 	for _, topic := range catalog.Topics {
 		for _, room := range topic.Rooms {

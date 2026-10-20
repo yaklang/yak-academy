@@ -80,6 +80,17 @@ func (r *topicRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, 
 	return res.RowsAffected, res.Error
 }
 
+// FindBuiltinNotInSlugs 查不在当前内置目录里的内置 Topic 行（导入 prune 用；
+// slugs 为空 = 全部内置行——GORM 空 NOT IN 语义错误，显式分支规避）。
+func (r *topicRepo) FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Topic, error) {
+	q := r.db.WithContext(ctx).Where("is_builtin = ?", true)
+	if len(slugs) > 0 {
+		q = q.Where("slug NOT IN ?", slugs)
+	}
+	var list []model.Topic
+	return list, q.Find(&list).Error
+}
+
 type roomRepo struct{ db *gorm.DB }
 
 func NewRoomRepo(db *gorm.DB) RoomRepo { return &roomRepo{db} }
@@ -152,6 +163,17 @@ func (r *roomRepo) DeleteBySlugs(ctx context.Context, slugs ...string) (int64, e
 	}
 	res := r.db.WithContext(ctx).Where("slug IN ?", slugs).Delete(&model.Room{})
 	return res.RowsAffected, res.Error
+}
+
+// FindBuiltinNotInSlugs 查不在当前内置目录里的内置 Room 行（导入 prune 用；
+// slugs 为空 = 全部内置行——GORM 空 NOT IN 语义错误，显式分支规避）。
+func (r *roomRepo) FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Room, error) {
+	q := r.db.WithContext(ctx).Where("is_builtin = ?", true)
+	if len(slugs) > 0 {
+		q = q.Where("slug NOT IN ?", slugs)
+	}
+	var list []model.Room
+	return list, q.Find(&list).Error
 }
 
 type challengeRepo struct{ db *gorm.DB }
@@ -362,6 +384,17 @@ func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
 		}
 		return tx.Delete(&c).Error
 	})
+}
+
+// FindBuiltinNotInSlugs 查不在当前内置目录里的内置题目行（导入 prune 用；
+// slugs 为空 = 全部内置行——GORM 空 NOT IN 语义错误，显式分支规避）。
+func (r *challengeRepo) FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Challenge, error) {
+	q := r.db.WithContext(ctx).Where("is_builtin = ?", true)
+	if len(slugs) > 0 {
+		q = q.Where("slug NOT IN ?", slugs)
+	}
+	var list []model.Challenge
+	return list, q.Find(&list).Error
 }
 
 type challengeAttachmentRepo struct{ db *gorm.DB }

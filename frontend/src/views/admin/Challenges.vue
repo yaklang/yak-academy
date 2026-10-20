@@ -248,7 +248,10 @@ async function onImportBuiltin() {
   builtinImporting.value = true
   try {
     const resp = await adminChallengeApi.importBuiltin()
-    const summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题、教程 ${resp.rooms} 篇`
+    let summary = `内置训练 v${resp.version}：新增 ${resp.created} 题、更新 ${resp.updated} 题、教程 ${resp.rooms} 篇`
+    if (resp.removed > 0) {
+      summary += `、清理目录外残留 ${resp.removed} 题`
+    }
     if (resp.image_built) {
       ElMessage.success(`${summary}；靶场镜像已构建`)
     } else {

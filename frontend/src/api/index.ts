@@ -299,6 +299,7 @@ export interface BuiltinImportResult {
   version: string
   created: number
   updated: number
+  removed: number
   topics: number
   rooms: number
   slugs: string[]
