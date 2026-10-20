@@ -1,6 +1,6 @@
 ---
 name: project-conventions
-description: yak-academy 项目分层与目录约定。任何代码改动前必须阅读本 skill，防止破坏分层架构。适用于：新增/修改 Go 后端代码、调整目录结构、新增模块、依赖引入、编写或修改测试。
+description: yak-academy 项目分层与目录约定。任何代码改动前必须阅读本 skill，防止破坏分层架构。适用于：新增/修改 Go 后端代码、调整目录结构、新增模块、依赖引入、编写或修改测试；含 Git 提交规范与提交前验证/清理门槛。
 ---
 
 # 项目分层约定（强制）
@@ -29,6 +29,22 @@ api → service → repo → model
 - **PR 标题与描述、PR review comment 一律中文**（面向协作者阅读，commit 是面向仓库历史的英文记录）；PR 标题保留 Conventional Commits 前缀，例：`feat(deploy): 部署约定标准化为 Linux 容器化`。
 - squash 合并时最终落库的 commit message 用英文（不直接沿用中文 PR 标题）；rebase/普通合并保持分支内英文 commit 原样。
 - 历史中文 commit 保持原样，**禁止**为统一语言重写已有历史。
+
+## 提交前验证与清理（强制）
+
+commit 落库的是**已验证的状态**，不是中途存档点。两条硬门槛，缺一不提交：
+
+1. **验证必须全绿**：
+   - 后端改动跑 `go vet ./... && go test -count=1 ./...`；前端改动跑 typecheck（`vue-tsc`）与相关 e2e 套件；契约/内容改动按对应 skill 补齐检查。
+   - bugfix 的回归用例必须**先红后绿**（证明在修复前确实失败，见 e2e-bugfix skill）。
+   - 验证失败**禁止**「先提交再修」：修好、重跑、绿了再提交；CI 红了视同未验证。
+2. **临时文件清理干净**：commit 前用 `git status` 逐项过一遍，工作区只剩本次改动：
+   - 调试产物一律删除：临时脚本（如给 JSON 打补丁的 `tmp*.py`）、一次性 debug spec、`.patch`/stash 备份、导出的日志/截图/har。
+   - 验证过程创建的运行时资源一律回收：探针/调试容器与 lab 实例（走管理 API 销毁，不留占端口的容器）、e2e 残留进程。
+   - 只 stage 本次改动相关文件，**禁止** `git add -A` / `git add .` 一把梭；diff 里出现临时产物、凭据、本地部署资产（remote-deploy skill、`deploy/` 本地脚本）即打回重做。
+
+❌ 错误：为改 challenges.json 写的 `tmp-patch.py` 随 `git add -A` 混进提交。
+❌ 错误：单测没跑完先 commit「占个坑」，想着后面再修。
 
 ## Git 冲突解决（强制）
 
