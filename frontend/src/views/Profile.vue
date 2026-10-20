@@ -112,7 +112,7 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>账号信息</h2>
+  <h2 class="page-title">账号<span class="accent">信息</span></h2>
   <p class="hint">账号 ID、名称、简介与总得分；头像支持 png / jpg / gif / webp（≤2MB）。</p>
 
   <el-skeleton v-if="loading" :rows="4" animated />

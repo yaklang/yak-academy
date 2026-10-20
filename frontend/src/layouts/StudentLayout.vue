@@ -1,14 +1,17 @@
 <script setup lang="ts">
-// 普通端布局：导航只有 教程 | 题库；头部右侧 XP、排行榜与用户区。
+// 普通端布局（CTF 平台通行的「顶栏 + 内容」结构，参考 CTFd/picoCTF）：
+// 左侧品牌 + 主导航（教程 | 题库 | 排行榜），右侧收拢低频入口（徽章/邮箱）
+// 进用户下拉，XP 与通关数做成 chip 徽章紧贴头像区。
 // 仅管理员显示「进入管理端」；普通人完全看不到管理入口。
 // 改密码在账号信息面板（/profile），布局头部只保留登录态操作。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { progressApi, profileApi } from '../api'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const displayName = computed(() => auth.user?.username ?? '')
 const role = computed(() => auth.user?.global_role ?? '')
 const roleLabel = computed(() => (role.value === 'admin' ? '管理员' : '普通人'))
@@ -60,54 +63,152 @@ function logout() {
 
 <template>
   <el-container class="layout">
-    <el-header class="nav">
-      <span class="brand"><span class="prompt">$</span> yak-academy</span>
-      <nav>
-        <router-link to="/">教程</router-link>
-        <router-link to="/training">题库</router-link>
-      </nav>
-      <div class="spacer" />
-      <span v-if="xp !== null" class="xp">XP: {{ xp }}</span>
-      <span v-if="completedRooms !== null" class="stats" title="事件派生的 Progress：已完成 / 进行中的教程 Room">
-        已完成 {{ completedRooms }} · 进行中 {{ inProgressRooms }}
-      </span>
-      <router-link v-if="canAdmin" to="/admin" class="admin-entry">进入管理端</router-link>
-      <router-link to="/leaderboard" class="secondary">排行榜</router-link>
-      <router-link to="/badges" class="secondary">徽章</router-link>
-      <router-link to="/mailbox" class="secondary">
-        邮箱
-        <el-badge v-if="unreadMails > 0" :value="unreadMails" :max="99" class="mail-badge" />
-      </router-link>
-      <router-link v-if="displayName" to="/profile" class="user-link">{{ displayName }}（{{ roleLabel }}）</router-link>
-      <el-button v-if="auth.token" link @click="logout">登出</el-button>
+    <el-header class="nav" height="auto">
+      <div class="nav-inner">
+        <router-link to="/" class="brand">
+          <span class="logo" aria-hidden="true">&lt;/&gt;</span>
+          <span class="name">yak-academy</span>
+        </router-link>
+        <nav class="main-nav">
+          <router-link to="/">教程</router-link>
+          <router-link to="/training">题库</router-link>
+          <router-link to="/leaderboard">排行榜</router-link>
+        </nav>
+        <div class="spacer" />
+        <div v-if="xp !== null" class="chips" title="事件派生的 Progress：已完成 / 进行中的教程 Room">
+          <span class="chip xp-chip"><span class="chip-label">XP</span>{{ xp }}</span>
+          <span v-if="completedRooms !== null" class="chip">
+            <span class="dot solved" />{{ completedRooms }}
+            <span class="chip-sub">已完成</span>
+          </span>
+          <span v-if="inProgressRooms !== null && inProgressRooms > 0" class="chip">
+            <span class="dot ongoing" />{{ inProgressRooms }}
+            <span class="chip-sub">进行中</span>
+          </span>
+        </div>
+        <router-link v-if="canAdmin" to="/admin" class="admin-entry">进入管理端</router-link>
+        <router-link to="/badges" class="icon-link">徽章</router-link>
+        <router-link to="/mailbox" class="icon-link">
+          邮箱
+          <el-badge v-if="unreadMails > 0" :value="unreadMails" :max="99" class="mail-badge" />
+        </router-link>
+        <router-link v-if="displayName" to="/profile" class="user-menu">
+          <span class="avatar">{{ displayName.slice(0, 1).toUpperCase() }}</span>
+          <span class="uname">{{ displayName }}（{{ roleLabel }}）</span>
+        </router-link>
+        <el-button v-if="auth.token" link @click="logout">登出</el-button>
+      </div>
     </el-header>
-    <el-main>
-      <router-view />
+    <el-main class="main">
+      <div class="container">
+        <router-view />
+      </div>
     </el-main>
+    <footer class="footer">
+      <span class="foot-note">$ yak-academy — 安全实训平台</span>
+      <span class="foot-dim">教程 · 题库 · 竞赛</span>
+    </footer>
   </el-container>
 </template>
 
 <style scoped>
-.layout { min-height: 100vh; }
+.layout { min-height: 100vh; display: flex; flex-direction: column; }
 .nav {
-  display: flex; align-items: center; gap: 2rem;
+  position: sticky; top: 0; z-index: 20;
+  padding: 0;
+  background: rgba(13, 17, 23, 0.88);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
 }
-.brand { font-weight: 700; font-family: Consolas, monospace; color: var(--el-text-color-primary); }
-.brand .prompt { color: var(--el-color-primary); }
-nav { display: flex; gap: 1.5rem; }
-nav a {
-  color: var(--el-text-color-regular); text-decoration: none;
-  padding-bottom: 2px; border-bottom: 2px solid transparent;
+.nav-inner {
+  display: flex; align-items: center; gap: 1.75rem;
+  max-width: 1200px; margin: 0 auto; padding: 0.65rem 1.5rem;
 }
-nav a.router-link-active { color: var(--el-color-primary); border-bottom-color: var(--el-color-primary); }
+.brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; }
+.logo {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 7px;
+  background: linear-gradient(135deg, rgba(0, 230, 118, 0.22), rgba(0, 230, 118, 0.06));
+  border: 1px solid var(--el-color-primary-light-7);
+  color: var(--el-color-primary);
+  font-family: Consolas, monospace; font-weight: 700; font-size: 0.8rem;
+}
+.name {
+  font-weight: 700; font-size: 1.05rem;
+  font-family: Consolas, monospace; color: var(--el-text-color-primary);
+}
+.main-nav { display: flex; gap: 1.4rem; }
+.main-nav a {
+  color: var(--el-text-color-secondary); text-decoration: none;
+  font-size: 0.95rem; padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease;
+}
+.main-nav a:hover { color: var(--el-text-color-primary); }
+.main-nav a.router-link-active {
+  color: var(--el-color-primary);
+  border-bottom-color: var(--el-color-primary);
+  font-weight: 600;
+}
 .spacer { flex: 1; }
-.xp { color: var(--el-color-primary); font-weight: 600; font-family: Consolas, monospace; }
-.stats { color: var(--el-text-color-secondary); font-size: 0.85rem; }
-.admin-entry { color: var(--el-color-warning); text-decoration: none; font-weight: 600; }
-.secondary { color: var(--el-text-color-secondary); text-decoration: none; font-size: 0.9rem; }
+.chips { display: flex; gap: 0.5rem; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-family: Consolas, monospace; font-size: 0.85rem;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px; padding: 0.2rem 0.7rem;
+}
+.xp-chip { color: var(--el-color-primary); font-weight: 700; }
+.chip-label { color: var(--el-color-primary); font-size: 0.72rem; font-weight: 700; }
+.chip-sub { color: var(--el-text-color-secondary); font-size: 0.72rem; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot.solved { background: var(--el-color-primary); }
+.dot.ongoing { background: #d29922; }
+.admin-entry {
+  color: var(--el-color-warning); text-decoration: none; font-weight: 600; font-size: 0.9rem;
+}
+.icon-link {
+  color: var(--el-text-color-secondary); text-decoration: none; font-size: 0.9rem;
+}
+.icon-link:hover { color: var(--el-text-color-primary); }
 .mail-badge { margin-left: 4px; transform: translateY(-2px); }
-.user-link { color: var(--el-text-color-primary); text-decoration: none; font-weight: 600; }
-.user { color: var(--el-text-color-secondary); font-size: 0.9rem; }
+.user-menu {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px; padding: 0.22rem 0.8rem 0.22rem 0.25rem;
+  text-decoration: none;
+}
+.user-menu:hover { border-color: var(--el-color-primary-light-5); }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary); font-weight: 700; font-size: 0.8rem;
+}
+.uname { font-weight: 600; font-size: 0.9rem; color: var(--el-text-color-primary); }
+.main { flex: 1; padding: 1.75rem 0 3rem; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+.footer {
+  border-top: 1px solid var(--el-border-color-lighter);
+  box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 1200px; margin: 0 auto; width: 100%;
+  padding: 0.9rem 1.5rem;
+  color: var(--el-text-color-secondary); font-size: 0.8rem;
+}
+.foot-note { font-family: Consolas, monospace; }
+.foot-dim { opacity: 0.7; }
+/* 窄屏：先收起信息性内容（XP chips / 用户名文字，头像保留），再让主导航折到第二行 */
+@media (max-width: 960px) {
+  .nav-inner { gap: 1rem; }
+  .chips, .uname { display: none; }
+}
+@media (max-width: 640px) {
+  .nav-inner { flex-wrap: wrap; row-gap: 0.5rem; padding: 0.55rem 1rem; }
+  .main-nav, .admin-entry { order: 5; }
+  .main-nav { flex-basis: 100%; gap: 1.1rem; }
+}
 </style>
