@@ -307,6 +307,13 @@ func containsFold(s, sub string) bool {
 	return strings.Contains(strings.ToLower(s), sub)
 }
 
+// browserLikeUA 判定浏览器流量形态：主流浏览器 UA 都带 Mozilla/5.0 引导串，
+// 脚本与工具（Yak、curl、Python requests、Fuzzer 空头）默认不带。仅用于
+// tamper 信号的形态锚定——攻击者可伪造，但伪造 UA 已超出本题教学边界。
+func browserLikeUA(h http.Header) bool {
+	return strings.Contains(h.Get("User-Agent"), "Mozilla")
+}
+
 // 解锁规则里的结构性匹配。
 var (
 	// 闭合注入 UNION COUNT：结果行 password 位是纯数字（用户总数），
@@ -314,9 +321,10 @@ var (
 	countPasswordRe = regexp.MustCompile(`"password"\s*:\s*"?\d+"?\s*[,}]`)
 	// 价格篡改：订单总价被改成 0.xx（正常商品总价不会以 0. 开头）。
 	priceZeroRe = regexp.MustCompile(`"total_price"\s*:\s*"?\s*0\.`)
-	// 业务链综合题的改价信号：总价精确等于 0.01（1 分钱下单），容忍 JSON
-	// 冒号两侧空白（紧凑手写与格式化后的 body 都算）。
-	mallChainPriceRe = regexp.MustCompile(`"total_price"\s*:\s*"0\.01"`)
+	// 业务链综合题的改价信号：订单项总价精确等于 0.01（1 分钱下单）。浏览器
+	// 结算 body 是 {"UserID":N,"OrderItems":[{"ProductName":…,"TotalPrice":"0.01"}]}
+	// （上游购物车页 submitOrder 由 DOM 拼 JSON.stringify），容忍冒号两侧空白。
+	mallChainPriceRe = regexp.MustCompile(`"TotalPrice"\s*:\s*"0\.01"`)
 	// 上传文件名绕过：multipart 文件名以 .php 结尾。
 	phpFilenameRe = regexp.MustCompile(`filename="?[^"\r\n;]*\.php`)
 )
@@ -377,12 +385,14 @@ var unlockRules = map[string]unlockRule{
 	},
 
 	// ---- 模块专精综合题（模块训练专题唯一题）----
-	// 商城业务链攻击：899 元商品 1 分钱下单。四个动作信号缺一不可，
-	// 分别对应教程教的 Yakit 模块，路径复用上游既有靶场端点：
+	// 商城业务链攻击：上游购物车里 899 元档的商品 1 分钱下单。四个动作信号
+	// 缺一不可，分别对应教程教的 Yakit 模块，路径复用上游既有靶场端点：
 	//   ① observe：MITM 观察商城登录（POST /mall/user/login 成功）——
 	//      代理观察是整条链的起点；
-	//   ② tamper：提交订单时 total_price 被改写为 0.01——MITM 热加载
-	//      Yak 脚本自动改包的产物（上游不校验价格，改价即篡改成立）；
+	//   ② tamper：浏览器结算订单的订单项 TotalPrice 被改写为 0.01——MITM
+	//      热加载 Yak 脚本自动改包的产物。信号锚定浏览器订单形态（body 带
+	//      OrderItems 的 TotalPrice、UA 为浏览器）：Fuzzer 默认 UA 手搓的
+	//      snake_case total_price 不再命中，强制走热加载改浏览器流量这条路；
 	//   ③ replay：同一订单请求携带自定义头 X-Mall-Internal（yakit 开头）
 	//      重放——浏览器表单发不出的请求形态，Fuzzer 的手搓标记。
 	//   ④ codec：口令经 base64→URL 编码送达网关注入的 /academy/codec/verify
@@ -394,7 +404,7 @@ var unlockRules = map[string]unlockRule{
 			g.markSeen("observe")
 		}
 		if req.Method == http.MethodPost && req.Path == "/mall/order/submit" {
-			if mallChainPriceRe.MatchString(req.Body) {
+			if mallChainPriceRe.MatchString(req.Body) && browserLikeUA(req.Header) {
 				g.markSeen("tamper")
 			}
 			if internal := req.Header.Get("X-Mall-Internal"); strings.HasPrefix(strings.ToLower(internal), "yakit") {

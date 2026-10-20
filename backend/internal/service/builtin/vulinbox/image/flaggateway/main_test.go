@@ -457,7 +457,9 @@ func TestXssTwoPathUnlock(t *testing.T) {
 
 // TestMallChainFourStepUnlock 商城业务链综合题：observe（商城登录）、
 // tamper（改价 0.01 下单）、replay（内部标记头重放）、codec（编码链端点）
-// 四个信号齐备才解锁；缺任何一步都不放行。
+// 四个信号齐备才解锁；缺任何一步都不放行。信号与顺序无关——本用例刻意
+// 把 tamper 留到最后：其余三信号齐备后先用手搓改价验证不命中（回归负例），
+// 再用热加载形态命中。
 func TestMallChainFourStepUnlock(t *testing.T) {
 	upMux := http.NewServeMux()
 	upMux.HandleFunc("/mall/user/login", func(w http.ResponseWriter, r *http.Request) {
@@ -478,15 +480,19 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 		t.Fatalf("GET /flag before chain = %d, want 403", resp.StatusCode)
 	}
 
-	// 负例：原始价下单（无标记头）——observe 命中，其余未命中
+	// 负例：observe（商城登录）+ 原始价下单（无标记头）——observe 命中，
+	// 其余未命中。原始价用浏览器结算形态（OrderItems/TotalPrice、Mozilla UA）。
 	resp, err := http.Post(gw+"/mall/user/login", "application/json",
 		strings.NewReader(`{"username":"user1","password":"password123"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	resp, err = http.Post(gw+"/mall/order/submit", "application/json",
-		strings.NewReader(`{"product_id":70,"quantity":1,"total_price":"199.00"}`))
+	orig, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"899.00"}]}`))
+	orig.Header.Set("Content-Type", "application/json")
+	orig.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
+	resp, err = http.DefaultClient.Do(orig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +503,25 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 		t.Fatalf("GET /flag after observe only = %d, want still 403", resp.StatusCode)
 	}
 
-	// 负例：编码链先过（四步可乱序做）——但 tamper/replay 未命中仍不放行
+	// 负例：replay——原价浏览器订单 + Fuzzer 标记头（观察到的原单重放，
+	// 改价信号未命中）——observe+replay 仍不放行
+	replayed, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"899.00"}]}`))
+	replayed.Header.Set("Content-Type", "application/json")
+	replayed.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
+	replayed.Header.Set("X-Mall-Internal", "yakit-order")
+	resp, err = http.DefaultClient.Do(replayed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after observe+replay = %d, want still 403", resp.StatusCode)
+	}
+
+	// 负例：编码链先过（四步可乱序做）——只差 tamper 仍不放行
 	good, err := http.Get(gw + "/academy/codec/verify?token=Y29kZWN%2BcHJvb2Y%3D")
 	if err != nil {
 		t.Fatal(err)
@@ -509,15 +533,35 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 	if resp, err = http.Get(gw + "/flag"); err != nil {
 		t.Fatal(err)
 	} else if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("GET /flag after codec but no tamper/replay = %d, want still 403", resp.StatusCode)
+		t.Fatalf("GET /flag after observe+replay+codec = %d, want still 403", resp.StatusCode)
 	}
 
-	// 正例：热加载改价（tamper）+ Fuzzer 标记头重放（replay）同请求命中；
-	// body 用冒号后带空格的格式化 JSON——改价信号需容忍两种写法
+	// 回归负例（2026-10-19，PR refactor/module-case-integration）：其余三信号
+	// 已齐备，此刻 Fuzzer 手搓 snake_case 改价订单必须仍不解锁——旧信号
+	// 匹配 snake_case total_price 时这里会提前放行 /flag（手搓即可通关，
+	// 热加载名存实亡）。修复后 tamper 锚定浏览器结算形态（OrderItems 的
+	// TotalPrice + Mozilla UA），手搓 body 不命中
+	curlTamper, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"product_id":70,"quantity":1,"total_price":"0.01"}`))
+	curlTamper.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(curlTamper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after Fuzzer-only tamper = %d, want still 403 (tamper must ride browser traffic)", resp.StatusCode)
+	}
+
+	// 正例：热加载改价（tamper）——浏览器结算订单被 MITM 热加载脚本把
+	// TotalPrice 改写为 0.01（浏览器 UA + OrderItems 形态，冒号后带空格的
+	// 格式化 JSON 也容忍）；纯浏览器形态、不带 Fuzzer 标记头
 	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"product_id": 70, "quantity": 1, "total_price": "0.01"}`))
+		strings.NewReader(`{"UserID": 3, "OrderItems": [{"ProductName": "商品4", "Quantity": "1", "TotalPrice": "0.01"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Mall-Internal", "yakit-mitm-hotload")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -551,7 +595,7 @@ func TestMallChainCodecLastUnlock(t *testing.T) {
 	up, _ := url.Parse(upSrv.URL)
 	gw := htttestGateway(t, "flag{lab-mall}", "vulinbox-mall-chain", up)
 
-	// ①②③：登录观察 + 改价下单 + 标记头重放（一个请求带 tamper+replay）
+	// ①②③：登录观察 + 浏览器改价订单 + 标记头重放（一个请求带 tamper+replay）
 	resp, err := http.Post(gw+"/mall/user/login", "application/json",
 		strings.NewReader(`{"username":"user1","password":"password123"}`))
 	if err != nil {
@@ -559,8 +603,9 @@ func TestMallChainCodecLastUnlock(t *testing.T) {
 	}
 	resp.Body.Close()
 	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"product_id":70,"quantity":1,"total_price":"0.01"}`))
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"0.01"}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0")
 	req.Header.Set("X-Mall-Internal", "yakit-order")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

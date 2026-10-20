@@ -1,6 +1,6 @@
 {
   "name": "vulinbox",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "基于 yaklang vulinbox 靶场引擎的精选内置训练集：配套教程（yakit 实战教学，一个教程对应一道题）+ 12 道题目（SSRF / SQL 注入 / 逻辑漏洞 / 越权 / JWT / 文件上传 / XSS / 商城业务链综合题：MITM 观察·热加载改包·Fuzzer 重放·Codec 编码四模块接力）。所有题目共享同一个 vulinbox 基础镜像（单容器多靶机，按路径路由；前置 flaggateway 层：每实例唯一 flag 写入 /flag.txt，GET /flag 读取端点带按题门禁——SSRF 题只放行靶机内部自请求、8 道攻击题观察到攻击成功信号后解锁、商城业务链综合题需四个信号齐备（观察+改价+内部头重放三个流量信号与编码链验证端点）、authz 题走命令模拟接口 cat flag.txt；/ssrf/flag 演示接口的随机 uuid 改写为固定假 flag{test}）。所有题目使用实例 flag 判定（flag_mode=instance），完成攻击后读取 flag 提交。",
   "image_tag": "yak-academy/vulinbox:latest",
   "port": 8787,
@@ -10,7 +10,7 @@
   "notes": [
     "镜像由 image/ 目录的 Dockerfile 构建时从官方 CDN 下载二进制并做 sha256 校验（校验失败即构建失败，防止上游更新导致靶机行为漂移；更新题集时需重新锁定 sha256）。",
     "上游 vulinbox 不消费 FLAG 环境变量：镜像内 flaggateway 层负责把平台按实例注入的 FLAG 写入 /flag.txt 并暴露 GET /flag 读取端点；其余路径原样反代上游，不改靶机行为。",
-    "GET /flag 读取端点带按题门禁（平台注入 CHALLENGE_SLUG 标识实例归属）：SSRF 两题与未知 slug 只放行靶机内部自请求（RemoteAddr 回环判定，实例端口映射后浏览器直连的源地址是 Docker 网桥，伪造 Host 头无效）；8 道攻击题在网关反代流量中观察到本题攻击成功信号（unlockRules，信号=配套教程宣告的成功特征）后放行，回环也不豁免（封死跨题借 SSRF 读 flag）；商城业务链综合题（mall-chain）需四信号齐备：商城登录（observe）+ 订单改价 0.01（tamper）+ 携带 X-Mall-Internal 内部头重放（replay）三个流量信号，叠加网关注入的 GET /academy/codec/verify 编码链验证端点（token=口令 base64 后再 URL 编码，通过仅记 codec 信号、不直接放行）；authz-cmd 的正路是命令模拟接口 cat flag.txt。",
+    "GET /flag 读取端点带按题门禁（平台注入 CHALLENGE_SLUG 标识实例归属）：SSRF 两题与未知 slug 只放行靶机内部自请求（RemoteAddr 回环判定，实例端口映射后浏览器直连的源地址是 Docker 网桥，伪造 Host 头无效）；8 道攻击题在网关反代流量中观察到本题攻击成功信号（unlockRules，信号=配套教程宣告的成功特征）后放行，回环也不豁免（封死跨题借 SSRF 读 flag）；商城业务链综合题（mall-chain）需四信号齐备：商城登录（observe）+ 浏览器结算订单被热加载脚本改价 0.01（tamper，信号锚定浏览器请求形态：OrderItems 的 TotalPrice + Mozilla UA，Fuzzer 手搓 snake_case body 不命中）+ 携带 X-Mall-Internal 内部头重放（replay）三个流量信号，叠加网关注入的 GET /academy/codec/verify 编码链验证端点（token=口令 base64 后再 URL 编码，通过仅记 codec 信号、不直接放行）；authz-cmd 的正路是命令模拟接口 cat flag.txt。",
     "命令模拟接口的 cat 注入仅注册在 authz-cmd（及未注入 slug 的手工容器）：上游白名单仅有 ls，其他题的实例上 cat 落回上游 command not found，封死跨题借 cmd 接口读 flag 的捷径。",
     "上游 /ssrf/flag 演示接口每次请求随机生成 flag{uuid}，与实例真 flag（flag{lab-...}）形态相同、易被误当答案提交——网关在反代响应里把它改写为固定假 flag{test}（一眼假），仅此一处响应改写，靶机行为其余不变。",
     "全部题目 flag_mode=instance：flag 形如 flag{lab-<token>}，每次启动环境重新生成，仅当前实例有效。",

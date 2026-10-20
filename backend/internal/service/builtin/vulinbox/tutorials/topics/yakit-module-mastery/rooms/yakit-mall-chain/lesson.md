@@ -7,26 +7,29 @@ difficulty: practitioner
 
 ## 原理背景
 
-真实渗透不是"单点漏洞一把梭"，而是**把工具串成流水线**：代理看清业务 → 脚本自动改包 → 手搓完成最后一击 → 编码穿过校验边界。价格篡改是这套流水线最经典的舞台——服务端**信任了客户端提交的金额**，攻击者只要在下单请求到达服务端之前改掉 `total_price`，就能用任意价格买走商品。
+真实渗透不是"单点漏洞一把梭"，而是**把工具串成流水线**：代理看清业务 → 脚本自动改包 → 手搓完成最后一击 → 编码穿过校验边界。价格篡改是这套流水线最经典的舞台——服务端**信任了客户端提交的金额**，攻击者只要在下单请求到达服务端之前改掉金额，就能用任意价格买走商品。
 
-本题要用 899 元商品的 **1 分钱** 完成下单，并读出本实例 flag。靶机会在网关层观察整条业务链：**MITM 观察、热加载改价、Fuzzer 标记头重放、Codec 编码链**四个信号全部命中，`/flag` 才解锁。四步可按任意顺序完成，但缺一步都不行。
+本题要把商城购物车里 899 元档的商品用 **1 分钱** 买下来，并读出本实例 flag。靶机会在网关层观察整条业务链：**MITM 观察、热加载改价、Fuzzer 标记头重放、Codec 编码链**四个信号全部命中，`/flag` 才解锁。四步可按任意顺序完成，但缺一步都不行。
 
 ## Yakit 四模块怎么用
 
 **① MITM 代理观察**：系统（或浏览器插件）代理指向 Yakit MITM 监听地址，装一次证书（MITM 页有引导）。浏览器里的每一次登录、下单都会出现在 MITM 历史里——**先让真实业务流量跑起来，你在旁边看**，这是所有测试的标准开局。
 
-**② 热加载自动改包**：MITM 页进入「热加载」/插件面板，新建 Yak 脚本。对劫持到的请求做改写（本例：命中订单提交接口就把金额换成 0.01），保存即生效——**不用断开代理、不用重启**，下一个经过的请求就带着你的改写逻辑。一段可以直接抄的脚本骨架：
+**② 热加载自动改包（本题必经之路）**：MITM 页进入「热加载」/插件面板，新建 Yak 脚本。脚本对**每一个经过代理的请求**做检查改写，保存即生效——**不用断开代理、不用重启**，下一个经过的请求就带着你的改写逻辑。本题就用它把浏览器结算订单的金额自动换成 0.01。一段可以直接抄的脚本骨架：
 
 ```javascript
-// MITM 热加载脚本：把商城订单的价格改写为 0.01
-if (isTLS && fisHost("你的实例地址")) {
-    if (fisPost() && fisContains(url, `/mall/order/submit`)) {
-        body = replace(body, `"total_price":"199.00"`, `"total_price":"0.01"`)
+// MITM 热加载脚本：把商城结算订单的金额改写为 0.01
+// 骨架按 Yakit MITM 热加载的劫持写法给出，函数名/取值细节以你所用
+// Yakit 版本的「MITM 交互页 → 热加载」示例模板为准，替换后即可用
+hijackSave = func (isHttps, url, req, rsp, body) {
+    if (isPost() && fisContains(url, `/mall/order/submit`)) {
+        body = replace(body, `"TotalPrice": "899.00"`, `"TotalPrice": "0.01"`)
     }
+    return body
 }
 ```
 
-写脚本前先用 MITM 历史抓一次真实下单，看清 body 的确切格式（金额字段叫什么、长什么样），再对照着写替换规则——**观察在先，改写在后**。
+注意替换规则要对准 body 的**确切原文**：先用 MITM 历史抓一次真实结算，看清金额字段名和当前值（本题是 `TotalPrice`），再对照写替换规则——**观察在先，改写在后**。
 
 **③ Web Fuzzer 手搓重放**：右键 MITM 历史里的订单请求「发送到 Web Fuzzer」，在请求头区手工新增一行 `X-Mall-Internal: yakit-order`（订单系统只认内部通道，浏览器表单发不出这种自定义头），发送。整条请求（方法、路径、头、体）都在你手里——这正是 Fuzzer 与浏览器的本质差别。
 
@@ -34,7 +37,7 @@ if (isTLS && fisHost("你的实例地址")) {
 
 ## 开始实战
 
-点击 **前往配套题目练习**，启动环境后按链路走：挂代理用 `user1` / `password123` 登录商城并尝试下单（观察）；写热加载脚本改价（tamper）；Fuzzer 重放下单并加 `X-Mall-Internal: yakit-order` 头（replay）；最后用 Codec 把口令 `codec~proof` 经 base64 → URL 编码送到校验端点 `GET /academy/codec/verify?token=...`（codec）。四步信号齐备后 `GET /flag` 读出本实例真 flag 并提交。
+点击 **前往配套题目练习**，启动环境后按链路走：浏览器挂代理登录商城并结算一次订单（观察）；写热加载脚本自动改价后浏览器再结算一次（tamper）；Fuzzer 重放订单并加 `X-Mall-Internal: yakit-order` 头（replay）；最后用 Codec 把口令 `codec~proof` 经 base64 → URL 编码送到校验端点 `GET /academy/codec/verify?token=...`（codec）。四步信号齐备后 `GET /flag` 读出本实例真 flag 并提交。
 
 <details>
 <summary>📋 详细步骤（点击展开，照做即可拿到答案）</summary>
@@ -45,59 +48,38 @@ if (isTLS && fisHost("你的实例地址")) {
 
 题目详情页点「启动实验环境」，等状态 running，复制访问地址。
 
-**第 2 步：MITM 观察——商城登录 + 一次原价下单**
+**第 2 步：MITM 观察——真实登录 + 原价结算**
 
-不用浏览器的话，直接在 Web Fuzzer 发（与走代理是同一条链，网关都能观察到）：
+浏览器代理指向 Yakit MITM，访问环境首页进「购物商城」（`/mall/shop/index`）：
 
-```http
-POST /mall/user/login HTTP/1.1
-Host: 127.0.0.1:36870
-Content-Type: application/json
+1. 进「Login」页用预置账号 `user1` / `password123` 登录，登录成功跳到个人页；
+2. 个人页点任一商品的「加入购物车」，再进购物车页（个人页菜单 → My Cart）点「提交订单」；
+3. 在 MITM 历史里找到 `POST /mall/order/submit`——**看它的 body**：浏览器结算订单长这样（金额在 `OrderItems` 每一项的 `TotalPrice` 里，这就是热加载脚本要改的字段）：
 
-{"username": "user1", "password": "password123"}
+```json
+{"UserID":3,"OrderItems":[{"ProductName":"Apple new mac book 2015 March :P","Quantity":"1","TotalPrice":"899.00"}]}
 ```
 
-响应 `{"success":true,"message":"Login successful"}`，并下发 `Set-Cookie: sessionID=...`——记下这个会话。再带会话下一次原价单（看清订单 body 的格式，热加载脚本要照着写）：
+注意：直接在 Web Fuzzer 里手打 body 也能「订单提交成功」，但**网关只认浏览器结算订单被改价**（改价信号锚定了浏览器请求形态）——这就是为什么本题必须用热加载脚本，而不是手改重发。结算成功后购物车会被清空，重结算前要把商品再加回购物车（个人页 → 加入购物车）。
 
-```http
-POST /mall/order/submit HTTP/1.1
-Host: 127.0.0.1:36870
-Content-Type: application/json
-Cookie: sessionID=<刚拿到的值>
+**第 3 步：热加载——挂上自动改价脚本**
 
-{"product_id": 70, "quantity": 1, "total_price": "199.00"}
+MITM 页 →「热加载」，新建 Yak 脚本，贴入骨架（把实例地址与替换规则对准第 2 步抓到的 body 原文）：
+
+```javascript
+hijackSave = func (isHttps, url, req, rsp, body) {
+    if (isPost() && fisContains(url, `/mall/order/submit`)) {
+        body = replace(body, `"TotalPrice": "899.00"`, `"TotalPrice": "0.01"`)
+    }
+    return body
+}
 ```
 
-响应「订单提交成功」——**注意：这是观察步骤，网关只认改价后的订单，原价单不算**。
-
-**第 3 步：热加载——MITM 里挂改价脚本**
-
-把上一步的订单请求右键「发送到 Web Fuzzer」，把 `total_price` 改成 `0.01` 发送（这就是价格篡改；走 MITM 热加载脚本自动改是完全等价的做法，脚本骨架见上文，替换规则写 `"total_price":"199.00"` → `"total_price":"0.01"`，热加载面板保存即生效）：
-
-```http
-POST /mall/order/submit HTTP/1.1
-Host: 127.0.0.1:36870
-Content-Type: application/json
-Cookie: sessionID=<会话值>
-
-{"product_id": 70, "quantity": 1, "total_price": "0.01"}
-```
-
-响应同样是「订单提交成功」——1 分钱订单已被服务端接受，价格篡改成立。
+保存后**浏览器里**重新加购物车 → 提交订单——MITM 历史里这条结算请求的 body 中 `TotalPrice` 已是 `0.01`，响应仍是「订单提交成功」：价格篡改由脚本自动完成，你一个字都没手改。
 
 **第 4 步：Fuzzer 重放——加上内部通道标记头**
 
-在 Fuzzer 里给改价后的订单请求再加一行自定义头（浏览器表单发不出的请求形态）：
-
-```http
-POST /mall/order/submit HTTP/1.1
-Host: 127.0.0.1:36870
-Content-Type: application/json
-Cookie: sessionID=<会话值>
-X-Mall-Internal: yakit-order
-
-{"product_id": 70, "quantity": 1, "total_price": "0.01"}
-```
+右键 MITM 历史里这条 0.01 订单「发送到 Web Fuzzer」，在请求头区加一行 `X-Mall-Internal: yakit-order`，发送。整条请求（方法、路径、头、体）都在你手里——浏览器表单永远发不出这种自定义头，这是 Fuzzer 的活。
 
 **第 5 步：Codec 编码链——通过内部校验端点**
 
