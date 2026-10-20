@@ -185,17 +185,17 @@
   {
    "slug": "vulinbox-mall-chain",
    "tutorial_slug": "yakit-mall-chain",
-   "title": "商城业务链：四模块接力 1 分钱买下 899 元商品",
+   "title": "商城业务链：四模块接力 1 分钱买下 89 元商品",
    "category": "logic",
    "difficulty": "practitioner",
-   "description_md": "# 背景\n\n真实渗透不是单点漏洞一把梭，而是把工具串成流水线：代理看清业务 → 热加载脚本自动改包 → Fuzzer 手搓完成最后一击 → 编码穿过校验边界。本题把 Yakit 四个模块接成一条完整的业务链攻击：靶场商城购物车里 899 元档的商品，你要用 1 分钱买下它。\n\n商城接口（环境首页进「购物商城」）：\n- 登录：`POST /mall/user/login`，JSON `{\"username\": \"user1\", \"password\": \"password123\"}`（预置账号），响应下发 `sessionID` Cookie；\n- 下单：`POST /mall/order/submit`，需要登录会话，浏览器结算订单形如 `{\"UserID\":3,\"OrderItems\":[{\"ProductName\":\"…\",\"Quantity\":\"1\",\"TotalPrice\":\"899.00\"}]}`，金额 `TotalPrice` 由客户端提交、服务端不重算。\n\n# 任务\n\n四步链，缺一不可（顺序不限）：\n\n1. **观察**：浏览器挂 Yakit MITM 代理，登录商城并完成一次真实结算，在 MITM 历史里看清订单 body；\n2. **改价**：在 MITM「热加载」挂 Yak 脚本，把结算订单的 `TotalPrice` 自动改写为 `\"0.01\"` 后浏览器再次结算——**网关只认浏览器结算订单被脚本改价**（手搓 Fuzzer 直接发 body 不算），这是本题练热加载的原因；\n3. **重放**：把改价订单「发送到 Web Fuzzer」，加浏览器表单发不出的自定义头 `X-Mall-Internal: yakit-order`（值以 yakit 开头）重放；\n4. **编码链**：口令 `codec~proof` 依次做 base64 → URL 编码，作为 `token` 请求 `GET /academy/codec/verify?token=...`，返回 `ok:true` 即通过（裸 base64 会 400：`+` 在 URL 里被解析成空格）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。该端点有门禁：上述四个信号（观察、改价、内部头重放、编码链）**全部命中前**直接访问得到 403；四步齐备后自动解锁，`GET /flag` 读出本实例 flag，在平台提交框中输入即可判定。\n\n> 配套教程（业务链攻击）逐步讲解 MITM、热加载、Web Fuzzer、Codec 四个模块各自怎么用，建议先读再打。",
+   "description_md": "# 背景\n\n真实渗透不是单点漏洞一把梭，而是把工具串成流水线：代理看清业务 → 热加载脚本自动改包 → Fuzzer 手搓完成最后一击 → 编码穿过校验边界。本题把 Yakit 四个模块接成一条完整的业务链攻击：靶场商城里 89 元的商品，你要用 1 分钱买下它。\n\n商城接口（环境首页进「购物商城」`/mall/shop/index`；首页的 MacBook 是摆设，真正能买的是登录后个人页 `/mall/user/profile?id=3` 的商品 1～12，每件 89 元）：\n- 登录：`POST /mall/user/login`，JSON `{\"username\":\"user1\",\"password\":\"password123\"}`（预置账号），响应下发 `sessionID` Cookie，登录成功自动跳转个人页；\n- 下单：`POST /mall/order/submit`，需要登录会话，浏览器结算订单是紧凑 JSON、金额无小数位，形如 `{\"UserID\":3,\"OrderItems\":[{\"ProductName\":\"商品1\",\"Quantity\":\"1\",\"TotalPrice\":\"89\"}]}`，金额 `TotalPrice` 由客户端提交、服务端不重算。\n\n# 任务\n\n四步链，缺一不可（顺序不限）：\n\n1. **观察**：浏览器挂 Yakit MITM 代理，登录商城并完成一次真实结算，在 MITM 历史里看清订单 body——注意 `TotalPrice` 的实际原值（单件 89 元商品就是 `\"89\"`，没有小数位；JSON 冒号后无空格），热加载替换规则要对准这个原文；\n2. **改价**：在 MITM「热加载」挂 Yak 脚本，把结算订单的 `TotalPrice` 自动改写为 `\"0.01\"` 后浏览器再次结算——**网关只认浏览器结算订单被脚本改价**（手搓 Fuzzer 直接发 body 不算），这是本题练热加载的原因；\n3. **重放**：把改价订单「发送到 Web Fuzzer」，加浏览器表单发不出的自定义头 `X-Mall-Internal: yakit-order`（值以 yakit 开头）重放；\n4. **编码链**：口令 `codec~proof` 依次做 base64 → URL 编码，作为 `token` 请求 `GET /academy/codec/verify?token=...`，返回 `ok:true` 即通过（裸 base64 会 400：`+` 在 URL 里被解析成空格）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。该端点有门禁：上述四个信号（观察、改价、内部头重放、编码链）**全部命中前**直接访问得到 403；四步齐备后自动解锁，`GET /flag` 读出本实例 flag，在平台提交框中输入即可判定。\n\n> 配套教程（业务链攻击）逐步讲解 MITM、热加载、Web Fuzzer、Codec 四个模块各自怎么用，建议先读再打。",
    "score": 300,
    "flag_mode": "instance",
    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
    "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
    "hints": [
     { "title": "第一步观察怎么做", "content": "POST /mall/user/login，JSON 体 {\"username\":\"user1\",\"password\":\"password123\"}，从响应 Set-Cookie 取 sessionID 留用；网关认的就是这条真实登录流量。", "cost": 10 },
-    { "title": "改价与内部头重放", "content": "先用 MITM 抓一次浏览器结算，看清 body 原文（金额在 OrderItems 的 TotalPrice）；MITM「热加载」挂 Yak 脚本把 TotalPrice 的值替换为 0.01，浏览器重新加购物车再结算即改价命中。再把改价订单发到 Web Fuzzer 加自定义头 X-Mall-Internal: yakit-order 重放。" },
+    { "title": "改价与内部头重放", "content": "先用 MITM 抓一次浏览器结算，看清 body 原文（紧凑 JSON：金额在 OrderItems 的 TotalPrice，单件 89 元商品值就是 \"89\"，没有小数位、冒号后无空格）；MITM「热加载」挂 Yak 脚本把替换串 \"TotalPrice\":\"89\" 对准原文替换为 \"0.01\"（替换串与原文一字不差才命中），浏览器重新加购物车再结算即改价命中。再把改价订单发到 Web Fuzzer 加自定义头 X-Mall-Internal: yakit-order 重放。" },
     { "title": "编码链最后一步", "content": "口令 codec~proof 先 base64 得 Y29kZWN+cHJvb2Y=，再 URL 编码（+ → %2B、= → %3D）得 Y29kZWN%2BcHJvb2Y%3D，请求 /academy/codec/verify?token=... 返回 ok:true；四步齐备后 /flag 解锁。", "cost": 20 }
    ],
    "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]

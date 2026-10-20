@@ -54,7 +54,7 @@ const (
 	// cat 注入的挑战 slug。
 	authzCmdSlug = "vulinbox-authz-cmd"
 
-	// mallChainSlug 业务链综合题（模块专精专题唯一题）：商城 899 元商品
+	// mallChainSlug 业务链综合题（模块专精专题唯一题）：商城 89 元商品
 	// 1 分钱下单——MITM 观察商城流量 → 热加载脚本改写订单价 → Fuzzer 带
 	// 内部标记头重放下单 → Codec 编码链通过网关验证端点。/flag 在三步
 	// 信号全部观察到（unlockRules）且编码链端点验证通过（codecVerify
@@ -385,7 +385,7 @@ var unlockRules = map[string]unlockRule{
 	},
 
 	// ---- 模块专精综合题（模块训练专题唯一题）----
-	// 商城业务链攻击：上游购物车里 899 元档的商品 1 分钱下单。四个动作信号
+	// 商城业务链攻击：上游商城里 89 元的商品 1 分钱下单。四个动作信号
 	// 缺一不可，分别对应教程教的 Yakit 模块，路径复用上游既有靶场端点：
 	//   ① observe：MITM 观察商城登录（POST /mall/user/login 成功）——
 	//      代理观察是整条链的起点；

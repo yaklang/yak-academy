@@ -70,7 +70,7 @@ test.describe('商城业务链综合案例（vulinbox-mall-chain）', () => {
     test.setTimeout(600_000)
     await importBuiltin(request)
 
-    const ep = await startInstance(page, 'vulinbox-mall-chain', '商城业务链：四模块接力 1 分钱买下 899 元商品')
+    const ep = await startInstance(page, 'vulinbox-mall-chain', '商城业务链：四模块接力 1 分钱买下 89 元商品')
 
     // 1. 负例：零攻击直连 /flag——四信号皆无
     const probe = await waitUp(request, `${ep}/mall/user/login`)
@@ -102,7 +102,7 @@ test.describe('商城业务链综合案例（vulinbox-mall-chain）', () => {
         Cookie: `sessionID=${session}`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0',
       },
-      data: `{"UserID":3,"OrderItems":[{"ProductName":"Apple new mac book 2015 March :P","Quantity":"1","TotalPrice":"899.00"}]}`,
+      data: `{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`,
       timeout: 30_000,
     })
     expect(origPrice.ok()).toBeTruthy()
@@ -117,7 +117,7 @@ test.describe('商城业务链综合案例（vulinbox-mall-chain）', () => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0',
         'X-Mall-Internal': 'yakit-order',
       },
-      data: `{"UserID":3,"OrderItems":[{"ProductName":"Apple new mac book 2015 March :P","Quantity":"1","TotalPrice":"899.00"}]}`,
+      data: `{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`,
       timeout: 30_000,
     })
     expect(replayed.ok()).toBeTruthy()
@@ -152,15 +152,15 @@ test.describe('商城业务链综合案例（vulinbox-mall-chain）', () => {
     expect(locked25.status()).toBe(403)
 
     // 8. tamper（热加载改价）：浏览器结算订单（Mozilla UA）被热加载脚本把
-    //    TotalPrice 改写为 0.01——纯浏览器形态、不带标记头。冒号后带空格的
-    //    格式化 JSON 也容忍（真实脚本 replace 后的形态）。落子即四信号齐备，
-    //    /flag 解锁 → 实例真 flag
+    //    TotalPrice 改写为 0.01——纯浏览器形态、不带标记头。真实结算 body 是
+    //    紧凑 JSON（冒号后无空格、金额无小数位），脚本 replace 后仍紧凑，
+    //    网关正则容忍空白。落子即四信号齐备，/flag 解锁 → 实例真 flag
     const tampered = await request.post(`${ep}/mall/order/submit`, {
       headers: {
         Cookie: `sessionID=${session}`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0',
       },
-      data: `{"UserID": 3, "OrderItems": [{"ProductName": "Apple new mac book 2015 March :P", "Quantity": "1", "TotalPrice": "0.01"}]}`,
+      data: `{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"0.01"}]}`,
       timeout: 30_000,
     })
     expect(tampered.ok()).toBeTruthy()

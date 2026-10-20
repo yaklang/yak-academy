@@ -489,7 +489,7 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 	}
 	resp.Body.Close()
 	orig, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"899.00"}]}`))
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`))
 	orig.Header.Set("Content-Type", "application/json")
 	orig.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
 	resp, err = http.DefaultClient.Do(orig)
@@ -506,7 +506,7 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 	// 负例：replay——原价浏览器订单 + Fuzzer 标记头（观察到的原单重放，
 	// 改价信号未命中）——observe+replay 仍不放行
 	replayed, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"899.00"}]}`))
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`))
 	replayed.Header.Set("Content-Type", "application/json")
 	replayed.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
 	replayed.Header.Set("X-Mall-Internal", "yakit-order")
@@ -556,10 +556,11 @@ func TestMallChainFourStepUnlock(t *testing.T) {
 	}
 
 	// 正例：热加载改价（tamper）——浏览器结算订单被 MITM 热加载脚本把
-	// TotalPrice 改写为 0.01（浏览器 UA + OrderItems 形态，冒号后带空格的
-	// 格式化 JSON 也容忍）；纯浏览器形态、不带 Fuzzer 标记头
+	// TotalPrice 改写为 0.01（浏览器 UA + OrderItems 形态）。上游 JSON.stringify
+	// 是紧凑格式（冒号后无空格、金额无小数位），replace 后仍是紧凑串；
+	// 网关正则容忍空白，紧凑/格式化都命中。纯浏览器形态、不带 Fuzzer 标记头
 	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"UserID": 3, "OrderItems": [{"ProductName": "商品4", "Quantity": "1", "TotalPrice": "0.01"}]}`))
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"0.01"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
 	resp, err = http.DefaultClient.Do(req)
@@ -603,7 +604,7 @@ func TestMallChainCodecLastUnlock(t *testing.T) {
 	}
 	resp.Body.Close()
 	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
-		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品4","Quantity":"1","TotalPrice":"0.01"}]}`))
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"0.01"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0")
 	req.Header.Set("X-Mall-Internal", "yakit-order")
