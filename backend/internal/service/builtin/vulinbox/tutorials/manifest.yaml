@@ -1,8 +1,9 @@
 name: yakit-vulinbox-training
-version: 1.2.0
+version: 1.3.0
 language: zh
 topics:
   - yakit-fundamentals
   - yakit-sql-injection
   - yakit-session-authz
   - yakit-server-side
+  - yakit-module-mastery
