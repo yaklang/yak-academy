@@ -183,52 +183,20 @@
     "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   },
   {
-   "slug": "vulinbox-fuzzer-headers",
-   "tutorial_slug": "yakit-fuzzer-replay",
-   "title": "Fuzzer 手搓请求：自定义头重放命令接口",
-   "category": "fuzz",
+   "slug": "vulinbox-mall-chain",
+   "tutorial_slug": "yakit-mall-chain",
+   "title": "商城业务链：四模块接力 1 分钱买下 89 元商品",
+   "category": "logic",
    "difficulty": "practitioner",
-   "description_md": "# 背景\n\nvulinbox 的命令模拟接口 `POST /vul/auth-bypass/unsafe/api/cmd` 接收 JSON 的 `cmd` 字段并执行模拟命令——浏览器表单只会发它写死的头，而 Web Fuzzer 可以任意增删请求头、改写请求体后重放。对整条请求（方法、路径、头、体）的完全控制，正是 Fuzzer 与浏览器的本质差别。\n\n# 任务\n\n启动环境后，向该接口重放一次 `cmd` 为 `ls` 的 POST 请求，并**手工添加自定义头 `X-Replay: yakit-fuzzer`**——这是题目要求的「用 Fuzzer 而不是浏览器」的标记，靶机认这个重放指纹。成功后解锁 flag 读取端点：`GET /flag` 读出本实例真 flag 并提交。\n\n> 提示：环境首页（实例地址根路径）是靶场的路由索引页；`cat flag.txt` 的命令注入路径在本题不适用（未注册 cat），正路就是 Fuzzer 重放。\n\n# 关于 flag\n\n本题采用**实例 flag**：真 flag 形如 `flag{lab-...}`，每次启动环境重新生成，仅对当前实例有效；`GET /flag` 端点带门禁，完成上述重放前直接访问得到 403，完成后自动解锁。",
-   "score": 150,
+   "description_md": "# 背景\n\n真实渗透不是单点漏洞一把梭，而是把工具串成流水线：代理看清业务 → 热加载脚本自动改包 → Fuzzer 手搓完成最后一击 → 编码穿过校验边界。本题把 Yakit 四个模块接成一条完整的业务链攻击：靶场商城里 89 元的商品，你要用 1 分钱买下它。\n\n商城接口（环境首页进「购物商城」`/mall/shop/index`；首页的 MacBook 是摆设，真正能买的是登录后个人页 `/mall/user/profile?id=3` 的商品 1～12，每件 89 元）：\n- 登录：`POST /mall/user/login`，JSON `{\"username\":\"user1\",\"password\":\"password123\"}`（预置账号），响应下发 `sessionID` Cookie，登录成功自动跳转个人页；\n- 下单：`POST /mall/order/submit`，需要登录会话，浏览器结算订单是紧凑 JSON、金额无小数位，形如 `{\"UserID\":3,\"OrderItems\":[{\"ProductName\":\"商品1\",\"Quantity\":\"1\",\"TotalPrice\":\"89\"}]}`，金额 `TotalPrice` 由客户端提交、服务端不重算。\n\n# 任务\n\n四步链，缺一不可（顺序不限）：\n\n1. **观察**：浏览器挂 Yakit MITM 代理，登录商城并完成一次真实结算，在 MITM 历史里看清订单 body——注意 `TotalPrice` 的实际原值（单件 89 元商品就是 `\"89\"`，没有小数位；JSON 冒号后无空格），热加载替换规则要对准这个原文；\n2. **改价**：在 MITM「热加载」挂 Yak 脚本，把结算订单的 `TotalPrice` 自动改写为 `\"0.01\"` 后浏览器再次结算——**网关只认浏览器结算订单被脚本改价**（手搓 Fuzzer 直接发 body 不算），这是本题练热加载的原因；\n3. **重放**：把改价订单「发送到 Web Fuzzer」，加浏览器表单发不出的自定义头 `X-Mall-Internal: yakit-order`（值以 yakit 开头）重放；\n4. **编码链**：口令 `codec~proof` 依次做 base64 → URL 编码，作为 `token` 请求 `GET /academy/codec/verify?token=...`，返回 `ok:true` 即通过（裸 base64 会 400：`+` 在 URL 里被解析成空格）。\n\n# 关于 flag\n\n本题采用**实例 flag**：靶机根路径提供 `GET /flag` 读取端点；flag 形如 `flag{lab-...}`，**每次启动环境都会重新生成**，仅对当前实例有效。该端点有门禁：上述四个信号（观察、改价、内部头重放、编码链）**全部命中前**直接访问得到 403；四步齐备后自动解锁，`GET /flag` 读出本实例 flag，在平台提交框中输入即可判定。\n\n> 配套教程（业务链攻击）逐步讲解 MITM、热加载、Web Fuzzer、Codec 四个模块各自怎么用，建议先读再打。",
+   "score": 300,
    "flag_mode": "instance",
    "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
    "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
    "hints": [
-    { "title": "重放要带什么", "content": "POST /vul/auth-bypass/unsafe/api/cmd，请求体 JSON 里 cmd 为 ls，另加一个头 X-Replay: yakit-fuzzer。", "cost": 10 },
-    { "title": "为什么浏览器不行", "content": "浏览器表单发不出自定义头——这正是本题要练的：Fuzzer 对整条请求的完全控制。", "cost": 15 }
-   ],
-   "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
-  },
-  {
-   "slug": "vulinbox-mitm-session",
-   "tutorial_slug": "yakit-mitm-session",
-   "title": "MITM 观察：截获并复用动态会话",
-   "category": "mitm",
-   "difficulty": "practitioner",
-   "description_md": "# 背景\n\n中间人代理的日常：截获明文登录流量，看清会话凭证怎么发、怎么用。靶场里有两套登录：**商城**（mall 模块）的登录永远下发固定值 `sessionID=fixedSessionID`（会话固定漏洞的产物，抓一百次都同一个值）；**logic 模块**的登录才像真实系统——每次动态签发一个 uuid 会话（`_cookie`）。\n\n# 任务\n\n启动环境后完成两步链：① 请求 `POST /logic/user/login`（JSON，账号 `user1` / 密码 `password123`）拿到**本次动态签发的** `_cookie` 会话 uuid（响应 JSON 里的 `id: 3` 是你的用户 id）；② 携带它请求 `GET /logic/user/profile?id=3`，响应渲染出你本人（user1）的资料。两步都命中后解锁 flag 读取端点：`GET /flag` 读出本实例真 flag 并提交。\n\n> 注意：预置的 `fixedSessionID` 是**诱饵**——那是商城会话固定漏洞的产物，不是本题要的动态会话。\n\n# 关于 flag\n\n本题采用**实例 flag**：真 flag 形如 `flag{lab-...}`，每次启动环境重新生成，仅对当前实例有效；`GET /flag` 端点带门禁，两步链完成前直接访问得到 403，完成后自动解锁。",
-   "score": 150,
-   "flag_mode": "instance",
-   "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
-   "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
-   "hints": [
-    { "title": "第一步的请求", "content": "POST /logic/user/login，JSON 体 {\"username\":\"user1\",\"password\":\"password123\"}，从响应的 Set-Cookie 里取本次签发的 _cookie uuid，响应里的 id:3 记下来。", "cost": 10 },
-    { "title": "第二步怎么带会话", "content": "GET /logic/user/profile?id=3，加请求头 Cookie: _cookie=<第一步签发的 uuid>，响应渲染出 user1 资料即命中。", "cost": 15 }
-   ],
-   "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
-  },  {
-   "slug": "vulinbox-codec-pipeline",
-   "tutorial_slug": "yakit-codec-pipeline",
-   "title": "Codec 编码链：把口令安全送到验证端点",
-   "category": "codec",
-   "difficulty": "apprentice",
-   "description_md": "# 背景\n\n编码无密钥、可逆、无处不在——payload 想穿过 URL 参数而不被截断，靠的是每一层都用对编码。最容易翻车的是 **base64 与 URL 的组合**：base64 输出里的 `+` 会被服务端解析成空格、`=` 是键值分隔符，原样塞进 URL，到达时已经不是你发出的那串。正确做法是 base64 之后再做一次 URL 编码（`+` → `%2B`、`=` → `%3D`）。\n\n# 任务\n\n启动环境后，把本关口令 `codec~proof` 依次做 **base64 编码 → URL 编码**，作为 `token` 参数请求验证端点 `GET /academy/codec/verify?token=...`。编码链全部正确时端点返回 `ok:true` 并解锁 flag 读取；错任何一环（最常见：忘了 URL 编码，`+` 在半路变成空格）只会得到 400。解锁后 `GET /flag` 读出本实例真 flag 并提交。\n\n# 关于 flag\n\n本题采用**实例 flag**：真 flag 形如 `flag{lab-...}`，每次启动环境重新生成，仅对当前实例有效；验证通过后 `GET /flag` 直接可读。",
-   "score": 100,
-   "flag_mode": "instance",
-   "challenge": { "type": "static", "flag": "flag{lab-{token}}" },
-   "env": { "image": "yak-academy/vulinbox:latest", "port": 8787 },
-   "hints": [
-    { "title": "编码链怎么做", "content": "Codec 里对口令先做 base64 编码（输出含 + 和 =），再对结果做一次 URL 编码：+ 变 %2B、= 变 %3D。", "cost": 10 },
-    { "title": "为什么必须做 URL 编码", "content": "base64 结果里的 + 在 URL 查询参数里会被服务端解析成空格——口令在半路就被改写，端点只会返回 400。", "cost": 15 }
+    { "title": "第一步观察怎么做", "content": "POST /mall/user/login，JSON 体 {\"username\":\"user1\",\"password\":\"password123\"}，从响应 Set-Cookie 取 sessionID 留用；网关认的就是这条真实登录流量。", "cost": 10 },
+    { "title": "改价与内部头重放", "content": "先用 MITM 抓一次浏览器结算，看清 body 原文（紧凑 JSON：金额在 OrderItems 的 TotalPrice，单件 89 元商品值就是 \"89\"，没有小数位、冒号后无空格）；MITM「热加载」挂 Yak 脚本把替换串 \"TotalPrice\":\"89\" 对准原文替换为 \"0.01\"（替换串与原文一字不差才命中），浏览器重新加购物车再结算即改价命中。再把改价订单发到 Web Fuzzer 加自定义头 X-Mall-Internal: yakit-order 重放。" },
+    { "title": "编码链最后一步", "content": "口令 codec~proof 先 base64 得 Y29kZWN+cHJvb2Y=，再 URL 编码（+ → %2B、= → %3D）得 Y29kZWN%2BcHJvb2Y%3D，请求 /academy/codec/verify?token=... 返回 ok:true；四步齐备后 /flag 解锁。", "cost": 20 }
    ],
    "links": [{ "name": "Vulinbox 靶场文档", "url": "https://yaklang.com/Yaklab/vulinbox/" }]
   }

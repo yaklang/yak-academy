@@ -842,6 +842,41 @@ func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) err
 	return s.challenges.Delete(ctx, slug)
 }
 
+// PruneBuiltinChallenges 内置导入的目录外清理：删除 is_builtin=true 但已不在
+// 当前目录（keepSlugs）里的题目。目录是内置内容的唯一事实源，残留行无条件
+// 清理——不复用 DeleteChallenge 的通关拦截（学生做过的旧内置题随版本下线是
+// 目录演进，不是管理员的删除误操作；提交事件 append-only 保留，派生数据只按
+// 事件流重放，不读题目行）。级联与 DeleteChallenge 一致：销毁运行中容器、
+// 删附件、删 flags/hints/lab_instances。返回清理行数。
+func (s *ChallengeService) PruneBuiltinChallenges(ctx context.Context, keepSlugs []string) (int, error) {
+	stale, err := s.challenges.FindBuiltinNotInSlugs(ctx, keepSlugs...)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, chal := range stale {
+		if s.env != nil {
+			instances, err := s.env.ListActiveByChallenge(ctx, chal.ID)
+			if err != nil {
+				return removed, err
+			}
+			for _, inst := range instances {
+				if err := s.env.AdminDestroyInstance(ctx, inst.ID); err != nil {
+					return removed, fmt.Errorf("destroy instance %d: %w", inst.ID, err)
+				}
+			}
+		}
+		if err := s.DeleteChallengeAttachments(ctx, chal.Slug); err != nil {
+			return removed, err
+		}
+		if err := s.challenges.Delete(ctx, chal.Slug); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 // challengeYML 实训常用 challenge.yml（扩展 difficulty/port/tutorial_slug/slug/flag_mode）。
 // 容器题必须同时提供 Dockerfile 与 docker-compose.yml（或 compose.yml）。
 type challengeYML struct {

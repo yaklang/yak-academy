@@ -23,7 +23,7 @@ test.describe('内置训练一键导入', () => {
       await expect(imageCard.getByRole('button', { name: '从 OSS 构建镜像' })).toBeDisabled()
     }
 
-    // 首次导入：确认弹窗 → 汇总提示（全新库为新增 14 + 教程 14；KEEP_STATE 复跑可能全量更新，故只锚定句式）
+    // 首次导入：确认弹窗 → 汇总提示（全新库为新增 12 + 教程 12；KEEP_STATE 复跑可能全量更新，故只锚定句式）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
     await expect(page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ })).toBeVisible()
@@ -33,10 +33,10 @@ test.describe('内置训练一键导入', () => {
     await expect(table.locator('tr', { hasText: 'vulinbox-ssrf-basic' })).toBeVisible()
     await expect(table.locator('tr', { hasText: 'vulinbox-jwt-none' })).toBeVisible()
 
-    // 重复导入 = 更新：本次运行首轮已全量落库，第二轮必然新增 0、更新 14、教程 14 篇（upsert 不重复）
+    // 重复导入 = 更新：本次运行首轮已全量落库，第二轮必然新增 0、更新 12、教程 12 篇（upsert 不重复）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
-    await expect(page.locator('.el-message', { hasText: '新增 0 题、更新 14 题、教程 14 篇' })).toBeVisible()
+    await expect(page.locator('.el-message', { hasText: '新增 0 题、更新 12 题、教程 12 篇' })).toBeVisible()
 
     // 学生题库：「教程题目」tab 专属内置题集，vulinbox 分类分组可见
     await loginAsStudent(page)

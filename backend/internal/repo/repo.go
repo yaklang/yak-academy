@@ -66,6 +66,9 @@ type TopicRepo interface {
 	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error
 	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
 	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
+	// FindBuiltinNotInSlugs 查不在当前内置目录里的内置 Topic 行（导入 prune：
+	// 目录外残留即清理对象；slugs 为空 = 全部内置行）。
+	FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Topic, error)
 }
 
 type RoomRepo interface {
@@ -82,6 +85,8 @@ type RoomRepo interface {
 	MarkBuiltin(ctx context.Context, slugs []string, builtin bool) error
 	// DeleteBySlugs 删除内容包时按 slug 批量清理，返回受影响行数。
 	DeleteBySlugs(ctx context.Context, slugs ...string) (int64, error)
+	// FindBuiltinNotInSlugs 查不在当前内置目录里的内置 Room 行（导入 prune）。
+	FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Room, error)
 }
 
 type ChallengeRepo interface {
@@ -113,6 +118,8 @@ type ChallengeRepo interface {
 	// Delete 删除题目（级联删 flags/hints/lab_instances 行，事务内）。
 	// 调用方负责先销毁运行中容器（service.EnvService）并拦截存在通关记录的删除。
 	Delete(ctx context.Context, slug string) error
+	// FindBuiltinNotInSlugs 查不在当前内置目录里的内置题目行（导入 prune）。
+	FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Challenge, error)
 }
 
 // ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源。

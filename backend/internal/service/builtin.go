@@ -42,6 +42,7 @@ type BuiltinImportResult struct {
 	Version    string   `json:"version"`
 	Created    int      `json:"created"`
 	Updated    int      `json:"updated"`
+	Removed    int      `json:"removed"`
 	Topics     int      `json:"topics"`
 	Rooms      int      `json:"rooms"`
 	Slugs      []string `json:"slugs"`
@@ -100,10 +101,17 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 	if _, err := s.challenge.MarkBuiltin(ctx, slugs, true); err != nil {
 		return nil, err
 	}
+	// 目录外清理：历史版本导入的内置行已不在当前目录（题目在教程 prune 之后，
+	// Room 的 ClearTutorialSlugs 已先行断开题目软引用）。
+	removed, err := s.challenge.PruneBuiltinChallenges(ctx, slugs)
+	if err != nil {
+		return nil, err
+	}
 	return &BuiltinImportResult{
 		Version:    manifest.Version,
 		Created:    created,
 		Updated:    updated,
+		Removed:    removed,
 		Topics:     topics,
 		Rooms:      rooms,
 		Slugs:      slugs,
@@ -309,6 +317,41 @@ func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, ro
 	// 命名空间，本次导入把它标记为内置——重复导入即补齐，无需额外迁移。
 	if err := s.MarkBuiltinTutorials(ctx, topicSlugs, roomSlugs); err != nil {
 		return 0, 0, err
+	}
+	// 目录外清理：历史版本导入、已不在当前目录的内置 Room/Topic 一并删除
+	//（级联语义与内容包删除一致：断开题目 tutorial_slug 软引用、清 Room 的
+	// Progress 行——派生表唯一例外写路径，见 event-sourcing-rules skill）。
+	staleRooms, err := s.rooms.FindBuiltinNotInSlugs(ctx, roomSlugs...)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(staleRooms) > 0 {
+		staleSlugs := make([]string, 0, len(staleRooms))
+		for _, r := range staleRooms {
+			staleSlugs = append(staleSlugs, r.Slug)
+		}
+		if _, err := s.challenge.ClearTutorialSlugs(ctx, staleSlugs); err != nil {
+			return 0, 0, err
+		}
+		if _, err := s.progress.DeleteByRoomSlugs(ctx, staleSlugs); err != nil {
+			return 0, 0, err
+		}
+		if _, err := s.rooms.DeleteBySlugs(ctx, staleSlugs...); err != nil {
+			return 0, 0, err
+		}
+	}
+	staleTopics, err := s.topics.FindBuiltinNotInSlugs(ctx, topicSlugs...)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(staleTopics) > 0 {
+		staleSlugs := make([]string, 0, len(staleTopics))
+		for _, t := range staleTopics {
+			staleSlugs = append(staleSlugs, t.Slug)
+		}
+		if _, err := s.topics.DeleteBySlugs(ctx, staleSlugs...); err != nil {
+			return 0, 0, err
+		}
 	}
 	return len(parsed.Topics), len(parsed.Rooms), nil
 }

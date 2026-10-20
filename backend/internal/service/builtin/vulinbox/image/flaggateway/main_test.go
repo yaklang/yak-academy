@@ -429,37 +429,6 @@ func TestUnlockRulesTable(t *testing.T) {
 			resp: respSnap{Body: `{"FileTypeHeaderType":"text/x-php"}`},
 			want: false,
 		},
-		{
-			name: "fuzzer-headers hit",
-			slug: "vulinbox-fuzzer-headers",
-			req: reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd",
-				Header: http.Header{"X-Replay": {"yakit-fuzzer"}}, Body: `{"command":"ls"}`},
-			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
-			want: true,
-		},
-		{
-			name: "fuzzer-headers without replay header (plain POST anyone can send)",
-			slug: "vulinbox-fuzzer-headers",
-			req:  reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd", Body: `{"command":"ls"}`},
-			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
-			want: false,
-		},
-		{
-			name: "fuzzer-headers unrelated replay header value",
-			slug: "vulinbox-fuzzer-headers",
-			req: reqSnap{Method: "POST", Path: "/vul/auth-bypass/unsafe/api/cmd",
-				Header: http.Header{"X-Replay": {"curl"}}, Body: `{"command":"ls"}`},
-			resp: respSnap{Status: http.StatusOK, Body: "file1\nfile2"},
-			want: false,
-		},
-		{
-			name: "fuzzer-headers replay header but not the cmd api",
-			slug: "vulinbox-fuzzer-headers",
-			req: reqSnap{Method: "POST", Path: "/other/api",
-				Header: http.Header{"X-Replay": {"yakit-fuzzer"}}, Body: `{"command":"ls"}`},
-			resp: respSnap{Status: http.StatusOK, Body: "file1"},
-			want: false,
-		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -486,36 +455,181 @@ func TestXssTwoPathUnlock(t *testing.T) {
 	}
 }
 
-// TestMitmSessionTwoStepUnlock 观察类：logic 模块动态登录 + 动态会话复用
-// 两步都命中才解锁；预置 fixedSessionID（会话固定漏洞产物，能渲染）不算。
-func TestMitmSessionTwoStepUnlock(t *testing.T) {
-	rule := unlockRules["vulinbox-mitm-session"]
-	gate := newFlagGate()
+// TestMallChainFourStepUnlock 商城业务链综合题：observe（商城登录）、
+// tamper（改价 0.01 下单）、replay（内部标记头重放）、codec（编码链端点）
+// 四个信号齐备才解锁；缺任何一步都不放行。信号与顺序无关——本用例刻意
+// 把 tamper 留到最后：其余三信号齐备后先用手搓改价验证不命中（回归负例），
+// 再用热加载形态命中。
+func TestMallChainFourStepUnlock(t *testing.T) {
+	upMux := http.NewServeMux()
+	upMux.HandleFunc("/mall/user/login", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":3,"success":true,"message":"Login successful"}`)
+	})
+	upMux.HandleFunc("/mall/order/submit", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "订单提交成功")
+	})
+	upSrv := httptest.NewServer(upMux)
+	t.Cleanup(upSrv.Close)
+	up, _ := url.Parse(upSrv.URL)
+	gw := htttestGateway(t, "flag{lab-mall}", "vulinbox-mall-chain", up)
 
-	profileHTML := "<td>user1</td><td>user</td>"
-	// 诱饵：预置 fixedSessionID 渲染成功，但不是动态会话——不算 replay
-	if rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile",
-		Header: http.Header{"Cookie": {"_cookie=fixedSessionID"}}},
-		respSnap{Status: http.StatusOK, Body: profileHTML}) {
-		t.Fatal("preset fixedSessionID must not unlock")
+	// 零攻击：/flag 403
+	if resp, err := http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag before chain = %d, want 403", resp.StatusCode)
 	}
-	// 半程：动态登录命中，但还没复用
-	if rule(gate, reqSnap{Method: "POST", Path: "/logic/user/login", Body: `{"username":"user1"}`},
-		respSnap{Status: http.StatusOK, Body: `{"id":3,"success":true}`}) {
-		t.Fatal("login alone must not unlock")
+
+	// 负例：observe（商城登录）+ 原始价下单（无标记头）——observe 命中，
+	// 其余未命中。原始价用浏览器结算形态（OrderItems/TotalPrice、Mozilla UA）。
+	resp, err := http.Post(gw+"/mall/user/login", "application/json",
+		strings.NewReader(`{"username":"user1","password":"password123"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// 带着旧会话的登录不算新登录（响应 Set-Cookie 才是链的起点）
-	rule(gate, reqSnap{Method: "POST", Path: "/logic/user/login",
-		Header: http.Header{"Cookie": {"_cookie=stale"}}, Body: `{"username":"user1"}`},
-		respSnap{Status: http.StatusOK, Body: `{"success":true}`})
-	// 无会话访问资料被拦（未登录页）——不算 replay
-	rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile"},
-		respSnap{Status: http.StatusOK, Body: `alert("请先登录")`})
-	// 正例：携带本次动态会话访问资料，渲染出本人资料
-	if !rule(gate, reqSnap{Method: "GET", Path: "/logic/user/profile",
-		Header: http.Header{"Cookie": {"_cookie=01846ea4-0e95-4938-b91b-d95263fd356d"}}},
-		respSnap{Status: http.StatusOK, Body: profileHTML}) {
-		t.Fatal("dynamic login + dynamic session replay must unlock")
+	resp.Body.Close()
+	orig, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`))
+	orig.Header.Set("Content-Type", "application/json")
+	orig.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
+	resp, err = http.DefaultClient.Do(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after observe only = %d, want still 403", resp.StatusCode)
+	}
+
+	// 负例：replay——原价浏览器订单 + Fuzzer 标记头（观察到的原单重放，
+	// 改价信号未命中）——observe+replay 仍不放行
+	replayed, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"89"}]}`))
+	replayed.Header.Set("Content-Type", "application/json")
+	replayed.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
+	replayed.Header.Set("X-Mall-Internal", "yakit-order")
+	resp, err = http.DefaultClient.Do(replayed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after observe+replay = %d, want still 403", resp.StatusCode)
+	}
+
+	// 负例：编码链先过（四步可乱序做）——只差 tamper 仍不放行
+	good, err := http.Get(gw + "/academy/codec/verify?token=Y29kZWN%2BcHJvb2Y%3D")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(good.Body)
+	if good.StatusCode != http.StatusOK || !strings.Contains(string(body), `"ok":true`) {
+		t.Fatalf("codec verify = %d %q, want 200 ok:true", good.StatusCode, body)
+	}
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after observe+replay+codec = %d, want still 403", resp.StatusCode)
+	}
+
+	// 回归负例（2026-10-19，PR refactor/module-case-integration）：其余三信号
+	// 已齐备，此刻 Fuzzer 手搓 snake_case 改价订单必须仍不解锁——旧信号
+	// 匹配 snake_case total_price 时这里会提前放行 /flag（手搓即可通关，
+	// 热加载名存实亡）。修复后 tamper 锚定浏览器结算形态（OrderItems 的
+	// TotalPrice + Mozilla UA），手搓 body 不命中
+	curlTamper, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"product_id":70,"quantity":1,"total_price":"0.01"}`))
+	curlTamper.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(curlTamper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /flag after Fuzzer-only tamper = %d, want still 403 (tamper must ride browser traffic)", resp.StatusCode)
+	}
+
+	// 正例：热加载改价（tamper）——浏览器结算订单被 MITM 热加载脚本把
+	// TotalPrice 改写为 0.01（浏览器 UA + OrderItems 形态）。上游 JSON.stringify
+	// 是紧凑格式（冒号后无空格、金额无小数位），replace 后仍是紧凑串；
+	// 网关正则容忍空白，紧凑/格式化都命中。纯浏览器形态、不带 Fuzzer 标记头
+	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"0.01"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 四步齐备：/flag 放行
+	if resp, err = http.Get(gw + "/flag"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "flag{lab-mall}") {
+		t.Fatalf("GET /flag after full chain = %d %q, want 200 flag", resp.StatusCode, body)
+	}
+}
+
+// TestMallChainCodecLastUnlock 乱序回归：编码链作为最后一步完成时，verify
+// 端点 handler 内即时裁决四信号——否则编码链之后再无流量触发 unlockRules
+// 的 seenAll，/flag 会永远锁死（e2e 实测踩过：前三步齐备后过 verify，
+// GET /flag 仍 403）。
+func TestMallChainCodecLastUnlock(t *testing.T) {
+	upMux := http.NewServeMux()
+	upMux.HandleFunc("/mall/user/login", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":3,"success":true,"message":"Login successful"}`)
+	})
+	upMux.HandleFunc("/mall/order/submit", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "订单提交成功")
+	})
+	upSrv := httptest.NewServer(upMux)
+	t.Cleanup(upSrv.Close)
+	up, _ := url.Parse(upSrv.URL)
+	gw := htttestGateway(t, "flag{lab-mall}", "vulinbox-mall-chain", up)
+
+	// ①②③：登录观察 + 浏览器改价订单 + 标记头重放（一个请求带 tamper+replay）
+	resp, err := http.Post(gw+"/mall/user/login", "application/json",
+		strings.NewReader(`{"username":"user1","password":"password123"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	req, _ := http.NewRequest(http.MethodPost, gw+"/mall/order/submit",
+		strings.NewReader(`{"UserID":3,"OrderItems":[{"ProductName":"商品1","Quantity":"1","TotalPrice":"0.01"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0")
+	req.Header.Set("X-Mall-Internal", "yakit-order")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// ④ 编码链最后完成：verify 响应即宣告解锁，紧跟的 GET /flag 必须放行
+	good, err := http.Get(gw + "/academy/codec/verify?token=Y29kZWN%2BcHJvb2Y%3D")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(good.Body)
+	if good.StatusCode != http.StatusOK || !strings.Contains(string(body), "/flag 已解锁") {
+		t.Fatalf("codec verify (last step) = %d %q, want 200 unlocked message", good.StatusCode, body)
+	}
+	resp, err = http.Get(gw + "/flag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "flag{lab-mall}") {
+		t.Fatalf("GET /flag right after codec-last verify = %d %q, want 200 flag", resp.StatusCode, body)
 	}
 }
 

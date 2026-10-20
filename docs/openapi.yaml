@@ -1325,9 +1325,13 @@ paths:
         vulinbox 基础镜像（失败则整体 422 不入库，与题目包"构建失败不入库"
         语义一致），最后逐题 upsert（slug 重复 = 更新）；未配置 Docker 驱动
         （noop）时跳过镜像构建仅导入定义，image_built=false。
+        导入完成后同步清理：库中 is_builtin=true 但已不在当前目录里的
+        题目/Room/Topic（历史版本导入的残留）按删除级联清理（销毁运行中
+        实例、删附件/flags/hints；提交事件 append-only 保留），返回 removed
+        计数。目录是内置内容的唯一事实源。
       responses:
         '200':
-          description: OK（返回训练集版本、新增/更新计数、教程计数与镜像构建状态）
+          description: OK（返回训练集版本、新增/更新/清理计数、教程计数与镜像构建状态）
           content:
             application/json:
               schema:
@@ -1336,6 +1340,7 @@ paths:
                   version: { type: string, description: 内置训练集版本 }
                   created: { type: integer, description: 本次新增题数 }
                   updated: { type: integer, description: 本次更新题数 }
+                  removed: { type: integer, description: 本次清理的目录外内置残留题数（历史版本导入遗留） }
                   topics: { type: integer, description: 本次导入（upsert）的教程 Topic 数 }
                   rooms: { type: integer, description: 本次导入（upsert）的教程 Room 数（与题 1:1） }
                   slugs: { type: array, items: { type: string } }
