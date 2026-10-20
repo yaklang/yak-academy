@@ -123,42 +123,86 @@ async function submit() {
 </script>
 
 <template>
-  <div class="login">
-    <div class="terminal-line"><span class="prompt">$</span> ssh user@yak-academy <span class="cursor">▊</span></div>
-    <el-form @submit.prevent="submit">
-      <h2>yak-academy {{ mode === 'login' ? '登录' : '注册' }}</h2>
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div class="hero-brand"><span class="logo">&lt;/&gt;</span> yak-academy</div>
+      <h1 class="hero-title">安全实训<br><span class="accent">从入门到实战</span></h1>
+      <p class="hero-sub">文字 + 视频教程，配套独立靶机题目。<br>通关即积分，进度实时结算。</p>
+      <div class="hero-points">
+        <span class="pt"><span class="pt-mark">▸</span> 专题式教程路线</span>
+        <span class="pt"><span class="pt-mark">▸</span> 一键启动容器靶机</span>
+        <span class="pt"><span class="pt-mark">▸</span> 排行榜 / 徽章成长体系</span>
+      </div>
+    </div>
+    <div class="login">
+      <div class="terminal-line"><span class="prompt">$</span> ssh user@yak-academy <span class="cursor">▊</span></div>
+      <el-form @submit.prevent="submit">
+        <h2>yak-academy {{ mode === 'login' ? '登录' : '注册' }}</h2>
 
-      <template v-if="mode === 'login'">
-        <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
-        <el-form-item><el-input v-model="password" type="password" placeholder="密码" show-password /></el-form-item>
-        <el-button type="primary" native-type="submit" :loading="loading" style="width: 100%">登录</el-button>
-        <div class="switch">还没有账号？<el-link type="primary" :underline="false" @click="mode = 'register'">手机验证码注册</el-link></div>
-      </template>
+        <template v-if="mode === 'login'">
+          <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
+          <el-form-item><el-input v-model="password" type="password" placeholder="密码" show-password /></el-form-item>
+          <el-button type="primary" native-type="submit" :loading="loading" class="submit-btn">登录</el-button>
+          <div class="switch">还没有账号？<el-link type="primary" :underline="false" @click="mode = 'register'">手机验证码注册</el-link></div>
+        </template>
 
-      <template v-else>
-        <el-form-item><el-input v-model="phone" placeholder="手机号（仅用于注册验证）" maxlength="11" /></el-form-item>
-        <el-form-item>
-          <div class="code-row">
-            <el-input v-model="code" placeholder="验证码" maxlength="6" inputmode="numeric" />
-            <el-button :disabled="countdown > 0" :loading="sending" @click="sendCode">
-              {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
-            </el-button>
-          </div>
-          <div v-if="sentCode" class="code-hint">
-            验证码：<b>{{ sentCode }}</b>（5 分钟内有效，可直接复制填入）
-          </div>
-        </el-form-item>
-        <el-form-item><el-input v-model="username" placeholder="用户名（3-64 字符，登录用）" /></el-form-item>
-        <el-form-item><el-input v-model="password" type="password" placeholder="密码（至少 6 位）" show-password /></el-form-item>
-        <el-button type="primary" native-type="submit" :loading="loading" style="width: 100%">注册并进入</el-button>
-        <div class="switch">已有账号？<el-link type="primary" :underline="false" @click="mode = 'login'">返回登录</el-link></div>
-      </template>
-    </el-form>
+        <template v-else>
+          <el-form-item><el-input v-model="phone" placeholder="手机号（仅用于注册验证）" maxlength="11" /></el-form-item>
+          <el-form-item>
+            <div class="code-row">
+              <el-input v-model="code" placeholder="验证码" maxlength="6" inputmode="numeric" />
+              <el-button :disabled="countdown > 0" :loading="sending" @click="sendCode">
+                {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
+              </el-button>
+            </div>
+            <div v-if="sentCode" class="code-hint">
+              验证码：<b>{{ sentCode }}</b>（5 分钟内有效，可直接复制填入）
+            </div>
+          </el-form-item>
+          <el-form-item><el-input v-model="username" placeholder="用户名（3-64 字符，登录用）" /></el-form-item>
+          <el-form-item><el-input v-model="password" type="password" placeholder="密码（至少 6 位）" show-password /></el-form-item>
+          <el-button type="primary" native-type="submit" :loading="loading" class="submit-btn">注册并进入</el-button>
+          <div class="switch">已有账号？<el-link type="primary" :underline="false" @click="mode = 'login'">返回登录</el-link></div>
+        </template>
+      </el-form>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.login { max-width: 360px; margin: 10vh auto; }
+.login-wrap {
+  min-height: 100vh; display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  max-width: 1060px; margin: 0 auto; padding: 0 1.5rem;
+  gap: 3rem;
+}
+.login-hero { display: flex; flex-direction: column; gap: 1.1rem; }
+.hero-brand {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: Consolas, monospace; font-weight: 700; font-size: 1rem;
+  color: var(--el-text-color-primary);
+}
+.hero-brand .logo {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 7px;
+  background: linear-gradient(135deg, rgba(0, 230, 118, 0.22), rgba(0, 230, 118, 0.06));
+  border: 1px solid var(--el-color-primary-light-7);
+  color: var(--el-color-primary); font-size: 0.75rem;
+}
+.hero-title {
+  font-size: 2.6rem; line-height: 1.25; margin: 0;
+  font-weight: 800; color: var(--el-text-color-primary);
+}
+.accent { color: var(--el-color-primary); }
+.hero-sub {
+  margin: 0; color: var(--el-text-color-secondary);
+  font-size: 0.98rem; line-height: 1.7;
+}
+.hero-points { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
+.pt { color: var(--el-text-color-regular); font-size: 0.9rem; }
+.pt-mark { color: var(--el-color-primary); margin-right: 0.5rem; font-size: 0.8rem; }
+.login { max-width: 380px; width: 100%; justify-self: end; }
 .terminal-line {
   font-family: Consolas, monospace; font-size: 0.85rem;
   color: var(--el-text-color-secondary); margin-bottom: 0.8rem;
@@ -169,10 +213,12 @@ async function submit() {
 .login :deep(.el-form) {
   background: var(--el-bg-color-overlay);
   border: 1px solid var(--el-border-color);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 2rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 .login h2 { margin: 0 0 1.2rem; font-family: Consolas, monospace; }
+.submit-btn { width: 100%; }
 .code-row { display: flex; gap: 0.5rem; width: 100%; }
 .code-hint {
   width: 100%; margin-top: 0.4rem; font-size: 0.82rem;
@@ -182,5 +228,9 @@ async function submit() {
 .switch {
   margin-top: 1rem; font-size: 0.85rem;
   color: var(--el-text-color-secondary); text-align: center;
+}
+@media (max-width: 880px) {
+  .login-wrap { grid-template-columns: 1fr; padding-top: 4vh; }
+  .login { justify-self: stretch; margin: 0 auto; }
 }
 </style>

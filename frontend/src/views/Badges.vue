@@ -24,7 +24,7 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>徽章</h2>
+  <h2 class="page-title">徽<span class="accent">章</span></h2>
   <p class="hint">已获得 {{ earnedCount }} / {{ badges.length }} 枚 —— 完成题目、学习教程与积分里程碑自动解锁。</p>
   <el-skeleton v-if="loading" :rows="4" animated />
   <div v-else class="grid">

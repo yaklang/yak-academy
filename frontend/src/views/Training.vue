@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 题库（Burp all-labs 风格）：页顶按题库 tab 切换（教程题目/CTF 题目/ACM 题目），
+// 题库：页顶按题库 tab 切换（教程题目/CTF 题目/ACM 题目），
 // tab 内过滤器支持按题目类型（category，客户端）与是否内置（服务端）筛选，
-// 列表按 category 分组仅展示标题/难度/分值/容器/通关状态；点题目进详情页
-// （启动容器、提交 flag 都在详情完成，列表保持纯浏览）。一次拉全量（page_size=100）。
+// 按 category 分组的卡片网格（CTFd challenges 风格），卡片展示
+// 标题/难度/分值/容器/通关状态；点题目进详情页（启动容器、提交 flag
+// 都在详情完成，列表保持纯浏览）。一次拉全量（page_size=100）。
 // 普通端与管理端共用。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -43,6 +44,7 @@ const groups = computed(() => {
 })
 
 const solvedCount = computed(() => items.value.filter((it) => it.solved).length)
+const solvedPercent = computed(() => (total.value > 0 ? Math.round((solvedCount.value / total.value) * 100) : 0))
 
 const base = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
 
@@ -85,10 +87,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="head">
-    <h2>题库</h2>
-    <span v-if="total" class="stat">{{ solvedCount }}/{{ total }} 已通关</span>
-  </div>
+  <header class="head">
+    <h2 class="page-title">题<span class="accent">库</span></h2>
+    <div v-if="total" class="solve-progress">
+      <span class="label">{{ solvedCount }}/{{ total }}</span>
+      <el-progress :percentage="solvedPercent" :stroke-width="8" class="bar" />
+      <span class="label">{{ solvedPercent }}%</span>
+    </div>
+  </header>
 
   <el-tabs v-model="activeBank" class="bank-tabs">
     <el-tab-pane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
@@ -114,44 +120,82 @@ onMounted(load)
   />
   <template v-else>
     <section v-for="g in groups" :key="g.category" class="group">
-      <h3 class="cat">{{ g.category }}</h3>
-      <div v-for="it in g.items" :key="it.id" class="row">
-        <router-link class="title" :to="`${base}/training/${it.slug}`">
-          {{ it.title }}
-          <el-tag v-if="it.solved" type="success" size="small" class="inline-tag">已通关</el-tag>
-          <el-tag v-else-if="it.has_env" type="primary" size="small" class="inline-tag">容器环境</el-tag>
-          <el-tag v-if="it.is_builtin" size="small" class="inline-tag">内置</el-tag>
+      <header class="cat-head">
+        <h3 class="cat">{{ g.category }}</h3>
+        <span class="cat-count">{{ g.items.length }} 题</span>
+      </header>
+      <div class="card-grid">
+        <router-link
+          v-for="it in g.items"
+          :key="it.id"
+          class="row chal-link"
+          :to="`${base}/training/${it.slug}`"
+        >
+          <div class="chal-card tall-card" :class="{ solved: it.solved }">
+            <div class="chal-title">
+              <span class="title-text">{{ it.title }}</span>
+              <span v-if="it.solved" class="solved-check" title="已通关">✓</span>
+            </div>
+            <div class="card-meta">
+              <el-tag :type="difficultyType(it.difficulty)" size="small" effect="plain">
+                {{ it.difficulty }}
+              </el-tag>
+              <span class="score">{{ it.score }} 分</span>
+              <span class="spacer" />
+              <el-tag v-if="it.solved" type="success" size="small">已通关</el-tag>
+              <el-tag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器环境</el-tag>
+              <el-tag v-if="it.is_builtin" size="small" effect="plain">内置</el-tag>
+            </div>
+          </div>
         </router-link>
-        <span class="right">
-          <el-tag :type="difficultyType(it.difficulty)" size="small">{{ it.difficulty }}</el-tag>
-          <span class="score">{{ it.score }} 分</span>
-        </span>
       </div>
     </section>
   </template>
 </template>
 
 <style scoped>
-.head { display: flex; align-items: baseline; gap: 1rem; }
-.stat { color: var(--el-text-color-secondary); font-size: 0.9rem; font-family: Consolas, monospace; }
+.head { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.accent { color: var(--el-color-primary); }
+.solve-progress { flex: 1; min-width: 220px; max-width: 380px; }
+.solve-progress .bar { flex: 1; }
+.solve-progress .bar :deep(.el-progress__text) { display: none; }
 .bank-tabs { margin-bottom: 0.25rem; }
 .filters { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; }
 .filter { width: 200px; }
-.group { margin-bottom: 2rem; max-width: 860px; }
-.cat {
-  font-size: 0.95rem; color: var(--el-color-primary);
+.group { margin-bottom: 2.25rem; }
+.cat-head {
+  display: flex; align-items: baseline; gap: 0.7rem;
+  margin-bottom: 0.9rem;
   border-bottom: 1px solid var(--el-border-color);
-  padding-bottom: 0.4rem; margin-bottom: 0.3rem;
-  font-family: Consolas, monospace; text-transform: lowercase;
+  padding-bottom: 0.45rem;
 }
-.row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--el-border-color-extra-light);
+.cat {
+  font-size: 1rem; color: var(--el-color-primary); margin: 0;
+  font-family: Consolas, monospace;
 }
-.row:hover { background: var(--el-fill-color-light); }
-.title { color: var(--el-text-color-primary); text-decoration: none; font-size: 0.95rem; }
-.title:hover { color: var(--el-color-primary); }
-.inline-tag { margin-left: 0.5rem; }
-.right { display: flex; align-items: center; gap: 0.7rem; }
+.cat::before { content: '# '; opacity: 0.7; }
+.cat-count { color: var(--el-text-color-secondary); font-size: 0.8rem; font-family: Consolas, monospace; }
+.chal-link { text-decoration: none; color: inherit; }
+.chal-card {
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 0.95rem 1.05rem 0.85rem;
+}
+.chal-card.solved { border-color: rgba(0, 230, 118, 0.35); }
+.chal-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; }
+.title-text {
+  color: var(--el-text-color-primary); font-size: 0.98rem; font-weight: 600;
+  line-height: 1.45;
+}
+.solved-check {
+  color: var(--el-color-primary); font-weight: 700;
+  border: 1px solid var(--el-color-primary-light-7);
+  background: var(--el-color-primary-light-9);
+  border-radius: 50%; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.78rem; flex: none;
+}
+.chal-card .spacer { flex: 1; }
 .score { color: var(--el-text-color-secondary); font-size: 0.85rem; font-family: Consolas, monospace; }
 </style>

@@ -256,15 +256,15 @@ onUnmounted(stopAutoSolvePolling)
 <template>
   <el-skeleton v-if="loading" :rows="6" animated />
   <div v-else-if="challenge" class="page">
-    <div class="head">
-      <h2>{{ challenge.title }}</h2>
+    <header class="head">
+      <h2 class="title">{{ challenge.title }}</h2>
       <span class="tags">
-        <el-tag :type="difficultyType(challenge.difficulty)">{{ challenge.difficulty }}</el-tag>
-        <el-tag type="info">{{ challenge.score }} 分</el-tag>
+        <el-tag :type="difficultyType(challenge.difficulty)" effect="plain">{{ challenge.difficulty }}</el-tag>
+        <el-tag type="info" effect="plain" class="score-tag">{{ challenge.score }} 分</el-tag>
         <el-tag v-if="challenge.solved" type="success">已通关</el-tag>
-        <el-tag v-if="challenge.has_env" type="primary">容器环境</el-tag>
+        <el-tag v-if="challenge.has_env" type="primary" effect="plain">容器环境</el-tag>
       </span>
-    </div>
+    </header>
 
     <router-link
       v-if="challenge.tutorial_slug && challenge.tutorial_topic_slug"
@@ -384,9 +384,16 @@ onUnmounted(stopAutoSolvePolling)
 
 <style scoped>
 .page { max-width: 860px; }
-.head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
-.tags { display: flex; gap: 0.4rem; }
-.tutorial-link { display: inline-block; margin: 0.5rem 0; color: var(--el-color-primary); text-decoration: none; }
+.head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.6rem;
+  border-bottom: 1px solid var(--el-border-color);
+  padding-bottom: 0.9rem; margin-bottom: 0.9rem;
+}
+.title { margin: 0; font-size: 1.45rem; font-weight: 700; }
+.tags { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.score-tag { font-family: Consolas, monospace; }
+.tutorial-link { display: inline-block; margin: 0.4rem 0 0.8rem; color: var(--el-color-primary); text-decoration: none; }
 .description { line-height: 1.7; margin: 1rem 0 2rem; }
 .description :deep(pre) { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; overflow: auto; }
 .description :deep(code) { background: var(--el-fill-color-light); padding: 0.1rem 0.3rem; border-radius: 3px; }

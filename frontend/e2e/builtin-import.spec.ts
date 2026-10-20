@@ -84,9 +84,9 @@ test.describe('内置训练一键导入', () => {
 
     // 教程首页出现内置专题（与 global-setup 上传的种子教程包并存）
     await page.getByRole('link', { name: '教程', exact: true }).click()
-    await expect(page.locator('.card-link', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
-    await expect(page.locator('.card-link', { hasText: 'SQL 注入实战' })).toBeVisible()
-    await page.locator('.card-link', { hasText: 'Yakit 上手与流量操控' }).click()
-    await expect(page.locator('.card-link', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
+    await expect(page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
+    await expect(page.locator('.topic-link', { hasText: 'SQL 注入实战' })).toBeVisible()
+    await page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' }).click()
+    await expect(page.locator('.room-link', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
   })
 })

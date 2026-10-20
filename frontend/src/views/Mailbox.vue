@@ -69,7 +69,7 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>站内邮箱</h2>
+  <h2 class="page-title">站内<span class="accent">邮箱</span></h2>
   <p class="hint">
     只收不发：竞赛邀请等系统通知投递到这里；当前未读 {{ unread }} 封。点开邮件即标记已读。
   </p>
