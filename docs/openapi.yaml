@@ -33,6 +33,21 @@ components:
               type: string
               enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, CONFLICT, INTERNAL]
             message: { type: string }
+    YakEngineStatus:
+      type: object
+      required: [configured, path, version, download]
+      properties:
+        configured: { type: boolean, description: 引擎已装配（code 判定与自测运行可用） }
+        path: { type: string, description: 当前引擎路径；未装配时为下载目标路径 }
+        version: { type: string, description: 已知引擎版本（下载完成时解析；未知为空） }
+        download:
+          type: object
+          required: [state, received, total]
+          properties:
+            state: { type: string, enum: [idle, running, done, failed] }
+            received: { type: integer, description: 已接收字节数 }
+            total: { type: integer, description: 总字节数（Content-Length；未知为 -1） }
+            error: { type: string, description: 失败原因（state=failed 时） }
     Page:
       type: object
       properties:
@@ -1581,6 +1596,58 @@ paths:
                 properties:
                   image_tag: { type: string, description: 本次构建的镜像 tag }
                   built: { type: boolean, description: 恒为 true }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/challenges/engine/yak:
+    get:
+      tags: [admin]
+      summary: yak 判题引擎状态（ACM 编程题 tab 引擎状态卡数据源）
+      description: |-
+        configured = 判题/自测运行可用（引擎已装配：启动时 ACADEMY_YAK_BIN
+        或数据目录探测，或此前经下载端点装配）。path 为当前引擎路径
+        （未装配时为下载目标路径，供下载前展示）。version 为已知版本
+        （下载完成后解析；未知为空串）。download 为最近一次下载任务状态
+        （进程内存，重启回到 idle）。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configured, path, version, download]
+                properties:
+                  configured: { type: boolean, description: 引擎已装配（code 判定与自测运行可用） }
+                  path: { type: string, description: 当前引擎路径；未装配时为下载目标路径 }
+                  version: { type: string, description: 已知引擎版本（下载完成时解析；未知为空） }
+                  download:
+                    type: object
+                    required: [state, received, total]
+                    properties:
+                      state: { type: string, enum: [idle, running, done, failed], description: 下载任务状态 }
+                      received: { type: integer, description: 已接收字节数 }
+                      total: { type: integer, description: 总字节数（Content-Length；未知为 -1） }
+                      error: { type: string, description: 失败原因（state=failed 时） }
+
+  /admin/challenges/engine/yak/download:
+    post:
+      tags: [admin]
+      summary: 从官方 OSS 下载 yak 判题引擎并即时装配
+      description: |-
+        异步任务：按服务端运行时 GOOS/GOARCH 从 yaklang 官方 OSS
+        （oss-qn.yaklang.com/yak/latest/）下载引擎二进制（约 220MB），
+        流式写入数据目录（.part 临时文件 + 原子改名，0755），完成后即时
+        装配判题引擎（无需重启；路径探测在重启后仍生效）。响应 202 返回
+        当前状态，进度经 GET /admin/challenges/engine/yak 轮询
+        （state=running 时 received/total 递增）。已在下载中返回 422。
+      responses:
+        '202':
+          description: Accepted（任务已受理）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YakEngineStatus'
         '422': { $ref: '#/components/responses/ErrorResp' }
         '500': { $ref: '#/components/responses/ErrorResp' }
 

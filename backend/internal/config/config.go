@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -45,6 +46,10 @@ type Config struct {
 	// code 题判定 internal_error）。判题进程以本进程子进程运行（限时杀进程），
 	// 生产部署应指向容器内 yak 二进制并配合最小权限运行。
 	YakBin string
+	// YakDownloadDir yak 引擎二进制的管理端 OSS 下载落盘目录（题目管理
+	// ACM tab「从 OSS 下载引擎」；空 = SQLite 数据库所在目录）。下载成功
+	// 后无需重启即装配；重启时自动探测该目录下的 yak 二进制。
+	YakDownloadDir string
 
 	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
 	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
@@ -75,6 +80,7 @@ func Load() *Config {
 		PublicURL:          getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 		InstancePublicHost: getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
 		YakBin:             getenv("ACADEMY_YAK_BIN", ""),
+		YakDownloadDir:     getenv("ACADEMY_YAK_DIR", filepath.Dir(getenv("ACADEMY_DB", "academy.db"))),
 		SmsShowCode:        getenvBool("ACADEMY_SMS_SHOW_CODE"),
 	}
 }

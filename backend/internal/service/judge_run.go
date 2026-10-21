@@ -91,7 +91,7 @@ func (s *JudgeService) CreateCodeRun(ctx context.Context, userID uint, slug, sou
 	if chal == nil || !chal.Published(s.now()) || chal.Type != model.ChallengeCode {
 		return "", ErrNotFound
 	}
-	if s.engine == nil {
+	if s.codeEngine() == nil {
 		return "", fmt.Errorf("%w: code engine not configured (self-test unavailable)", ErrValidation)
 	}
 	if len(source) > maxCodeSource {
@@ -196,9 +196,16 @@ func (s *JudgeService) executeCodeRun(run *codeRun, source, input, answer string
 	st.mu.Unlock()
 
 	start := s.now()
+	engine := s.codeEngine() // 引擎只增不撤（下载换装），创建时已校验非 nil；防御断言
+	if engine == nil {
+		st.mu.Lock()
+		run.status, run.outcome, run.stderr = runDone, "re", "code engine unavailable"
+		st.mu.Unlock()
+		return
+	}
 	runCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeLimitS)*time.Second)
 	defer cancel()
-	out, err := s.engine.Run(runCtx, source, input)
+	out, err := engine.Run(runCtx, source, input)
 	elapsed := s.now().Sub(start)
 
 	st.mu.Lock()
