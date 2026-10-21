@@ -36,7 +36,7 @@ worker 消费 → 判定（flag 题：比对；编程题：CodeEngine 逐组运�
 ```
 
 - **flag 题**（type=flag）：比对目标见下表；恒时比较，禁止 == 比较。
-- **编程题**（type=code）：判定结论写 `Submission.verdict`（ac/wa/tle/re/internal_error），`status` 仍为 pending/correct/incorrect——积分/排行派生管线对两类题完全一致（verdict 只影响前端展示与 AC 判定语义）。逐组 lazy 判定（首个失败即停），输出比对 token 级空白不敏感。引擎由 `ACADEMY_YAK_BIN` 门控，未配置 = internal_error（不是 error，是合法 verdict，仍走事件流）。
+- **编程题**（type=code）：判定结论写 `Submission.verdict`（全过 = ac，否则首个失败组的 wa/tle/re/internal_error），`status` 仍为 pending/correct/incorrect——积分/排行派生管线对两类题完全一致（verdict 只影响前端展示与 AC 判定语义）。**逐组全跑**（每组结论独立，全跑后取首个失败 verdict），输出比对 token 级空白不敏感。**部分得分制**：数据组配分（全 0 = 未配置，全有全无）时部分通过 = status incorrect 但 score>0，逐组明细写 `Submission.groups` 并随 `submission.judged` 事件 payload `groups` 附带；**派生器不累计部分分**（`correct=false` 事件行直接跳过），通关与总分结算仍以全过首通为准——防重复刷部分分虚增 XP/竞赛榜。引擎由 `ACADEMY_YAK_BIN` 门控，未配置 = internal_error（不是 error，是合法 verdict，仍走事件流）。
 - **编程题提交守卫**：源码 ≤128KiB；同一 (user, challenge) 已有 pending 判定 → 422（防并发重复入队）。
 - **自测运行（动态执行框）不进事件流**：`/challenges/{slug}/judge/runs` 是运营态（学生本地验证，非判定）——不写 Submission、不写 Event、不计分，票据仅进程内存（重启即清）。这是设计意图而非遗漏：自测无限次、无审计/重放诉求，混入事件流会污染积分重放。异步票据模型（202 + 轮询）与判题一致，引擎执行在请求路径外。
 
