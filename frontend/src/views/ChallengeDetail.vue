@@ -312,10 +312,14 @@ function submit() {
 }
 
 // 结算模型：题目分值只结算一次，重复判对 score=0；提示扣费按账号永久（不退回）。
-// ACM 编程题附带 verdict 文案（wa/tle/re/internal_error）。
+// ACM 编程题附带 verdict 文案（wa/tle/re/internal_error）；部分得分制下部分
+// 通过组也写入 score（verdict 非 ac 但得分 > 0）。
 const resultTitle = computed(() => {
   if (!result.value) return ''
   if (result.value.status !== 'correct') {
+    if (result.value.score > 0 && result.value.groups?.length) {
+      return `部分通过，得分 ${result.value.score}（未全部通过，题目未通关；补齐失败组后重新提交）`
+    }
     if (result.value.verdict) return `判定不通过：${verdictLabels[result.value.verdict]}`
     return '判定不通过'
   }
@@ -483,7 +487,7 @@ onUnmounted(() => {
       <template v-if="isCode">
         <div class="sample-note">
           提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
-          全部通过才算 AC；可在下方编辑器编码，先对样例或自定义输入自测运行。
+          全部通过才算 AC；配置了组分的题目按通过组折算得分。可在下方编辑器编码，先对样例或自定义输入自测运行。
         </div>
         <CodeEditor v-model="source" class="code-input" :disabled="polling" />
         <div class="run-panel">
@@ -559,6 +563,23 @@ onUnmounted(() => {
         :closable="false"
         class="result"
       />
+      <!-- ACM 部分得分：逐组判定结论（通过组计分、失败组标注判定）。 -->
+      <div v-if="result?.groups?.length" class="group-results">
+        <div
+          v-for="g in result.groups"
+          :key="g.name"
+          class="group-row"
+          :class="{ 'group-pass': g.passed, 'group-fail': !g.passed }"
+        >
+          <span class="group-name">
+            {{ g.sample ? '样例' : '测试' }}组 {{ g.name }}
+          </span>
+          <el-tag :type="g.passed ? 'success' : 'danger'" size="small" effect="plain">
+            {{ g.passed ? '通过' : verdictLabels[g.verdict!] || '未通过' }}
+          </el-tag>
+          <span v-if="g.score > 0" class="group-score">{{ g.score }} 分</span>
+        </div>
+      </div>
     </el-card>
   </div>
 </template>
@@ -592,6 +613,22 @@ onUnmounted(() => {
 .hint-locked { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 .hint-locked-text { margin: 0; color: var(--el-text-color-secondary); font-size: 0.9rem; }
 .solve { max-width: 640px; }
+/* ACM 逐组判定结论（部分得分反馈） */
+.group-results {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  margin-top: 0.8rem; padding-top: 0.8rem;
+  border-top: 1px dashed var(--el-border-color);
+}
+.group-row { display: flex; align-items: center; gap: 0.6rem; }
+.group-name {
+  font-family: Consolas, monospace; font-size: 0.85rem;
+  color: var(--el-text-color-regular); min-width: 6.5rem;
+}
+.group-score {
+  margin-left: auto; font-size: 0.85rem;
+  color: var(--el-text-color-secondary); font-family: Consolas, monospace;
+}
+.group-fail .group-name { color: var(--el-color-danger); }
 .instance-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
 .endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }
 .expire { color: var(--el-text-color-secondary); font-size: 0.8rem; }

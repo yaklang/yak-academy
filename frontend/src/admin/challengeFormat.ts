@@ -48,6 +48,8 @@ export function validateChallenge(chal: ChallengeJSON): string[] {
       else if (!/^[a-z0-9][a-z0-9-]*$/.test(t.name))
         where(`judge.testdata[${i}].name`, '只允许小写字母/数字/连字符')
       else if (names.has(t.name)) where(`judge.testdata[${i}].name`, '组名重复')
+      if (t.score !== undefined && t.score !== null && t.score < 0)
+        where(`judge.testdata[${i}].score`, '必须为非负整数（0 = 未配置，全有全无）')
       names.add(t.name)
     })
   } else {

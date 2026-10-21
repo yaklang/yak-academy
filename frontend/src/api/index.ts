@@ -23,11 +23,20 @@ export const verdictLabels: Record<SubmissionVerdict, string> = {
   re: '运行错误（RE）',
   internal_error: '判定服务暂不可用，请稍后重试',
 }
+// 逐组判定明细（ACM 部分得分制）：判定对全部数据组逐组运行，每组独立结论。
+export interface SubmissionGroupResult {
+  name: string
+  sample: boolean
+  passed: boolean
+  verdict?: 'wa' | 'tle' | 're'
+  score: number // 组配置分值（权重；0 = 未配置）
+}
 export interface Submission {
   id: number
   status: 'pending' | 'correct' | 'incorrect'
   score: number
   verdict?: SubmissionVerdict | null
+  groups?: SubmissionGroupResult[] | null
 }
 export interface LabInstance {
   id: number
@@ -142,7 +151,7 @@ export interface JudgeJSON {
   engine: 'yak'
   time_limit_s: number
   memory_limit_mb?: number
-  testdata: { name: string; input?: string; output?: string; sample?: boolean }[]
+  testdata: { name: string; input?: string; output?: string; sample?: boolean; score?: number }[]
 }
 export interface ChallengeJSON {
   slug: string

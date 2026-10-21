@@ -47,9 +47,11 @@ export const E2E = {
     roomSlug: 'e2e-del-room',
     roomTitle: '待删除教程',
   },
-  // ACM 编程题种子（题目包 zip：challenge.yml judge 段 + testdata/）：
+  // ACM 编程题种子（题目包 zip：challenge.yml judge 段 + testdata/ + scores.json）：
   // 学生提交 yak 源码判定（ACM 旅程 spec）。判题引擎由 ACADEMY_YAK_BIN
   // 门控——装配时断言 AC/WA，未装配（CI）断言 internal_error 路径。
+  // scores.json 按 2/1/1/1 配分（题面 50 分）：partialSource 仅在 partialfail
+  // 组（输入 5 5）输出 11≠10 → WA，专用于部分得分断言（4/5 组过 → 40 分）。
   acm: {
     zip: 'acm-package.zip',
     slug: 'acm-e2e-sum',
@@ -65,5 +67,20 @@ export const E2E = {
       '}',
     ].join('\n'),
     wrongSource: 'println(42)',
+    partialExpected: 40,
+    partialGroups: { demo: 2, edge: 1, hidden: 1, partialfail: 1 },
+    // 正确求和但 5+5 故意输出 11：其余组全对，仅 partialfail 组 WA。
+    partialSource: [
+      'res := io.ReadAll(os.Stdin)',
+      'lines := str.ParseStringToLines(string(res[0]))',
+      'for i := range lines {',
+      '    toks := str.SplitAndTrim(lines[i], " ")',
+      '    if len(toks) < 2 { continue }',
+      '    a := int(toks[0])',
+      '    b := int(toks[1])',
+      '    if a == 5 && b == 5 { println(11); continue }',
+      '    println(a + b)',
+      '}',
+    ].join('\n'),
   },
 } as const
