@@ -586,8 +586,8 @@ onMounted(() => {
     </span>
   </div>
 
-  <!-- vulinbox 靶场镜像状态：学生端启动实验环境的前提（驱动 + 本地镜像 + 从 OSS 构建） -->
-  <el-card v-if="imageStatus" class="image-card" shadow="never">
+  <!-- vulinbox 靶场镜像状态：仅内置训练 tab 显示（镜像只服务内置题集的实验环境） -->
+  <el-card v-if="readonlyTab && imageStatus" class="image-card" shadow="never">
     <div class="image-status">
       <span class="image-label">vulinbox 靶场镜像</span>
       <el-tag :type="imageStatus.driver === 'docker' ? 'success' : 'info'" size="small">

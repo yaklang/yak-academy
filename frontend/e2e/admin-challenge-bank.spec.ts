@@ -47,6 +47,9 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
 
+    // vulinbox 镜像状态卡只属于内置训练 tab：管理 tab 下不显示
+    await expect(page.locator('.image-card')).toHaveCount(0)
+
     // 筛选条内下拉按 DOM 序：分类 / 难度 / 来源（内置 tab 无来源项）
     const selects = page.locator('.filter-bar .el-select')
     // 分类筛选：cryptography 同样收敛到凯撒
