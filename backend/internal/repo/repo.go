@@ -122,10 +122,14 @@ type ChallengeRepo interface {
 	FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Challenge, error)
 }
 
-// ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源。
+// ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源；
+// Category/Difficulty 空 = 不过滤；Search 空 = 不搜索（命中 slug/title/category，前缀 LIKE）。
 type ChallengeListFilter struct {
-	Bank      string
-	IsBuiltin *bool
+	Bank       string
+	IsBuiltin  *bool
+	Category   string
+	Difficulty string
+	Search     string
 }
 
 // ChallengeAttachmentRepo 题目附件元数据（文件本体由 service 层落盘/删除）。

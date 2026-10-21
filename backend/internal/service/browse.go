@@ -239,8 +239,9 @@ type AdminChallengeItem struct {
 }
 
 // AdminListChallenges 管理端：题目全量列表（分页，含 has_env 与教程关联富化）。
-func (s *TopicService) AdminListChallenges(ctx context.Context, offset, limit int) ([]AdminChallengeItem, int64, error) {
-	chals, total, err := s.challenges.List(ctx, repo.ChallengeListFilter{}, offset, limit)
+// filter 承载表格搜索/筛选（题库 tab / 关键字 / 分类 / 难度 / 来源，零值 = 不过滤）。
+func (s *TopicService) AdminListChallenges(ctx context.Context, filter repo.ChallengeListFilter, offset, limit int) ([]AdminChallengeItem, int64, error) {
+	chals, total, err := s.challenges.List(ctx, filter, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}

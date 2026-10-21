@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -281,6 +282,8 @@ func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, filter C
 }
 
 // challengeFilterScope 题库过滤条件（零值字段不参与 WHERE）。
+// Search 对 slug/title/category 做前缀 LIKE（管理端表格搜索）；值经 gorm
+// 占位符绑定，搜索串里的 %/_ 只影响自身命中范围，无注入面。
 func challengeFilterScope(f ChallengeListFilter) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		if f.Bank != "" {
@@ -288,6 +291,19 @@ func challengeFilterScope(f ChallengeListFilter) func(*gorm.DB) *gorm.DB {
 		}
 		if f.IsBuiltin != nil {
 			db = db.Where("is_builtin = ?", *f.IsBuiltin)
+		}
+		if f.Category != "" {
+			db = db.Where("category = ?", f.Category)
+		}
+		if f.Difficulty != "" {
+			db = db.Where("difficulty = ?", f.Difficulty)
+		}
+		if f.Search != "" {
+			like := strings.ToLower(f.Search) + "%"
+			db = db.Where(
+				"LOWER(slug) LIKE ? OR LOWER(title) LIKE ? OR LOWER(category) LIKE ?",
+				like, like, like,
+			)
 		}
 		return db
 	}

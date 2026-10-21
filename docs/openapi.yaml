@@ -1238,10 +1238,30 @@ paths:
   /admin/challenges:
     get:
       tags: [admin]
-      summary: 题目全量列表（管理端题目管理表格，分页）
+      summary: 题目全量列表（管理端题目管理表格，分页；支持搜索与筛选）
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+        - name: q
+          in: query
+          description: 关键字搜索（slug / 标题 / 分类，前缀 LIKE，不区分大小写）
+          schema: { type: string }
+        - name: bank
+          in: query
+          description: 题库 tab 过滤（ctf / acm / tutorial）
+          schema: { type: string, enum: [ctf, acm, tutorial] }
+        - name: category
+          in: query
+          description: 分类 slug 精确匹配
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          description: 难度过滤
+          schema: { type: string, enum: [apprentice, practitioner, expert] }
+        - name: builtin
+          in: query
+          description: 来源过滤（true 仅内置 / false 仅自建；缺省 = 全部）
+          schema: { type: boolean }
       responses:
         '200':
           description: OK
@@ -1264,6 +1284,8 @@ paths:
     post:
       tags: [admin]
       summary: 上传题目定义 JSON（单个对象或对象数组，upsert 生效；无容器题目可用）
+      description: 内置训练集题目（is_builtin）以该接口重传一律 422——内置题集只能经
+        「一键导入」整体更新（目录是唯一事实源），不提供单题编辑出路。
       requestBody:
         required: true
         content:
@@ -1502,6 +1524,8 @@ paths:
       description: |-
         题目存在任一用户通关记录（submission 事件历史）时返回 409——
         事件溯源下提交历史 append-only 不可删，删除题目会制造悬挂积分。
+        内置训练集题目（is_builtin）返回 422：内置题集只能经「一键导入」
+        随目录整体更新/清理，不提供单题删除。
         无通关记录时：销毁该题目全部运行中实例，级联删除 flags/hints/attachments/lab_instances 行
         并清理附件目录。
       parameters:
@@ -1516,6 +1540,12 @@ paths:
                 properties:
                   deleted: { type: boolean }
         '404': { $ref: '#/components/responses/ErrorResp' }
+        '422':
+          description: 内置训练集题目，不可删除（只能经一键导入随目录清理）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: 题目存在通关记录，拒绝删除（事件历史不可删）
           content:
@@ -1531,6 +1561,8 @@ paths:
         is_visible=false 或 release_at 在未来时，学生端训练场列表、题目详情、
         实例启动、答案提交、提示解锁对该题返回 404（隐藏语义同不存在）。
         已有通关记录不受影响（事件历史 append-only 不动），题目重新可见后恢复开放。
+        内置训练集题目（is_builtin）返回 422：内置题集的可视性由一键导入管理，
+        不提供单题开关。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1580,6 +1612,7 @@ paths:
       tags: [admin]
       summary: 上传题目附件（multipart，单文件 ≤50MB，文件名规范化存储）
       description: 附件落盘 ACADEMY_ATTACHMENTS_DIR/&lt;slug&gt;/，同名覆盖；重复文件名 = 覆盖更新。
+        内置训练集题目（is_builtin）返回 422：附件与题目定义同属内置目录管理。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1605,6 +1638,7 @@ paths:
     delete:
       tags: [admin]
       summary: 删除题目附件（删元数据行 + 磁盘文件）
+      description: 内置训练集题目（is_builtin）返回 422——附件与题目定义同属内置目录管理。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
         - { name: filename, in: path, required: true, schema: { type: string } }
@@ -1619,6 +1653,7 @@ paths:
                   deleted: { type: boolean }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /challenges/{slug}/attachments/{filename}:
     get:
