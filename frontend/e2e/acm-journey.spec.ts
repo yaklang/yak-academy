@@ -50,6 +50,20 @@ test.describe('ACM 编程题（源码判定）', () => {
     )
     expect(tokenColors).toContain('rgb(224, 135, 60)') // println 内建函数
     expect(tokenColors).toContain('rgb(152, 195, 121)') // "hi" 字符串
+
+    // yak 代码补全：词首补全（内建函数）与 lib. 成员补全（标准库真实函数）
+    const content = page.locator('.solve .cm-content')
+    const menu = page.locator('.cm-tooltip-autocomplete')
+    await content.click()
+    await content.press('ControlOrMeta+a')
+    await content.pressSequentially('print')
+    await expect(menu).toBeVisible()
+    await expect(menu.getByText('println', { exact: true })).toBeVisible()
+    await content.press('Escape')
+    await content.press('ControlOrMeta+a')
+    await content.pressSequentially('codec.')
+    await expect(menu.getByText('EncodeToHex', { exact: true })).toBeVisible()
+    await content.press('Escape')
   })
 
   test('提交 yak 源码：逐组对拍全部通过 → AC 计分', async ({ page }) => {
