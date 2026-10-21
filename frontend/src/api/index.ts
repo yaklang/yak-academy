@@ -29,10 +29,26 @@ export interface TopicDetail extends Topic { rooms: RoomSummary[] }
 // 题库 tab（bank）：教程题目 = 内置题集专属（仅一键导入写入，上传传 tutorial 一律 422）；
 // CTF（上传缺省）/ ACM 为管理员上传题库。
 export type ChallengeBank = 'tutorial' | 'ctf' | 'acm'
+export type ChallengeDifficulty = 'apprentice' | 'practitioner' | 'expert'
 export const BANK_LABELS: Record<ChallengeBank, string> = {
   tutorial: '教程题目',
   ctf: 'CTF 题目',
   acm: 'ACM 题目',
+}
+export const DIFFICULTY_LABELS: Record<ChallengeDifficulty, string> = {
+  apprentice: '入门',
+  practitioner: '进阶',
+  expert: '专家',
+}
+
+// 题目管理列表查询参数（GET /admin/challenges）：全部可选，零值 = 不过滤。
+export interface AdminChallengeQuery {
+  page?: number
+  q?: string
+  bank?: ChallengeBank
+  category?: string
+  difficulty?: ChallengeDifficulty
+  builtin?: boolean
 }
 
 export interface TrainingItem {
@@ -355,7 +371,17 @@ export const adminChallengeApi = {
   // 内置训练集教程目录与导入状态（教程管理页「内置训练集」区块）。
   builtinTutorialCatalog: () =>
     http.get<BuiltinTutorialCatalog>('/admin/challenges/builtin/tutorials'),
-  list: (page = 1) => http.get<Paged<TrainingItem>>(`/admin/challenges?page=${page}`),
+  list: (query: AdminChallengeQuery = {}) => {
+    const params = new URLSearchParams()
+    if (query.page) params.set('page', String(query.page))
+    if (query.q) params.set('q', query.q)
+    if (query.bank) params.set('bank', query.bank)
+    if (query.category) params.set('category', query.category)
+    if (query.difficulty) params.set('difficulty', query.difficulty)
+    if (query.builtin !== undefined) params.set('builtin', String(query.builtin))
+    const qs = params.toString()
+    return http.get<Paged<TrainingItem>>(`/admin/challenges${qs ? `?${qs}` : ''}`)
+  },
   // 单题完整定义（编辑回填；含 flag 值，仅 admin）。
   getJSON: (slug: string) => http.get<ChallengeFullJSON>(`/admin/challenges/${slug}`),
   remove: (slug: string) => http.del<{ deleted: boolean }>(`/admin/challenges/${slug}`),

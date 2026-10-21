@@ -1,14 +1,22 @@
 <script setup lang="ts">
-// 题目管理：主流程为「选择 challenge.json → 前端校验 → 编辑弹窗确认 → 一键上传」
+// 题目管理：三个题库 tab（内置训练 / CTF / ACM）分开管理。
+// 内置 tab 只读——目录是内置内容唯一事实源，更新只经「一键导入」整体进行
+// （写接口对内置题一律 422，前端同步禁用编辑/删除/可见性/附件操作）。
+// CTF / ACM tab 支持关键字搜索（slug/标题/分类前缀）与筛选（分类/难度/来源）。
+// 主上传流程不变：选择 challenge.json → 前端校验 → 编辑弹窗确认 → 一键上传
 // （打包即把表单数据规范化回 JSON 后 POST /admin/challenges）。
 // 行内「编辑」拉取库内完整定义回填同一弹窗（GET /admin/challenges/{slug}），
 // 附件管理也并入了该弹窗；操作列只保留 编辑 / 删除。
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import {
-  adminChallengeApi, BANK_LABELS,
-  type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink, type TrainingItem,
+  adminChallengeApi, DIFFICULTY_LABELS,
+  type AdminChallengeQuery,
+  type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeDifficulty,
+  type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink,
+  type TrainingItem,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -20,6 +28,68 @@ const page = ref(1)
 const loading = ref(false)
 const uploading = ref(false)
 const specVisible = ref(false)
+
+// ===== 题库 tab（内置只读；CTF/ACM 可管理）=====
+type AdminTab = 'builtin' | 'ctf' | 'acm'
+const activeTab = ref<AdminTab>('builtin')
+// 内置 tab 按来源聚合（is_builtin=true，不限 bank——内置集现全为 tutorial，
+// 但语义上「内置训练」= 随二进制分发的一套，不该被 bank 二次切分）。
+const TAB_META: Record<AdminTab, { bank?: ChallengeBank; builtin: boolean; hint: string }> = {
+  builtin: { builtin: true, hint: '内置训练集随平台分发，只读展示；更新 / 清理一律经「导入内置训练（vulinbox）」按目录整体进行' },
+  ctf: { bank: 'ctf', builtin: false, hint: 'CTF 题目：flag 提交判定（静态 / 正则），可选容器环境' },
+  acm: { bank: 'acm', builtin: false, hint: 'ACM 题目：算法编程题，challenge.json 归置 bank=acm 上传' },
+}
+
+// ===== 搜索 / 筛选（随 tab 与分页联动；关键字 400ms 防抖）=====
+const keyword = ref('')
+const categoryFilter = ref('')
+const difficultyFilter = ref<'' | ChallengeDifficulty>('')
+const builtinFilter = ref<'' | 'yes' | 'no'>('')
+let keywordTimer: ReturnType<typeof setTimeout> | undefined
+
+function currentQuery(): AdminChallengeQuery {
+  const meta = TAB_META[activeTab.value]
+  const q: AdminChallengeQuery = { page: page.value }
+  if (meta.builtin) {
+    q.builtin = true
+  } else {
+    q.bank = meta.bank
+    if (builtinFilter.value === 'yes') q.builtin = true
+    if (builtinFilter.value === 'no') q.builtin = false
+  }
+  if (keyword.value.trim()) q.q = keyword.value.trim()
+  if (categoryFilter.value) q.category = categoryFilter.value
+  if (difficultyFilter.value) q.difficulty = difficultyFilter.value
+  return q
+}
+
+function resetAndLoad() {
+  page.value = 1
+  load()
+}
+
+function clearFilters() {
+  keyword.value = ''
+  categoryFilter.value = ''
+  difficultyFilter.value = ''
+  builtinFilter.value = ''
+  resetAndLoad()
+}
+
+const onKeywordInput = () => {
+  clearTimeout(keywordTimer)
+  keywordTimer = setTimeout(resetAndLoad, 400)
+}
+
+watch([activeTab, categoryFilter, difficultyFilter, builtinFilter], resetAndLoad)
+
+// 当前 tab 的分类选项从列表页可见数据聚合（管理端题目量级小，前端聚合足够；
+// 保持与列表过滤同一事实源，避免单独的 distinct 接口）。
+const categoryOptions = computed(() => {
+  const s = new Set<string>()
+  for (const it of items.value) s.add(it.category)
+  return [...s].sort()
+})
 
 // ===== challenge.json 导入 + 编辑弹窗 =====
 const editVisible = ref(false)
@@ -304,7 +374,7 @@ async function onBuildBuiltinImage() {
 async function load() {
   loading.value = true
   try {
-    const resp = await adminChallengeApi.list(page.value)
+    const resp = await adminChallengeApi.list(currentQuery())
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
@@ -414,6 +484,9 @@ function difficultyType(d: TrainingItem['difficulty']) {
   return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
 }
 
+// 内置 tab 只读：编辑/删除/可见性/附件全部收口（后端同语义 422 兜底）。
+const readonlyTab = computed(() => TAB_META[activeTab.value].builtin)
+
 onMounted(() => {
   load()
   loadImageStatus()
@@ -421,41 +494,96 @@ onMounted(() => {
 </script>
 
 <template>
-  <h2>题目管理</h2>
-  <p class="hint">
-    选择 challenge.json 文件：自动校验格式并弹出编辑确认，点「确认上传」自动打包导入。
-    完整样例见仓库 <code>examples/challenges/sqli-login-bypass</code>。
-  </p>
-  <div class="toolbar">
-    <el-upload
-      :show-file-list="false"
-      accept=".json,application/json"
-      :before-upload="onImport"
-      :disabled="uploading"
-    >
-      <el-button type="primary" :loading="uploading">选择 challenge.json</el-button>
-    </el-upload>
-    <el-button @click="downloadSampleChallenge">下载样例 JSON</el-button>
-    <el-upload
-      :show-file-list="false"
-      accept=".zip,application/zip"
-      :before-upload="onUploadPackage"
-      :disabled="uploading"
-    >
-      <el-button :loading="uploading" title="image: . 的容器题需经 zip 包上传（上传时构建镜像）">
-        上传题目包 zip
+  <header class="page-head">
+    <h2 class="page-title">题目<span class="accent">管理</span></h2>
+    <span class="head-count" v-if="total">共 {{ total }} 题</span>
+  </header>
+
+  <el-tabs v-model="activeTab" class="bank-tabs">
+    <el-tab-pane name="builtin">
+      <template #label>
+        <span class="tab-label">内置训练<span class="tab-sub">只读</span></span>
+      </template>
+    </el-tab-pane>
+    <el-tab-pane name="ctf">
+      <template #label><span class="tab-label">CTF 题目</span></template>
+    </el-tab-pane>
+    <el-tab-pane name="acm">
+      <template #label><span class="tab-label">ACM 题目</span></template>
+    </el-tab-pane>
+  </el-tabs>
+
+  <p class="hint">{{ TAB_META[activeTab].hint }}</p>
+
+  <!-- 内置 tab 只读：收起全部上传入口，仅保留一键导入与镜像状态 -->
+  <template v-if="readonlyTab">
+    <div class="toolbar">
+      <el-button
+        :loading="builtinImporting"
+        title="导入随平台分发的 vulinbox 内置训练题集（重复导入 = 更新；目录外残留自动清理）"
+        @click="onImportBuiltin"
+      >
+        导入内置训练（vulinbox）
       </el-button>
-    </el-upload>
-    <el-button
-      :loading="builtinImporting"
-      title="导入随平台分发的 vulinbox 内置训练题集（重复导入 = 更新）"
-      @click="onImportBuiltin"
-    >
-      导入内置训练（vulinbox）
-    </el-button>
-    <el-button @click="specVisible = !specVisible">
-      {{ specVisible ? '收起格式规范' : '查看格式规范' }}
-    </el-button>
+      <el-button text @click="load">刷新</el-button>
+    </div>
+  </template>
+  <template v-else>
+    <div class="toolbar">
+      <el-upload
+        :show-file-list="false"
+        accept=".json,application/json"
+        :before-upload="onImport"
+        :disabled="uploading"
+      >
+        <el-button type="primary" :loading="uploading">选择 challenge.json</el-button>
+      </el-upload>
+      <el-button @click="downloadSampleChallenge">下载样例 JSON</el-button>
+      <el-upload
+        :show-file-list="false"
+        accept=".zip,application/zip"
+        :before-upload="onUploadPackage"
+        :disabled="uploading"
+      >
+        <el-button :loading="uploading" title="image: . 的容器题需经 zip 包上传（上传时构建镜像）">
+          上传题目包 zip
+        </el-button>
+      </el-upload>
+      <el-button
+        @click="specVisible = !specVisible"
+      >
+        {{ specVisible ? '收起格式规范' : '查看格式规范' }}
+      </el-button>
+    </div>
+  </template>
+
+  <!-- 搜索 / 筛选：全部 tab 可用；来源筛选仅非内置 tab（内置 tab 恒为内置来源） -->
+  <div class="filter-bar">
+    <el-input
+      v-model="keyword"
+      class="filter-search"
+      placeholder="搜索 slug / 标题 / 分类（前缀匹配）"
+      clearable
+      :prefix-icon="Search"
+      @input="onKeywordInput"
+      @clear="resetAndLoad"
+    />
+    <el-select v-model="categoryFilter" class="filter" placeholder="分类：全部" clearable>
+      <el-option label="分类：全部" value="" />
+      <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
+    </el-select>
+    <el-select v-model="difficultyFilter" class="filter" placeholder="难度：全部" clearable>
+      <el-option label="难度：全部" value="" />
+      <el-option v-for="(label, v) in DIFFICULTY_LABELS" :key="v" :label="`${v}（${label}）`" :value="v" />
+    </el-select>
+    <el-select v-if="!readonlyTab" v-model="builtinFilter" class="filter" placeholder="来源：全部" clearable>
+      <el-option label="来源：全部" value="" />
+      <el-option label="来源：内置题集" value="yes" />
+      <el-option label="来源：管理员上传" value="no" />
+    </el-select>
+    <span v-if="keyword || categoryFilter || difficultyFilter || builtinFilter" class="filter-clear" @click="clearFilters">
+      清除筛选
+    </span>
   </div>
 
   <!-- vulinbox 靶场镜像状态：学生端启动实验环境的前提（驱动 + 本地镜像 + 从 OSS 构建） -->
@@ -514,16 +642,10 @@ onMounted(() => {
     </el-card>
   </el-collapse-transition>
 
-  <el-table :data="items" v-loading="loading">
+  <el-table :data="items" v-loading="loading" class="chal-table">
     <el-table-column prop="slug" label="Slug" width="180" show-overflow-tooltip />
     <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
     <el-table-column prop="category" label="分类" width="140" show-overflow-tooltip />
-    <el-table-column label="题库" width="130">
-      <template #default="{ row }">
-        <span>{{ BANK_LABELS[row.bank as ChallengeBank] ?? '教程题目' }}</span>
-        <el-tag v-if="row.is_builtin" size="small" class="builtin-tag">内置</el-tag>
-      </template>
-    </el-table-column>
     <el-table-column label="难度" width="110">
       <template #default="{ row }">
         <el-tag :type="difficultyType(row.difficulty)" size="small">{{ row.difficulty }}</el-tag>
@@ -542,24 +664,31 @@ onMounted(() => {
         <span v-else>—</span>
       </template>
     </el-table-column>
-    <el-table-column label="可见性" width="90">
-      <template #default="{ row }">
-        <el-switch
-          :model-value="row.is_visible !== false"
-          :loading="visSaving === row.slug"
-          inline-prompt
-          active-text="可见"
-          inactive-text="隐藏"
-          @change="toggleVisible(row)"
-        />
-      </template>
-    </el-table-column>
-    <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
-      <template #default="{ row }">
-        <el-button size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</el-button>
-        <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
-      </template>
-    </el-table-column>
+    <template v-if="!readonlyTab">
+      <el-table-column label="可见性" width="90">
+        <template #default="{ row }">
+          <el-switch
+            :model-value="row.is_visible !== false"
+            :loading="visSaving === row.slug"
+            inline-prompt
+            active-text="可见"
+            inactive-text="隐藏"
+            @change="toggleVisible(row)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
+        <template #default="{ row }">
+          <el-button size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</el-button>
+          <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+        </template>
+      </el-table-column>
+      <el-table-column v-else label="来源" width="90">
+        <template #default="{ row }">
+          <el-tag v-if="row.is_builtin" size="small" type="info">内置</el-tag>
+        </template>
+      </el-table-column>
+    </template>
   </el-table>
   <el-pagination
     v-if="total > 20"
@@ -697,17 +826,45 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
-.toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+/* 页头 */
+.page-head { display: flex; align-items: baseline; gap: 0.8rem; margin: 0 0 0.6rem; }
+.page-title { font-size: 1.35rem; font-weight: 700; margin: 0; }
+.page-title .accent { color: var(--el-color-primary); margin-left: 2px; }
+.head-count { color: var(--el-text-color-secondary); font-size: 0.88rem; }
+
+/* 题库 tab */
+.bank-tabs :deep(.el-tabs__header) { margin-bottom: 0.4rem; }
+.tab-label { font-size: 0.95rem; }
+.tab-sub {
+  font-size: 0.72rem; color: var(--el-color-warning); border: 1px solid var(--el-color-warning-light-5);
+  padding: 0 5px; margin-left: 6px; border-radius: 3px; vertical-align: 1px;
+}
+.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin: 0 0 1rem; }
+
+/* 工具栏与筛选 */
+.toolbar { margin-bottom: 0.9rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+.filter-bar { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.filter-search { width: 300px; }
+.filter { width: 170px; }
+.filter-clear {
+  color: var(--el-color-primary); font-size: 0.85rem; cursor: pointer; user-select: none;
+}
+.filter-clear:hover { opacity: 0.8; }
+
+/* 镜像状态卡 / 规范折叠卡 / 表格 */
 .image-card { margin-bottom: 1rem; }
 .image-card :deep(.el-card__body) { padding: 0.6rem 1rem; }
 .image-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .image-label { font-weight: 600; }
 .image-tag { color: var(--el-text-color-secondary); font-size: 0.82rem; }
+.spec { margin-bottom: 1rem; }
 .spec h3 { margin-top: 0; }
 .spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
 .spec .json { line-height: 1.5; font-family: Consolas, monospace; }
+.chal-table { margin-bottom: 0.8rem; }
 .dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+
+/* 编辑弹窗 */
 .form-errors { margin-bottom: 1rem; }
 .err-line { margin: 0.15rem 0; font-size: 0.85rem; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.8rem; }
@@ -720,5 +877,4 @@ onMounted(() => {
 .hint-cost { flex: none; }
 .attach-toolbar { margin-bottom: 0.8rem; }
 .form-hint { line-height: 1.4; margin-top: 2px; }
-.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
 </style>
