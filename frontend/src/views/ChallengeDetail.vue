@@ -657,7 +657,6 @@ onUnmounted(() => {
   margin-bottom: 0.8rem; font-size: 0.85rem;
   color: var(--el-text-color-secondary);
 }
-.code-input { font-family: Consolas, monospace; }
 .run-panel { margin-top: 0.6rem; }
 .run-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .stdin-input { margin-top: 0.5rem; font-family: Consolas, monospace; }

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // 代码编辑器（CodeMirror 6）：ACM 编程题源码提交与自测运行共用。
-// yak 语法高度近似 Go（:= / func / for range / 注释与字符串规则），
-// 用 Go 高亮做近似着色；后续如需精确 yak 文法可替换为自定义 StreamLanguage。
-import { EditorView, basicSetup } from 'codemirror'
+// yak 语法高亮为 yakit Monarch 词法的移植（yakLanguage.ts），
+// 配套暗色主题与白色代码字（yakTheme.ts）。
+import { basicSetup } from 'codemirror'
+import { EditorView, placeholder } from '@codemirror/view'
 import { Compartment, EditorState } from '@codemirror/state'
-import { go } from '@codemirror/lang-go'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { yak } from './yakLanguage'
+import { yakEditorTheme } from './yakTheme'
 
 const props = withDefaults(
   defineProps<{ modelValue: string; height?: string; disabled?: boolean }>(),
@@ -23,14 +25,15 @@ onMounted(() => {
       doc: props.modelValue,
       extensions: [
         basicSetup,
-        go(),
+        yak(),
+        yakEditorTheme,
+        placeholder('在此编写 yak 源码，可先对样例自测运行…'),
         editableComp.of(EditorView.editable.of(!props.disabled)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) emit('update:modelValue', u.state.doc.toString())
         }),
         EditorView.theme({
           '&': { height: props.height },
-          '.cm-scroller': { fontFamily: 'Consolas, Menlo, monospace', fontSize: '13px' },
         }),
       ],
     }),
@@ -60,16 +63,19 @@ onUnmounted(() => view?.destroy())
 
 <style scoped>
 .code-editor {
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
+  border: 1px solid #383e46;
+  border-radius: 8px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
-.code-editor.is-disabled { opacity: 0.6; }
-.code-editor :deep(.cm-editor) { background: var(--el-fill-color-blank); }
-.code-editor :deep(.cm-editor.cm-focused) { outline: none; }
-.code-editor :deep(.cm-gutters) {
-  background: var(--el-fill-color-light);
-  border-right: 1px solid var(--el-border-color-lighter);
-  color: var(--el-text-color-secondary);
+.code-editor:focus-within {
+  border-color: #4a7db3;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.18);
+}
+.code-editor.is-disabled {
+  opacity: 0.55;
+  filter: saturate(0.75);
+  cursor: not-allowed;
 }
 </style>
