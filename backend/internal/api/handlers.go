@@ -94,6 +94,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin", "admin", h.importBuiltinChallenges)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/builtin/image", "admin", h.getBuiltinImageStatus)
 	r.Handle(http.MethodPost, "/api/v1/admin/challenges/builtin/image", "admin", h.buildBuiltinImage)
+	r.Handle(http.MethodGet, "/api/v1/admin/challenges/engine/yak", "admin", h.getYakEngineStatus)
+	r.Handle(http.MethodPost, "/api/v1/admin/challenges/engine/yak/download", "admin", h.downloadYakEngine)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/builtin/tutorials", "admin", h.getBuiltinTutorials)
 	r.Handle(http.MethodGet, "/api/v1/admin/challenges/{slug}", "admin", h.getChallengeJSON)
 	r.Handle(http.MethodDelete, "/api/v1/admin/challenges/{slug}", "admin", h.deleteChallenge)
@@ -824,6 +826,22 @@ func (h *Handlers) buildBuiltinImage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// getYakEngineStatus 管理端：yak 判题引擎装配态与下载任务进度
+//（题目管理 ACM tab 状态卡；轮询数据源）。
+func (h *Handlers) getYakEngineStatus(w http.ResponseWriter, req *http.Request) {
+	writeJSON(w, http.StatusOK, h.Judge.YakEngineStatus())
+}
+
+// downloadYakEngine 管理端：触发 yak 引擎 OSS 异步下载（约 220MB，后台
+// 任务，202 立即返回；进度轮询 GET …/engine/yak）。已有任务进行中 422。
+func (h *Handlers) downloadYakEngine(w http.ResponseWriter, req *http.Request) {
+	if err := h.Judge.DownloadYakEngine(); err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, h.Judge.YakEngineStatus())
 }
 
 // adminListChallenges 管理端：题目全量列表（题目管理表格；搜索/筛选参数透传 repo 过滤器）。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
@@ -37,13 +38,22 @@ type JudgeService struct {
 	bus          *eventbus.Bus
 	// engine ACM 编程题（type=code）判题引擎；nil = 引擎未配置，code 题
 	// 判 internal_error（平台侧失败，不消耗判定机会语义由 verdict 体现）。
-	engine CodeEngine
+	// 下载端点运行中可换装（judge_engine_admin.go），读写须持 engineMu。
+	engine   CodeEngine
+	engineMu sync.RWMutex
 	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
 	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
 	queue chan uint
 	// runs 自测运行票据表（在线执行框，judge_run.go）：仅内存、不落库。
 	runs *runStore
 	now  func() time.Time
+	// yak 引擎管理态（judge_engine_admin.go）：装配路径/版本、OSS 下载任务。
+	yakMu      sync.Mutex
+	yakTarget  string // 下载落盘目标（<downloadDir>/yak[.exe]）
+	yakPath    string // 当前生效引擎路径（env 指定或下载/探测产物）
+	yakVersion string // 尽力而为的版本探测结果（空 = 未知）
+	yakOSSBase string // OSS 目录前缀（测试注入 httptest）
+	dl         *yakDownloadJob
 }
 
 func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances repo.LabInstanceRepo, ev repo.EventRepo, comp repo.CompetitionRepo, bus *eventbus.Bus) *JudgeService {
@@ -54,15 +64,29 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances
 		events:       ev,
 		competitions: comp,
 		bus:          bus,
-		queue:        make(chan uint, 256),
-		runs:         newRunStore(),
-		now:          time.Now,
+		queue:       make(chan uint, 256),
+		runs:        newRunStore(),
+		yakOSSBase:  defaultYakOSSBase,
+		dl:          &yakDownloadJob{state: yakDLIdle},
+		now:         time.Now,
 	}
 }
 
-// SetCodeEngine 注入 ACM 判题引擎（main 装配时调用一次；nil/未配置 =
-// code 题提交仍可入队，判定 internal_error）。
-func (s *JudgeService) SetCodeEngine(e CodeEngine) { s.engine = e }
+// SetCodeEngine 注入 ACM 判题引擎（main 启动装配与引擎下载完成后换装；
+// nil/未配置 = code 题提交仍可入队，判定 internal_error）。
+func (s *JudgeService) SetCodeEngine(e CodeEngine) {
+	s.engineMu.Lock()
+	defer s.engineMu.Unlock()
+	s.engine = e
+}
+
+// codeEngine 并发安全读取判题引擎：下载端点在运行中换装引擎（HTTP 请求
+// 触发），与判题 worker / 自测运行 goroutine 的读取构成数据竞争，须持锁。
+func (s *JudgeService) codeEngine() CodeEngine {
+	s.engineMu.RLock()
+	defer s.engineMu.RUnlock()
+	return s.engine
+}
 
 // Submit 提交答案：写 submission(pending) + submission.created 事件，立即返回。
 // 哨兵答案保留给检测点自动判定，用户提交一律拒绝（防伪造环境判定）。
@@ -305,7 +329,8 @@ func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, cha
 		s.finishCode(ctx, sub, model.VerdictInternalError)
 		return
 	}
-	if s.engine == nil {
+	engine := s.codeEngine()
+	if engine == nil {
 		log.Printf("judge: code engine not configured (challenge %s)", chal.Slug)
 		s.finishCode(ctx, sub, model.VerdictInternalError)
 		return
@@ -313,7 +338,7 @@ func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, cha
 	verdict := model.VerdictAC
 	for i := range data {
 		runCtx, cancel := context.WithTimeout(ctx, time.Duration(conf.TimeLimitS)*time.Second)
-		out, err := s.engine.Run(runCtx, sub.Answer, data[i].Input)
+		out, err := engine.Run(runCtx, sub.Answer, data[i].Input)
 		cancel()
 		if err != nil {
 			verdict = verdictFromError(err)
