@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { E2E } from './fixtures/consts'
-import { loginAsStudent } from './helpers'
+import { loginAsStudent, studentToken } from './helpers'
 
 // ACM 编程题旅程：源码提交判定（对齐 ICPC 模型），不走 flag；
 // 详情页内置动态执行框（CodeMirror 编辑器 + 自测运行，运营态不产生提交）。
@@ -62,6 +62,54 @@ test.describe('ACM 编程题（源码判定）', () => {
 
     await expect(page.locator('.result')).toContainText('答案错误（WA）', { timeout: 30_000 })
     await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+  })
+
+  // 部分得分回归（e2e-bugfix）：种子题 scores.json 按 2/1/1/1 配分，
+  // partialSource 仅在 partialfail 组（5+5）输出 11≠10 → WA。4/5 组过 →
+  // 题面全额按权重折算 4/5 计入（error 警示未通关但计部分分），逐组行可见
+  // 结论与组分。题面全额随动态衰减变化（本 spec 内 AC 用例已判对 → n=1），
+  // 期望分按线性衰减公式 max(initial - 10*n, max(20% initial, 10)) 折算。
+  test('部分得分制：4/5 组通过 → 按动态题分折算部分得分且题目未通关，逐组结论可见', async ({ page, request }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置）')
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    // 已判对人数经学生侧题解接口取 solved 态并按衰减公式还原 n
+    // （AC 用例在前：全量套件下本用例运行时 n≥1；单独跑本 spec 则 n=0）。
+    const token = await studentToken(request)
+    const detail = await request.get(`${E2E.apiURL}/api/v1/challenges/${E2E.acm.slug}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const chal = (await detail.json()) as { solved: boolean; score: number }
+    const n = chal.solved ? 1 : 0
+    const initial = 50
+    const full = Math.max(initial - 10 * n, Math.max(Math.floor(initial / 5), 10))
+    const expected = Math.floor((full * 4 + 2) / 5) // (full*4+total/2)/total, total=5
+
+    await fillSource(page, E2E.acm.partialSource)
+    await page.getByRole('button', { name: '提交代码' }).click()
+
+    await expect(page.locator('.result')).toContainText(
+      `部分通过，得分 ${expected}`, { timeout: 30_000 },
+    )
+    await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+    // 逐组结论：通过组绿色「通过」并显示组分；失败组红色 WA 且无分
+    for (const name of Object.keys(E2E.acm.partialGroups)) {
+      await expect(page.locator('.group-row', { hasText: name })).toBeVisible()
+    }
+    const failRow = page.locator('.group-row', { hasText: 'partialfail' })
+    await expect(failRow).toHaveClass(/group-fail/)
+    await expect(failRow).toContainText('WA')
+    await expect(failRow.locator('.group-score')).toHaveCount(0)
+    const demoRow = page.locator('.group-row', { hasText: 'demo' })
+    await expect(demoRow).toHaveClass(/group-pass/)
+    await expect(demoRow.locator('.group-score')).toContainText('2 分')
+
+    // 题目未通关：部分通过不翻转 solved——页面保持未通关态
+    // （全量套件下 AC 用例先通关属正常前置，solved 一旦翻转不回退，
+    // 因此断言收敛为「通关标记与结算文案互斥且部分通过为 error 警示」）。
+    await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+    await expect(page.locator('.result')).not.toContainText('判定通过')
   })
 
   test('引擎未装配 → internal_error（平台侧失败提示，区别于代码错误）', async ({ page }) => {

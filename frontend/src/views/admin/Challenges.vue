@@ -147,8 +147,9 @@ function buildPayload(): ChallengeJSON {
       engine: 'yak',
       time_limit_s: form.judge.time_limit_s,
       memory_limit_mb: form.judge.memory_limit_mb,
-      // 数据组只回传 name/sample（内容在库内；后端按空组走保留语义）。
-      testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample })),
+      // 数据组回传 name/sample/score（内容在库内；后端按空 input/output 走
+      // 保留语义，score 覆写——元数据维护里调整组分值不出包 zip）。
+      testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample, score: t.score ?? 0 })),
     }
   } else {
     payload.challenge = { type: form.type, flag: form.flag.trim() }
@@ -184,14 +185,14 @@ function fillForm(chal: ChallengeJSON) {
   form.flag_mode = chal.flag_mode ?? 'shared'
   form.type = chal.challenge?.type ?? 'static'
   form.flag = chal.challenge?.flag ?? ''
-  // ACM 编程题：judge 段回填（组名/样例标记 + 判定配置）；flag 表单项隐藏。
+  // ACM 编程题：judge 段回填（组名/样例标记/组分值 + 判定配置）；flag 表单项隐藏。
   form.judge = (chal as ChallengeFullJSON).judge
     ? {
         engine: 'yak',
         time_limit_s: (chal as ChallengeFullJSON).judge!.time_limit_s,
         memory_limit_mb: (chal as ChallengeFullJSON).judge!.memory_limit_mb ?? 128,
         testdata: ((chal as ChallengeFullJSON).judge!.testdata ?? []).map((t) => ({
-          name: t.name, sample: t.sample ?? false,
+          name: t.name, sample: t.sample ?? false, score: t.score ?? 0,
         })),
       }
     : null
@@ -885,7 +886,8 @@ onUnmounted(stopEnginePolling)
         <el-form-item label="关联教程">
           <el-input v-model="form.tutorial_slug" placeholder="可选，教程 Room slug" />
         </el-form-item>
-        <!-- ACM 编程题：judge 段回填（判定配置只读展示；测试数据经题目包 zip 维护） -->
+        <!-- ACM 编程题：judge 段回填（判定配置只读展示；测试数据经题目包 zip 维护，
+             组分值（部分得分制）可在此调整——保存随元数据维护一并覆写） -->
         <template v-if="form.judge">
           <el-form-item label="判定引擎">
             <el-tag>code / yak</el-tag>
@@ -899,6 +901,25 @@ onUnmounted(stopEnginePolling)
           </el-form-item>
           <el-form-item label="内存上限（MB）">
             <el-input-number v-model="form.judge.memory_limit_mb" :min="16" :max="512" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="测试组与分值">
+            <div v-if="form.judge.testdata.length" class="testdata-list">
+              <div v-for="t in form.judge.testdata" :key="t.name" class="testdata-row">
+                <span class="testdata-name">{{ t.name }}</span>
+                <el-tag v-if="t.sample" size="small" effect="plain">样例</el-tag>
+                <el-input-number
+                  v-model="t.score"
+                  :min="0"
+                  size="small"
+                  controls-position="right"
+                  class="testdata-score"
+                />
+              </div>
+            </div>
+            <div v-else class="dim form-hint">无数据组（元数据维护语义将保留库内数据）。</div>
+            <div class="dim form-hint">
+              组分值 0 = 未配置（全有全无：全过才得分）；&gt;0 时按权重分摊题面分值，通过组即得。
+            </div>
           </el-form-item>
         </template>
         <template v-else>
@@ -1044,4 +1065,9 @@ onUnmounted(stopEnginePolling)
 .hint-cost { flex: none; }
 .attach-toolbar { margin-bottom: 0.8rem; }
 .form-hint { line-height: 1.4; margin-top: 2px; }
+/* ACM 数据组行：与 attach-row 同一排版体系（等宽组名 + 说明文字） */
+.testdata-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.testdata-row { display: flex; align-items: center; gap: 0.6rem; }
+.testdata-name { font-family: Consolas, monospace; min-width: 8rem; }
+.testdata-score { width: 130px; }
 </style>
