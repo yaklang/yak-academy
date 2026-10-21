@@ -11,7 +11,9 @@ COPY backend/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/academy-server ./cmd/academy-server
 
 FROM alpine:3.21
-RUN apk add --no-cache docker-cli ca-certificates tzdata
+# gcompat：glibc 兼容层——yaklang 官方 Linux 二进制按 glibc 动态链接
+# （PT_INTERP /lib64/ld-linux-x86-64.so.2），musl 环境缺它时 exec 报 not found。
+RUN apk add --no-cache docker-cli ca-certificates tzdata gcompat
 COPY --from=build /out/academy-server /usr/local/bin/academy-server
 # 数据卷挂载点（ACADEMY_DB=/data/academy.db）。
 VOLUME /data
