@@ -23,6 +23,8 @@ docs/plans/
 # 本地测试构造的内容包样例
 *.test-package.zip
 testdata/
+# ACM 参考样例包的测试数据组是交付内容，随包入库（.in/.answer 成对）
+!examples/challenges/*/testdata/
 .zcode/
 
 # E2E (Playwright)
