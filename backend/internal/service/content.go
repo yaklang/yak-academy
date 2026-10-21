@@ -676,6 +676,14 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 		}
 	}
 	for _, c := range batch {
+		// 内置题集防写护栏：普通上传（allowTutorialBank=false）撞内置题目一律 422——
+		// 目录是内置内容的唯一事实源，单题编辑出路会破坏「一键导入 = 整体更新」
+		// 语义。内部导入路径（allowTutorialBank=true）不受限。
+		if !allowTutorialBank {
+			if existing, err := s.challenge.challenges.FindBySlug(ctx, c.Slug); err == nil && existing != nil && existing.IsBuiltin {
+				return 0, nil, fmt.Errorf("%w: challenge %q is builtin; update it via builtin import", ErrValidation, c.Slug)
+			}
+		}
 		hints := make([]model.Hint, 0, len(c.Hints))
 		for _, h := range c.Hints {
 			hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
@@ -811,6 +819,7 @@ func (s *ContentService) resolveUploadBank(ctx context.Context, slug string, b m
 }
 
 // DeleteChallenge 删除题目：存在通关记录拒绝（409）；
+// 内置训练集题目拒绝（422，PruneBuiltinChallenges 的目录清理是唯一出口）；
 // 否则先销毁全部运行中容器，再级联删 flags/hints/lab_instances 行。
 // 提交事件历史 append-only 保留（event-sourcing-rules skill），题目行删除后
 // 历史 submission.challenge_id 悬挂属预期——重放派生只按事件流进行，不再读题。
@@ -818,6 +827,9 @@ func (s *ChallengeService) DeleteChallenge(ctx context.Context, slug string) err
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
 		return err
+	}
+	if chal.IsBuiltin {
+		return fmt.Errorf("%w: builtin challenge %q can only be pruned via builtin import", ErrValidation, slug)
 	}
 	if n, err := s.challenges.CountSolves(ctx, chal.ID); err != nil {
 		return err

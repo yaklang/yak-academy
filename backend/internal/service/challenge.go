@@ -63,9 +63,14 @@ type VisibilityUpdate struct {
 	ClearRelease  bool
 }
 
+// SetVisibility 管理端可见性/定时发布更新。内置训练集题目拒绝（422）：
+// 内置题集的可见性由一键导入管理（目录演进），不提供单题开关。
 func (s *ChallengeService) SetVisibility(ctx context.Context, slug string, u VisibilityUpdate) (*model.Challenge, error) {
 	if u.IsVisible == nil && u.ReleaseAt == nil && !u.ClearRelease {
 		return nil, fmt.Errorf("%w: empty visibility update", ErrValidation)
+	}
+	if existing, err := s.challenges.FindBySlug(ctx, slug); err == nil && existing != nil && existing.IsBuiltin {
+		return nil, fmt.Errorf("%w: builtin challenge %q visibility is managed by builtin import", ErrValidation, slug)
 	}
 	var releaseAt *time.Time
 	if u.ClearRelease {
@@ -234,6 +239,9 @@ func (s *ChallengeService) UploadAttachment(ctx context.Context, slug, origName 
 	if err != nil {
 		return nil, mapRecordNotFound(err)
 	}
+	if chal.IsBuiltin {
+		return nil, fmt.Errorf("%w: builtin challenge %q attachments are managed by builtin import", ErrValidation, slug)
+	}
 	filename, err := sanitizeFilename(origName)
 	if err != nil {
 		return nil, err
@@ -333,6 +341,9 @@ func (s *ChallengeService) DeleteAttachment(ctx context.Context, slug, filename 
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
 		return mapRecordNotFound(err)
+	}
+	if chal.IsBuiltin {
+		return fmt.Errorf("%w: builtin challenge %q attachments are managed by builtin import", ErrValidation, slug)
 	}
 	att, err := s.attachments.Find(ctx, chal.ID, filename)
 	if err != nil {

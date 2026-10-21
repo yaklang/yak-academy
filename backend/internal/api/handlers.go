@@ -3,12 +3,15 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/repo"
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
@@ -776,10 +779,38 @@ func (h *Handlers) buildBuiltinImage(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// adminListChallenges 管理端：题目全量列表（题目管理表格）。
+// adminListChallenges 管理端：题目全量列表（题目管理表格；搜索/筛选参数透传 repo 过滤器）。
 func (h *Handlers) adminListChallenges(w http.ResponseWriter, req *http.Request) {
 	page, pageSize := pageParams(req)
-	items, total, err := h.Topics.AdminListChallenges(req.Context(), (page-1)*pageSize, pageSize)
+	q := req.URL.Query()
+	filter := repo.ChallengeListFilter{
+		Bank:     q.Get("bank"),
+		Category: q.Get("category"),
+		Search:   strings.TrimSpace(q.Get("q")),
+	}
+	if v := q.Get("difficulty"); v != "" {
+		switch model.Difficulty(v) {
+		case model.DifficultyApprentice, model.DifficultyPractitioner, model.DifficultyExpert:
+			filter.Difficulty = v
+		default:
+			mapError(w, fmt.Errorf("%w: difficulty must be apprentice, practitioner or expert", service.ErrValidation))
+			return
+		}
+	}
+	if v := q.Get("builtin"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			mapError(w, fmt.Errorf("%w: builtin must be a boolean", service.ErrValidation))
+			return
+		}
+		filter.IsBuiltin = &b
+	}
+	if filter.Bank != "" && filter.Bank != string(model.BankCTF) &&
+		filter.Bank != string(model.BankACM) && filter.Bank != string(model.BankTutorial) {
+		mapError(w, fmt.Errorf("%w: bank must be ctf, acm or tutorial", service.ErrValidation))
+		return
+	}
+	items, total, err := h.Topics.AdminListChallenges(req.Context(), filter, (page-1)*pageSize, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return
