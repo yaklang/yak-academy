@@ -1054,6 +1054,80 @@ paths:
                         output: { type: string, description: 样例期望输出全文 }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /challenges/{slug}/judge/runs:
+    post:
+      tags: [student]
+      summary: ACM 编程题自测运行（在线执行框）
+      description: |
+        学生在平台内直接运行 yak 源码自测（在线 IDE / custom invocation 模式）。
+        不产生提交记录、不判分、不写事件流——与正式提交（POST /submissions）完全
+        隔离。sample 模式喂指定样例组（sample=true）的输入，完成后与期望输出比对
+        （matches 字段，与判题同一比对器：token 级空白不敏感）；stdin 模式喂
+        自定义输入。异步执行（与判题一致的模型）：创建返回 run id，
+        轮询 GET /challenges/{slug}/judge/runs/{id} 取结果。
+        限制：source ≤ 128KiB；stdin ≤ 256KiB；stdout 响应截断 64KiB（truncated
+        标记）；同一用户同时仅 1 个进行中的 run（422）；判定引擎未配置
+        （ACADEMY_YAK_BIN 空）422；完成票据保留 10 分钟后过期（404）。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, description: yak 源码 }
+                sample:
+                  type: string
+                  description: 样例组名（仅 sample=true 的组）；与 stdin 二选一（都不带 = 422）
+                stdin:
+                  type: string
+                  description: 自定义输入全文；与 sample 二选一
+      responses:
+        '202':
+          description: 已受理（异步执行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, description: run id（轮询用） }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /challenges/{slug}/judge/runs/{id}:
+    get:
+      tags: [student]
+      summary: ACM 自测运行结果轮询
+      description: |
+        轮询自测运行状态（仅创建者可查，他人/过期票据 404）。status=done 时携带
+        结果字段：outcome 引擎结论（ok/tle/re）、stdout 运行输出、time_ms 耗时；
+        sample 模式另有 matches（输出与样例期望是否一致，custom 模式为 null）。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string, enum: [pending, running, done] }
+                  mode: { type: string, enum: [sample, custom] }
+                  sample: { type: string, description: sample 模式时的组名 }
+                  outcome: { type: string, enum: [ok, tle, re], description: status=done 时 }
+                  stdout: { type: string, description: 运行输出（截断至 64KiB） }
+                  stderr: { type: string, description: outcome=re 时的错误输出 }
+                  truncated: { type: boolean, description: stdout 是否被截断 }
+                  time_ms: { type: integer, description: 引擎运行耗时（毫秒） }
+                  matches: { type: boolean, nullable: true, description: sample 模式输出比对结果；custom 模式 null }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /challenges/{slug}/hints/{hintId}/unlock:
     post:
       tags: [student]

@@ -41,7 +41,9 @@ type JudgeService struct {
 	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
 	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
 	queue chan uint
-	now   func() time.Time
+	// runs 自测运行票据表（在线执行框，judge_run.go）：仅内存、不落库。
+	runs *runStore
+	now  func() time.Time
 }
 
 func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances repo.LabInstanceRepo, ev repo.EventRepo, comp repo.CompetitionRepo, bus *eventbus.Bus) *JudgeService {
@@ -53,6 +55,7 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances
 		competitions: comp,
 		bus:          bus,
 		queue:        make(chan uint, 256),
+		runs:         newRunStore(),
 		now:          time.Now,
 	}
 }
