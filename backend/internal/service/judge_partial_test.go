@@ -5,7 +5,9 @@ package service
 // 逐组 groups 明细、scores.json 装配与校验。
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"gorm.io/gorm"
@@ -261,5 +263,73 @@ func TestValidateJudgeJSONNegativeScore(t *testing.T) {
 	}}
 	if err := validateJudgeJSON("challenge.yml", j); err == nil {
 		t.Fatal("negative testdata score must be rejected")
+	}
+}
+// 回归（先红后绿）：管理端编辑弹窗保存 judge 段回传 name/sample/score
+// 引用（不带 input/output）时，走元数据维护语义——保留库内数据并覆写分值，
+// 不得命中「requires inline input and output」422；引用不存在的组名才 422。
+func TestUploadChallengesMetadataEditScores(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	create := []byte(`{
+		"slug": "meta-edit-score", "title": "A+B", "category": "warmup", "bank": "acm",
+		"difficulty": "apprentice", "score": 100,
+		"judge": {"engine": "yak", "time_limit_s": 5,
+			"testdata": [
+				{"name": "01", "input": "1 2\n", "output": "3\n", "sample": true},
+				{"name": "02", "input": "4 5\n", "output": "9\n"}
+			]}
+	}`)
+	if _, _, err := svc.UploadChallenges(ctx, create); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var chal model.Challenge
+	if err := gdb.Where("slug = ?", "meta-edit-score").First(&chal).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 编辑弹窗保存：只回传组引用 + 新分值（30/70），不带数据内容。
+	edit := []byte(`{
+		"slug": "meta-edit-score", "title": "A+B", "category": "warmup", "bank": "acm",
+		"difficulty": "apprentice", "score": 100,
+		"judge": {"engine": "yak", "time_limit_s": 15,
+			"testdata": [
+				{"name": "01", "sample": true, "score": 30},
+				{"name": "02", "score": 70}
+			]}
+	}`)
+	if _, _, err := svc.UploadChallenges(ctx, edit); err != nil {
+		t.Fatalf("metadata edit should carry stored testdata, got: %v", err)
+	}
+	stored, err := repo.NewChallengeRepo(gdb).FindTestdata(ctx, chal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored groups = %d, want 2", len(stored))
+	}
+	if stored[0].Input != "1 2\n" || stored[0].Answer != "3\n" {
+		t.Fatalf("metadata edit must not drop stored data: %+v", stored[0])
+	}
+	if stored[0].Score != 30 || stored[1].Score != 70 {
+		t.Fatalf("score overrides not applied: %d/%d", stored[0].Score, stored[1].Score)
+	}
+	var conf model.ACMJudge
+	if err := gdb.Where("challenge_id = ?", chal.ID).First(&conf).Error; err != nil {
+		t.Fatal(err)
+	}
+	if conf.TimeLimitS != 15 {
+		t.Fatalf("time limit not updated: %d", conf.TimeLimitS)
+	}
+
+	// 引用不存在的组名 → 422（防出题人笔误静默丢组）。
+	badRef := []byte(`{
+		"slug": "meta-edit-score", "title": "A+B", "category": "warmup", "bank": "acm",
+		"difficulty": "apprentice", "score": 100,
+		"judge": {"engine": "yak", "time_limit_s": 5,
+			"testdata": [{"name": "ghost", "score": 10}]}
+	}`)
+	if _, _, err := svc.UploadChallenges(ctx, badRef); !errors.Is(err, ErrValidation) {
+		t.Fatalf("unknown group reference must 422, got: %v", err)
 	}
 }

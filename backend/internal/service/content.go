@@ -725,16 +725,55 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 			chal.Type = model.ChallengeCode
 			acm = &model.ACMJudge{Engine: c.Judge.Engine, TimeLimitS: c.Judge.TimeLimitS, MemoryLimitMB: c.Judge.MemoryLimitMB}
 			testdata = make([]model.JudgeTestdata, 0, len(c.Judge.Testdata))
+			// 元数据维护判定：judge 段数据组全都不带 input/output（管理端编辑
+			// 弹窗回传 name/sample/score 引用）→ 保留库内数据，按组名覆写
+			// sample/score；任一组带数据 = 直传 JSON 内联（zip 装配在外层完成）。
+			metadataEdit := len(c.Judge.Testdata) > 0
 			for i := range c.Judge.Testdata {
-				t := &c.Judge.Testdata[i]
-				if t.Input == "" || t.Output == "" {
-					// 直传 JSON 内联数据组必须带 input/output 全文（包 zip 路径
-					// 由 testdata/ 文件装配，不会走到这里；元数据维护无数据组）。
-					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata[%d] requires inline input and output", ErrValidation, c.Slug, i)
+				if c.Judge.Testdata[i].Input != "" || c.Judge.Testdata[i].Output != "" {
+					metadataEdit = false
+					break
 				}
-				testdata = append(testdata, model.JudgeTestdata{
-					Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample, Score: t.Score,
-				})
+			}
+			if metadataEdit {
+				existing, ferr := s.challenge.challenges.FindBySlug(ctx, c.Slug)
+				if ferr != nil || existing == nil || existing.Type != model.ChallengeCode {
+					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata[%d] requires inline input and output", ErrValidation, c.Slug, 0)
+				}
+				carried, ferr := s.challenge.challenges.FindTestdata(ctx, existing.ID)
+				if ferr != nil {
+					return 0, nil, ferr
+				}
+				if len(carried) == 0 {
+					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata must not be empty", ErrValidation, c.Slug)
+				}
+				// 引用组名必须全部命中库内组（缺名 = 出题人笔误，拒绝静默丢组/改组）。
+				stored := make(map[string]model.JudgeTestdata, len(carried))
+				for _, td := range carried {
+					stored[td.Name] = td
+				}
+				for _, ref := range c.Judge.Testdata {
+					td, ok := stored[ref.Name]
+					if !ok {
+						return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata %q not found in stored testdata", ErrValidation, c.Slug, ref.Name)
+					}
+					td.ID = 0 // delete+recreate 语义下按新行插入
+					td.Sample = ref.Sample
+					td.Score = ref.Score
+					testdata = append(testdata, td)
+				}
+			} else {
+				for i := range c.Judge.Testdata {
+					t := &c.Judge.Testdata[i]
+					if t.Input == "" || t.Output == "" {
+						// 直传 JSON 内联数据组必须带 input/output 全文（包 zip 路径
+						// 由 testdata/ 文件装配，不会走到这里；元数据维护无数据组）。
+						return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata[%d] requires inline input and output", ErrValidation, c.Slug, i)
+					}
+					testdata = append(testdata, model.JudgeTestdata{
+						Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample, Score: t.Score,
+					})
+				}
 			}
 			if len(testdata) == 0 {
 				// 元数据维护：judge 段不带数据组 = 保留库内已有测试数据，仅更新
