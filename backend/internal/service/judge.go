@@ -35,6 +35,9 @@ type JudgeService struct {
 	events       repo.EventRepo
 	competitions repo.CompetitionRepo // 竞赛提交：队伍归属 + 反作弊检测
 	bus          *eventbus.Bus
+	// engine ACM 编程题（type=code）判题引擎；nil = 引擎未配置，code 题
+	// 判 internal_error（平台侧失败，不消耗判定机会语义由 verdict 体现）。
+	engine CodeEngine
 	// queue 进程内投递通道（低延迟快路径）。持久化由 Submission 表承担：
 	// status=pending 即持久队列，轮询兜底重投（judge 幂等护栏防重复判定）。
 	queue chan uint
@@ -54,6 +57,10 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances
 	}
 }
 
+// SetCodeEngine 注入 ACM 判题引擎（main 装配时调用一次；nil/未配置 =
+// code 题提交仍可入队，判定 internal_error）。
+func (s *JudgeService) SetCodeEngine(e CodeEngine) { s.engine = e }
+
 // Submit 提交答案：写 submission(pending) + submission.created 事件，立即返回。
 // 哨兵答案保留给检测点自动判定，用户提交一律拒绝（防伪造环境判定）。
 func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint, answer string) (*model.Submission, error) {
@@ -65,6 +72,9 @@ func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint
 func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, competitionID uint, answer, sourceIP string) (*model.Submission, error) {
 	if answer == autoAnswer {
 		return nil, fmt.Errorf("%w: reserved answer", ErrValidation)
+	}
+	if err := s.checkCodeSubmit(ctx, userID, challengeID, answer); err != nil {
+		return nil, err
 	}
 	sub := &model.Submission{
 		UserID:        userID,
@@ -90,6 +100,29 @@ func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, co
 	default:
 	}
 	return sub, nil
+}
+
+// checkCodeSubmit ACM 题提交前置校验：源码大小上限 + 同题并发判定去重。
+// flag 判定题（type != code）零成本直通。
+func (s *JudgeService) checkCodeSubmit(ctx context.Context, userID, challengeID uint, answer string) error {
+	chal, err := s.challenges.FindByID(ctx, challengeID)
+	if err != nil {
+		return err
+	}
+	if chal.Type != model.ChallengeCode {
+		return nil
+	}
+	if len(answer) > maxCodeSource {
+		return fmt.Errorf("%w: source exceeds %d KiB limit", ErrValidation, maxCodeSource>>10)
+	}
+	pending, err := s.submissions.HasPendingCode(ctx, userID, challengeID)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("%w: a previous code submission is still being judged", ErrValidation)
+	}
+	return nil
 }
 
 // GetSubmission 查询判定结果（属主校验：仅本人可查，他人 404）。
@@ -204,6 +237,11 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		log.Printf("judge: load challenge: %v", err)
 		return
 	}
+	// ACM 编程题：引擎对拍测试数据（不走 flag 比对）。
+	if chal.Type == model.ChallengeCode {
+		s.judgeCode(ctx, sub, chal)
+		return
+	}
 	// 哨兵答案 = 检测点回调判定通过，跳过 flag 比对直接判对
 	// （真实 flag 比对仅服务端内存与 DB，哨兵不泄露任何可用答案）。
 	correct := sub.Answer == autoAnswer
@@ -246,6 +284,103 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	if chal.TutorialSlug != "" {
 		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
+}
+
+// judgeCode ACM 编程题判定（ICPC 模型）：逐组运行引擎对拍测试数据，
+// 全组通过 = correct（ac），首组失败即停（lazy evaluation，与 DOMjudge 一致）。
+// internal_error（引擎未配置/读题失败）是平台侧失败，不消耗"判定机会"语义。
+func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, chal *model.Challenge) {
+	conf, err := s.challenges.FindACM(ctx, chal.ID)
+	if err != nil {
+		log.Printf("judge: load acm config %d: %v", chal.ID, err)
+		s.finishCode(ctx, sub, model.VerdictInternalError)
+		return
+	}
+	data, err := s.challenges.FindTestdata(ctx, chal.ID)
+	if err != nil {
+		log.Printf("judge: load testdata %d: %v", chal.ID, err)
+		s.finishCode(ctx, sub, model.VerdictInternalError)
+		return
+	}
+	if s.engine == nil {
+		log.Printf("judge: code engine not configured (challenge %s)", chal.Slug)
+		s.finishCode(ctx, sub, model.VerdictInternalError)
+		return
+	}
+	verdict := model.VerdictAC
+	for i := range data {
+		runCtx, cancel := context.WithTimeout(ctx, time.Duration(conf.TimeLimitS)*time.Second)
+		out, err := s.engine.Run(runCtx, sub.Answer, data[i].Input)
+		cancel()
+		if err != nil {
+			verdict = verdictFromError(err)
+			break
+		}
+		if !compareOutput(out, data[i].Answer) {
+			verdict = model.VerdictWA
+			break
+		}
+	}
+	if verdict == model.VerdictInternalError {
+		s.finishCode(ctx, sub, verdict)
+		return
+	}
+	if verdict != model.VerdictAC {
+		// 竞赛提交：错误答案也走反作弊检测（源码提交不涉及实例 flag，仅 IP 基线推进）。
+		if sub.CompetitionID > 0 {
+			s.detectCheat(ctx, sub, chal)
+		}
+		s.finishCode(ctx, sub, verdict)
+		return
+	}
+	// 同作用域已通过 → 不重复计分（score=0），与 flag 题一致。
+	if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID, sub.CompetitionID); err == nil && solved {
+		s.finishCode(ctx, sub, model.VerdictAC)
+		return
+	}
+	if sub.CompetitionID > 0 {
+		s.detectCheat(ctx, sub, chal)
+	}
+	score, err := s.dynamicScore(ctx, sub.ChallengeID, sub.CompetitionID)
+	if err != nil {
+		log.Printf("judge: dynamic score: %v", err)
+		s.finishCode(ctx, sub, model.VerdictAC)
+		return
+	}
+	s.finishCode(ctx, sub, verdict, score)
+	if chal.TutorialSlug != "" {
+		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
+	}
+}
+
+// finishCode ACM 判定写回：verdict 一并落库；score 仅 ac 且首次通过结算。
+// internal_error 保持 pending 语义上"平台失败"——这里仍写 incorrect + verdict，
+// 学生端以 verdict=internal_error 提示重试（区别于代码本身错误）。
+func (s *JudgeService) finishCode(ctx context.Context, sub *model.Submission, verdict model.SubmissionVerdict, score ...int) {
+	sc := 0
+	if len(score) > 0 {
+		sc = score[0]
+	}
+	status := model.SubmissionIncorrect
+	if verdict == model.VerdictAC {
+		status = model.SubmissionCorrect
+	}
+	if err := s.submissions.UpdateVerdict(ctx, sub.ID, status, sc, verdict); err != nil {
+		log.Printf("judge: update verdict: %v", err)
+		return
+	}
+	payload := map[string]any{
+		"submission_id": sub.ID, "challenge_id": sub.ChallengeID,
+		"correct": status == model.SubmissionCorrect, "score": sc,
+		"verdict": string(verdict),
+	}
+	if sub.CompetitionID > 0 {
+		payload["competition_id"] = sub.CompetitionID
+		if sub.SourceIP != "" {
+			payload["source_ip"] = sub.SourceIP
+		}
+	}
+	s.appendEvent(ctx, sub.UserID, model.EventSubmissionJudged, payload)
 }
 
 // matchAnswer shared 读 Flag 表；instance 仅对 running 实例 FlagValue 恒时比较（销毁后需重启）。

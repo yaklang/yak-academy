@@ -628,13 +628,17 @@ type challengeJSON struct {
 	Category      string             `json:"category"`
 	Bank          model.ChallengeBank `json:"bank"`
 	Difficulty    model.Difficulty   `json:"difficulty"`
-	DescriptionMD string           `json:"description_md"`
-	Score         int              `json:"score"`
-	FlagMode      model.FlagMode   `json:"flag_mode"`
+	DescriptionMD string             `json:"description_md"`
+	Score         int                `json:"score"`
+	FlagMode      model.FlagMode     `json:"flag_mode"`
 	Challenge     struct {
 		Type model.ChallengeType `json:"type"`
-		Flag string             `json:"flag"`
+		Flag string              `json:"flag"`
 	} `json:"challenge"`
+	// Judge ACM 编程题判定定义（bank=acm 必填；与 challenge 段互斥）。
+	// nil = flag 判定题（static/regex）。数据组可经包 zip 的 testdata/ 目录
+	// 装配（challenge.json 直传无 zip 时必须内联携带全部数据）。
+	Judge *judgeJSON `json:"judge"`
 	Env struct {
 		Image string `json:"image"`
 		Port  int    `json:"port"`
@@ -647,6 +651,23 @@ type challengeJSON struct {
 	// Links 题目外链（配套工具/参考资料），存 JSON 列。
 	Links []model.ChallengeLink `json:"links"`
 	TutorialSlug string `json:"tutorial_slug"`
+}
+
+// judgeJSON ACM 判定定义（challenge.yml judge 段 / challenge.json judge 段同构）。
+type judgeJSON struct {
+	Engine        string          `json:"engine" yaml:"engine"`
+	TimeLimitS    int             `json:"time_limit_s" yaml:"time_limit_s"`
+	MemoryLimitMB int             `json:"memory_limit_mb" yaml:"memory_limit_mb"`
+	Testdata      []judgeTestData `json:"testdata" yaml:"testdata"`
+}
+
+// judgeTestData 数据组（直传 JSON 内联 input/output；包 zip 路径由 testdata/
+// 文件装配填充。yaml tag 供 challenge.yml judge.testdata 声明组名/sample 用）。
+type judgeTestData struct {
+	Name   string `json:"name" yaml:"name"`
+	Input  string `json:"input" yaml:"input"`
+	Output string `json:"output" yaml:"output"`
+	Sample bool   `json:"sample" yaml:"sample"`
 }
 
 // UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
@@ -695,9 +716,54 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
 			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
 		}
+		// ACM 编程题：type=code（无 flag 行），判定配置与测试数据落 ACM 专用表。
+		var acm *model.ACMJudge
+		var testdata []model.JudgeTestdata
+		if c.Judge != nil {
+			chal.Type = model.ChallengeCode
+			acm = &model.ACMJudge{Engine: c.Judge.Engine, TimeLimitS: c.Judge.TimeLimitS, MemoryLimitMB: c.Judge.MemoryLimitMB}
+			testdata = make([]model.JudgeTestdata, 0, len(c.Judge.Testdata))
+			for i := range c.Judge.Testdata {
+				t := &c.Judge.Testdata[i]
+				if t.Input == "" || t.Output == "" {
+					// 直传 JSON 内联数据组必须带 input/output 全文（包 zip 路径
+					// 由 testdata/ 文件装配，不会走到这里；元数据维护无数据组）。
+					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata[%d] requires inline input and output", ErrValidation, c.Slug, i)
+				}
+				testdata = append(testdata, model.JudgeTestdata{
+					Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample,
+				})
+			}
+			if len(testdata) == 0 {
+				// 元数据维护：judge 段不带数据组 = 保留库内已有测试数据，仅更新
+				// 判定配置与题目元数据（管理端编辑弹窗保存路径）。新建编程题必须
+				// 携带数据组（包 zip 由 testdata/ 装配，直传 JSON 须内联）。
+				existing, ferr := s.challenge.challenges.FindBySlug(ctx, c.Slug)
+				if ferr != nil || existing == nil || existing.Type != model.ChallengeCode {
+					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata must not be empty", ErrValidation, c.Slug)
+				}
+				carried, ferr := s.challenge.challenges.FindTestdata(ctx, existing.ID)
+				if ferr != nil {
+					return 0, nil, ferr
+				}
+				if len(carried) == 0 {
+					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata must not be empty", ErrValidation, c.Slug)
+				}
+				for i := range carried {
+					carried[i].ID = 0 // delete+recreate 语义下按新行插入
+				}
+				testdata = carried
+			}
+		}
 		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 			return 0, nil, err
+		}
+		if acm != nil {
+			acm.ChallengeID = chal.ID
+			if err := s.challenge.challenges.UpsertACM(ctx, acm, testdata); err != nil {
+				return 0, nil, err
+			}
 		}
 		slugs = append(slugs, c.Slug)
 	}
@@ -737,17 +803,33 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	if c.Score < 0 {
 		return fmt.Errorf("%w: %s: score must be non-negative", ErrValidation, where)
 	}
-	switch c.Challenge.Type {
-	case model.ChallengeStatic:
-	case model.ChallengeRegex:
-		if _, err := regexp.Compile(c.Challenge.Flag); err != nil {
-			return fmt.Errorf("%w: %s: invalid regex flag: %v", ErrValidation, where, err)
+	// 判定定义二选一：judge 段（ACM 编程题）或 challenge 段（flag 判定题）。
+	if c.Judge != nil {
+		if c.Challenge.Type != "" || c.Challenge.Flag != "" {
+			return fmt.Errorf("%w: %s: judge and challenge are mutually exclusive", ErrValidation, where)
 		}
-	default:
-		return fmt.Errorf("%w: %s: challenge.type must be static or regex", ErrValidation, where)
-	}
-	if c.Challenge.Flag == "" {
-		return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
+		if c.Bank != "" && c.Bank != model.BankACM {
+			return fmt.Errorf("%w: %s: judge section requires bank=acm", ErrValidation, where)
+		}
+		if c.Bank == model.BankCTF {
+			return fmt.Errorf("%w: %s: judge section requires bank=acm", ErrValidation, where)
+		}
+		if err := validateJudgeJSON(where, c.Judge); err != nil {
+			return err
+		}
+	} else {
+		switch c.Challenge.Type {
+		case model.ChallengeStatic:
+		case model.ChallengeRegex:
+			if _, err := regexp.Compile(c.Challenge.Flag); err != nil {
+				return fmt.Errorf("%w: %s: invalid regex flag: %v", ErrValidation, where, err)
+			}
+		default:
+			return fmt.Errorf("%w: %s: challenge.type must be static or regex", ErrValidation, where)
+		}
+		if c.Challenge.Flag == "" {
+			return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
+		}
 	}
 	mode := resolveFlagMode(c.FlagMode)
 	if c.FlagMode != "" && mode != model.FlagModeShared && mode != model.FlagModeInstance {
@@ -783,8 +865,47 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 			return fmt.Errorf("%w: %s: links[%d].url must be http(s)", ErrValidation, where, i)
 		}
 	}
+	// bank=acm 但没带 judge 段：ACM 题必须是编程题（对齐「ACM 不通过 flag 判定」）。
+	if c.Bank == model.BankACM && c.Judge == nil && c.Challenge.Type == "" {
+		return fmt.Errorf("%w: %s: bank=acm requires a judge section (code problems only)", ErrValidation, where)
+	}
 	return nil
 }
+
+// validateJudgeJSON ACM judge 段校验：engine 枚举、时限/内存范围、数据组
+// 名称唯一且成对（直传内联路径须带 input/output；包 zip 路径在装配后再校验）。
+func validateJudgeJSON(where string, j *judgeJSON) error {
+	if j.Engine != "yak" {
+		return fmt.Errorf("%w: %s: judge.engine must be yak", ErrValidation, where)
+	}
+	if j.TimeLimitS < 1 || j.TimeLimitS > 60 {
+		return fmt.Errorf("%w: %s: judge.time_limit_s must be 1-60", ErrValidation, where)
+	}
+	if j.MemoryLimitMB == 0 {
+		j.MemoryLimitMB = 128
+	}
+	if j.MemoryLimitMB < 16 || j.MemoryLimitMB > 512 {
+		return fmt.Errorf("%w: %s: judge.memory_limit_mb must be 16-512", ErrValidation, where)
+	}
+	seen := map[string]bool{}
+	for i := range j.Testdata {
+		t := &j.Testdata[i]
+		if t.Name == "" {
+			return fmt.Errorf("%w: %s: judge.testdata[%d].name is required", ErrValidation, where, i)
+		}
+		if !testdataNamePattern.MatchString(t.Name) {
+			return fmt.Errorf("%w: %s: judge.testdata[%d].name must match [a-z0-9-]+", ErrValidation, where, i)
+		}
+		if seen[t.Name] {
+			return fmt.Errorf("%w: %s: duplicate testdata name %q", ErrValidation, where, t.Name)
+		}
+		seen[t.Name] = true
+	}
+	return nil
+}
+
+// testdataNamePattern 测试数据组名（包内文件名去扩展名；序号惯例如 01/02）。
+var testdataNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // linksJSON 外链列表序列化为 Challenge.Links JSON 字符串列；空列表存空串。
 func linksJSON(links []model.ChallengeLink) string {
@@ -891,6 +1012,9 @@ func (s *ChallengeService) PruneBuiltinChallenges(ctx context.Context, keepSlugs
 
 // challengeYML 实训常用 challenge.yml（扩展 difficulty/port/tutorial_slug/slug/flag_mode）。
 // 容器题必须同时提供 Dockerfile 与 docker-compose.yml（或 compose.yml）。
+// ACM 编程题：judge 段声明引擎/时限/内存；测试数据组由包内 testdata/ 目录
+// 的 <组名>.in/.answer 文件装配（challenge.yml 里不重复声明数据内容），
+// judge.testdata 列表只声明组名与 sample 标记。
 type challengeYML struct {
 	Slug          string             `yaml:"slug"`
 	Name          string             `yaml:"name"`
@@ -898,18 +1022,29 @@ type challengeYML struct {
 	Category      string             `yaml:"category"`
 	Bank          model.ChallengeBank `yaml:"bank"`
 	Difficulty    model.Difficulty   `yaml:"difficulty"`
-	Description   string           `yaml:"description"`
-	DescriptionMD string           `yaml:"description_md"`
-	Value         int              `yaml:"value"`
-	Score         int              `yaml:"score"`
-	Type          string           `yaml:"type"` // static | regex（flag 类型）
-	FlagMode      model.FlagMode   `yaml:"flag_mode"`
-	Image         string           `yaml:"image"`
-	Port          int              `yaml:"port"`
-	Protocol      string           `yaml:"protocol"`
+	Description   string             `yaml:"description"`
+	DescriptionMD string             `yaml:"description_md"`
+	Value         int                `yaml:"value"`
+	Score         int                `yaml:"score"`
+	Type          string             `yaml:"type"` // static | regex（flag 类型）
+	FlagMode      model.FlagMode     `yaml:"flag_mode"`
+	Image         string             `yaml:"image"`
+	Port          int                `yaml:"port"`
+	Protocol      string             `yaml:"protocol"`
 	Links         []model.ChallengeLink `yaml:"links"`
 	Flags         []challengeYMLFlag `yaml:"flags"`
-	Hints         []struct {
+	// Judge ACM 编程题判定段（engine/time_limit_s/memory_limit_mb +
+	// testdata 组名与 sample 标记；数据内容由包内 testdata/ 文件装配）。
+	Judge *struct {
+		Engine        string `yaml:"engine"`
+		TimeLimitS    int    `yaml:"time_limit_s"`
+		MemoryLimitMB int    `yaml:"memory_limit_mb"`
+		Testdata []struct {
+			Name   string `yaml:"name"`
+			Sample bool   `yaml:"sample"`
+		} `yaml:"testdata"`
+	} `yaml:"judge"`
+	Hints []struct {
 		Title   string `yaml:"title"`
 		Content string `yaml:"content"`
 		Cost    int    `yaml:"cost"`
@@ -994,6 +1129,18 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	if err := s.validateChallengeJSON(0, cj, seen, false); err != nil {
 		return 0, nil, err
 	}
+	// ACM 编程题：包内 testdata/ 的 <组名>.in/.answer 文件装配为数据组。
+	if cj.Judge != nil {
+		if err := assembleTestdata(cj.Judge, files); err != nil {
+			return 0, nil, err
+		}
+		if len(cj.Judge.Testdata) == 0 {
+			return 0, nil, fmt.Errorf("%w: judge problem requires testdata/*.in and testdata/*.answer pairs", ErrValidation)
+		}
+		if err := validateJudgeJSON("challenge.yml", cj.Judge); err != nil {
+			return 0, nil, err
+		}
+	}
 	if buildLocal {
 		if err := s.buildChallengeImage(ctx, cj.Env.Image, files); err != nil {
 			return 0, nil, err
@@ -1005,15 +1152,91 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	}
 	chal := &model.Challenge{
 		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
+		Bank: s.resolveUploadBank(ctx, cj.Slug, cj.Bank),
 		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
 		FlagMode: resolveFlagMode(cj.FlagMode), Image: cj.Env.Image, Port: cj.Env.Port,
 		Links: linksJSON(cj.Links), TutorialSlug: cj.TutorialSlug,
 	}
 	flags := []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
+	if cj.Judge != nil {
+		chal.Type = model.ChallengeCode
+		flags = nil
+	}
 	if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 		return 0, nil, err
 	}
+	if cj.Judge != nil {
+		acm := &model.ACMJudge{
+			ChallengeID: chal.ID, Engine: cj.Judge.Engine,
+			TimeLimitS: cj.Judge.TimeLimitS, MemoryLimitMB: cj.Judge.MemoryLimitMB,
+		}
+		testdata := make([]model.JudgeTestdata, 0, len(cj.Judge.Testdata))
+		for i := range cj.Judge.Testdata {
+			t := &cj.Judge.Testdata[i]
+			testdata = append(testdata, model.JudgeTestdata{
+				Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample,
+			})
+		}
+		if err := s.challenge.challenges.UpsertACM(ctx, acm, testdata); err != nil {
+			return 0, nil, err
+		}
+	}
 	return 1, []string{cj.Slug}, nil
+}
+
+// assembleTestdata 包内 testdata/ 目录装配为 ACM 数据组：每组 <组名>.in 与
+// <组名>.answer 成对（缺一即 422）；组名合法性与唯一性由 validateJudgeJSON 兜底。
+// challenge.yml judge.testdata 里声明的组名/样例标记与文件按组合并。
+func assembleTestdata(j *judgeJSON, files map[string][]byte) error {
+	declared := map[string]bool{}
+	for i := range j.Testdata {
+		declared[j.Testdata[i].Name] = true
+	}
+	inputs := map[string][]byte{}
+	answers := map[string][]byte{}
+	for name, content := range files {
+		dir, base := filepath.Split(filepath.ToSlash(name))
+		if dir != "testdata/" && dir != "testdata" {
+			continue
+		}
+		ext := filepath.Ext(base)
+		stem := strings.TrimSuffix(base, ext)
+		switch ext {
+		case ".in":
+			inputs[stem] = content
+		case ".answer":
+			answers[stem] = content
+		}
+	}
+	for name, in := range inputs {
+		ans, ok := answers[name]
+		if !ok {
+			return fmt.Errorf("%w: testdata/%s.in has no matching .answer file", ErrValidation, name)
+		}
+		if !declared[name] {
+			j.Testdata = append(j.Testdata, judgeTestData{Name: name})
+			declared[name] = true
+		}
+		for i := range j.Testdata {
+			if j.Testdata[i].Name == name {
+				j.Testdata[i].Input = string(in)
+				j.Testdata[i].Output = string(ans)
+			}
+		}
+	}
+	// 声明了组名但包内没有对应文件 → 数据组悬空。
+	for i := range j.Testdata {
+		if j.Testdata[i].Input == "" && inputs[j.Testdata[i].Name] == nil {
+			return fmt.Errorf("%w: judge.testdata[%d] %q has no testdata/ files", ErrValidation, i, j.Testdata[i].Name)
+		}
+	}
+	// 孤儿 .answer（无 .in 配对）：422，防出题人笔误漏喂输入。
+	for name := range answers {
+		if inputs[name] == nil {
+			return fmt.Errorf("%w: testdata/%s.answer has no matching .in file", ErrValidation, name)
+		}
+	}
+	return nil
 }
 
 // buildChallengeImage 将包内文件写到临时目录后调用 ImageBuilder。
@@ -1066,6 +1289,19 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 	flagType := model.ChallengeType(y.Type)
 	if flagType == "" {
 		flagType = model.ChallengeStatic
+	}
+	// ACM judge 段：转 challengeJSON 的 judge 定义（数据内容待包内 testdata/ 装配）。
+	if y.Judge != nil {
+		out.Judge = &judgeJSON{
+			Engine:        y.Judge.Engine,
+			TimeLimitS:    y.Judge.TimeLimitS,
+			MemoryLimitMB: y.Judge.MemoryLimitMB,
+		}
+		for i := range y.Judge.Testdata {
+			t := &y.Judge.Testdata[i]
+			out.Judge.Testdata = append(out.Judge.Testdata, judgeTestData{Name: t.Name, Sample: t.Sample})
+		}
+		return out, nil
 	}
 	if len(y.Flags) == 0 {
 		return out, fmt.Errorf("%w: flags required in challenge.yml", ErrValidation)

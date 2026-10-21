@@ -394,6 +394,13 @@ func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.Hint{}).Error; err != nil {
 			return err
 		}
+		// ACM 判定配置与测试数据随题级联（type=code 专用表）。
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.ACMJudge{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.JudgeTestdata{}).Error; err != nil {
+			return err
+		}
 		// 题目删除后实例行失去引用：一并级联（容器本体由 service 层先销毁）。
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.LabInstance{}).Error; err != nil {
 			return err
@@ -411,6 +418,43 @@ func (r *challengeRepo) FindBuiltinNotInSlugs(ctx context.Context, slugs ...stri
 	}
 	var list []model.Challenge
 	return list, q.Find(&list).Error
+}
+
+// UpsertACM 保存 ACM 判定配置与测试数据（配置行按 challenge_id upsert；
+// 测试数据整体重建——重传包即全量覆盖，与 flags/hints 语义一致）。
+func (r *challengeRepo) UpsertACM(ctx context.Context, j *model.ACMJudge, data []model.JudgeTestdata) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "challenge_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"engine", "time_limit_s", "memory_limit_mb"}),
+		}).Create(j).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_id = ?", j.ChallengeID).Delete(&model.JudgeTestdata{}).Error; err != nil {
+			return err
+		}
+		for i := range data {
+			data[i].ChallengeID = j.ChallengeID
+		}
+		if len(data) > 0 {
+			return tx.Create(&data).Error
+		}
+		return nil
+	})
+}
+
+func (r *challengeRepo) FindACM(ctx context.Context, challengeID uint) (*model.ACMJudge, error) {
+	var j model.ACMJudge
+	if err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).First(&j).Error; err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+func (r *challengeRepo) FindTestdata(ctx context.Context, challengeID uint) ([]model.JudgeTestdata, error) {
+	var list []model.JudgeTestdata
+	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Order("name").Find(&list).Error
+	return list, err
 }
 
 type challengeAttachmentRepo struct{ db *gorm.DB }
@@ -519,4 +563,17 @@ func (r *submissionRepo) DeleteByCompetition(ctx context.Context, competitionID 
 func (r *submissionRepo) UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error {
 	return r.db.WithContext(ctx).Model(&model.Submission{}).Where("id = ?", id).
 		Updates(map[string]any{"status": status, "score": score}).Error
+}
+
+func (r *submissionRepo) UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict) error {
+	return r.db.WithContext(ctx).Model(&model.Submission{}).Where("id = ?", id).
+		Updates(map[string]any{"status": status, "score": score, "verdict": verdict}).Error
+}
+
+func (r *submissionRepo) HasPendingCode(ctx context.Context, userID, challengeID uint) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("user_id = ? AND challenge_id = ? AND status = ?", userID, challengeID, model.SubmissionPending).
+		Count(&n).Error
+	return n > 0, err
 }

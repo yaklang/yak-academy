@@ -116,6 +116,9 @@ type ChallengeFullJSON struct {
 	Score         int                   `json:"score"`
 	FlagMode      model.FlagMode        `json:"flag_mode"`
 	Challenge     fullJSONJudge         `json:"challenge"`
+	// Judge ACM 判定段（编程题回填；flag 判定题为 null）。组名/样例标记供
+	// 元数据编辑往返；测试数据内容不回填（管理端经包 zip 维护，重存走保留语义）。
+	Judge         *fullJSONJudgeSection `json:"judge"`
 	Env           *fullJSONEnv          `json:"env"`
 	Hints         []fullJSONHint        `json:"hints"`
 	Links         []model.ChallengeLink `json:"links"`
@@ -128,6 +131,20 @@ type ChallengeFullJSON struct {
 type fullJSONJudge struct {
 	Type model.ChallengeType `json:"type"`
 	Flag string              `json:"flag"`
+}
+
+// fullJSONJudgeSection 管理端 ACM 判定段回填：数据组仅 name/sample（无内容）。
+// 编辑保存时 judge 段无数据组 → 后端保留库内测试数据（元数据维护语义）。
+type fullJSONJudgeSection struct {
+	Engine         string                `json:"engine"`
+	TimeLimitS     int                   `json:"time_limit_s"`
+	MemoryLimitMB  int                   `json:"memory_limit_mb"`
+	Testdata       []fullJSONTestdataRef `json:"testdata"`
+}
+
+type fullJSONTestdataRef struct {
+	Name   string `json:"name"`
+	Sample bool   `json:"sample"`
 }
 
 type fullJSONEnv struct {
@@ -179,6 +196,25 @@ func (s *ChallengeService) GetFullJSON(ctx context.Context, slug string) (*Chall
 	}
 	if chal.Image != "" {
 		out.Env = &fullJSONEnv{Image: chal.Image, Port: chal.Port}
+	}
+	// ACM 编程题：judge 段回填（组名 + 样例标记 + 判定配置）。
+	if chal.Type == model.ChallengeCode {
+		conf, err := s.challenges.FindACM(ctx, chal.ID)
+		if err != nil {
+			return nil, err
+		}
+		data, err := s.challenges.FindTestdata(ctx, chal.ID)
+		if err != nil {
+			return nil, err
+		}
+		refs := make([]fullJSONTestdataRef, 0, len(data))
+		for _, d := range data {
+			refs = append(refs, fullJSONTestdataRef{Name: d.Name, Sample: d.Sample})
+		}
+		out.Judge = &fullJSONJudgeSection{
+			Engine: conf.Engine, TimeLimitS: conf.TimeLimitS,
+			MemoryLimitMB: conf.MemoryLimitMB, Testdata: refs,
+		}
 	}
 	return out, nil
 }

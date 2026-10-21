@@ -105,13 +105,21 @@ components:
       required: [challenge_slug, answer]
       properties:
         challenge_slug: { type: string }
-        answer: { type: string }
+        answer: { type: string, description: "flag 判定题：flag 文本；ACM 编程题：yak 源码全文（判定不用 flag）" }
     Submission:
       type: object
       properties:
         id: { type: integer }
         status: { type: string, enum: [pending, correct, incorrect] }
         score: { type: integer, description: 判定通过后返回的得分 }
+        verdict:
+          type: string
+          nullable: true
+          enum: [ac, wa, tle, re, internal_error]
+          description: |
+            ACM 编程题判定结果（flag 判定题为 null）：ac=全部数据通过；wa=输出不匹配；
+            tle=超时；re=运行出错/内存超限；internal_error=引擎不可用等平台侧失败
+            （不消耗题目的判定机会，可稍后重试）。
     LeaderboardEntry:
       type: object
       properties:
@@ -222,6 +230,18 @@ components:
         - type: object
           properties:
             description_md: { type: string, description: 题目描述 Markdown（背景/任务目标） }
+            judge:
+              type: object
+              nullable: true
+              description: |
+                ACM 编程题判定配置（flag 判定题为 null）：学生提交 yak 源码，
+                worker 对每组测试数据运行比对（sample=true 的组是样例，其余隐藏）。
+                测试数据内容不下发——样例经 /challenges/{slug}/judge/samples 端点提供。
+              properties:
+                engine: { type: string, enum: [yak] }
+                time_limit_s: { type: integer, description: 单组数据时限（秒） }
+                memory_limit_mb: { type: integer, description: 单组数据内存上限（MB） }
+                testdata_count: { type: integer, description: 测试数据组数（含样例） }
             hints:
               type: array
               items: { $ref: '#/components/schemas/HintView' }
@@ -252,7 +272,7 @@ components:
       description: |
         题目定义 JSON（兼容批量导入的固定格式，单对象或对象数组）。
         带容器环境的题目推荐改用 challenge 包 zip（challenge.yml + Dockerfile + docker-compose.yml）。
-      required: [slug, title, category, difficulty, score, challenge]
+      required: [slug, title, category, difficulty, score]
       properties:
         slug: { type: string }
         title: { type: string }
@@ -276,9 +296,47 @@ components:
         challenge:
           type: object
           required: [type, flag]
+          description: |
+            flag 判定定义（static/regex）。ACM 编程题（judge 段存在）不判定 flag，
+            challenge 段整体省略；否则必填。
           properties:
             type: { type: string, enum: [static, regex] }
             flag: { type: string, description: "instance 模式下为含 {token} 的模板" }
+        judge:
+          type: object
+          description: |
+            ACM 编程题判定定义（bank=acm 必填；ctf 题出现该段一律 422）。
+            ACM 题不通过 flag 判定——学生提交 yak 源码，judge worker 用引擎执行
+            并对拍测试数据（对齐 ICPC 模型：样例 + 隐藏数据逐组运行、token 忽略
+            行尾空白比对、时限/内存限制、AC/WA/TLE/RE 判定）。题目包 zip 中
+            测试数据文件放 testdata/ 目录，由包上传管线存入 judge.testdata；
+            challenge.json 直传（无 zip）无法携带数据文件，仅适合包路径。
+          required: [engine, time_limit_s, testdata]
+          properties:
+            engine: { type: string, enum: [yak], description: 判题引擎（第一版仅 yaklang yak） }
+            time_limit_s:
+              type: integer
+              minimum: 1
+              maximum: 60
+              description: 单组测试数据的运行时限（秒；worker 对引擎进程整体计时，超时判 TLE）
+            memory_limit_mb:
+              type: integer
+              minimum: 16
+              maximum: 512
+              default: 128
+              description: 单组测试数据的内存上限（MB；超限判 RE）
+            testdata:
+              type: array
+              minItems: 1
+              description: 测试数据组（.in/.answer 成对；sample=true 的组学生可见样例）
+              items:
+                type: object
+                required: [name, input, output]
+                properties:
+                  name: { type: string, description: 组名（包内文件去扩展名；展示用） }
+                  input: { type: string, description: 输入数据全文 }
+                  output: { type: string, description: 期望输出全文 }
+                  sample: { type: boolean, default: false, description: 是否样例组（题面样例；隐藏组 false） }
         env:
           type: object
           description: 容器环境（image/port 要么都填要么都不填）
@@ -307,6 +365,10 @@ components:
       type: object
       description: |
         实训常用题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
+        ACM 编程题（challenge.yml 带 judge 段）包内以 testdata/ 目录携带数据文件：
+        testdata/<组名>.in 输入、testdata/<组名>.answer 期望输出（对齐 ICPC .in/.ans
+        惯例，期望输出用 .answer 避开构建工具对 .ans 的误处理），组名建议 01/02/03
+        序号；题面样例组在 challenge.yml judge.testdata 里按 name 标 sample: true。
         详见 content-package-spec skill。
     ChallengeAttachment:
       type: object
@@ -965,6 +1027,33 @@ paths:
               schema: { $ref: '#/components/schemas/ChallengeDetail' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /challenges/{slug}/judge/samples:
+    get:
+      tags: [student]
+      summary: ACM 编程题样例测试数据（sample=true 的组）
+      description: 仅 ACM 编程题（judge 段存在）返回；flag 判定题 404。
+        隐藏测试组（sample=false）不出现在响应中。
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  time_limit_s: { type: integer, description: 单组数据时限（秒） }
+                  samples:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        input: { type: string, description: 样例输入全文 }
+                        output: { type: string, description: 样例期望输出全文 }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /challenges/{slug}/hints/{hintId}/unlock:
     post:
       tags: [student]
@@ -989,6 +1078,10 @@ paths:
     post:
       tags: [student]
       summary: 提交答案（异步判定，返回 pending）
+      description: |-
+        flag 判定题（static/regex）提交 flag 文本；ACM 编程题提交 yak 源码全文——
+        服务端经引擎对每组测试数据运行比对后判定（async worker），不比对 flag。
+        同一 ACM 题在判定出结果前重复提交 422（防并发刷引擎）。
       requestBody:
         required: true
         content:
@@ -1311,6 +1404,9 @@ paths:
     post:
       tags: [admin]
       summary: 上传实训常用题目包 zip（必含 challenge.yml；有容器时必含 Dockerfile + docker-compose.yml）
+      description: |-
+        ACM 编程题：challenge.yml 带 judge 段，包内 testdata/&lt;组名&gt;.in/.answer
+        成对提供测试数据（详见 ChallengePackageUpload schema）。
       requestBody:
         required: true
         content:
@@ -1466,6 +1562,8 @@ paths:
         challenge.flag = flags[0] 供单 flag 表单回填；多 flag（题目包 zip 能力）
         时 flags 数组完整返回，前端保存需提示「只保留表单中这一个」。
         bank=tutorial（内置题集）原样返回，重传时省略 bank 即保留。
+        ACM 编程题额外返回 judge 段（数据组仅 name/sample 标记，内容不回填）；
+        编辑保存时 judge 段不带数据组即保留库内测试数据（元数据维护语义）。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       responses:
@@ -1490,6 +1588,22 @@ paths:
                     properties:
                       type: { type: string, enum: [static, regex] }
                       flag: { type: string, description: 'flags[0]，表单回填用' }
+                  judge:
+                    type: object
+                    nullable: true
+                    description: ACM 编程题判定段（flag 判定题为 null）
+                    properties:
+                      engine: { type: string, enum: [yak] }
+                      time_limit_s: { type: integer }
+                      memory_limit_mb: { type: integer }
+                      testdata:
+                        type: array
+                        description: 数据组引用（name + sample 标记；内容不回填）
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string }
+                            sample: { type: boolean }
                   env:
                     type: object
                     nullable: true
