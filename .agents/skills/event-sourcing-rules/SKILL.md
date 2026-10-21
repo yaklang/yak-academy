@@ -15,8 +15,8 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 
 | type | 触发 |
 |---|---|
-| `submission.created` | 用户提交答案 |
-| `submission.judged` | worker 完成判定（payload 含 correct 与得分） |
+| `submission.created` | 用户提交答案（flag 明文 / yak 源码） |
+| `submission.judged` | worker 完成判定（payload 含 correct 与得分；编程题另含 `verdict`: ac/wa/tle/re/internal_error） |
 | `hint.unlocked` | 用户扣分解锁提示 |
 | `room.completed` | Room 通关 |
 | `lab.instance.started / stopped` | 题目环境生命周期 |
@@ -31,9 +31,13 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 
 ```
 POST 提交 → 写 submission + submission.created 事件 → 返回 pending
-worker 消费 → flag 比对（恒时比较，禁止 == 比较）→ 写 submission.judged 事件
+worker 消费 → 判定（flag 题：比对；编程题：CodeEngine 逐组运行 testdata）→ 写 submission.judged 事件
 派生器消费事件 → 更新 ScoreRecord/Progress → 广播排行榜变更
 ```
+
+- **flag 题**（type=flag）：比对目标见下表；恒时比较，禁止 == 比较。
+- **编程题**（type=code）：判定结论写 `Submission.verdict`（ac/wa/tle/re/internal_error），`status` 仍为 pending/correct/incorrect——积分/排行派生管线对两类题完全一致（verdict 只影响前端展示与 AC 判定语义）。逐组 lazy 判定（首个失败即停），输出比对 token 级空白不敏感。引擎由 `ACADEMY_YAK_BIN` 门控，未配置 = internal_error（不是 error，是合法 verdict，仍走事件流）。
+- **编程题提交守卫**：源码 ≤128KiB；同一 (user, challenge) 已有 pending 判定 → 422（防并发重复入队）。
 
 ### Flag 比对来源（flag_mode）
 
