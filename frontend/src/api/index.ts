@@ -622,7 +622,9 @@ export const adminCompetitionApi = {
   detail: (id: number) => http.get<CompetitionDetail>(`/admin/competitions/${id}`),
   update: (id: number, body: { name?: string; description?: string; start_time?: string; end_time?: string }) =>
     http.patch<CompetitionDetail>(`/admin/competitions/${id}`, body),
-  // 删除竞赛（running 422 拒绝）；级联清理参赛者/题目绑定/提交/WP（含 zip 落盘）/容器。
+  // 手动结束竞赛（仅 running；end_time 置为当前时刻。结束后起止时间可重新配置再开赛）。
+  end: (id: number) => http.post<CompetitionDetail>(`/admin/competitions/${id}/end`),
+  // 删除竞赛（running 422 拒绝——先手动结束）；级联清理参赛者/题目绑定/提交/WP（含 zip 落盘）/容器。
   delete: (id: number) => http.del<{ ok: boolean }>(`/admin/competitions/${id}`),
   challenges: (id: number) =>
     http.get<{ items: TrainingItem[] }>(`/admin/competitions/${id}/challenges`),

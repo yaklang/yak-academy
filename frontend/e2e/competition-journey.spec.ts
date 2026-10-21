@@ -8,7 +8,7 @@ import { endCompetition, loginAsStudent, seedRunningCompetition, studentToken } 
 //   ① 入场前：学生知道管理端 URL 也进不去（前端守卫送回 + 服务端 403）；
 //   ② 入场后：平台其余路径被引导回竞赛首页，服务端对非竞赛域一律 403，
 //      登出重进仍锁（锁定态在服务端），竞赛域内提交 flag 正常判定；
-//   ③ 比赛结束（管理端把 end_time 改到过去）：竞赛首页自检感知、放出 WP
+//   ③ 比赛结束（管理端手动结束）：竞赛首页自检感知、放出 WP
 //      提交，学生恢复平台访问（前端守卫与服务端同时解除）。
 const { challenge: C } = E2E
 
@@ -20,8 +20,8 @@ async function enterViaMailLink(page: import('@playwright/test').Page, id: numbe
   await expect(page.getByText('进行中', { exact: true })).toBeVisible()
 }
 
-// 本 spec 运行中创建的竞赛：无论用例成败，afterEach 都把 end_time 改到
-// 过去兜底收尾（锁定由「已入场 ∧ running」派生，比赛结束即解除）——
+// 本 spec 运行中创建的竞赛：无论用例成败，afterEach 都手动结束兜底收尾
+// （锁定由「已入场 ∧ running」派生，比赛结束即解除）——
 // 否则中途失败/重试会把学生锁死，殃及后续 spec 与重跑。
 const openIds: number[] = []
 test.afterEach(async ({ request }) => {
@@ -108,7 +108,7 @@ test.describe('竞赛隔离旅程', () => {
     await loginAsStudent(page)
     await enterViaMailLink(page, comp.id, comp.code)
 
-    // 管理端把 end_time 改到过去（running 期间允许缩短）：比赛立即结束
+    // 管理端手动结束竞赛（POST /end，end_time 置为当前时刻）：比赛立即结束
     await endCompetition(request, comp.id)
 
     // 竞赛首页 5s 节拍自检：感知结束 → 解锁并放出 WP 提交（结束态业务标识）

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 管理面板：竞赛管理（列表 + 创建）。竞赛详情/题目/参赛者/容器/警告/WP/榜单
 // 在详情页按标签页组织（/admin/panel/competitions/:id）。
-// 状态由起止时间派生（scheduled/running/ended），无"手动开始/结束"。
+// 状态由起止时间派生（scheduled/running/ended）：进行中的竞赛可手动结束
+// （end_time 置为当前时刻），已结束的竞赛可在详情页重新配置再次开赛。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminCompetitionApi, type Competition } from '../../api'
@@ -78,9 +79,33 @@ function statusLabel(s: Competition['status']) {
 }
 
 const deleting = ref('')
+const ending = ref('')
+
+// 手动结束竞赛（仅 running）：end_time 置为当前时刻，参赛者解锁、WP 开放提交。
+async function end(row: Competition) {
+  try {
+    await ElMessageBox.confirm(
+      `手动结束竞赛「${row.name}」？立即生效：参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可在详情页重新配置起止时间再次开赛。`,
+      '手动结束竞赛',
+      { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return
+  }
+  ending.value = String(row.id)
+  try {
+    await adminCompetitionApi.end(row.id)
+    ElMessage.success(`竞赛「${row.name}」已结束`)
+    await load()
+  } catch (e) {
+    ElMessage.error((e as Error).message || '操作失败')
+  } finally {
+    ending.value = ''
+  }
+}
 
 // 删除竞赛：running 期间后端 422 拉回提示，前端直接给出可操作提示
-// （先把结束时间改到过去再删）。
+// （先手动结束再删）。
 async function remove(row: Competition) {
   try {
     await ElMessageBox.confirm(
@@ -101,7 +126,7 @@ async function remove(row: Competition) {
   } catch (e) {
     const msg = (e as Error).message || '删除失败'
     ElMessage.error(
-      row.status === 'running' ? `${msg}（进行中的竞赛不可删除，可先把结束时间改到过去）` : msg,
+      row.status === 'running' ? `${msg}（进行中的竞赛不可删除，可先手动结束再删除）` : msg,
     )
   } finally {
     deleting.value = ''
@@ -142,11 +167,19 @@ onMounted(load)
       <el-table-column label="结束时间" width="170">
         <template #default="{ row }">{{ fmt(row.end_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="170">
+      <el-table-column label="操作" width="220">
         <template #default="{ row }">
           <router-link :to="`/admin/panel/competitions/${row.id}`">
             <el-button size="small" type="primary" link>详情与配置</el-button>
           </router-link>
+          <el-button
+            v-if="row.status === 'running'"
+            size="small"
+            type="danger"
+            link
+            :loading="ending === String(row.id)"
+            @click="end(row)"
+          >结束</el-button>
           <el-button
             size="small"
             type="danger"

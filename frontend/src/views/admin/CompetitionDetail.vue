@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 管理面板：竞赛详情页。配置编辑 + 题目绑定/批量导入 + 参赛人员与队伍批量导入
 // （自动建号/邀请码/站内邀请邮件）+ 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
-// 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）。
+// 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）；
+// 进行中的竞赛可手动结束，已结束的竞赛可重新配置起止时间再次开赛。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -80,6 +81,32 @@ async function saveConfig() {
     ElMessage.error((e as Error).message)
   } finally {
     saving.value = false
+  }
+}
+
+// 手动结束竞赛（仅 running）：end_time 置为当前时刻；参赛者解锁、WP 开放提交。
+// 结束后仍可重新配置起止时间再次开赛。
+const ending = ref(false)
+
+async function endCompetition() {
+  try {
+    await ElMessageBox.confirm(
+      `手动结束竞赛「${detail.value?.name}」？立即生效：参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可重新配置起止时间再次开赛。`,
+      '手动结束竞赛',
+      { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return
+  }
+  ending.value = true
+  try {
+    detail.value = await adminCompetitionApi.end(compId)
+    syncForm()
+    ElMessage.success('竞赛已结束')
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    ending.value = false
   }
 }
 
@@ -458,14 +485,22 @@ onMounted(async () => {
               <el-input v-model="form.description" type="textarea" :rows="3" />
             </el-form-item>
             <el-form-item label="开始时间">
-              <el-date-picker v-model="form.start" type="datetime" :disabled="status !== 'scheduled'" style="width: 100%" />
-              <div v-if="status !== 'scheduled'" class="dim">已开始的竞赛不能修改开赛时间</div>
+              <el-date-picker v-model="form.start" type="datetime" :disabled="running" style="width: 100%" />
+              <div v-if="running" class="dim">进行中的竞赛不能修改开赛时间，可先手动结束</div>
+              <div v-else-if="status === 'ended'" class="dim">已结束的竞赛可重新配置起止时间，再次开赛</div>
             </el-form-item>
             <el-form-item label="结束时间">
               <el-date-picker v-model="form.end" type="datetime" style="width: 100%" />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
+              <el-button
+                v-if="running"
+                type="danger"
+                plain
+                :loading="ending"
+                @click="endCompetition"
+              >手动结束竞赛</el-button>
             </el-form-item>
           </el-form>
         </el-card>

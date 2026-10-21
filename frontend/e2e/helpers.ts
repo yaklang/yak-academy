@@ -88,11 +88,13 @@ export async function seedRunningCompetition(
 
 // 把竞赛 end_time 改到过去（running 期间允许缩短）：比赛立即结束、入场锁解除。
 // 已结束的竞赛再缩短会被 422 拒绝，调用方按需忽略响应（幂等收尾）。
+// 手动结束竞赛（POST /admin/competitions/{id}/end，仅 running 有效）。
+// 兜底收尾用：无论用例成败把比赛结束，避免学生账号被锁进后续 spec；
+// 已结束（422）不视为失败。
 export async function endCompetition(request: APIRequestContext, id: number): Promise<void> {
   const login = await request.post(`${E2E.apiURL}/api/v1/auth/login`, { data: E2E.admin })
   const { token } = (await login.json()) as { token: string }
-  await request.patch(`${E2E.apiURL}/api/v1/admin/competitions/${id}`, {
+  await request.post(`${E2E.apiURL}/api/v1/admin/competitions/${id}/end`, {
     headers: { Authorization: `Bearer ${token}` },
-    data: { end_time: new Date(Date.now() - 60_000).toISOString() },
   })
 }

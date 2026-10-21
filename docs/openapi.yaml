@@ -2161,7 +2161,11 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
     patch:
       tags: [admin]
-      summary: 修改竞赛配置（name/description/起止时间；至少一项）
+      summary: |
+        修改竞赛配置（name/description/起止时间；至少一项）。
+        running 期间 start_time 不可改（入场锁定语义依赖开赛时刻）、
+        end_time 可延后或缩短；已结束的竞赛起止时间均可重新配置
+        （新窗口落回未来即重新开赛）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -2188,7 +2192,7 @@ paths:
     delete:
       tags: [admin]
       summary: |
-        删除竞赛（仅 scheduled/ended 可删，running 期间 422 拒绝）。
+        删除竞赛（仅 scheduled/ended 可删，running 期间 422 拒绝——先手动结束）。
         级联清理：参赛者/队伍/题目绑定/反作弊警告/WP（含落盘 zip）/竞赛积分/
         竞赛内提交与容器记录；运行中容器先销毁。提交事件历史 append-only 保留。
       parameters:
@@ -2203,6 +2207,24 @@ paths:
                 required: [ok]
                 properties:
                   ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/end:
+    post:
+      tags: [admin]
+      summary: |
+        手动结束竞赛（仅 running；end_time 置为当前时刻，状态仍由时间派生）。
+        scheduled/ended 状态调用 422。已结束的竞赛可通过 PATCH 重新配置起止时间。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionDetail' }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }

@@ -178,6 +178,90 @@ func TestCompetitionCreateValidatesTimes(t *testing.T) {
 	}
 }
 
+// TestEndedCompetitionReconfigurable 已结束的竞赛可重新配置起止时间
+// （回归：曾因"已开始即永久锁死 start_time"导致结束后的竞赛无法重排复活，
+// 报错 cannot change start_time after competition started）。
+func TestEndedCompetitionReconfigurable(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	comp := e.createRunningComp(t, "重排复活赛")
+	// 推进时钟到比赛结束后。
+	e.now = comp.EndTime.Add(time.Minute)
+	// 1. 整体重排到未来窗口：成功且状态回到 scheduled（重新开赛）。
+	ns := e.now.Add(2 * time.Hour)
+	ne := e.now.Add(4 * time.Hour)
+	rescheduled, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{StartTime: &ns, EndTime: &ne})
+	if err != nil {
+		t.Fatalf("reconfigure ended competition: %v", err)
+	}
+	if rescheduled.Status != model.CompetitionScheduled {
+		t.Fatalf("status after reschedule: want scheduled, got %s", rescheduled.Status)
+	}
+	if !rescheduled.StartTime.Equal(ns) || !rescheduled.EndTime.Equal(ne) {
+		t.Fatalf("rescheduled times not persisted: start=%v end=%v", rescheduled.StartTime, rescheduled.EndTime)
+	}
+	// 2. 重排后进入新窗口 running：start_time 再次锁定（保护入场锁定语义）。
+	e.now = ns.Add(time.Minute)
+	if _, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{StartTime: &ne}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("change start while re-running: want ErrValidation, got %v", err)
+	}
+	// 3. running 窗口内延后 end_time 仍允许。
+	ne2 := ne.Add(time.Hour)
+	if _, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{EndTime: &ne2}); err != nil {
+		t.Fatalf("extend end while re-running: %v", err)
+	}
+	// 4. 再次结束后缩回 end_time 也属于重新配置（曾报 cannot shorten
+	// end_time after competition ended）。
+	e.now = ne2.Add(time.Minute)
+	shorter := ne2.Add(-time.Hour)
+	if _, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{EndTime: &shorter}); err != nil {
+		t.Fatalf("shorten end after re-ended: %v", err)
+	}
+}
+
+// TestEndCompetitionManually 手动结束：仅 running 可结束，end_time 置为
+// 当前时刻；结束后可重排复活（与 TestEndedCompetitionReconfigurable 衔接）。
+func TestEndCompetitionManually(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	// scheduled：未开赛不存在"结束"，422。
+	futureStart := e.now.Add(time.Hour)
+	futureEnd := e.now.Add(3 * time.Hour)
+	scheduled, err := e.comps.Create(ctx, "未开赛赛", "", futureStart, futureEnd)
+	if err != nil {
+		t.Fatalf("create scheduled: %v", err)
+	}
+	if _, err := e.comps.End(ctx, scheduled.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("end scheduled: want ErrValidation, got %v", err)
+	}
+	// running：手动结束成功，end_time = now，状态派生 ended。
+	comp := e.createRunningComp(t, "手动结束赛")
+	ended, err := e.comps.End(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("end running: %v", err)
+	}
+	if ended.Status != model.CompetitionEnded {
+		t.Fatalf("status after end: want ended, got %s", ended.Status)
+	}
+	if !ended.EndTime.Equal(e.now) {
+		t.Fatalf("end_time after end: want %v, got %v", e.now, ended.EndTime)
+	}
+	// 已结束的竞赛再调 End：422（幂等保护，避免误触改写历史窗口）。
+	if _, err := e.comps.End(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("end already-ended: want ErrValidation, got %v", err)
+	}
+	// 手动结束 → 重排到未来复活（用户主路径：进行中竞赛先结束再重新配置）。
+	ns := e.now.Add(time.Hour)
+	ne := e.now.Add(2 * time.Hour)
+	revived, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{StartTime: &ns, EndTime: &ne})
+	if err != nil {
+		t.Fatalf("revive after manual end: %v", err)
+	}
+	if revived.Status != model.CompetitionScheduled {
+		t.Fatalf("status after revive: want scheduled, got %s", revived.Status)
+	}
+}
+
 // TestBindChallengesBySlugsAndUnbind 题目绑定/解绑（幂等 + running 拒解绑）。
 func TestBindChallengesBySlugsAndUnbind(t *testing.T) {
 	e := newCompEnv(t)
