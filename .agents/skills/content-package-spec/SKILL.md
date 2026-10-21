@@ -1,6 +1,6 @@
 ---
 name: content-package-spec
-description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内容上传、zip 解析、Markdown front matter、challenge.json 题目定义、内容版本化或发布状态机时必须加载。
+description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内容上传、zip 解析、Markdown front matter、challenge.json/challenge.yml 题目定义（含 ACM judge 段与 testdata/ 数据组）、内容版本化或发布状态机时必须加载。
 ---
 
 # 教程包与题目 JSON 规范（管理员上传是内容的唯一来源）
@@ -48,6 +48,7 @@ package.zip
 ├── challenge.yml          # 必填（或 challenge.yaml）
 ├── Dockerfile             # 声明 image 时必填
 ├── docker-compose.yml     # 声明 image 时必填（或 compose.yml）
+├── testdata/              # ACM 编程题（judge 段）必填：<组名>.in + <组名>.answer 成对
 └── src/…                  # 可选（构建上下文）
 ```
 
@@ -59,6 +60,7 @@ package.zip
 | `category` / `difficulty` / `value`（或 `score`） | difficulty 三级枚举 |
 | `description` | Markdown 描述 |
 | `type` + `flags` | flag 匹配类型 static/regex；取首个 flag |
+| `judge` | ACM 编程题判定段（与 `type`+`flags` 互斥，要求 `bank: acm`），见下 |
 | `flag_mode` | `shared`（默认，题目级共享）/ `instance`（每实例唯一，模板含 `{token}`） |
 | `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` 且**上传时 docker build** |
 | `hints` / `tutorial_slug` / `bank` | 可选；bank = 题库 tab（**上传仅 ctf/acm**，缺省 ctf），见 B 节 |
@@ -66,6 +68,7 @@ package.zip
 - `flag_mode: instance` **必须**同时声明容器（image/port）；模板示例：`flag{lab-{token}}`。
 - `image: .`：平台解压构建上下文并 `docker build -t yak-academy/<slug>:latest`；Docker 不可用 → 422，禁止悬空 tag。
 - 远程镜像（非 `.`）不构建，仍要求包内含 Dockerfile + compose（文档/本地复现用）。
+- **`judge` 段（编程题，对齐 ICPC 源码判定模型，禁止用 flag 验证 ACM 题）**：学生提交 yak 源码，引擎逐组运行 `testdata/` 比对输出（token 级空白不敏感），首个失败组即停（lazy evaluation）；判定结论 verdict = ac/wa/tle/re/internal_error。字段：`engine: yak`、`time_limit_s`（1-60）、`memory_limit_mb`（16-512，缺省 128）、`testdata` 组名列表（`sample: true` 的组学生端可见，经 `GET /challenges/{slug}/judge/samples`）。`testdata/` 目录每组 `<组名>.in` + `<组名>.answer` 成对（单侧缺失 → 422）；组名 `^[a-z0-9][a-z0-9-]*$` 且唯一。`judge` 与 `image`/`env` 容器段互斥。**元数据维护语义**：管理端编辑弹窗保存 judge 段不带数据组 = 保留库内已有 testdata（仅更新时限/元数据）；新建编程题必须携带数据组。判题引擎由 `ACADEMY_YAK_BIN` 配置门控，未配置时判定 internal_error（见 remote-deploy/架构文档）。参考样例：`examples/challenges/acm-yak-a-plus-b/`。
 
 ### C. 内置训练集（vulinbox 教程 + 题目，仅经管理端一键导入）
 
@@ -101,9 +104,10 @@ package.zip
 ```
 
 - 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug`/`flag_mode`/`bank` 可选。
-- `bank`：`ctf`（缺省）/ `acm`——题库页 tab 分组键。**`tutorial` 为教程题目 tab 专属，保留给内置题集**：上传显式传 `tutorial` 一律 422；缺省时新建默认 `ctf`、重传保留原值。
+- `bank`：`ctf`（缺省）/ `acm`——题库页 tab 分组键。**`tutorial` 为教程题目 tab 专属，保留给内置题集**：上传显式传 `tutorial` 一律 422；缺省时新建默认 `ctf`、重传保留原值。`bank: acm` 的题**必须**带 `judge` 段（编程题），不得走 `challenge` flag 判定。
 - `is_builtin` 不是上传字段：它是导入来源标记，仅 `POST /admin/challenges/builtin` 置 true（题库页「是否内置」过滤依据），普通上传/编辑 upsert 不触碰、也不清除。
 - `challenge.type`：`static`（明文 flag）/ `regex`（可编译正则）。
+- `judge`（可选，与 `challenge` 互斥）：字段同 A 节（engine/time_limit_s/memory_limit_mb），但**直传 JSON 须内联数据组**——`testdata: [{name, input, output, sample?}]`，`input`/`output` 必填（管理端「元数据维护不带数据组」语义仅存在于编辑保存路径，A 节 zip 由 `testdata/` 目录装配）。
 - `flag_mode`：`shared`|`instance`；`instance` 时 flag 为含 `{token}` 的模板，且必须有 env。
 - `env` 整段可选；**要么都填要么都不填**。image 非空即 `has_env: true`。
 - `hints[].cost` 非负；解锁走 `hint.unlocked` 事件扣分（见 event-sourcing-rules）。
