@@ -71,6 +71,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/judge/samples", "", h.getJudgeSamples)
+	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/judge/runs", "", h.createJudgeRun)
+	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/judge/runs/{id}", "", h.getJudgeRun)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/attachments/{filename}", "", h.downloadAttachment)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -601,6 +603,38 @@ func (h *Handlers) getJudgeSamples(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"time_limit_s": timeLimitS, "samples": samples,
 	})
+}
+
+// createJudgeRun ACM 自测运行（在线执行框）：受理 sample/stdin 二选一的
+// 一次源码运行，返回 run id 供轮询（异步，HTTP 路径不执行引擎）。
+func (h *Handlers) createJudgeRun(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Source string `json:"source"`
+		Sample string `json:"sample"`
+		Stdin  string `json:"stdin"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Source == "" {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	id, err := h.Judge.CreateCodeRun(req.Context(), user.ID, req.PathValue("slug"), body.Source, body.Sample, body.Stdin)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": id})
+}
+
+// getJudgeRun 自测运行结果轮询（仅创建者可见）。
+func (h *Handlers) getJudgeRun(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	view, err := h.Judge.GetCodeRun(req.Context(), user.ID, req.PathValue("slug"), req.PathValue("id"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 // updateChallengeVisibility 管理端：更新题目可见性/定时发布。
