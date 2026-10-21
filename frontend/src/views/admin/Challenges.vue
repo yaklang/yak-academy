@@ -8,7 +8,7 @@
 // 行内「编辑」拉取库内完整定义回填同一弹窗（GET /admin/challenges/{slug}），
 // 附件管理也并入了该弹窗；操作列只保留 编辑 / 删除。
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import {
@@ -16,7 +16,7 @@ import {
   type AdminChallengeQuery,
   type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeDifficulty,
   type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink,
-  type JudgeJSON, type TrainingItem,
+  type JudgeJSON, type TrainingItem, type YakEngineStatus,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -82,6 +82,10 @@ const onKeywordInput = () => {
 }
 
 watch([activeTab, categoryFilter, difficultyFilter, builtinFilter], resetAndLoad)
+// 进入 ACM tab 时加载引擎状态卡（下载任务若仍在进行会自动续上轮询）。
+watch(activeTab, (tab) => {
+  if (tab === 'acm') loadEngineStatus()
+})
 
 // 当前 tab 的分类选项从列表页可见数据聚合（管理端题目量级小，前端聚合足够；
 // 保持与列表过滤同一事实源，避免单独的 distinct 接口）。
@@ -411,6 +415,78 @@ async function load() {
   }
 }
 
+// ===== yak 判题引擎状态（OSS 异步下载，仅 ACM tab） =====
+// 状态卡数据源 GET /admin/challenges/engine/yak。引擎二进制约 220MB，走
+// 后台任务 + 1s 轮询（大文件同步转发放大有代理超时风险，与靶场镜像的
+// 同步构建不同）；完成即装配，无需重启后端。进入 ACM tab 或刷新时加载，
+// 若服务端仍有进行中的任务（如页面刷新过）自动续上轮询。
+const engineStatus = ref<YakEngineStatus | null>(null)
+let enginePollTimer: number | undefined
+
+async function loadEngineStatus() {
+  try {
+    engineStatus.value = await adminChallengeApi.yakEngineStatus()
+    resumeEnginePolling()
+  } catch {
+    engineStatus.value = null // 状态查询失败不阻塞页面
+  }
+}
+
+function resumeEnginePolling() {
+  if (engineStatus.value?.download.state === 'running' && enginePollTimer === undefined) {
+    enginePollTimer = window.setInterval(pollEngineOnce, 1000)
+  }
+}
+
+async function pollEngineOnce() {
+  try {
+    engineStatus.value = await adminChallengeApi.yakEngineStatus()
+  } catch {
+    return // 瞬时失败容忍，下一拍重试
+  }
+  const state = engineStatus.value?.download.state
+  if (state !== 'running') {
+    stopEnginePolling()
+    if (state === 'done') {
+      ElMessage.success('yak 引擎已就绪，ACM 判题与自测运行已启用')
+    } else if (state === 'failed') {
+      ElMessage.error({ message: `引擎下载失败：${engineStatus.value?.download.error || '未知错误'}`, duration: 8000 })
+    }
+  }
+}
+
+function stopEnginePolling() {
+  if (enginePollTimer !== undefined) {
+    clearInterval(enginePollTimer)
+    enginePollTimer = undefined
+  }
+}
+
+// total=-1（OSS 未给 Content-Length）时退化为不定态进度条。
+const engineDownloadPercent = computed(() => {
+  const d = engineStatus.value?.download
+  if (!d || d.total <= 0) return 0
+  return Math.min(100, Math.round((d.received / d.total) * 100))
+})
+
+async function onDownloadYakEngine() {
+  try {
+    await ElMessageBox.confirm(
+      '将从 yaklang 官方 OSS 下载 yak 引擎二进制（约 220MB，需联网，视带宽约 1-5 分钟）。下载在后台进行，完成后自动装配，无需重启服务。是否继续？',
+      '下载 yak 判题引擎',
+      { type: 'info', confirmButtonText: '开始下载', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    engineStatus.value = await adminChallengeApi.yakEngineDownload()
+    resumeEnginePolling()
+  } catch (e) {
+    ElMessage.error(`引擎下载启动失败：${(e as Error).message}`)
+  }
+}
+
 async function remove(row: TrainingItem) {
   try {
     await ElMessageBox.confirm(
@@ -518,6 +594,8 @@ onMounted(() => {
   load()
   loadImageStatus()
 })
+
+onUnmounted(stopEnginePolling)
 </script>
 
 <template>
@@ -641,6 +719,45 @@ onMounted(() => {
       </el-button>
       <el-button size="small" text @click="loadImageStatus">刷新</el-button>
     </div>
+  </el-card>
+
+  <!-- yak 判题引擎状态：仅 ACM tab 显示（引擎服务 code 题判定与自测运行；
+       未装配时 ACM 提交判 internal_error、自测运行 422） -->
+  <el-card v-if="activeTab === 'acm' && engineStatus" class="image-card" shadow="never">
+    <div class="image-status">
+      <span class="image-label">yak 判题引擎</span>
+      <el-tag :type="engineStatus.configured ? 'success' : 'warning'" size="small">
+        {{ engineStatus.configured ? '已装配' : '未装配' }}
+      </el-tag>
+      <el-tag v-if="engineStatus.version" type="info" size="small">{{ engineStatus.version }}</el-tag>
+      <code class="image-tag">{{ engineStatus.path }}</code>
+      <el-button
+        size="small"
+        type="primary"
+        :loading="engineStatus.download.state === 'running'"
+        :title="engineStatus.configured
+          ? '重新从官方 OSS 下载 yak 二进制并换装（约 220MB，后台进行，完成即生效）'
+          : '从 yaklang 官方 OSS 下载 yak 二进制到数据目录（约 220MB，后台进行，完成即装配，无需重启）'"
+        @click="onDownloadYakEngine"
+      >
+        从 OSS 下载引擎
+      </el-button>
+      <el-button size="small" text @click="loadEngineStatus">刷新</el-button>
+    </div>
+    <div v-if="engineStatus.download.state === 'running'" class="engine-progress">
+      <el-progress
+        :percentage="engineDownloadPercent"
+        :indeterminate="engineStatus.download.total < 0"
+        :show-text="false"
+        :stroke-width="6"
+      />
+      <span class="engine-progress-text">
+        {{ attachSize(engineStatus.download.received) }}{{ engineStatus.download.total > 0 ? ` / ${attachSize(engineStatus.download.total)}` : '' }}
+      </span>
+    </div>
+    <p v-else-if="engineStatus.download.state === 'failed'" class="engine-error">
+      上次下载失败：{{ engineStatus.download.error || '未知错误' }}（可重试）
+    </p>
   </el-card>
 
   <el-collapse-transition>
@@ -896,12 +1013,17 @@ onMounted(() => {
 }
 .filter-clear:hover { opacity: 0.8; }
 
-/* 镜像状态卡 / 规范折叠卡 / 表格 */
+/* 镜像状态卡 / 引擎状态卡 / 规范折叠卡 / 表格 */
 .image-card { margin-bottom: 1rem; }
 .image-card :deep(.el-card__body) { padding: 0.6rem 1rem; }
 .image-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .image-label { font-weight: 600; }
 .image-tag { color: var(--el-text-color-secondary); font-size: 0.82rem; }
+/* 引擎下载进度行 / 失败提示：与 image-tag 同一字号体系 */
+.engine-progress { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; max-width: 480px; }
+.engine-progress .el-progress { flex: 1; }
+.engine-progress-text { color: var(--el-text-color-secondary); font-size: 0.82rem; white-space: nowrap; }
+.engine-error { color: var(--el-color-danger); font-size: 0.82rem; margin: 0.5rem 0 0; }
 .spec { margin-bottom: 1rem; }
 .spec h3 { margin-top: 0; }
 .spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
