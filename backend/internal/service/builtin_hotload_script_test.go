@@ -25,7 +25,9 @@ func TestBuiltinMallChainHotloadScriptUsesRealHooks(t *testing.T) {
 	}
 	lesson := string(raw)
 
-	fence := regexp.MustCompile("(?s)```[a-zA-Z]*\n(.*?)\n```")
+	// \r? 容忍 core.autocrlf=true 的检出（工作区文件成 CRLF，go:embed 原样带进
+	// 测试二进制）；索引内与 CI（autocrlf=false）仍是 LF。
+	fence := regexp.MustCompile("(?s)```[a-zA-Z]*\\r?\\n(.*?)\\r?\\n```")
 	blocks := fence.FindAllStringSubmatch(lesson, -1)
 	if len(blocks) == 0 {
 		t.Fatal("lesson.md contains no fenced code block")

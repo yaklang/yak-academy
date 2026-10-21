@@ -290,7 +290,8 @@ func TestImportBuiltinChallengesNoopSkipsImage(t *testing.T) {
 	}
 }
 
-// 普通上传路径不改写来源标记：管理端编辑/重传内置题后 is_builtin 保持 true。
+// 内置题集防写护栏：普通上传重传内置题一律 422（目录是内置内容唯一事实源，
+// 单题编辑出路会破坏「一键导入 = 整体更新」语义）。拒绝后库内行原样保留。
 func TestUploadDoesNotClearBuiltinMark(t *testing.T) {
 	svc, gdb := newBuiltinTestService(t, &builtinBuildRecorder{})
 	if _, err := svc.ImportBuiltinChallenges(context.Background()); err != nil {
@@ -298,18 +299,19 @@ func TestUploadDoesNotClearBuiltinMark(t *testing.T) {
 	}
 	edited := fmt.Sprintf(`[{"slug":"vulinbox-xss-escape","title":"改过的标题","category":"xss",`+
 		`"difficulty":"apprentice","score":120,"challenge":{"type":"static","flag":"&lt;script&gt;"}}]`)
-	if _, _, err := svc.UploadChallenges(context.Background(), []byte(edited)); err != nil {
-		t.Fatalf("re-upload: %v", err)
+	_, _, err := svc.UploadChallenges(context.Background(), []byte(edited))
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("re-upload builtin challenge: err = %v, want ErrValidation (422)", err)
 	}
 	var chal model.Challenge
 	if err := gdb.Where("slug = ?", "vulinbox-xss-escape").First(&chal).Error; err != nil {
 		t.Fatal(err)
 	}
 	if !chal.IsBuiltin {
-		t.Fatal("is_builtin cleared by normal upload, want preserved")
+		t.Fatal("is_builtin cleared by rejected upload, want preserved")
 	}
-	if chal.Title != "改过的标题" || chal.Score != 120 {
-		t.Fatalf("re-upload should take effect: %+v", chal)
+	if chal.Title == "改过的标题" || chal.Score == 120 {
+		t.Fatalf("rejected re-upload must not take effect: %+v", chal)
 	}
 }
 
