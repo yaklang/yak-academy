@@ -33,8 +33,37 @@ describe('validateChallenge', () => {
     expect(validateChallenge(base({ bank: bad })).join('\n')).toContain('bank')
     expect(validateChallenge(base({ bank: tutorial })).join('\n')).toContain('bank')
     expect(validateChallenge(base({ bank: 'ctf' }))).toEqual([])
-    expect(validateChallenge(base({ bank: 'acm' }))).toEqual([])
     expect(validateChallenge(base({ bank: undefined }))).toEqual([])
+  })
+
+  it('ACM 题库：必须为编程题（judge 段），flag 判定题归 ctf', () => {
+    // bank=acm + challenge 段（flag 判定）→ 报错：ACM 不通过 flag 验证。
+    const errs = validateChallenge(base({ bank: 'acm' }))
+    expect(errs.join('\n')).toContain('judge')
+  })
+
+  it('judge 段规则：互斥/bank 归置/引擎/时限/组名', () => {
+    const judge = {
+      engine: 'yak' as const,
+      time_limit_s: 5,
+      testdata: [{ name: '01', sample: true }],
+    }
+    const acmCode = base({ bank: 'acm', challenge: undefined, env: undefined, judge })
+    expect(validateChallenge(acmCode)).toEqual([])
+    // 与 challenge 段互斥。
+    expect(validateChallenge(base({ judge, challenge: { type: 'static', flag: 'f' } })).join('\n')).toContain('互斥')
+    // ctf 题带 judge 段 → 归置错误。
+    expect(validateChallenge(base({ bank: 'ctf', challenge: undefined, judge })).join('\n')).toContain('acm')
+    // 引擎枚举与时限范围。
+    const badEngine = { ...judge, engine: 'python' as unknown as 'yak' }
+    expect(validateChallenge(base({ challenge: undefined, judge: badEngine })).join('\n')).toContain('engine')
+    const badLimit = { ...judge, time_limit_s: 0 }
+    expect(validateChallenge(base({ challenge: undefined, judge: badLimit })).join('\n')).toContain('time_limit_s')
+    // 组名格式与重复。
+    const badName = { ...judge, testdata: [{ name: '1A', sample: true }] }
+    expect(validateChallenge(base({ challenge: undefined, judge: badName })).join('\n')).toContain('name')
+    // judge 题不能带容器环境。
+    expect(validateChallenge(base({ challenge: undefined, judge, env: { image: 'app:1', port: 80 } })).join('\n')).toContain('容器环境')
   })
 
   it('score 必须非负', () => {

@@ -29,14 +29,39 @@ export function validateChallenge(chal: ChallengeJSON): string[] {
   if (chal.score === undefined || chal.score === null) where('score', '必填')
   else if (chal.score < 0) where('score', '必须为非负整数')
 
-  if (!chal.challenge?.type || !['static', 'regex'].includes(chal.challenge.type))
-    where('challenge.type', '必须为 static 或 regex')
-  if (!chal.challenge?.flag) where('challenge.flag', '必填')
-  else if (chal.challenge.type === 'regex') {
-    try {
-      new RegExp(chal.challenge.flag)
-    } catch (e) {
-      where('challenge.flag', `正则无法编译：${(e as Error).message}`)
+  // 判定定义二选一：judge 段（ACM 编程题）或 challenge 段（flag 判定题）。
+  if (chal.judge) {
+    if (chal.challenge?.type || chal.challenge?.flag)
+      where('judge', '与 challenge 段互斥：ACM 编程题不通过 flag 判定')
+    if (chal.bank && chal.bank !== 'acm')
+      where('bank', 'ACM 编程题（judge 段）必须归 acm 题库')
+    if (chal.bank === 'ctf')
+      where('bank', 'ACM 编程题（judge 段）必须归 acm 题库')
+    if (chal.judge.engine !== 'yak') where('judge.engine', '必须为 yak')
+    if (!chal.judge.time_limit_s || chal.judge.time_limit_s < 1 || chal.judge.time_limit_s > 60)
+      where('judge.time_limit_s', '必须为 1-60 秒')
+    const mem = chal.judge.memory_limit_mb ?? 128
+    if (mem < 16 || mem > 512) where('judge.memory_limit_mb', '必须为 16-512 MB')
+    const names = new Set<string>()
+    chal.judge.testdata?.forEach((t, i) => {
+      if (!t.name) where(`judge.testdata[${i}].name`, '必填')
+      else if (!/^[a-z0-9][a-z0-9-]*$/.test(t.name))
+        where(`judge.testdata[${i}].name`, '只允许小写字母/数字/连字符')
+      else if (names.has(t.name)) where(`judge.testdata[${i}].name`, '组名重复')
+      names.add(t.name)
+    })
+  } else {
+    if (chal.bank === 'acm')
+      where('judge', 'ACM 题库的题目必须为编程题：challenge.yml/challenge.json 带 judge 段（对齐 ICPC 源码判定模型）')
+    if (!chal.challenge?.type || !['static', 'regex'].includes(chal.challenge.type))
+      where('challenge.type', '必须为 static 或 regex')
+    if (!chal.challenge?.flag) where('challenge.flag', '必填')
+    else if (chal.challenge.type === 'regex') {
+      try {
+        new RegExp(chal.challenge.flag)
+      } catch (e) {
+        where('challenge.flag', `正则无法编译：${(e as Error).message}`)
+      }
     }
   }
 
@@ -48,12 +73,16 @@ export function validateChallenge(chal: ChallengeJSON): string[] {
     if (!chal.challenge?.flag?.includes('{token}'))
       where('challenge.flag', 'instance 模式必须为含 {token} 的模板，如 flag{lab-{token}}')
   }
+  if (chal.judge && mode === 'instance')
+    where('flag_mode', 'ACM 编程题不支持 instance 作用域（无 flag/容器实例）')
 
   if (chal.env && (chal.env.image || chal.env.port)) {
     if (!chal.env.image) where('env.image', 'env 段出现时必填')
     if (!chal.env.port || chal.env.port < 1 || chal.env.port > 65535)
       where('env.port', '必须为 1-65535')
   }
+  if (chal.judge && chal.env?.image)
+    where('env', 'ACM 编程题不支持容器环境（判题在 worker 内完成）')
 
   const hints: ChallengeHintInput[] = chal.hints ?? []
   hints.forEach((h, i) => {
