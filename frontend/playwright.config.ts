@@ -97,6 +97,10 @@ export default defineConfig({
         // 实例 endpoint 对外主机名（docker project）：localhost 而非 127.0.0.1，
         // 使 endpoint 回归 spec 能区分「配置的主机名」与「硬编码回环」。
         ACADEMY_INSTANCE_PUBLIC_HOST: 'localhost',
+        // ACM 判题引擎（可选）：指向本机 yak 可执行文件时 code 题真实对拍
+        // （ACM 旅程断言 AC/WA）；未设置（CI 无 yak）时引擎未装配，
+        // code 题判定 internal_error——ACM 旅程相应断言该路径。
+        ACADEMY_YAK_BIN: process.env.ACADEMY_YAK_BIN || '',
       },
     },
     {

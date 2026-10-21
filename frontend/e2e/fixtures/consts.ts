@@ -47,4 +47,23 @@ export const E2E = {
     roomSlug: 'e2e-del-room',
     roomTitle: '待删除教程',
   },
+  // ACM 编程题种子（题目包 zip：challenge.yml judge 段 + testdata/）：
+  // 学生提交 yak 源码判定（ACM 旅程 spec）。判题引擎由 ACADEMY_YAK_BIN
+  // 门控——装配时断言 AC/WA，未装配（CI）断言 internal_error 路径。
+  acm: {
+    zip: 'acm-package.zip',
+    slug: 'acm-e2e-sum',
+    title: 'E2E 求和题（yak）',
+    samples: ['demo', 'edge'],
+    correctSource: [
+      'res := io.ReadAll(os.Stdin)',
+      'lines := str.ParseStringToLines(string(res[0]))',
+      'for i := range lines {',
+      '    toks := str.SplitAndTrim(lines[i], " ")',
+      '    if len(toks) < 2 { continue }',
+      '    println(int(toks[0]) + int(toks[1]))',
+      '}',
+    ].join('\n'),
+    wrongSource: 'println(42)',
+  },
 } as const
