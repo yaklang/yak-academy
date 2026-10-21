@@ -2,14 +2,21 @@ import { expect, test } from '@playwright/test'
 import { E2E } from './fixtures/consts'
 import { loginAsStudent } from './helpers'
 
-// ACM 编程题旅程：源码提交判定（对齐 ICPC 模型），不走 flag。
+// ACM 编程题旅程：源码提交判定（对齐 ICPC 模型），不走 flag；
+// 详情页内置动态执行框（CodeMirror 编辑器 + 自测运行，运营态不产生提交）。
 // 引擎由 ACADEMY_YAK_BIN 门控（playwright.config 注入后端）：
 // - 装配（本地设 yak 可执行路径）：正确源码 AC 计分、错误输出 WA；
-// - 未装配（CI）：正确源码判 internal_error（平台侧失败，可重试提示）。
+//   自测运行样例模式比对期望、自定义输入模式回显 stdout；
+// - 未装配（CI）：提交判 internal_error、自测运行 422 友好提示。
 const engineConfigured = Boolean(process.env.ACADEMY_YAK_BIN)
 
+// CodeMirror 6 的可编辑区是 contenteditable，fill() 直接可用。
+async function fillSource(page: import('@playwright/test').Page, source: string) {
+  await page.locator('.cm-content').fill(source)
+}
+
 test.describe('ACM 编程题（源码判定）', () => {
-  test('详情页展示样例数据卡与源码提交框，无 flag 输入', async ({ page }) => {
+  test('详情页展示样例数据卡与代码编辑器，无 flag 输入', async ({ page }) => {
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
@@ -28,8 +35,8 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(demo).toContainText('2 3') // demo 组输入
     await expect(demo).toContainText('30') // demo 组期望输出
 
-    // 源码提交框存在，flag 输入不存在（ACM 不通过 flag 判定）
-    await expect(page.getByPlaceholder('粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）')).toBeVisible()
+    // 代码编辑器（CodeMirror）存在，flag 输入不存在（ACM 不通过 flag 判定）
+    await expect(page.locator('.solve .cm-editor')).toBeVisible()
     await expect(page.getByPlaceholder('输入 flag')).toHaveCount(0)
   })
 
@@ -38,8 +45,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
-    await page.getByPlaceholder('粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）')
-      .fill(E2E.acm.correctSource)
+    await fillSource(page, E2E.acm.correctSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('判定通过，得分', { timeout: 30_000 })
@@ -51,8 +57,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
-    await page.getByPlaceholder('粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）')
-      .fill(E2E.acm.wrongSource)
+    await fillSource(page, E2E.acm.wrongSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('答案错误（WA）', { timeout: 30_000 })
@@ -64,10 +69,84 @@ test.describe('ACM 编程题（源码判定）', () => {
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
-    await page.getByPlaceholder('粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）')
-      .fill(E2E.acm.correctSource)
+    await fillSource(page, E2E.acm.correctSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('判定服务暂不可用', { timeout: 30_000 })
+  })
+
+  test('自测运行面板：样例/自定义输入切换，运行入口齐备', async ({ page }) => {
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await expect(page.getByRole('button', { name: '运行自测' })).toBeVisible()
+    // 样例组与自定义输入都以 radio 按钮呈现，默认选中第一个样例
+    for (const name of E2E.acm.samples) {
+      await expect(page.locator('.run-bar').getByText(`样例 ${name}`)).toBeVisible()
+    }
+    await expect(page.locator('.run-bar .el-radio-button').first()).toHaveClass(/is-active/)
+    await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
+
+    // 切到自定义输入出现 stdin 输入框，切回样例收起
+    await page.locator('.run-bar').getByText('自定义输入').click()
+    await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toBeVisible()
+    await page.locator('.run-bar').getByText(`样例 ${E2E.acm.samples[0]}`).click()
+    await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
+  })
+
+  test('自测运行（样例模式）：输出与期望比对一致，不产生提交', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置）')
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, E2E.acm.correctSource)
+    await page.getByRole('button', { name: '运行自测' }).click()
+
+    // demo 组：输入 2 3 / 10 20 → 期望 5 / 30
+    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-output')).toContainText('与样例期望一致')
+    await expect(page.locator('.run-stdout')).toContainText('30')
+    await expect(page.locator('.run-output')).toContainText(/耗时 \d+ ms/)
+  })
+
+  test('自测运行（自定义输入）：回显 stdout，不做期望比对', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置）')
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, E2E.acm.correctSource)
+    await page.locator('.run-bar').getByText('自定义输入').click()
+    await page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）').fill('10 20\n2 5')
+    await page.getByRole('button', { name: '运行自测' }).click()
+
+    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-stdout')).toContainText('30')
+    await expect(page.locator('.run-stdout')).toContainText('7')
+    // 自定义模式 matches 恒 null：不出现样例一致性标签
+    await expect(page.locator('.run-output')).not.toContainText('与样例期望')
+  })
+
+  test('自测运行：错误输出的源码 → 样例比对不一致提示', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置）')
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, E2E.acm.wrongSource)
+    await page.getByRole('button', { name: '运行自测' }).click()
+
+    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-output')).toContainText('与样例期望不一致')
+    await expect(page.locator('.run-stdout')).toContainText('42')
+  })
+
+  test('引擎未装配 → 自测运行 422 友好提示', async ({ page }) => {
+    test.skip(engineConfigured, '判题引擎已装配，422 路径不适用')
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, E2E.acm.correctSource)
+    await page.getByRole('button', { name: '运行自测' }).click()
+
+    await expect(page.locator('.el-message')).toContainText('自测运行不可用')
   })
 })
