@@ -107,6 +107,22 @@ export interface JudgeConfig {
 // ACM 样例数据组（sample=true；隐藏组不下发）。
 export interface JudgeSample { name: string; input: string; output: string }
 export interface JudgeSamplesResponse { time_limit_s: number; samples: JudgeSample[] }
+// ACM 自测运行（动态执行框）：POST 创建 202 {id} → GET 轮询至 status=done。
+// 运营态与判题隔离：不产生提交/事件/积分；sample 模式服务端按样例期望输出
+// 比对（matches，token 级空白不敏感），自定义 stdin 模式 matches 恒 null；
+// stdout 超过 64KiB 截断（truncated=true）；票据 10 分钟后过期 404。
+export interface CodeRunView {
+  id: string
+  status: 'pending' | 'running' | 'done'
+  mode: 'sample' | 'custom'
+  sample?: string
+  outcome?: 'ok' | 'tle' | 're'
+  stdout?: string
+  stderr?: string
+  truncated: boolean
+  time_ms: number
+  matches: boolean | null
+}
 export interface ChallengeDetail extends TrainingItem {
   description_md: string
   judge?: JudgeConfig | null
@@ -312,6 +328,11 @@ export const trainingApi = {
   // ACM 编程题样例数据（flag 判定题 404，调用方按题有无 judge 段自行决定是否拉取）。
   judgeSamples: (challengeSlug: string) =>
     http.get<JudgeSamplesResponse>(`/challenges/${challengeSlug}/judge/samples`),
+  // 自测运行（sample 组名 / 自定义 stdin 二选一）。创建返回 202 {id}；轮询见 judgeRunGet。
+  judgeRun: (challengeSlug: string, body: { source: string; sample?: string; stdin?: string }) =>
+    http.post<{ id: string }>(`/challenges/${challengeSlug}/judge/runs`, body),
+  judgeRunGet: (challengeSlug: string, id: string) =>
+    http.get<CodeRunView>(`/challenges/${challengeSlug}/judge/runs/${id}`),
   unlockHint: (challengeSlug: string, hintId: number) =>
     http.post<HintUnlockResponse>(`/challenges/${challengeSlug}/hints/${hintId}/unlock`),
 }

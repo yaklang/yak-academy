@@ -10,10 +10,11 @@ import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   trainingApi, instanceApi, downloadAttachment,
-  type AdminLabInstance, type ChallengeDetail, type JudgeSample, type LabInstance,
+  type AdminLabInstance, type ChallengeDetail, type CodeRunView, type JudgeSample, type LabInstance,
   verdictLabels,
 } from '../api'
 import type { ApiError } from '../api/client'
+import CodeEditor from '../components/CodeEditor.vue'
 import { useSubmissionPoll } from '../composables/useSubmissionPoll'
 
 // 附件下载：fetch blob 后触发浏览器保存（附件接口需 JWT，<a href> 无法带头）。
@@ -60,6 +61,15 @@ const isCode = computed(() => !!challenge.value?.judge)
 const samples = ref<JudgeSample[]>([])
 const source = ref('')
 
+// 自测运行（动态执行框）：对样例组或自定义输入跑一次当前源码，
+// 异步票据 + 1s 轮询；运营态，不产生提交/事件/计分（与提交判题互不影响）。
+const RUN_CUSTOM = '__custom'
+const runTarget = ref('')
+const customStdin = ref('')
+const running = ref(false)
+const runResult = ref<CodeRunView | null>(null)
+let runTimer: number | null = null
+
 async function loadSamples() {
   try {
     const res = await trainingApi.judgeSamples(slug())
@@ -67,7 +77,73 @@ async function loadSamples() {
   } catch {
     samples.value = [] // 样例拉取失败不阻断提交（题面通常也含样例）
   }
+  runTarget.value = samples.value.length ? samples.value[0].name : RUN_CUSTOM
 }
+
+async function runCode() {
+  if (!source.value) return
+  if (runTarget.value === RUN_CUSTOM && !customStdin.value.trim()) {
+    ElMessage.warning('请先填写自定义输入（作为程序的标准输入）')
+    return
+  }
+  running.value = true
+  runResult.value = null
+  try {
+    const body = runTarget.value === RUN_CUSTOM
+      ? { source: source.value, stdin: customStdin.value }
+      : { source: source.value, sample: runTarget.value }
+    const { id } = await trainingApi.judgeRun(slug(), body)
+    runTimer = window.setInterval(() => pollRun(id), 1000)
+  } catch (e) {
+    running.value = false
+    ElMessage.error(friendlyRunError(e))
+  }
+}
+
+async function pollRun(id: string) {
+  try {
+    const view = await trainingApi.judgeRunGet(slug(), id)
+    runResult.value = view
+    if (view.status === 'done') {
+      stopRunPolling()
+      running.value = false
+    }
+  } catch {
+    stopRunPolling()
+    running.value = false
+    ElMessage.error('自测运行结果获取失败，请重试')
+  }
+}
+
+function stopRunPolling() {
+  if (runTimer !== null) {
+    window.clearInterval(runTimer)
+    runTimer = null
+  }
+}
+
+// 后端 422 文案（英文）本地化，其余透传。
+function friendlyRunError(e: unknown) {
+  const msg = (e as Error).message || '未知错误'
+  if (msg.includes('code engine not configured')) {
+    return '自测运行不可用：平台未配置判定引擎（ACADEMY_YAK_BIN），请联系管理员'
+  }
+  if (msg.includes('previous self-test run')) {
+    return '已有一次自测运行在进行中，请等它结束后再试'
+  }
+  return `自测运行失败：${msg}`
+}
+
+const runOutcomeLabel = computed(() => {
+  const v = runResult.value
+  if (!v || v.status !== 'done') return ''
+  return v.outcome === 'ok' ? '运行完成' : v.outcome === 'tle' ? '超出时限' : '运行错误'
+})
+const runOutcomeTag = computed(() => {
+  const v = runResult.value
+  if (!v || v.status !== 'done') return 'info' as const
+  return v.outcome === 'ok' ? ('success' as const) : v.outcome === 'tle' ? ('warning' as const) : ('danger' as const)
+})
 
 const renderedDescription = computed(() =>
   DOMPurify.sanitize(marked.parse(challenge.value?.description_md ?? '') as string),
@@ -272,7 +348,10 @@ function difficultyType(d: ChallengeDetail['difficulty']) {
 }
 
 onMounted(load)
-onUnmounted(stopAutoSolvePolling)
+onUnmounted(() => {
+  stopAutoSolvePolling()
+  stopRunPolling()
+})
 </script>
 
 <template>
@@ -400,20 +479,57 @@ onUnmounted(stopAutoSolvePolling)
           ? '本题已通关（分值已结算）。仍可重复提交源码验证，重复判对不再计分。'
           : '本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。'"
       />
-      <!-- ACM 编程题：源码提交（引擎逐组运行对拍，判定期间禁止重复提交）。 -->
+      <!-- ACM 编程题：在线编辑器 + 自测运行（不产生提交记录），提交走正式判题。 -->
       <template v-if="isCode">
-        <div v-if="samples.length" class="sample-note">
+        <div class="sample-note">
           提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
-          全部通过才算 AC；上方「样例数据」可本地自测。
+          全部通过才算 AC；可在下方编辑器编码，先对样例或自定义输入自测运行。
         </div>
-        <el-input
-          v-model="source"
-          type="textarea"
-          :rows="10"
-          placeholder="粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）"
-          class="code-input"
-          :disabled="polling"
-        />
+        <CodeEditor v-model="source" class="code-input" :disabled="polling" />
+        <div class="run-panel">
+          <div class="run-bar">
+            <el-radio-group v-model="runTarget" size="small" :disabled="running">
+              <el-radio-button v-for="s in samples" :key="s.name" :value="s.name">
+                样例 {{ s.name }}
+              </el-radio-button>
+              <el-radio-button :value="RUN_CUSTOM">自定义输入</el-radio-button>
+            </el-radio-group>
+            <el-button
+              size="small"
+              :loading="running"
+              :disabled="!source || !runTarget"
+              @click="runCode"
+            >运行自测</el-button>
+          </div>
+          <el-input
+            v-if="runTarget === RUN_CUSTOM"
+            v-model="customStdin"
+            type="textarea"
+            :rows="4"
+            class="stdin-input"
+            placeholder="自定义输入（作为程序的标准输入，回车换行）"
+          />
+          <div v-if="runResult" class="run-output">
+            <div class="run-meta">
+              <el-tag v-if="runResult.status !== 'done'" size="small" type="info">
+                {{ runResult.status === 'pending' ? '排队中…' : '运行中…' }}
+              </el-tag>
+              <template v-else>
+                <el-tag size="small" :type="runOutcomeTag">{{ runOutcomeLabel }}</el-tag>
+                <span class="run-time">耗时 {{ runResult.time_ms }} ms</span>
+                <el-tag
+                  v-if="runResult.mode === 'sample' && runResult.matches !== null"
+                  size="small"
+                  :type="runResult.matches ? 'success' : 'danger'"
+                  effect="plain"
+                >{{ runResult.matches ? '与样例期望一致' : '与样例期望不一致' }}</el-tag>
+                <el-tag v-if="runResult.truncated" size="small" type="info" effect="plain">输出超长已截断</el-tag>
+              </template>
+            </div>
+            <pre v-if="runResult.stdout" class="run-stdout">{{ runResult.stdout }}</pre>
+            <pre v-if="runResult.stderr" class="run-stderr">{{ runResult.stderr }}</pre>
+          </div>
+        </div>
         <el-button
           type="primary"
           class="submit-btn"
@@ -505,6 +621,20 @@ onUnmounted(stopAutoSolvePolling)
   color: var(--el-text-color-secondary);
 }
 .code-input { font-family: Consolas, monospace; }
+.run-panel { margin-top: 0.6rem; }
+.run-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.stdin-input { margin-top: 0.5rem; font-family: Consolas, monospace; }
+.run-output {
+  margin-top: 0.5rem; background: var(--el-fill-color-light);
+  border-radius: 4px; padding: 0.5rem 0.7rem;
+}
+.run-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.run-time { font-size: 0.8rem; color: var(--el-text-color-secondary); }
+.run-output pre {
+  margin: 0.4rem 0 0; font-family: Consolas, monospace; font-size: 0.85rem;
+  white-space: pre-wrap; word-break: break-all;
+}
+.run-stderr { color: var(--el-color-danger); }
 .submit-btn { margin-top: 0.6rem; }
 .solved-note { margin-bottom: 0.8rem; }
 .result { margin-top: 0.8rem; }
