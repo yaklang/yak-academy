@@ -51,7 +51,20 @@ test.describe('ACM 编程题（源码判定）', () => {
     expect(tokenColors).toContain('rgb(224, 135, 60)') // println 内建函数
     expect(tokenColors).toContain('rgb(152, 195, 121)') // "hi" 字符串
 
-    // yak 代码补全：词首补全（内建函数）与 lib. 成员补全（标准库真实函数）
+    // 库策略提示：题面 chips 显示白名单（fixture 配 [str, io, os]），
+    // 黑名单高危库说明可见（exec/file 在默认黑名单内）
+    await expect(page.locator('.lib-policy .lib-title')).toHaveText('本题可用库')
+    await expect(page.locator('.lib-policy .lib-chip')).toHaveCount(E2E.acm.allowedLibs.length)
+    for (const lib of E2E.acm.allowedLibs) {
+      await expect(page.locator('.lib-policy .lib-chip', { hasText: lib })).toBeVisible()
+    }
+    await expect(page.locator('.lib-policy .lib-blocked')).toContainText('已禁用高危库')
+    await expect(page.locator('.lib-policy .lib-blocked')).toContainText('exec')
+    await expect(page.locator('.lib-policy .lib-blocked')).toContainText('file')
+
+    // yak 代码补全：词首补全（内建函数）与 lib. 成员补全（标准库真实函数）；
+    // 补全菜单遵循题面白名单——str. 提供成员，白名单外（codec.）/黑名单（exec.）
+    // 不提供任何成员（无菜单）
     const content = page.locator('.solve .cm-content')
     const menu = page.locator('.cm-tooltip-autocomplete')
     await content.click()
@@ -61,9 +74,16 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(menu.getByText('println', { exact: true })).toBeVisible()
     await content.press('Escape')
     await content.press('ControlOrMeta+a')
-    await content.pressSequentially('codec.')
-    await expect(menu.getByText('EncodeToHex', { exact: true })).toBeVisible()
+    await content.pressSequentially('str.')
+    await expect(menu.getByText('Contains', { exact: true })).toBeVisible()
     await content.press('Escape')
+    await content.press('ControlOrMeta+a')
+    await content.pressSequentially('codec.')
+    await expect(menu).not.toBeVisible()
+    await content.press('Escape')
+    await content.press('ControlOrMeta+a')
+    await content.pressSequentially('exec.')
+    await expect(menu).not.toBeVisible()
   })
 
   test('提交 yak 源码：逐组对拍全部通过 → AC 计分', async ({ page }) => {
@@ -147,6 +167,44 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('判定服务暂不可用', { timeout: 30_000 })
+  })
+
+  // 库策略拦截（e2e-bugfix 回归锚点）：静态扫描发生在受理阶段（引擎执行之前），
+  // 不依赖判题引擎装配，也不产生提交记录。种子题白名单 [str, io, os]。
+  test('提交 exec 黑名单库源码 → 422 拒绝并点名违规库', async ({ page }) => {
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, 'exec.Command("id")')
+    await page.getByRole('button', { name: '提交代码' }).click()
+
+    const toast = page.locator('.el-message--error')
+    await expect(toast).toContainText('提交失败')
+    await expect(toast).toContainText('blacklisted yak lib(s): exec')
+  })
+
+  test('提交白名单外库源码（codec）→ 422 拒绝', async ({ page }) => {
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, 'codec.EncodeToHex("a")')
+    await page.getByRole('button', { name: '提交代码' }).click()
+
+    const toast = page.locator('.el-message--error')
+    await expect(toast).toContainText('提交失败')
+    await expect(toast).toContainText('outside the challenge whitelist: codec')
+  })
+
+  test('自测运行：黑名单库源码 → 受理阶段 422 拦截', async ({ page }) => {
+    await loginAsStudent(page)
+    await page.goto(`/training/${E2E.acm.slug}`)
+
+    await fillSource(page, 'file.IsDir("/etc")')
+    await page.getByRole('button', { name: '运行自测' }).click()
+
+    const toast = page.locator('.el-message--error')
+    await expect(toast).toContainText('自测运行失败')
+    await expect(toast).toContainText('file')
   })
 
   test('自测运行面板：样例/自定义输入切换，运行入口齐备', async ({ page }) => {

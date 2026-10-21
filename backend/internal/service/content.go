@@ -659,6 +659,9 @@ type judgeJSON struct {
 	TimeLimitS    int             `json:"time_limit_s" yaml:"time_limit_s"`
 	MemoryLimitMB int             `json:"memory_limit_mb" yaml:"memory_limit_mb"`
 	Testdata      []judgeTestData `json:"testdata" yaml:"testdata"`
+	// AllowedLibs yak 库白名单（防高危库执行；空 = 未配置，允许全部非黑名单库）。
+	// 值校验与受理前扫描见 yak_libpolicy.go。
+	AllowedLibs []string `json:"allowed_libs" yaml:"allowed_libs"`
 }
 
 // judgeTestData 数据组（直传 JSON 内联 input/output；包 zip 路径由 testdata/
@@ -723,7 +726,11 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 		var testdata []model.JudgeTestdata
 		if c.Judge != nil {
 			chal.Type = model.ChallengeCode
-			acm = &model.ACMJudge{Engine: c.Judge.Engine, TimeLimitS: c.Judge.TimeLimitS, MemoryLimitMB: c.Judge.MemoryLimitMB}
+			acm = &model.ACMJudge{
+				Engine: c.Judge.Engine, TimeLimitS: c.Judge.TimeLimitS,
+				MemoryLimitMB: c.Judge.MemoryLimitMB,
+				AllowedLibs:   serializeAllowedLibs(c.Judge.AllowedLibs),
+			}
 			testdata = make([]model.JudgeTestdata, 0, len(c.Judge.Testdata))
 			// 元数据维护判定：judge 段数据组全都不带 input/output（管理端编辑
 			// 弹窗回传 name/sample/score 引用）→ 保留库内数据，按组名覆写
@@ -928,6 +935,10 @@ func validateJudgeJSON(where string, j *judgeJSON) error {
 	if j.MemoryLimitMB < 16 || j.MemoryLimitMB > 512 {
 		return fmt.Errorf("%w: %s: judge.memory_limit_mb must be 16-512", ErrValidation, where)
 	}
+	// yak 库白名单值校验（universe / 黑名单 / 重复；见 yak_libpolicy.go）。
+	if err := validateAllowedLibs(where, j.AllowedLibs); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i := range j.Testdata {
 		t := &j.Testdata[i]
@@ -1080,10 +1091,12 @@ type challengeYML struct {
 	Flags         []challengeYMLFlag `yaml:"flags"`
 	// Judge ACM 编程题判定段（engine/time_limit_s/memory_limit_mb +
 	// testdata 组名与 sample 标记；数据内容由包内 testdata/ 文件装配）。
+	// allowed_libs 为 yak 库白名单（防高危库执行；空 = 允许全部非黑名单库）。
 	Judge *struct {
-		Engine        string `yaml:"engine"`
-		TimeLimitS    int    `yaml:"time_limit_s"`
-		MemoryLimitMB int    `yaml:"memory_limit_mb"`
+		Engine        string   `yaml:"engine"`
+		TimeLimitS    int      `yaml:"time_limit_s"`
+		MemoryLimitMB int      `yaml:"memory_limit_mb"`
+		AllowedLibs   []string `yaml:"allowed_libs"`
 		Testdata []struct {
 			Name   string `yaml:"name"`
 			Sample bool   `yaml:"sample"`
@@ -1214,6 +1227,7 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		acm := &model.ACMJudge{
 			ChallengeID: chal.ID, Engine: cj.Judge.Engine,
 			TimeLimitS: cj.Judge.TimeLimitS, MemoryLimitMB: cj.Judge.MemoryLimitMB,
+			AllowedLibs: serializeAllowedLibs(cj.Judge.AllowedLibs),
 		}
 		testdata := make([]model.JudgeTestdata, 0, len(cj.Judge.Testdata))
 		for i := range cj.Judge.Testdata {
@@ -1363,6 +1377,7 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 			Engine:        y.Judge.Engine,
 			TimeLimitS:    y.Judge.TimeLimitS,
 			MemoryLimitMB: y.Judge.MemoryLimitMB,
+			AllowedLibs:   y.Judge.AllowedLibs,
 		}
 		for i := range y.Judge.Testdata {
 			t := &y.Judge.Testdata[i]

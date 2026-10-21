@@ -54,11 +54,14 @@ export const E2E = {
   // 门控——装配时断言 AC/WA，未装配（CI）断言 internal_error 路径。
   // scores.json 按 2/1/1/1 配分（题面 50 分）：partialSource 仅在 partialfail
   // 组（输入 5 5）输出 11≠10 → WA，专用于部分得分断言（4/5 组过 → 40 分）。
+  // judge.allowed_libs 配 [str, io, os]（correctSource/partialSource 仅用这三库）：
+  // 库策略断言（题面 chips、补全过滤、codec/exec 提交 422 拦截）以此为锚点。
   acm: {
     zip: 'acm-package.zip',
     slug: 'acm-e2e-sum',
     title: 'E2E 求和题（yak）',
     samples: ['demo', 'edge'],
+    allowedLibs: ['str', 'io', 'os'],
     correctSource: [
       'res := io.ReadAll(os.Stdin)',
       'lines := str.ParseStringToLines(string(res[0]))',

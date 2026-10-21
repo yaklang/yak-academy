@@ -108,6 +108,10 @@ type ACMJudge struct {
 	Engine      string `gorm:"size:16" json:"engine"`        // 判题引擎：yak
 	TimeLimitS  int    `json:"time_limit_s"`                 // 单组数据时限（秒）
 	MemoryLimitMB int  `json:"memory_limit_mb"`              // 单组数据内存上限（MB）
+	// AllowedLibs yak 库白名单（JSON 数组文本列，同 Challenge.Links 模式）；
+	// 空 = 未配置（允许全部非黑名单库）。提交/自测受理前按此静态扫描拦截
+	//（service/yak_libpolicy.go）。
+	AllowedLibs string `gorm:"type:text" json:"-"`
 }
 
 // JudgeTestdata ACM 编程题测试数据组（.in/.answer 成对；sample=true 题面样例）。

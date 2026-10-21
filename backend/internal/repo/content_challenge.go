@@ -426,7 +426,7 @@ func (r *challengeRepo) UpsertACM(ctx context.Context, j *model.ACMJudge, data [
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "challenge_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"engine", "time_limit_s", "memory_limit_mb"}),
+			DoUpdates: clause.AssignmentColumns([]string{"engine", "time_limit_s", "memory_limit_mb", "allowed_libs"}),
 		}).Create(j).Error; err != nil {
 			return err
 		}

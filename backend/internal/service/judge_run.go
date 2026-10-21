@@ -82,7 +82,8 @@ func newRunStore() *runStore {
 }
 
 // CreateCodeRun 受理一次自测运行（sample 组名或自定义 stdin 二选一）。
-// 校验：题目可见且为编程题、引擎已配置、源码/输入限额、同用户仅一个进行中。
+// 校验：题目可见且为编程题、库策略静态扫描、引擎已配置、源码/输入限额、
+// 同用户仅一个进行中。
 func (s *JudgeService) CreateCodeRun(ctx context.Context, userID uint, slug, source, sample, stdin string) (string, error) {
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
@@ -90,6 +91,15 @@ func (s *JudgeService) CreateCodeRun(ctx context.Context, userID uint, slug, sou
 	}
 	if chal == nil || !chal.Published(s.now()) || chal.Type != model.ChallengeCode {
 		return "", ErrNotFound
+	}
+	// 库策略拦截先于引擎装配检查：策略拒绝是受理层闸口，不依赖引擎存在
+	//（yak_libpolicy.go）——自测不是绕过白名单的后门。
+	conf, err := s.challenges.FindACM(ctx, chal.ID)
+	if err != nil {
+		return "", mapRecordNotFound(err)
+	}
+	if err := checkYakLibPolicy(source, parseAllowedLibs(conf.AllowedLibs)); err != nil {
+		return "", err
 	}
 	if s.codeEngine() == nil {
 		return "", fmt.Errorf("%w: code engine not configured (self-test unavailable)", ErrValidation)
@@ -102,10 +112,6 @@ func (s *JudgeService) CreateCodeRun(ctx context.Context, userID uint, slug, sou
 	}
 	if len(stdin) > maxRunStdin {
 		return "", fmt.Errorf("%w: stdin exceeds %d KiB limit", ErrValidation, maxRunStdin>>10)
-	}
-	conf, err := s.challenges.FindACM(ctx, chal.ID)
-	if err != nil {
-		return "", mapRecordNotFound(err)
 	}
 	input, answer := stdin, "" // sample 模式：输入与期望输出取自库内样例组
 	if sample != "" {

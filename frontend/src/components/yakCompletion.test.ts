@@ -1,14 +1,23 @@
 // yak 补全源单测：直接构造 CompletionContext 驱动 yakCompletion，
 // 覆盖成员补全（lib. 前缀）、词首补全（关键字/内建/库前缀/片段）、
-// 未知前缀不补、数据源真实性（挑战用到的函数必须在列）。
+// 未知前缀不补、数据源真实性（挑战用到的函数必须在列）；
+// 库策略（yakLibPolicy facet：白名单 + 平台黑名单）下的补全过滤。
 import { describe, expect, it } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import { CompletionContext } from '@codemirror/autocomplete'
-import { yakCompletion } from './yakCompletion'
+import { yakCompletion, yakLibPolicy, defaultYakLibPolicy, type YakLibPolicy } from './yakCompletion'
 import { LIB_FUNCS } from './yakVocab'
 
 const optionsAt = (doc: string) => {
   const state = EditorState.create({ doc })
+  const ctx = new CompletionContext(state, doc.length, false)
+  const result = yakCompletion(ctx)
+  return result ? result.options.map((o) => o.label) : null
+}
+
+// 按指定库策略构造编辑器状态（模拟 CodeEditor 的 policyComp 注入）。
+const optionsAtWith = (doc: string, policy: YakLibPolicy) => {
+  const state = EditorState.create({ doc, extensions: [yakLibPolicy.of(policy)] })
   const ctx = new CompletionContext(state, doc.length, false)
   const result = yakCompletion(ctx)
   return result ? result.options.map((o) => o.label) : null
@@ -66,5 +75,51 @@ describe('yakCompletion 补全', () => {
     // rand/strings 不是 yak 标准库（yaklang Import 表无此项），不得混入
     expect(Object.keys(LIB_FUNCS)).not.toContain('rand')
     expect(Object.keys(LIB_FUNCS)).not.toContain('strings')
+  })
+})
+
+describe('yakCompletion 库策略过滤', () => {
+  it('默认策略（未配置白名单）：全部库可选', () => {
+    expect(defaultYakLibPolicy.allowed).toBeNull()
+    const labels = optionsAt('co')
+    expect(labels).toContain('codec')
+  })
+
+  it('白名单：库前缀仅白名单内可选', () => {
+    const labels = optionsAtWith('c', { allowed: ['str', 'io', 'os'], blocked: [] })!
+    expect(labels).toContain('str')
+    expect(labels).not.toContain('codec')
+    expect(labels).not.toContain('fuzz')
+  })
+
+  it('白名单：白名单外库的成员补全直接拒绝', () => {
+    expect(optionsAtWith('codec.', { allowed: ['str', 'io', 'os'], blocked: [] })).toBeNull()
+    // 白名单内库不受影响
+    expect(optionsAtWith('str.', { allowed: ['str', 'io', 'os'], blocked: [] })).toContain('Join')
+  })
+
+  it('黑名单：黑名单库不进词首补全、成员补全拒绝', () => {
+    // exec/file 不在词表（本就未收录），用词表内的库验证黑名单机制
+    const labels = optionsAtWith('c', { allowed: null, blocked: ['codec'] })!
+    expect(labels).not.toContain('codec')
+    expect(optionsAtWith('codec.', { allowed: null, blocked: ['codec'] })).toBeNull()
+  })
+
+  it('黑名单优先于白名单：白名单配了黑名单库也拦', () => {
+    const policy: YakLibPolicy = { allowed: ['str', 'codec'], blocked: ['codec'] }
+    const labels = optionsAtWith('c', policy)!
+    expect(labels).toContain('str')
+    expect(labels).not.toContain('codec')
+    expect(optionsAtWith('codec.', policy)).toBeNull()
+  })
+
+  it('stdin 片段依赖 io/os/str：任一禁用则不提供', () => {
+    const full = optionsAtWith('std', { allowed: ['str', 'io', 'os'], blocked: [] })!
+    expect(full).toContain('stdin')
+    const noStr = optionsAtWith('std', { allowed: ['io', 'os', 'codec'], blocked: [] })!
+    expect(noStr).not.toContain('stdin')
+    // for-range / func 片段不依赖库，恒可用
+    expect(noStr).toContain('forrange')
+    expect(noStr).toContain('func')
   })
 })

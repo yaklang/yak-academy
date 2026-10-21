@@ -272,6 +272,18 @@ components:
                 time_limit_s: { type: integer, description: 单组数据时限（秒） }
                 memory_limit_mb: { type: integer, description: 单组数据内存上限（MB） }
                 testdata_count: { type: integer, description: 测试数据组数（含样例） }
+                allowed_libs:
+                  type: array
+                  nullable: true
+                  description: |
+                    题目级 yak 库白名单（judge.allowed_libs 配置；null = 未配置，
+                    允许全部非黑名单库）。服务端已扣除全局黑名单；编辑器补全与
+                    提交/自测拦截均以此为准。
+                  items: { type: string }
+                blocked_libs:
+                  type: array
+                  description: 平台全局 yak 库黑名单（exec/cli/file 等高危库；env ACADEMY_YAK_LIB_BLACKLIST 可覆盖）——任何题目不可使用。
+                  items: { type: string }
             hints:
               type: array
               items: { $ref: '#/components/schemas/HintView' }
@@ -355,6 +367,15 @@ components:
               maximum: 512
               default: 128
               description: 单组测试数据的内存上限（MB；超限判 RE）
+            allowed_libs:
+              type: array
+              description: |
+                yak 库白名单（防高危库执行）：配置后学生源码只能引用这些库
+                （其余库一律 422 拒绝）；留空/缺省 = 允许全部（全局黑名单除外）。
+                值必须是 yaklang 命名空间库名（如 str/codec/io/json/time/os）；
+                配置黑名单库（exec/file 等）→ 422。提交与自测运行在受理前做
+                静态扫描拦截（标识符级，含 `a := exec` 这类别名引用）。
+              items: { type: string }
             testdata:
               type: array
               minItems: 1
@@ -1098,6 +1119,7 @@ paths:
         限制：source ≤ 128KiB；stdin ≤ 256KiB；stdout 响应截断 64KiB（truncated
         标记）；同一用户同时仅 1 个进行中的 run（422）；判定引擎未配置
         （ACADEMY_YAK_BIN 空）422；完成票据保留 10 分钟后过期（404）。
+        库策略与正式提交一致：源码命中黑名单库 / 白名单外库 → 422（受理前拦截）。
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1186,6 +1208,8 @@ paths:
         flag 判定题（static/regex）提交 flag 文本；ACM 编程题提交 yak 源码全文——
         服务端经引擎对每组测试数据运行比对后判定（async worker），不比对 flag。
         同一 ACM 题在判定出结果前重复提交 422（防并发刷引擎）。
+        ACM 题库策略拦截（受理前静态扫描）：源码引用全局黑名单库（exec/file 等）
+        或题目 judge.allowed_libs 白名单之外的库 → 422。
       requestBody:
         required: true
         content:
@@ -1752,6 +1776,11 @@ paths:
                       engine: { type: string, enum: [yak] }
                       time_limit_s: { type: integer }
                       memory_limit_mb: { type: integer }
+                      allowed_libs:
+                        type: array
+                        nullable: true
+                        description: yak 库白名单（null = 未配置，允许全部非黑名单库；编辑回填/保存）
+                        items: { type: string }
                       testdata:
                         type: array
                         description: 数据组引用（name + sample 标记；内容不回填）
