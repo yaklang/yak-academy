@@ -1,0 +1,67 @@
+slug: acm-yak-a-plus-b
+title: A+B Problem（yak）
+category: warmup
+bank: acm
+difficulty: apprentice
+score: 50
+description_md: |
+  # A+B Problem
+
+  输入第一行一个整数 $T$（$1 \le T \le 10^5$），表示数据组数。接下来 $T$ 行，每行两个整数 $a, b$（$-10^9 \le a, b \le 10^9$），以空格分隔。
+
+  对每组数据输出一行：$a + b$ 的值。
+
+  ## 提交方式
+
+  本题是 ACM 编程题：**直接提交 yak 源码**，判题引擎会逐组运行测试数据
+  （样例 + 隐藏数据）并比对输出——不判定 flag。程序从标准输入读数据，
+  向标准输出打印结果。
+
+  - 时限：每组数据 5 秒；内存上限 128MB；
+  - 全部数据组通过才算 AC；判定结果 AC / WA / TLE / RE 见提交后提示。
+
+  ## yak 读 stdin 的正确姿势
+
+  yak 引擎的 ACM 读入模型（实测可用）：
+
+  ```yak
+  // io.ReadAll 返回 [bytes, err]，res[0] 是输入的字节流
+  res := io.ReadAll(os.Stdin)
+  lines := str.ParseStringToLines(string(res[0]))
+  // 注意：yak 的 for...range 遍历数组拿到的是下标，取值要 lines[i]
+  for i := range lines {
+      toks := str.SplitAndTrim(lines[i], " ")
+      if len(toks) < 2 { continue }
+      a := int(toks[0])
+      b := int(toks[1])
+      println(a + b)
+  }
+  ```
+
+  `int()` 是内置类型转换（字符串转整数）；`str.SplitAndTrim` 按分隔符切分并去除空白；`println` 输出一行。
+
+  ## 样例
+
+  见题目页「样例数据」卡片（与判题样例组一致），可先在本地对拍再提交。
+
+# ACM 判定段：数据组来自包内 testdata/<组名>.in + <组名>.answer，
+# 这里只声明组名与样例标记（sample=true 对学生可见，其余为隐藏数据）。
+judge:
+  engine: yak
+  time_limit_s: 5
+  memory_limit_mb: 128
+  testdata:
+    - name: sample-01
+      sample: true
+    - name: edge
+      sample: true
+    - name: bulk
+    - name: hidden-neg
+
+hints:
+  - title: 读入模型
+    content: io.ReadAll(os.Stdin) 一次读全部输入；res[0] 是字节流，用 string() 转字符串再 str.ParseStringToLines 按行切。
+    cost: 5
+  - title: range 是下标
+    content: yak 的 for i := range 数组遍历拿到的是索引不是元素，取值用 lines[i]——与其他主流语言不同，是 yak 引擎的实测行为。
+    cost: 10
