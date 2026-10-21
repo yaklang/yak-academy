@@ -38,6 +38,7 @@ worker 消费 → 判定（flag 题：比对；编程题：CodeEngine 逐组运�
 - **flag 题**（type=flag）：比对目标见下表；恒时比较，禁止 == 比较。
 - **编程题**（type=code）：判定结论写 `Submission.verdict`（ac/wa/tle/re/internal_error），`status` 仍为 pending/correct/incorrect——积分/排行派生管线对两类题完全一致（verdict 只影响前端展示与 AC 判定语义）。逐组 lazy 判定（首个失败即停），输出比对 token 级空白不敏感。引擎由 `ACADEMY_YAK_BIN` 门控，未配置 = internal_error（不是 error，是合法 verdict，仍走事件流）。
 - **编程题提交守卫**：源码 ≤128KiB；同一 (user, challenge) 已有 pending 判定 → 422（防并发重复入队）。
+- **自测运行（动态执行框）不进事件流**：`/challenges/{slug}/judge/runs` 是运营态（学生本地验证，非判定）——不写 Submission、不写 Event、不计分，票据仅进程内存（重启即清）。这是设计意图而非遗漏：自测无限次、无审计/重放诉求，混入事件流会污染积分重放。异步票据模型（202 + 轮询）与判题一致，引擎执行在请求路径外。
 
 ### Flag 比对来源（flag_mode）
 

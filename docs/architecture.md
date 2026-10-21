@@ -93,6 +93,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 动态计分：`value = f(solve_count)`，linear / logarithmic 衰减，下限 minimum。
 - 服务端自动判定（检测点回调，参考 PortSwigger）：实例启动时生成 `checkpoint_token`，随 `CHECKPOINT_TOKEN`/`CHECKPOINT_URL` 注入容器；题目内 checker 达成目标后 POST `CHECKPOINT_URL`（公开接口，token 即能力凭证）。服务端以哨兵答案入队，worker 走与手动提交相同的管线判过计分（防重复通关、动态计分、room.completed 复用）；提交接口拒绝哨兵值，用户无法伪造环境判定。
 - **ACM 编程题（type=code，对齐 ICPC 判定模型）**：题目带 `judge` 段（`acm_judges` + `judge_testdata` 表，包 zip 以 `testdata/<组名>.in`/`<组名>.answer` 成对携带数据组）时不经 flag 判定——学生经同一 `/submissions` 接口提交 yak 源码全文，judge worker 用 `CodeEngine`（`ACADEMY_YAK_BIN` 装配 yak 可执行文件；未装配 → 判 `internal_error`，平台侧失败可重试）逐组「运行 → token 化比对输出」，首组失败即停（lazy evaluation），判定结果写 `Submission.verdict`（ac/wa/tle/re/internal_error，`submission.judged` 事件 payload 附带）且 status 仍为 correct/incorrect——计分/首通/竞赛反作弊/room.completed 与 flag 题完全同管线。提交侧护栏：源码 ≤128KiB、同题 pending 期间重复提交 422；样例组（sample=true）经 `GET /challenges/{slug}/judge/samples` 下发（隐藏组不出网）。元数据维护语义：管理端编辑保存 judge 段不带数据组 = 保留库内测试数据（新建编程题必须携带数据组：包 zip 装配或直传 JSON 内联）。
+- **自测运行（动态执行框 / custom invocation）**：`POST /challenges/{slug}/judge/runs`（sample 组名或自定义 stdin 二选一）→ 202 票据 id → `GET .../runs/{id}` 轮询至 done。学生端在题目详情页 CodeMirror 编辑器里直接编码自测（对样例组或自定义输入跑当前源码），与正式判题共用 `CodeEngine` 与题目时限；**运营态而非判定**——不产生 Submission 行、不写事件流、不计分（与事件溯源完全隔离，可无限次自测），票据仅进程内存（重启即清，无审计/重放诉求）。样例模式服务端按样例期望输出 token 化比对（`matches`），自定义模式仅回显 stdout。护栏：源码 ≤128KiB、stdin ≤256KiB、响应 stdout 截断 64KiB、每用户同时仅一个进行中（422）、全局并发闸 2（正式判题不共用，判题优先）、票据 TTL 10 分钟；引擎未装配 → 创建即 422（区别于提交判定的 internal_error：自测可提前知道平台不可用，无需等待判定）。
 
 ### 3.5 env — Lab 环境
 
@@ -250,6 +251,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（手机验证码，开发投递器通道）。
 - **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 [flaggateway 入口层 + 上游二进制] + instance 判定：每实例唯一 flag，靶机内 /flag.txt 与带按题门禁的 GET /flag、authz 题命令模拟接口 cat flag.txt，跨题捷径均已封死）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 3.7** ✅ 已完成：ACM 编程题源码判定（对齐 ICPC 出题/判题模型）：题目包 zip `judge` 段 + `testdata/` 数据组（`acm_judges`/`judge_testdata` 表），学生提交 yak 源码，`CodeEngine`（`ACADEMY_YAK_BIN`）逐组运行对拍（token 化比对、时限、lazy evaluation），`Submission.verdict` 判定结果（ac/wa/tle/re/internal_error）随 `submission.judged` 事件下发，计分/首通/反作弊复用既有管线；样例组专端点下发，管理端编辑支持元数据维护（judge 段不带数据组 = 保留库内数据）。
+- **Phase 3.8** ✅ 已完成：ACM 自测运行（动态执行框，custom invocation）：题目详情页内置 CodeMirror 6 编辑器（Go 语法近似 yak 高亮）+ 运行面板，对样例组或自定义 stdin 异步运行当前源码（202 票据 + 轮询，与判题共用 `CodeEngine` 与题目时限）；运营态与判定/事件流完全隔离（无 Submission、无事件、不计分），样例模式服务端比对期望输出，票据进程内存 + TTL 10 分钟；引擎未装配创建即 422（与提交判定的 internal_error 路径区分）。
 - **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 11. 当前边界（明确不做）
