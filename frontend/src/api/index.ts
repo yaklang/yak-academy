@@ -391,6 +391,24 @@ export interface BuiltinImageStatus {
   can_build: boolean
 }
 
+// yak 判题引擎 OSS 下载任务进度：total=-1 未知大小（进度条退化为不定态）；
+// 任务态仅存服务进程内存，服务重启回 idle。
+export interface YakDownloadProgress {
+  state: 'idle' | 'running' | 'done' | 'failed'
+  received: number
+  total: number
+  error?: string
+}
+
+// yak 判题引擎装配态（题目管理 ACM tab 状态卡）：configured=false 时
+// ACM 题提交判 internal_error、自测运行 422。
+export interface YakEngineStatus {
+  configured: boolean
+  path: string
+  version: string
+  download: YakDownloadProgress
+}
+
 // 内置训练集教程目录（教程管理页「内置训练集」区块）：帐面清单来自 embed
 // 资产，imported 按内容表探测——内置教程只读，更新走一键导入。
 export interface BuiltinTutorialRoom {
@@ -429,6 +447,12 @@ export const adminChallengeApi = {
     http.get<BuiltinImageStatus>('/admin/challenges/builtin/image'),
   buildBuiltinImage: () =>
     http.post<BuiltinImageStatus>('/admin/challenges/builtin/image'),
+  // yak 判题引擎：状态查询 / 触发 OSS 异步下载（约 220MB，202 返回后台任务，
+  // 进度轮询状态接口；下载完成即时装配，无需重启）。
+  yakEngineStatus: () =>
+    http.get<YakEngineStatus>('/admin/challenges/engine/yak'),
+  yakEngineDownload: () =>
+    http.post<YakEngineStatus>('/admin/challenges/engine/yak/download'),
   // 内置训练集教程目录与导入状态（教程管理页「内置训练集」区块）。
   builtinTutorialCatalog: () =>
     http.get<BuiltinTutorialCatalog>('/admin/challenges/builtin/tutorials'),
