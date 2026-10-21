@@ -165,8 +165,9 @@ type SubmissionRepo interface {
 	// DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
 	DeleteByCompetition(ctx context.Context, competitionID uint) error
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
-	// UpdateVerdict 判定结果 + ACM 细分一并写回（code 题；verdict 空串 = flag 题）。
-	UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict) error
+	// UpdateVerdict 判定结果 + ACM 细分一并写回（code 题；verdict 空串 = flag 题。
+	// groupsJSON = ACM 逐组明细 JSON，空串 = 无明细/flag 题）。
+	UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict, groupsJSON string) error
 	// HasPendingCode 该用户该 ACM 题是否有未出结果的提交（防并发刷引擎）。
 	HasPendingCode(ctx context.Context, userID, challengeID uint) (bool, error)
 }

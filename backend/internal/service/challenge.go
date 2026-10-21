@@ -133,8 +133,9 @@ type fullJSONJudge struct {
 	Flag string              `json:"flag"`
 }
 
-// fullJSONJudgeSection 管理端 ACM 判定段回填：数据组仅 name/sample（无内容）。
-// 编辑保存时 judge 段无数据组 → 后端保留库内测试数据（元数据维护语义）。
+// fullJSONJudgeSection 管理端 ACM 判定段回填：数据组仅 name/sample/score（无内容）。
+// 编辑保存时 judge 段无数据组 → 后端保留库内测试数据（元数据维护语义；
+// 携带数据组 = 整组替换，score 一并覆写）。
 type fullJSONJudgeSection struct {
 	Engine         string                `json:"engine"`
 	TimeLimitS     int                   `json:"time_limit_s"`
@@ -145,6 +146,7 @@ type fullJSONJudgeSection struct {
 type fullJSONTestdataRef struct {
 	Name   string `json:"name"`
 	Sample bool   `json:"sample"`
+	Score  int    `json:"score"`
 }
 
 type fullJSONEnv struct {
@@ -209,7 +211,7 @@ func (s *ChallengeService) GetFullJSON(ctx context.Context, slug string) (*Chall
 		}
 		refs := make([]fullJSONTestdataRef, 0, len(data))
 		for _, d := range data {
-			refs = append(refs, fullJSONTestdataRef{Name: d.Name, Sample: d.Sample})
+			refs = append(refs, fullJSONTestdataRef{Name: d.Name, Sample: d.Sample, Score: d.Score})
 		}
 		out.Judge = &fullJSONJudgeSection{
 			Engine: conf.Engine, TimeLimitS: conf.TimeLimitS,

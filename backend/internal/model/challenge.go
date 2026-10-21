@@ -119,6 +119,9 @@ type JudgeTestdata struct {
 	Input       string `gorm:"type:text" json:"input"`                      // 输入数据全文
 	Answer      string `gorm:"type:text" json:"output"`                     // 期望输出全文
 	Sample      bool   `gorm:"default:false" json:"sample"`                 // 样例组（学生可见）
+	// Score 组分值（部分得分制）：0 = 未配置，按组数均分题面分值；>0 时
+	// 各组按比例分摊题面分值（总题分不随配置变化）。ACM 语义：通过组即得该组分。
+	Score int `gorm:"default:0" json:"score"`
 }
 
 // Hint 提示，扣分解锁（解锁写 hint.unlocked 事件）。
@@ -165,8 +168,11 @@ type Submission struct {
 	Answer   string             `json:"-"`
 	Status   SubmissionStatus   `gorm:"size:16;index" json:"status"`
 	// Verdict ACM 判定细分（ac/wa/tle/re/internal_error；flag 判定题为空串 → JSON null）。
-	Verdict  SubmissionVerdict `gorm:"size:16" json:"verdict"`
-	Score    int               `json:"score"` // 判定通过后写入（submission.judged 事件派生）
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	Verdict SubmissionVerdict `gorm:"size:16" json:"verdict"`
+	Score   int               `json:"score"` // 判定通过后写入（submission.judged 事件派生）
+	// Groups ACM 逐组判定明细（JSON，CodeGroupResult[]；部分得分制学生端反馈，
+	// 与 submission.judged 事件 payload.groups 同源）。flag 判定题为空串 → JSON null。
+	Groups    string     `gorm:"type:text" json:"groups"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }

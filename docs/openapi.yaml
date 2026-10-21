@@ -126,7 +126,7 @@ components:
       properties:
         id: { type: integer }
         status: { type: string, enum: [pending, correct, incorrect] }
-        score: { type: integer, description: 判定通过后返回的得分 }
+        score: { type: integer, description: 判定得分（ACM 部分得分制：全过 = 题面全额；部分通过组按组分值权重折算） }
         verdict:
           type: string
           nullable: true
@@ -135,6 +135,21 @@ components:
             ACM 编程题判定结果（flag 判定题为 null）：ac=全部数据通过；wa=输出不匹配；
             tle=超时；re=运行出错/内存超限；internal_error=引擎不可用等平台侧失败
             （不消耗题目的判定机会，可稍后重试）。
+        groups:
+          type: array
+          nullable: true
+          description: |
+            ACM 编程题逐组判定明细（部分得分制；flag 判定题为 null）。判定对全部
+            数据组逐组运行（非首败即停），每组独立结论；通过组的分值权重折算进 score。
+            样例组（sample=true）学生可见名称，隐藏组仅展示序号名。
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              sample: { type: boolean }
+              passed: { type: boolean }
+              verdict: { type: string, enum: [wa, tle, re], description: 失败组的判定 }
+              score: { type: integer, description: 组配置分值（0 = 未配置，按权重均分语义不适用） }
     LeaderboardEntry:
       type: object
       properties:

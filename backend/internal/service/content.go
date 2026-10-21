@@ -662,12 +662,14 @@ type judgeJSON struct {
 }
 
 // judgeTestData 数据组（直传 JSON 内联 input/output；包 zip 路径由 testdata/
-// 文件装配填充。yaml tag 供 challenge.yml judge.testdata 声明组名/sample 用）。
+// 文件装配填充。yaml tag 供 challenge.yml judge.testdata 声明组名/sample/score 用）。
 type judgeTestData struct {
 	Name   string `json:"name" yaml:"name"`
 	Input  string `json:"input" yaml:"input"`
 	Output string `json:"output" yaml:"output"`
 	Sample bool   `json:"sample" yaml:"sample"`
+	// Score 组分值（部分得分制）：0 = 未配置（全有全无）；>0 各组按权重分摊题面分。
+	Score int `json:"score" yaml:"score"`
 }
 
 // UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
@@ -731,7 +733,7 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 					return 0, nil, fmt.Errorf("%w: challenge %q judge.testdata[%d] requires inline input and output", ErrValidation, c.Slug, i)
 				}
 				testdata = append(testdata, model.JudgeTestdata{
-					Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample,
+					Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample, Score: t.Score,
 				})
 			}
 			if len(testdata) == 0 {
@@ -900,6 +902,10 @@ func validateJudgeJSON(where string, j *judgeJSON) error {
 			return fmt.Errorf("%w: %s: duplicate testdata name %q", ErrValidation, where, t.Name)
 		}
 		seen[t.Name] = true
+		// 部分得分制：组分值非负（0 = 未配置，全有全无语义）。
+		if t.Score < 0 {
+			return fmt.Errorf("%w: %s: judge.testdata[%d].score must be >= 0", ErrValidation, where, i)
+		}
 	}
 	return nil
 }
@@ -1174,7 +1180,7 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		for i := range cj.Judge.Testdata {
 			t := &cj.Judge.Testdata[i]
 			testdata = append(testdata, model.JudgeTestdata{
-				Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample,
+				Name: t.Name, Input: t.Input, Answer: t.Output, Sample: t.Sample, Score: t.Score,
 			})
 		}
 		if err := s.challenge.challenges.UpsertACM(ctx, acm, testdata); err != nil {
@@ -1221,6 +1227,28 @@ func assembleTestdata(j *judgeJSON, files map[string][]byte) error {
 			if j.Testdata[i].Name == name {
 				j.Testdata[i].Input = string(in)
 				j.Testdata[i].Output = string(ans)
+			}
+		}
+	}
+	// testdata/scores.json（可选）：组名 → 分值（部分得分制）。在数据文件
+	// 配对装配之后合并（文件隐式声明的组也可配分）；引用不存在的组名 → 422
+	//（防出题人笔误静默丢配置）。
+	if raw, ok := files["testdata/scores.json"]; ok {
+		var groupScores map[string]int
+		if err := json.Unmarshal(raw, &groupScores); err != nil {
+			return fmt.Errorf("%w: testdata/scores.json: %v", ErrValidation, err)
+		}
+		for name, sc := range groupScores {
+			if sc < 0 {
+				return fmt.Errorf("%w: testdata/scores.json: group %q score must be >= 0", ErrValidation, name)
+			}
+			if !declared[name] {
+				return fmt.Errorf("%w: testdata/scores.json: unknown group %q (no .in/.answer pair)", ErrValidation, name)
+			}
+			for i := range j.Testdata {
+				if j.Testdata[i].Name == name {
+					j.Testdata[i].Score = sc
+				}
 			}
 		}
 	}

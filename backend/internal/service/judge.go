@@ -313,8 +313,9 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	}
 }
 
-// judgeCode ACM 编程题判定（ICPC 模型）：逐组运行引擎对拍测试数据，
-// 全组通过 = correct（ac），首组失败即停（lazy evaluation，与 DOMjudge 一致）。
+// judgeCode ACM 编程题判定：逐组运行引擎对拍测试数据（不再 lazy 首败即停
+// ——部分得分制要求每组都有结论）。全组通过 = ac；否则 verdict = 首个失败
+// 组的判定（wa/tle/re），但通过的组仍按组分值计入 score。
 // internal_error（引擎未配置/读题失败）是平台侧失败，不消耗"判定机会"语义。
 func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, chal *model.Challenge) {
 	conf, err := s.challenges.FindACM(ctx, chal.ID)
@@ -335,65 +336,118 @@ func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, cha
 		s.finishCode(ctx, sub, model.VerdictInternalError)
 		return
 	}
+	// 逐组全跑：每组结论独立（pass 得组分，fail 记 verdict），全部通过才算 ac。
 	verdict := model.VerdictAC
+	groups := make([]CodeGroupResult, 0, len(data))
+	passedWeight := 0
+	totalWeight := 0
 	for i := range data {
 		runCtx, cancel := context.WithTimeout(ctx, time.Duration(conf.TimeLimitS)*time.Second)
-		out, err := engine.Run(runCtx, sub.Answer, data[i].Input)
+		out, runErr := engine.Run(runCtx, sub.Answer, data[i].Input)
 		cancel()
-		if err != nil {
-			verdict = verdictFromError(err)
-			break
+		group := CodeGroupResult{Name: data[i].Name, Sample: data[i].Sample}
+		switch {
+		case runErr == nil && compareOutput(out, data[i].Answer):
+			group.Passed = true
+			group.Score = data[i].Score
+			passedWeight += data[i].Score
+		case runErr != nil:
+			group.Verdict = string(verdictFromError(runErr))
+		default:
+			group.Verdict = string(model.VerdictWA)
 		}
-		if !compareOutput(out, data[i].Answer) {
-			verdict = model.VerdictWA
-			break
+		totalWeight += data[i].Score
+		if !group.Passed && verdict == model.VerdictAC {
+			verdict = model.SubmissionVerdict(group.Verdict)
 		}
+		groups = append(groups, group)
 	}
 	if verdict == model.VerdictInternalError {
 		s.finishCode(ctx, sub, verdict)
 		return
 	}
+	// 部分得分：score = 动态题分 × 通过组权重 / 总权重；全过即全额。
+	// 组权重全 0（未配置分值）时退化为全有全无——通过组数 = 组数才得分。
+	fullScore, err := s.dynamicScore(ctx, sub.ChallengeID, sub.CompetitionID)
+	if err != nil {
+		log.Printf("judge: dynamic score: %v", err)
+		fullScore = chal.Score
+	}
+	earned := partialScore(fullScore, passedWeight, totalWeight, len(data) > 0 && verdict == model.VerdictAC)
 	if verdict != model.VerdictAC {
 		// 竞赛提交：错误答案也走反作弊检测（源码提交不涉及实例 flag，仅 IP 基线推进）。
 		if sub.CompetitionID > 0 {
 			s.detectCheat(ctx, sub, chal)
 		}
-		s.finishCode(ctx, sub, verdict)
+		s.finishCode(ctx, sub, verdict, earned, groups)
 		return
 	}
 	// 同作用域已通过 → 不重复计分（score=0），与 flag 题一致。
 	if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID, sub.CompetitionID); err == nil && solved {
-		s.finishCode(ctx, sub, model.VerdictAC)
+		s.finishCode(ctx, sub, model.VerdictAC, 0, groups)
 		return
 	}
 	if sub.CompetitionID > 0 {
 		s.detectCheat(ctx, sub, chal)
 	}
-	score, err := s.dynamicScore(ctx, sub.ChallengeID, sub.CompetitionID)
-	if err != nil {
-		log.Printf("judge: dynamic score: %v", err)
-		s.finishCode(ctx, sub, model.VerdictAC)
-		return
-	}
-	s.finishCode(ctx, sub, verdict, score)
+	s.finishCode(ctx, sub, verdict, earned, groups)
 	if chal.TutorialSlug != "" {
 		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
 }
 
-// finishCode ACM 判定写回：verdict 一并落库；score 仅 ac 且首次通过结算。
+// CodeGroupResult 编程题逐组判定结论（submission.judged 事件 payload.groups
+// 与学生端提交结果反馈共用；样例组标记便于前端区分展示）。
+type CodeGroupResult struct {
+	Name    string `json:"name"`
+	Sample  bool   `json:"sample"`
+	Passed  bool   `json:"passed"`
+	Verdict string `json:"verdict,omitempty"` // 失败组的判定（wa/tle/re）
+	Score   int    `json:"score"`              // 组权重（配置分值；非实得分）
+}
+
+// partialScore 部分得分换算：全过 = 题面全额；部分过 = 全额 × 通过权重/总权重，
+// 四舍五入；权重全 0（未配置组分值）时部分通过不得分（全有全无语义），
+// 只有全部通过才给全额——保持未配置分值题目与旧行为完全一致。
+func partialScore(full, passedWeight, totalWeight int, allPassed bool) int {
+	if allPassed {
+		return full
+	}
+	if totalWeight <= 0 || passedWeight <= 0 {
+		return 0
+	}
+	return (full*passedWeight + totalWeight/2) / totalWeight
+}
+
+// finishCode ACM 判定写回：verdict 一并落库；score 含部分得分（ac 全额/部分
+// 过按权重折算）；groups 逐组结论进事件 payload（学生端反馈与审计重放同源）。
 // internal_error 保持 pending 语义上"平台失败"——这里仍写 incorrect + verdict，
 // 学生端以 verdict=internal_error 提示重试（区别于代码本身错误）。
-func (s *JudgeService) finishCode(ctx context.Context, sub *model.Submission, verdict model.SubmissionVerdict, score ...int) {
+func (s *JudgeService) finishCode(ctx context.Context, sub *model.Submission, verdict model.SubmissionVerdict, extra ...any) {
 	sc := 0
-	if len(score) > 0 {
-		sc = score[0]
+	var groups []CodeGroupResult
+	for _, e := range extra {
+		switch v := e.(type) {
+		case int:
+			sc = v
+		case []CodeGroupResult:
+			groups = v
+		}
 	}
 	status := model.SubmissionIncorrect
 	if verdict == model.VerdictAC {
 		status = model.SubmissionCorrect
 	}
-	if err := s.submissions.UpdateVerdict(ctx, sub.ID, status, sc, verdict); err != nil {
+	// 逐组明细落 Submission.groups（学生端轮询反馈；与事件 payload 同源）。
+	groupsJSON := ""
+	if len(groups) > 0 {
+		if b, err := json.Marshal(groups); err == nil {
+			groupsJSON = string(b)
+		} else {
+			log.Printf("judge: marshal groups: %v", err)
+		}
+	}
+	if err := s.submissions.UpdateVerdict(ctx, sub.ID, status, sc, verdict, groupsJSON); err != nil {
 		log.Printf("judge: update verdict: %v", err)
 		return
 	}
@@ -401,6 +455,9 @@ func (s *JudgeService) finishCode(ctx context.Context, sub *model.Submission, ve
 		"submission_id": sub.ID, "challenge_id": sub.ChallengeID,
 		"correct": status == model.SubmissionCorrect, "score": sc,
 		"verdict": string(verdict),
+	}
+	if len(groups) > 0 {
+		payload["groups"] = groups
 	}
 	if sub.CompetitionID > 0 {
 		payload["competition_id"] = sub.CompetitionID
