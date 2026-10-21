@@ -120,6 +120,13 @@ type ChallengeRepo interface {
 	Delete(ctx context.Context, slug string) error
 	// FindBuiltinNotInSlugs 查不在当前内置目录里的内置题目行（导入 prune）。
 	FindBuiltinNotInSlugs(ctx context.Context, slugs ...string) ([]model.Challenge, error)
+	// UpsertACM 保存 ACM 编程题判定配置 + 测试数据组（type=code 专用；整体重建，
+	// 与 flags/hints 的版本化覆盖语义一致）。与 flags 互斥由 service 校验保证。
+	UpsertACM(ctx context.Context, j *model.ACMJudge, data []model.JudgeTestdata) error
+	// FindACM 查 ACM 判定配置（无则 gorm.ErrRecordNotFound = 非 code 题）。
+	FindACM(ctx context.Context, challengeID uint) (*model.ACMJudge, error)
+	// FindTestdata 查测试数据组（按组名排序；样例与隐藏组都返回，可见性由 service 过滤）。
+	FindTestdata(ctx context.Context, challengeID uint) ([]model.JudgeTestdata, error)
 }
 
 // ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源；
@@ -158,6 +165,10 @@ type SubmissionRepo interface {
 	// DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
 	DeleteByCompetition(ctx context.Context, competitionID uint) error
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
+	// UpdateVerdict 判定结果 + ACM 细分一并写回（code 题；verdict 空串 = flag 题）。
+	UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict) error
+	// HasPendingCode 该用户该 ACM 题是否有未出结果的提交（防并发刷引擎）。
+	HasPendingCode(ctx context.Context, userID, challengeID uint) (bool, error)
 }
 
 type ContentPackageRepo interface {

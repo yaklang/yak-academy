@@ -41,6 +41,11 @@ type Config struct {
 	// 设为学员浏览器可达的宿主地址（如内网 IP），端口随之发布全网卡。
 	InstancePublicHost string
 
+	// YakBin yak 引擎可执行文件路径（ACM 编程题判题用；空 = 引擎未配置，
+	// code 题判定 internal_error）。判题进程以本进程子进程运行（限时杀进程），
+	// 生产部署应指向容器内 yak 二进制并配合最小权限运行。
+	YakBin string
+
 	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
 	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
 	// 服务日志，学员拿不到码会卡死在注册第一步；正式部署保持关闭。
@@ -69,6 +74,7 @@ func Load() *Config {
 		InstanceCPUs:       getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
 		PublicURL:          getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 		InstancePublicHost: getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
+		YakBin:             getenv("ACADEMY_YAK_BIN", ""),
 		SmsShowCode:        getenvBool("ACADEMY_SMS_SHOW_CODE"),
 	}
 }

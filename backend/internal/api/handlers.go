@@ -70,6 +70,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/instance/extend", "", h.extendInstance)
 	r.Handle(http.MethodGet, "/api/v1/challenges", "", h.listChallenges)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}", "", h.getChallenge)
+	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/judge/samples", "", h.getJudgeSamples)
 	r.Handle(http.MethodGet, "/api/v1/challenges/{slug}/attachments/{filename}", "", h.downloadAttachment)
 	r.Handle(http.MethodPost, "/api/v1/challenges/{slug}/hints/{hintId}/unlock", "", h.unlockHint)
 	r.Handle(http.MethodGet, "/api/v1/progress", "", h.myProgress)
@@ -588,6 +589,18 @@ func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// getJudgeSamples ACM 编程题样例数据（flag 判定题 404；隐藏组不下发）。
+func (h *Handlers) getJudgeSamples(w http.ResponseWriter, req *http.Request) {
+	samples, timeLimitS, err := h.Topics.ListJudgeSamples(req.Context(), req.PathValue("slug"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"time_limit_s": timeLimitS, "samples": samples,
+	})
 }
 
 // updateChallengeVisibility 管理端：更新题目可见性/定时发布。

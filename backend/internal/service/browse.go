@@ -145,6 +145,17 @@ type ChallengeDetail struct {
 	Hints         []HintView      `json:"hints"`
 	// Attachments 附件列表（api 层从 ChallengeService 拼装，学生凭 JWT 下载）。
 	Attachments []AttachmentView `json:"attachments"`
+	// Judge ACM 编程题判定配置（flag 判定题为 nil；数据内容不下发，
+	// 样例经 ListJudgeSamples 提供）。
+	Judge *JudgeConfigView `json:"judge"`
+}
+
+// JudgeConfigView ACM 判定配置的学生端视图（不含测试数据内容）。
+type JudgeConfigView struct {
+	Engine         string `json:"engine"`
+	TimeLimitS     int    `json:"time_limit_s"`
+	MemoryLimitMB  int    `json:"memory_limit_mb"`
+	TestdataCount  int    `json:"testdata_count"`
 }
 
 // enrichTutorial 批量拼关联教程 Room 的标题（tutorial_slug → room 元数据）。
@@ -291,6 +302,19 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 		Hints:         toHintViews(hints, unlocked),
 		DescriptionMD: chal.Description,
 	}
+	// ACM 编程题：判定配置随详情下发（数据内容不下发）。
+	if chal.Type == model.ChallengeCode {
+		if conf, err := s.challenges.FindACM(ctx, chal.ID); err == nil {
+			n := 0
+			if data, err := s.challenges.FindTestdata(ctx, chal.ID); err == nil {
+				n = len(data)
+			}
+			detail.Judge = &JudgeConfigView{
+				Engine: conf.Engine, TimeLimitS: conf.TimeLimitS,
+				MemoryLimitMB: conf.MemoryLimitMB, TestdataCount: n,
+			}
+		}
+	}
 	if solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID, 0); err == nil {
 		detail.Solved = solved
 	}
@@ -301,6 +325,41 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 	}
 	detail.TrainingItem = items[0]
 	return detail, nil
+}
+
+// JudgeSampleView ACM 样例数据组（学生可见；隐藏组不下发）。
+type JudgeSampleView struct {
+	Name   string `json:"name"`
+	Input  string `json:"input"`
+	Output string `json:"output"`
+}
+
+// ListJudgeSamples ACM 编程题样例数据（GET /challenges/{slug}/judge/samples）。
+// 仅返回 sample=true 的组；flag 判定题或不可见题 → ErrNotFound。
+// 时限一并下发（提交页展示；隐藏在详情 judge 段也有，这里自包含方便复用）。
+func (s *TopicService) ListJudgeSamples(ctx context.Context, slug string) ([]JudgeSampleView, int, error) {
+	chal, err := s.challenges.FindBySlug(ctx, slug)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !chal.Published(s.now()) || chal.Type != model.ChallengeCode {
+		return nil, 0, ErrNotFound
+	}
+	conf, err := s.challenges.FindACM(ctx, chal.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	data, err := s.challenges.FindTestdata(ctx, chal.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]JudgeSampleView, 0, len(data))
+	for _, d := range data {
+		if d.Sample {
+			out = append(out, JudgeSampleView{Name: d.Name, Input: d.Input, Output: d.Answer})
+		}
+	}
+	return out, conf.TimeLimitS, nil
 }
 
 // UpdateTopic 更新主题元数据（PUT /topics/{slug}，仅管理员）。

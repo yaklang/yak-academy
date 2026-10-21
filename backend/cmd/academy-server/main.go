@@ -109,6 +109,14 @@ func main() {
 	}
 	contentSvc := service.NewContentService(contentRepo, topicRepo, roomRepo, challengeSvc, builder, progressRepo)
 	judgeSvc := service.NewJudgeService(submissionRepo, challengeRepo, instanceRepo, eventRepo, competitionRepo, bus)
+	// ACM 判题引擎：ACADEMY_YAK_BIN 配置时装配真实 yak 引擎；
+	// 未配置 = code 题判定 internal_error（提交/判定链路不受影响）。
+	if cfg.YakBin != "" {
+		judgeSvc.SetCodeEngine(service.NewYakEngine(cfg.YakBin))
+		log.Printf("code judge engine: yak (%s)", cfg.YakBin)
+	} else {
+		log.Printf("code judge engine: not configured (ACADEMY_YAK_BIN empty; code submissions judge internal_error)")
+	}
 	judgeSvc.StartWorker(ctx)
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)

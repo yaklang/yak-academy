@@ -46,6 +46,10 @@ services:
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
       ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
       ACADEMY_SMS_SHOW_CODE: ${ACADEMY_SMS_SHOW_CODE:-} # 验证码回显（内网/演示部署）：开启后发码响应带原文、注册页内联显示；正式部署保持空
+      # ACM 编程题判题引擎：yak 可执行文件在容器内的绝对路径（Linux 构建，
+      # 放 ./data/yak 随卷挂载即路径 /data/yak）。空 = 引擎未装配，code 题
+      # 提交后判 internal_error（区别于学生代码错误，前端提示可重试）。
+      ACADEMY_YAK_BIN: ${ACADEMY_YAK_BIN:-}
     restart: unless-stopped
     healthcheck: # GET /health 存活探针（alpine busybox wget）
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]

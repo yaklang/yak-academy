@@ -8,6 +8,9 @@ type ChallengeType string
 const (
 	ChallengeStatic ChallengeType = "static" // 静态 flag
 	ChallengeRegex  ChallengeType = "regex"  // 正则 flag
+	// ChallengeCode ACM 编程题：提交 yak 源码，judge worker 用引擎对每组测试数据
+	// 运行比对（对齐 ICPC 模型），不比对 flag。判定配置在 ACMJudge/JudgeTestdata 表。
+	ChallengeCode ChallengeType = "code"
 )
 
 // FlagMode flag 作用域：shared=题目级共享；instance=每容器实例唯一。
@@ -89,11 +92,33 @@ type ChallengeAttachment struct {
 }
 
 // Flag 题目的判定答案。比较必须使用恒时比较（event-sourcing-rules skill：禁止 == ）。
+// ACM 编程题（type=code）不写 Flag 行——判定走 ACMJudge + JudgeTestdata。
 type Flag struct {
 	ID          uint          `gorm:"primaryKey"`
 	ChallengeID uint          `gorm:"index"`
 	Type        ChallengeType `gorm:"size:16"`
 	Value       string        `gorm:"size:512"` // static: 明文；regex: 正则
+}
+
+// ACMJudge ACM 编程题判定配置（type=code 专用；与 Flag 行互斥）。
+// 学生提交 yak 源码，worker 用引擎对每组 JudgeTestdata 运行比对（ICPC 模型）。
+type ACMJudge struct {
+	ID          uint   `gorm:"primaryKey" json:"-"`
+	ChallengeID uint   `gorm:"uniqueIndex" json:"-"`
+	Engine      string `gorm:"size:16" json:"engine"`        // 判题引擎：yak
+	TimeLimitS  int    `json:"time_limit_s"`                 // 单组数据时限（秒）
+	MemoryLimitMB int  `json:"memory_limit_mb"`              // 单组数据内存上限（MB）
+}
+
+// JudgeTestdata ACM 编程题测试数据组（.in/.answer 成对；sample=true 题面样例）。
+// 期望输出列名 AnswerFile 避开 .ans 后缀（构建工具误处理，见 openapi 契约说明）。
+type JudgeTestdata struct {
+	ID          uint   `gorm:"primaryKey" json:"-"`
+	ChallengeID uint   `gorm:"index:idx_judge_testdata" json:"-"`
+	Name        string `gorm:"index:idx_judge_testdata;size:64" json:"name"` // 组名（包内文件去扩展名）
+	Input       string `gorm:"type:text" json:"input"`                      // 输入数据全文
+	Answer      string `gorm:"type:text" json:"output"`                     // 期望输出全文
+	Sample      bool   `gorm:"default:false" json:"sample"`                 // 样例组（学生可见）
 }
 
 // Hint 提示，扣分解锁（解锁写 hint.unlocked 事件）。
@@ -114,6 +139,19 @@ const (
 	SubmissionIncorrect  SubmissionStatus = "incorrect"
 )
 
+// SubmissionVerdict ACM 编程题判定细分（flag 判定题为空串，JSON 输出 null）：
+// ac/wa/tle/re/internal_error（openapi 契约 Submission.verdict）。
+type SubmissionVerdict string
+
+const (
+	VerdictNone           SubmissionVerdict = ""                // flag 判定题
+	VerdictAC             SubmissionVerdict = "ac"              // 全部测试数据通过
+	VerdictWA             SubmissionVerdict = "wa"             // 输出不匹配
+	VerdictTLE            SubmissionVerdict = "tle"            // 超时
+	VerdictRE             SubmissionVerdict = "re"             // 运行错误/内存超限
+	VerdictInternalError  SubmissionVerdict = "internal_error" // 平台侧失败（引擎不可用等）
+)
+
 // Submission 一次答案提交。判定由 worker 异步完成，HTTP 路径禁止同步判定。
 type Submission struct {
 	ID          uint             `gorm:"primaryKey" json:"id"`
@@ -126,7 +164,9 @@ type Submission struct {
 	SourceIP string             `gorm:"size:64" json:"-"`
 	Answer   string             `json:"-"`
 	Status   SubmissionStatus   `gorm:"size:16;index" json:"status"`
-	Score    int                `json:"score"` // 判定通过后写入（submission.judged 事件派生）
+	// Verdict ACM 判定细分（ac/wa/tle/re/internal_error；flag 判定题为空串 → JSON null）。
+	Verdict  SubmissionVerdict `gorm:"size:16" json:"verdict"`
+	Score    int               `json:"score"` // 判定通过后写入（submission.judged 事件派生）
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 }
