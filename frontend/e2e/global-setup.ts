@@ -101,6 +101,18 @@ export default async function globalSetup(): Promise<void> {
       '上传教程包',
     )
 
+    // ACM 编程题种子（题目包 zip：judge 段 + testdata/ 对拍数据）。
+    const acmZip = await readFile(path.join(e2eDir, 'fixtures', E2E.acm.zip))
+    await must(
+      ctx.post('/api/v1/admin/challenges/package', {
+        headers: auth,
+        multipart: {
+          package: { name: E2E.acm.zip, mimeType: 'application/zip', buffer: acmZip },
+        },
+      }),
+      '上传 ACM 题目包',
+    )
+
     const list = await must(ctx.get('/api/v1/content/packages', { headers: auth }), '教程包列表')
     const body = (await list.json()) as { items?: Array<{ id: number; name: string }> }
     const pkg = (body.items ?? []).find((p) => p.name === E2E.tutorial.pkgName)

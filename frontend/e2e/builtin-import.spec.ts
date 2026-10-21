@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { E2E } from './fixtures/consts'
 import { loginAsAdmin, loginAsStudent } from './helpers'
 
 // 内置训练（vulinbox）一键导入旅程：管理端确认弹窗 → 导入 → 幂等重导入
 // （新增 0 / 全量更新）→ 管理表格出现 vulinbox 题 → 学生题库「教程题目」tab
-// 专属内置题集（CTF tab 只见管理员上传题、ACM 空态）+ 「是否内置」过滤。
+// 专属内置题集（CTF tab 只见管理员上传题、ACM tab 只见 ACM 种子编程题）
+// + 「是否内置」过滤。
 // 默认 e2e 后端为 noop 驱动，恰好覆盖 image_built=false 提示路径；
 // 断言只锚定两种驱动下都成立的汇总文案与表格/列表行，不区分镜像是否构建。
 test.describe('内置训练一键导入', () => {
@@ -44,12 +46,14 @@ test.describe('内置训练一键导入', () => {
     await expect(page.locator('h3.cat', { hasText: 'ssrf' })).toBeVisible()
     await expect(page.locator('h3.cat', { hasText: 'jwt' })).toBeVisible()
 
-    // CTF tab 只见管理员上传的种子题（凯撒密码），内置题集不混入；ACM tab 空态
+    // CTF tab 只见管理员上传的种子题（凯撒密码），内置题集不混入；
+    // ACM tab 只见 global-setup 上传的 ACM 种子编程题（源码判定题）
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
     await expect(page.locator('.row', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
     await expect(page.locator('h3.cat', { hasText: 'ssrf' })).toHaveCount(0)
     await page.getByRole('tab', { name: 'ACM 题目' }).click()
-    await expect(page.locator('.el-empty')).toContainText('暂无ACM题目')
+    await expect(page.locator('.row', { hasText: E2E.acm.title })).toBeVisible()
+    await expect(page.locator('h3.cat', { hasText: 'ssrf' })).toHaveCount(0)
 
     // 「是否内置」过滤（服务端）：教程题目 tab 全是内置（筛上传为空），
     // CTF tab 全是上传（筛内置为空）——两个 tab 的题集归属互不稀释。

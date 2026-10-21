@@ -4,9 +4,10 @@ import { loginAsAdmin, switchAdminChallengeBank } from './helpers'
 
 // 题目管理页题库 tab 旅程：内置训练只读 / CTF 可管理 / ACM 独立题库，
 // 与 CTF tab 的搜索（slug/标题/分类前缀）+ 筛选（分类/难度/来源）。
-// 种子为 global-setup 上传的 3 道 CTF 题（凯撒/关联教程/附件）；
-// 内置集导入发生在 builtin-import.spec（字母序靠后），本 spec 不依赖内置行存在，
-// 只锚定顺序无关的不变量：上传题永不落入内置 tab、内置来源筛选在 CTF tab 恒空。
+// 种子为 global-setup 上传的 3 道 CTF 题（凯撒/关联教程/附件）+ 1 道 ACM
+// 编程题（acm-e2e-sum 求和题包）；内置集导入发生在 builtin-import.spec
+// （字母序靠后），本 spec 不依赖内置行存在，只锚定顺序无关的不变量：
+// 上传题永不落入内置 tab、内置来源筛选在 CTF tab 恒空。
 const { challenge: C } = E2E
 
 test.describe('题目管理：题库 tab 与搜索筛选', () => {
@@ -77,15 +78,18 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
   })
 
-  test('ACM tab：与 CTF 题库隔离的空态，管理入口齐备', async ({ page }) => {
+  test('ACM tab：种子编程题在列，与 CTF 题库隔离，管理入口齐备', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
     await switchAdminChallengeBank(page, 'ACM 题目')
 
-    // 种子均为 ctf：ACM tab 空表，但上传工具栏在位（题库可管理）
+    // global-setup 上传的 ACM 种子包在列；CTF 种子（flag 判定）不落入本 tab，
+    // 上传工具栏在位（题库可管理）
     //（el-upload 包装层也带 button 角色，断言锚定内部真实按钮避免 strict 冲突）
     const table = page.locator('.chal-table')
-    await expect(table.locator('.el-table__empty-text')).toBeVisible()
+    await expect(table.locator('tr', { hasText: E2E.acm.slug })).toBeVisible()
+    await expect(table.locator('tr', { hasText: C.slug })).toHaveCount(0)
+    await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
     await expect(page.locator('button.el-button', { hasText: '选择 challenge.json' })).toBeVisible()
   })
 })

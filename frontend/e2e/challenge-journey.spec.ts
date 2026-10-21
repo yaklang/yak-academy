@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { E2E } from './fixtures/consts'
-import { loginAsAdmin, loginAsStudent, switchAdminChallengeBank } from './helpers'
+import { loginAsAdmin, loginAsStudent, studentToken, switchAdminChallengeBank } from './helpers'
 
 // 题目全链路旅程（本套件最重要的一条）：管理端表格 → 学生题库分组 →
 // 详情提示解锁（扣分）→ 错 flag / 对 flag 判定 → 排行榜 → 徽章 → 附件下载。
@@ -15,7 +15,7 @@ async function submitFlag(page: Page, flag: string) {
 }
 
 test.describe('题目全链路', () => {
-  test('题库按分类分组，详情可通题', async ({ page }) => {
+  test('题库按分类分组，详情可通题', async ({ page, request }) => {
     await loginAsStudent(page)
 
     // 题库列表：上传的种子题归「CTF 题目」tab（教程题目 tab 专属内置题集），
@@ -51,11 +51,19 @@ test.describe('题目全链路', () => {
     await hintRow.locator('.el-collapse-item__header').click()
     await expect(hintRow.locator('.hint-content')).toBeVisible()
 
-    // 排行榜出现学生分数（结算 50 - 提示 5 = 45）
+    // 排行榜出现学生分数（本用例结算 C.score - 提示 5）。全量套件中字母序
+    // 更早的 acm-journey 可能已替学生判对 ACM 种子题（+其分值），期望总分
+    // 按该题 solved 态动态计算——单独跑本 spec、未装配引擎（internal_error
+    // 不判对）与全量套件三种形态下都成立。
+    const token = await studentToken(request)
+    const acmDetail = await request.get(`${E2E.apiURL}/api/v1/challenges/${E2E.acm.slug}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const acm = (await acmDetail.json()) as { solved: boolean; score: number }
     await page.getByRole('link', { name: '排行榜' }).click()
     const row = page.locator('tr', { hasText: E2E.student.username })
     await expect(row).toBeVisible()
-    await expect(row).toContainText('45')
+    await expect(row).toContainText(String(C.score - C.hintCost + (acm.solved ? acm.score : 0)))
 
     // 徽章：first_solve（初试锋芒）点亮
     await page.getByRole('link', { name: '徽章' }).click()
