@@ -10,7 +10,8 @@ import DOMPurify from 'dompurify'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   trainingApi, instanceApi, downloadAttachment,
-  type AdminLabInstance, type ChallengeDetail, type LabInstance,
+  type AdminLabInstance, type ChallengeDetail, type JudgeSample, type LabInstance,
+  verdictLabels,
 } from '../api'
 import type { ApiError } from '../api/client'
 import { useSubmissionPoll } from '../composables/useSubmissionPoll'
@@ -53,6 +54,20 @@ const { submitting, polling, result, submit: submitPoll } = useSubmissionPoll(()
 
 // 提交时是否已通关：重复提交判对不重复计分（结算只有一次），文案需要区分。
 const solvedBeforeSubmit = ref(false)
+
+// ACM 编程题（judge 段存在）：源码提交 + 样例数据卡（flag 判定题 samples 恒空）。
+const isCode = computed(() => !!challenge.value?.judge)
+const samples = ref<JudgeSample[]>([])
+const source = ref('')
+
+async function loadSamples() {
+  try {
+    const res = await trainingApi.judgeSamples(slug())
+    samples.value = res.samples
+  } catch {
+    samples.value = [] // 样例拉取失败不阻断提交（题面通常也含样例）
+  }
+}
 
 const renderedDescription = computed(() =>
   DOMPurify.sanitize(marked.parse(challenge.value?.description_md ?? '') as string),
@@ -105,6 +120,7 @@ async function load() {
   try {
     challenge.value = await trainingApi.detail(slug())
     if (challenge.value.has_env) loadInstance()
+    if (challenge.value.judge) loadSamples()
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -212,15 +228,21 @@ async function extendInstance() {
 }
 
 function submit() {
-  if (!challenge.value || !answer.value) return
+  if (!challenge.value) return
+  const payload = isCode.value ? source.value : answer.value
+  if (!payload) return
   solvedBeforeSubmit.value = challenge.value.solved
-  submitPoll(challenge.value.slug, answer.value)
+  submitPoll(challenge.value.slug, payload)
 }
 
 // 结算模型：题目分值只结算一次，重复判对 score=0；提示扣费按账号永久（不退回）。
+// ACM 编程题附带 verdict 文案（wa/tle/re/internal_error）。
 const resultTitle = computed(() => {
   if (!result.value) return ''
-  if (result.value.status !== 'correct') return '判定不通过'
+  if (result.value.status !== 'correct') {
+    if (result.value.verdict) return `判定不通过：${verdictLabels[result.value.verdict]}`
+    return '判定不通过'
+  }
   if (result.value.score > 0) return `判定通过，得分 ${result.value.score}`
   return solvedBeforeSubmit.value ? '判定通过——本题分值已结算过，重复提交不重复计分' : '判定通过（本题 0 分）'
 })
@@ -263,6 +285,7 @@ onUnmounted(stopAutoSolvePolling)
         <el-tag type="info" effect="plain" class="score-tag">{{ challenge.score }} 分</el-tag>
         <el-tag v-if="challenge.solved" type="success">已通关</el-tag>
         <el-tag v-if="challenge.has_env" type="primary" effect="plain">容器环境</el-tag>
+        <el-tag v-if="challenge.judge" type="warning" effect="plain">编程题 · {{ challenge.judge.time_limit_s }}s / {{ challenge.judge.memory_limit_mb }}MB</el-tag>
       </span>
     </header>
 
@@ -273,6 +296,24 @@ onUnmounted(stopAutoSolvePolling)
     >配套教程：{{ challenge.tutorial_title || challenge.tutorial_slug }} →</router-link>
 
     <div class="description" v-html="renderedDescription" />
+
+    <!-- ACM 编程题样例数据（sample=true 的组；隐藏组不下发） -->
+    <div v-if="samples.length" class="samples">
+      <h4>样例数据</h4>
+      <div v-for="s in samples" :key="s.name" class="sample-group">
+        <span class="sample-name">{{ s.name }}</span>
+        <div class="sample-io">
+          <div class="sample-block">
+            <span class="sample-label">输入</span>
+            <pre>{{ s.input }}</pre>
+          </div>
+          <div class="sample-block">
+            <span class="sample-label">期望输出</span>
+            <pre>{{ s.output }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div v-if="challenge.attachments?.length" class="attachments">
       <h4>附件</h4>
@@ -355,9 +396,33 @@ onUnmounted(stopAutoSolvePolling)
         type="success"
         :closable="false"
         class="solved-note"
-        title="本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。"
+        :title="isCode
+          ? '本题已通关（分值已结算）。仍可重复提交源码验证，重复判对不再计分。'
+          : '本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。'"
       />
-      <div class="submit-row">
+      <!-- ACM 编程题：源码提交（引擎逐组运行对拍，判定期间禁止重复提交）。 -->
+      <template v-if="isCode">
+        <div v-if="samples.length" class="sample-note">
+          提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
+          全部通过才算 AC；上方「样例数据」可本地自测。
+        </div>
+        <el-input
+          v-model="source"
+          type="textarea"
+          :rows="10"
+          placeholder="粘贴 yak 源码（从标准输入读取数据，向标准输出打印结果）"
+          class="code-input"
+          :disabled="polling"
+        />
+        <el-button
+          type="primary"
+          class="submit-btn"
+          :loading="submitting || polling"
+          :disabled="!source"
+          @click="submit"
+        >提交代码</el-button>
+      </template>
+      <div v-else class="submit-row">
         <el-input
           v-model="answer"
           placeholder="输入 flag"
@@ -415,6 +480,32 @@ onUnmounted(stopAutoSolvePolling)
 .endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }
 .expire { color: var(--el-text-color-secondary); font-size: 0.8rem; }
 .submit-row { display: flex; gap: 0.5rem; }
+.samples { margin: 0 0 1.5rem; }
+.samples h4 { margin: 0 0 0.4rem; }
+.sample-group { margin-bottom: 0.6rem; }
+.sample-name {
+  font-family: Consolas, monospace; font-size: 0.85rem;
+  color: var(--el-text-color-secondary);
+}
+.sample-io { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.sample-block {
+  flex: 1; min-width: 200px; background: var(--el-fill-color-light);
+  border-radius: 4px; padding: 0.5rem 0.7rem;
+}
+.sample-label {
+  display: block; font-size: 0.8rem; color: var(--el-text-color-secondary);
+  margin-bottom: 0.2rem;
+}
+.sample-block pre {
+  margin: 0; font-family: Consolas, monospace; font-size: 0.85rem;
+  white-space: pre-wrap; word-break: break-all;
+}
+.sample-note {
+  margin-bottom: 0.8rem; font-size: 0.85rem;
+  color: var(--el-text-color-secondary);
+}
+.code-input { font-family: Consolas, monospace; }
+.submit-btn { margin-top: 0.6rem; }
 .solved-note { margin-bottom: 0.8rem; }
 .result { margin-top: 0.8rem; }
 </style>

@@ -14,7 +14,21 @@ export interface Room {
   video_url?: string
   related_challenge_slug?: string | null
 }
-export interface Submission { id: number; status: 'pending' | 'correct' | 'incorrect'; score: number }
+// verdict：ACM 编程题判定结果（flag 判定题为 null，学生端按 status 展示）。
+export type SubmissionVerdict = 'ac' | 'wa' | 'tle' | 're' | 'internal_error'
+export const verdictLabels: Record<SubmissionVerdict, string> = {
+  ac: '通过（AC）',
+  wa: '答案错误（WA）',
+  tle: '超出时限（TLE）',
+  re: '运行错误（RE）',
+  internal_error: '判定服务暂不可用，请稍后重试',
+}
+export interface Submission {
+  id: number
+  status: 'pending' | 'correct' | 'incorrect'
+  score: number
+  verdict?: SubmissionVerdict | null
+}
 export interface LabInstance {
   id: number
   status: 'creating' | 'running' | 'stopped' | 'destroyed'
@@ -83,8 +97,19 @@ export interface HintUnlockResponse extends Hint {
 export interface ChallengeLink { name: string; url: string }
 // 题目附件元数据（学生端凭 JWT 经 downloadAttachment 拉取）。
 export interface ChallengeAttachment { filename: string; size: number; created_at: string }
+// ACM 编程题判定配置（学生端视图：不含测试数据内容；flag 判定题为 null/缺省）。
+export interface JudgeConfig {
+  engine: string
+  time_limit_s: number
+  memory_limit_mb: number
+  testdata_count: number
+}
+// ACM 样例数据组（sample=true；隐藏组不下发）。
+export interface JudgeSample { name: string; input: string; output: string }
+export interface JudgeSamplesResponse { time_limit_s: number; samples: JudgeSample[] }
 export interface ChallengeDetail extends TrainingItem {
   description_md: string
+  judge?: JudgeConfig | null
   hints: Hint[]
   attachments: ChallengeAttachment[]
 }
@@ -95,6 +120,14 @@ export interface ChallengeHintInput {
   cost?: number
 }
 // 题目定义固定格式（challenge.json，管理员上传：单对象或数组）。
+// judge 段存在 = ACM 编程题（与 challenge 段互斥；judge 段的 testdata 内容
+// 仅包 zip 上传时由 testdata/ 文件装配，直传 JSON 须内联 input/output）。
+export interface JudgeJSON {
+  engine: 'yak'
+  time_limit_s: number
+  memory_limit_mb?: number
+  testdata: { name: string; input?: string; output?: string; sample?: boolean }[]
+}
 export interface ChallengeJSON {
   slug: string
   title: string
@@ -107,6 +140,7 @@ export interface ChallengeJSON {
   // flag 作用域：shared=题目级共享（默认）；instance=每实例唯一（flag 为含 {token} 的模板，必须配 env）。
   flag_mode?: 'shared' | 'instance'
   challenge: { type: 'static' | 'regex'; flag: string }
+  judge?: JudgeJSON | null
   env?: { image: string; port: number }
   hints?: ChallengeHintInput[]
   links?: ChallengeLink[]
@@ -114,10 +148,13 @@ export interface ChallengeJSON {
 }
 // 管理端单题完整定义（GET /admin/challenges/{slug}，编辑回填用）：
 // 与上传 JSON 同构，另含完整 flag 值列表（题目包 zip 可多 flag，表单只回填首个）。
+// ACM 编程题：challenge 段为空对象、judge 段回填（testdata 仅 name/sample 引用）。
 export interface ChallengeFullJSON extends ChallengeJSON {
   bank: ChallengeBank
   flag_mode: 'shared' | 'instance'
   flags: string[]
+  challenge: { type: 'static' | 'regex'; flag: string }
+  judge?: JudgeJSON | null
 }
 export interface AdminLabInstance {
   id: number
@@ -272,6 +309,9 @@ export const trainingApi = {
     return http.get<Paged<TrainingItem>>(`/challenges?${params}`)
   },
   detail: (challengeSlug: string) => http.get<ChallengeDetail>(`/challenges/${challengeSlug}`),
+  // ACM 编程题样例数据（flag 判定题 404，调用方按题有无 judge 段自行决定是否拉取）。
+  judgeSamples: (challengeSlug: string) =>
+    http.get<JudgeSamplesResponse>(`/challenges/${challengeSlug}/judge/samples`),
   unlockHint: (challengeSlug: string, hintId: number) =>
     http.post<HintUnlockResponse>(`/challenges/${challengeSlug}/hints/${hintId}/unlock`),
 }

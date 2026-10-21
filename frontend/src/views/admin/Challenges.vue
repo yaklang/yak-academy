@@ -16,7 +16,7 @@ import {
   type AdminChallengeQuery,
   type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeDifficulty,
   type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink,
-  type TrainingItem,
+  type JudgeJSON, type TrainingItem,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
@@ -102,6 +102,7 @@ const editLoading = ref('')
 // 提交省略 bank（后端缺省 = 保留原值），避免把内置题挤出教程题目 tab。
 const bankLocked = ref(false)
 // 表单模型：env 用 has_env 开关承载（env 段要么都填要么都不填）。
+// ACM 编程题用 judge 承载（judge 段存在时隐藏 flag 表单项，判定类型固定 code）。
 const form = reactive({
   slug: '',
   title: '',
@@ -119,19 +120,34 @@ const form = reactive({
   tutorial_slug: '',
   hints: [] as ChallengeHintInput[],
   links: [] as ChallengeLink[],
+  judge: null as JudgeJSON | null,
 })
 
 // 表单 → 规范化题目 JSON（"自动打包"）。
 // bankLocked（编辑内置 tutorial 题）时省略 bank：后端缺省 = 保留原值。
+// ACM 编程题（judge 段）：省略 challenge 段；judge 不带数据组 = 保留库内
+// 测试数据（元数据维护语义，后端兜底校验）。
 function buildPayload(): ChallengeJSON {
-  const payload: ChallengeJSON = {
+  // challenge 段为必填类型，ACM 编程题用 Partial 上的二选一填入（judge 段
+  // 存在时省略 challenge——后端互斥校验；judge 不带数据组 = 保留库内数据）。
+  const payload = {
     slug: form.slug.trim(),
     title: form.title.trim(),
     category: form.category.trim(),
     difficulty: form.difficulty,
     score: form.score,
     flag_mode: form.flag_mode,
-    challenge: { type: form.type, flag: form.flag.trim() },
+  } as Partial<ChallengeJSON>
+  if (form.judge) {
+    payload.judge = {
+      engine: 'yak',
+      time_limit_s: form.judge.time_limit_s,
+      memory_limit_mb: form.judge.memory_limit_mb,
+      // 数据组只回传 name/sample（内容在库内；后端按空组走保留语义）。
+      testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample })),
+    }
+  } else {
+    payload.challenge = { type: form.type, flag: form.flag.trim() }
   }
   if (!bankLocked.value) payload.bank = form.bank
   if (form.description_md.trim()) payload.description_md = form.description_md
@@ -142,7 +158,7 @@ function buildPayload(): ChallengeJSON {
     .map((h) => ({ title: h.title.trim(), content: h.content.trim(), cost: h.cost ?? 0 }))
   const links = form.links.filter((l) => l.name || l.url)
   if (links.length) payload.links = links.map((l) => ({ name: l.name.trim(), url: l.url.trim() }))
-  return payload
+  return payload as ChallengeJSON
 }
 
 // 实时校验错误（弹窗内 alert 展示，保存按钮禁用）。
@@ -164,6 +180,17 @@ function fillForm(chal: ChallengeJSON) {
   form.flag_mode = chal.flag_mode ?? 'shared'
   form.type = chal.challenge?.type ?? 'static'
   form.flag = chal.challenge?.flag ?? ''
+  // ACM 编程题：judge 段回填（组名/样例标记 + 判定配置）；flag 表单项隐藏。
+  form.judge = (chal as ChallengeFullJSON).judge
+    ? {
+        engine: 'yak',
+        time_limit_s: (chal as ChallengeFullJSON).judge!.time_limit_s,
+        memory_limit_mb: (chal as ChallengeFullJSON).judge!.memory_limit_mb ?? 128,
+        testdata: ((chal as ChallengeFullJSON).judge!.testdata ?? []).map((t) => ({
+          name: t.name, sample: t.sample ?? false,
+        })),
+      }
+    : null
   form.has_env = Boolean(chal.env?.image)
   form.image = chal.env?.image ?? ''
   form.port = chal.env?.port ?? 80
@@ -741,21 +768,39 @@ onMounted(() => {
         <el-form-item label="关联教程">
           <el-input v-model="form.tutorial_slug" placeholder="可选，教程 Room slug" />
         </el-form-item>
-        <el-form-item label="判定类型" required>
-          <el-select v-model="form.type">
-            <el-option value="static" label="static（明文 flag）" />
-            <el-option value="regex" label="regex（正则匹配）" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="flag" required>
-          <el-input v-model="form.flag" :placeholder="form.flag_mode === 'instance' ? 'flag{lab-{token}}' : 'flag{answer}'" />
-        </el-form-item>
-        <el-form-item label="flag 作用域">
-          <el-select v-model="form.flag_mode">
-            <el-option value="shared" label="shared（题目级共享）" />
-            <el-option value="instance" label="instance（每实例唯一）" />
-          </el-select>
-        </el-form-item>
+        <!-- ACM 编程题：judge 段回填（判定配置只读展示；测试数据经题目包 zip 维护） -->
+        <template v-if="form.judge">
+          <el-form-item label="判定引擎">
+            <el-tag>code / yak</el-tag>
+            <div class="dim form-hint">
+              ACM 编程题：学生提交 yak 源码，引擎逐组运行测试数据判定（不验 flag）。
+              测试数据共 {{ form.judge.testdata.length }} 组，经题目包 zip 的 testdata/ 目录维护，此处保存仅更新元数据。
+            </div>
+          </el-form-item>
+          <el-form-item label="时限（秒）">
+            <el-input-number v-model="form.judge.time_limit_s" :min="1" :max="60" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="内存上限（MB）">
+            <el-input-number v-model="form.judge.memory_limit_mb" :min="16" :max="512" controls-position="right" />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="判定类型" required>
+            <el-select v-model="form.type">
+              <el-option value="static" label="static（明文 flag）" />
+              <el-option value="regex" label="regex（正则匹配）" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="flag" required>
+            <el-input v-model="form.flag" :placeholder="form.flag_mode === 'instance' ? 'flag{lab-{token}}' : 'flag{answer}'" />
+          </el-form-item>
+          <el-form-item label="flag 作用域">
+            <el-select v-model="form.flag_mode">
+              <el-option value="shared" label="shared（题目级共享）" />
+              <el-option value="instance" label="instance（每实例唯一）" />
+            </el-select>
+          </el-form-item>
+        </template>
       </div>
       <el-form-item label="容器环境">
         <el-switch v-model="form.has_env" />
