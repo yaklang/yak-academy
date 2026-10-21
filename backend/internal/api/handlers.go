@@ -468,7 +468,19 @@ func (h *Handlers) getSubmission(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sub)
+	// ACM 逐组明细（Submission.groups 存 JSON 字符串列）解析为数组下发，
+	// 学生端部分得分反馈免二次解析；flag 判定题为空串 → null。
+	var groups any
+	if sub.Groups != "" {
+		var parsed []service.CodeGroupResult
+		if err := json.Unmarshal([]byte(sub.Groups), &parsed); err == nil {
+			groups = parsed
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": sub.ID, "status": sub.Status, "score": sub.Score,
+		"verdict": sub.Verdict, "groups": groups,
+	})
 }
 
 // resolveChallenge 实例操作前的公共解析：按题目 slug 查（题目独立资源的主键入口）。

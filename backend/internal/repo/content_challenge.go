@@ -565,9 +565,9 @@ func (r *submissionRepo) UpdateStatus(ctx context.Context, id uint, status model
 		Updates(map[string]any{"status": status, "score": score}).Error
 }
 
-func (r *submissionRepo) UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict) error {
+func (r *submissionRepo) UpdateVerdict(ctx context.Context, id uint, status model.SubmissionStatus, score int, verdict model.SubmissionVerdict, groupsJSON string) error {
 	return r.db.WithContext(ctx).Model(&model.Submission{}).Where("id = ?", id).
-		Updates(map[string]any{"status": status, "score": score, "verdict": verdict}).Error
+		Updates(map[string]any{"status": status, "score": score, "verdict": verdict, "groups": groupsJSON}).Error
 }
 
 func (r *submissionRepo) HasPendingCode(ctx context.Context, userID, challengeID uint) (bool, error) {
