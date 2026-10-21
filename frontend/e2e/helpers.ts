@@ -26,6 +26,15 @@ export async function logout(page: Page) {
   await page.waitForURL((u) => u.pathname === '/login')
 }
 
+// 题目管理页题库 tab 切换：默认 tab 为「内置训练」（只读），
+// 管理员上传的种子题都在 CTF 题目 tab。
+export async function switchAdminChallengeBank(
+  page: Page,
+  tab: '内置训练' | 'CTF 题目' | 'ACM 题目',
+) {
+  await page.getByRole('tab', { name: tab }).click()
+}
+
 // ---------- 竞赛域种子（隔离/解锁/回归 spec 共用） ----------
 
 // 学生登录换 API token（服务端行为断言用；不经 UI 是因为 UI 断言由页面路径覆盖）。

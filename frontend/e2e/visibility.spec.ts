@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { E2E } from './fixtures/consts'
-import { loginAsAdmin, loginAsStudent } from './helpers'
+import { loginAsAdmin, loginAsStudent, switchAdminChallengeBank } from './helpers'
 
 // 可见性旅程：管理端开关 → 学生端列表与直连 404 双侧验证。
 // 语义：隐藏 = 学生端整体不存在（列表不出现、直链 404）。
@@ -11,6 +11,7 @@ test.describe('可见性旅程', () => {
   test('隐藏题目：学生列表消失、直链 404，恢复后可见', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
+    await switchAdminChallengeBank(page, 'CTF 题目')
     const row = page.locator('.el-table tr', { hasText: C.slug })
     const toggle = row.locator('.el-switch')
     await expect(toggle).toHaveClass(/is-checked/, { timeout: 10_000 })
@@ -34,6 +35,7 @@ test.describe('可见性旅程', () => {
     // 恢复可见：学生立即可见
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
+    await switchAdminChallengeBank(page, 'CTF 题目')
     const row2 = page.locator('.el-table tr', { hasText: C.slug })
     await row2.locator('.el-switch').click()
     await expect(page.locator('.el-message', { hasText: '已对学生可见' })).toBeVisible()

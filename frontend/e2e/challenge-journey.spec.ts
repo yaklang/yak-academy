@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { E2E } from './fixtures/consts'
-import { loginAsAdmin, loginAsStudent } from './helpers'
+import { loginAsAdmin, loginAsStudent, switchAdminChallengeBank } from './helpers'
 
 // 题目全链路旅程（本套件最重要的一条）：管理端表格 → 学生题库分组 →
 // 详情提示解锁（扣分）→ 错 flag / 对 flag 判定 → 排行榜 → 徽章 → 附件下载。
@@ -87,6 +87,7 @@ test.describe('题目全链路', () => {
   test('管理端题目表格展示种子题与可见性控件', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
+    await switchAdminChallengeBank(page, 'CTF 题目')
 
     // 种子题在管理表格中可见（含关联题与附件题）
     const table = page.locator('.el-table')
@@ -101,6 +102,7 @@ test.describe('题目全链路', () => {
   test('管理端行内编辑：回填库内完整定义，改标题保存生效', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
+    await switchAdminChallengeBank(page, 'CTF 题目')
     const row = page.locator('.el-table tr', { hasText: C.attachSlug })
     const ops = row.locator('.el-table__cell').last()
 
@@ -135,6 +137,7 @@ test.describe('题目全链路', () => {
     // 还原标题（后续用例与种子常量依赖初始标题）
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
+    await switchAdminChallengeBank(page, 'CTF 题目')
     const row2 = page.locator('.el-table tr', { hasText: C.attachSlug })
     await row2.getByRole('button', { name: '编辑' }).click()
     const dialog2 = page.locator('.el-dialog', { hasText: `编辑题目：${C.attachSlug}` })
