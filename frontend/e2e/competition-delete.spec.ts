@@ -32,8 +32,8 @@ test.describe('竞赛删除旅程', () => {
     // 行仍在（未误删）
     await expect(row).toBeVisible()
 
-    // 比赛结束（管理 API 把 end_time 改到过去——起止相对“现在”，UI 表单时间
-    // 解析涉及时区换算易碎；结束动作本身不是被测功能，删除操作才是）
+    // 比赛结束（管理 API 手动结束——起止相对“现在”，UI 表单时间解析涉及时区
+    // 换算易碎；结束动作另有回归 spec 覆盖，此处聚焦删除操作）
     await endCompetition(request, comp.id)
 
     // 回列表删除：确认后成功，行消失

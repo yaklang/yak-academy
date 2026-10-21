@@ -36,6 +36,8 @@ export const E2E = {
     lockName: 'E2E 隔离验证赛',
     endName: 'E2E 到点解锁赛',
     reloginName: 'E2E 重登仍锁赛',
+    manualEndName: 'E2E 手动结束赛',
+    reviveName: 'E2E 结束重排赛',
   },
   // 删除旅程专用包（独立 slug，避免与 e2e-test 种子冲突）：
   // spec 内经 UI 上传→发布→删除，验证两侧消失。

@@ -202,8 +202,9 @@ func (s *CompetitionService) buildDetail(ctx context.Context, c *model.Competiti
 	}, nil
 }
 
-// Update 修改配置：nil 字段不动。运行中的竞赛只允许延后 end_time 与改描述
-// （改起止时间会影响已入场的锁定语义，收紧必须先确认）。
+// Update 修改配置：nil 字段不动。running 期间 start_time 不可改（入场锁定
+// 语义依赖开赛时刻）；已结束的竞赛起止时间均可重新配置（新窗口落回未来
+// 即重新开赛，锁定派生自"已入场 ∧ running"，随新窗口自动恢复）。
 type CompetitionUpdate struct {
 	Name        *string
 	Description *string
@@ -231,6 +232,13 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 		fields["description"] = *u.Description
 	}
 	now := s.now()
+	// running 期间 start_time 不动：入场锁定语义依赖开赛时刻
+	// （改回过去 = 事后追溯入场资格，改到未来 = 已入场者被锁进尚未开赛的窗口）。
+	if c.Status(now) == model.CompetitionRunning {
+		if u.StartTime != nil && !u.StartTime.Equal(c.StartTime) {
+			return nil, fmt.Errorf("%w: cannot change start_time while competition is running", ErrValidation)
+		}
+	}
 	// 合成新的起止时间再整体校验区间。
 	start, end := c.StartTime, c.EndTime
 	if u.StartTime != nil {
@@ -242,16 +250,6 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 	if !end.After(start) {
 		return nil, fmt.Errorf("%w: end_time must be after start_time", ErrValidation)
 	}
-	// 已开始的竞赛：不允许把 start/finish 改回过去影响锁定语义——
-	// end 只能延后，start 不动。
-	if now.After(c.StartTime) {
-		if u.StartTime != nil && !u.StartTime.Equal(c.StartTime) {
-			return nil, fmt.Errorf("%w: cannot change start_time after competition started", ErrValidation)
-		}
-		if u.EndTime != nil && u.EndTime.Before(c.EndTime) && now.After(c.EndTime) {
-			return nil, fmt.Errorf("%w: cannot shorten end_time after competition ended", ErrValidation)
-		}
-	}
 	if u.StartTime != nil {
 		fields["start_time"] = start.UTC()
 	}
@@ -259,6 +257,28 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 		fields["end_time"] = end.UTC()
 	}
 	if err := s.comps.UpdateSelective(ctx, id, fields); err != nil {
+		return nil, err
+	}
+	fresh, err := s.find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildDetail(ctx, fresh)
+}
+
+// End 手动结束竞赛（仅 running）：end_time 置为当前时刻。状态仍由时间派生，
+// 不引入落库字段；后续如需重新开赛，经 Update 把窗口改回未来即可。
+func (s *CompetitionService) End(ctx context.Context, id uint) (*CompetitionDetail, error) {
+	c, err := s.find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	switch c.Status(s.now()) {
+	case model.CompetitionRunning:
+	case model.CompetitionScheduled, model.CompetitionEnded:
+		return nil, fmt.Errorf("%w: only a running competition can be ended", ErrValidation)
+	}
+	if err := s.comps.UpdateSelective(ctx, id, map[string]any{"end_time": s.now().UTC()}); err != nil {
 		return nil, err
 	}
 	fresh, err := s.find(ctx, id)
@@ -278,8 +298,8 @@ func (s *CompetitionService) SetInstanceDestroyer(destroy instanceDestroyer) {
 }
 
 // Delete 删除竞赛（仅 scheduled/ended；running 422 拒绝——与 running 期间
-// 禁改 start_time/禁解绑题目同一保护语义）。容器/落盘 zip 是非事务资源，
-// 先于行删除清理：容器销毁失败中止（防孤儿容器），zip 失败仅记录继续删。
+// 禁改 start_time/禁解绑题目同一保护语义，先 End 手动结束）。容器/落盘 zip
+// 是非事务资源，先于行删除清理：容器销毁失败中止（防孤儿容器），zip 失败仅记录继续删。
 // 提交事件历史 append-only 保留（event-sourcing-rules）。
 func (s *CompetitionService) Delete(ctx context.Context, id uint) error {
 	c, err := s.find(ctx, id)
@@ -287,7 +307,7 @@ func (s *CompetitionService) Delete(ctx context.Context, id uint) error {
 		return err
 	}
 	if c.Status(s.now()) == model.CompetitionRunning {
-		return fmt.Errorf("%w: cannot delete a running competition; move end_time into the past first", ErrValidation)
+		return fmt.Errorf("%w: cannot delete a running competition; end it manually first", ErrValidation)
 	}
 	if s.destroyInstances != nil {
 		if err := s.destroyInstances(ctx, id); err != nil {
