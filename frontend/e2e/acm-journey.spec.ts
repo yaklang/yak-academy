@@ -36,8 +36,20 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(demo).toContainText('30') // demo 组期望输出
 
     // 代码编辑器（CodeMirror）存在，flag 输入不存在（ACM 不通过 flag 判定）
-    await expect(page.locator('.solve .cm-editor')).toBeVisible()
+    const editor = page.locator('.solve .cm-editor')
+    await expect(editor).toBeVisible()
     await expect(page.getByPlaceholder('输入 flag')).toHaveCount(0)
+
+    // 暗色编辑器 + 白色代码字 + yak 语法着色（yakit 词法移植的回归锚点：
+    // 底色 #212428、默认字白、内建函数橙 #e0873c、字符串绿 #98c379）
+    await expect(editor).toHaveCSS('background-color', 'rgb(33, 36, 40)')
+    await expect(page.locator('.solve .cm-content')).toHaveCSS('color', 'rgb(255, 255, 255)')
+    await fillSource(page, 'println("hi")')
+    const tokenColors = await page.locator('.solve .cm-line span').evaluateAll(
+      (spans) => spans.map((s) => getComputedStyle(s).color),
+    )
+    expect(tokenColors).toContain('rgb(224, 135, 60)') // println 内建函数
+    expect(tokenColors).toContain('rgb(152, 195, 121)') // "hi" 字符串
   })
 
   test('提交 yak 源码：逐组对拍全部通过 → AC 计分', async ({ page }) => {
