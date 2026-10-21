@@ -140,6 +140,7 @@ type fullJSONJudgeSection struct {
 	Engine         string                `json:"engine"`
 	TimeLimitS     int                   `json:"time_limit_s"`
 	MemoryLimitMB  int                   `json:"memory_limit_mb"`
+	AllowedLibs    []string              `json:"allowed_libs"`
 	Testdata       []fullJSONTestdataRef `json:"testdata"`
 }
 
@@ -216,6 +217,7 @@ func (s *ChallengeService) GetFullJSON(ctx context.Context, slug string) (*Chall
 		out.Judge = &fullJSONJudgeSection{
 			Engine: conf.Engine, TimeLimitS: conf.TimeLimitS,
 			MemoryLimitMB: conf.MemoryLimitMB, Testdata: refs,
+			AllowedLibs: parseAllowedLibs(conf.AllowedLibs),
 		}
 	}
 	return out, nil

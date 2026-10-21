@@ -152,10 +152,15 @@ type ChallengeDetail struct {
 
 // JudgeConfigView ACM 判定配置的学生端视图（不含测试数据内容）。
 type JudgeConfigView struct {
-	Engine         string `json:"engine"`
-	TimeLimitS     int    `json:"time_limit_s"`
-	MemoryLimitMB  int    `json:"memory_limit_mb"`
-	TestdataCount  int    `json:"testdata_count"`
+	Engine        string `json:"engine"`
+	TimeLimitS    int    `json:"time_limit_s"`
+	MemoryLimitMB int    `json:"memory_limit_mb"`
+	TestdataCount int    `json:"testdata_count"`
+	// AllowedLibs 题目 yak 库白名单（nil = 未配置，允许全部非黑名单库）。
+	// 已扣除全局黑名单；编辑器补全过滤与题面库标签以此为准。
+	AllowedLibs []string `json:"allowed_libs"`
+	// BlockedLibs 平台全局黑名单（exec/file 等高危库）——题面提示与补全排除用。
+	BlockedLibs []string `json:"blocked_libs"`
 }
 
 // enrichTutorial 批量拼关联教程 Room 的标题（tutorial_slug → room 元数据）。
@@ -312,6 +317,8 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 			detail.Judge = &JudgeConfigView{
 				Engine: conf.Engine, TimeLimitS: conf.TimeLimitS,
 				MemoryLimitMB: conf.MemoryLimitMB, TestdataCount: n,
+				AllowedLibs: effectiveAllowedLibs(conf.AllowedLibs),
+				BlockedLibs: sortedBlockedList(),
 			}
 		}
 	}

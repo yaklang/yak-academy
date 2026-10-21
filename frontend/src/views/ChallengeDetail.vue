@@ -15,6 +15,8 @@ import {
 } from '../api'
 import type { ApiError } from '../api/client'
 import CodeEditor from '../components/CodeEditor.vue'
+import type { YakLibPolicy } from '../components/yakCompletion'
+import { LIB_DESC } from '../components/yakVocab'
 import { useSubmissionPoll } from '../composables/useSubmissionPoll'
 
 // 附件下载：fetch blob 后触发浏览器保存（附件接口需 JWT，<a href> 无法带头）。
@@ -60,6 +62,20 @@ const solvedBeforeSubmit = ref(false)
 const isCode = computed(() => !!challenge.value?.judge)
 const samples = ref<JudgeSample[]>([])
 const source = ref('')
+
+// 库策略（防高危库执行）：白名单/黑名单由服务端随 judge 段下发——
+// 编辑器补全过滤（CodeEditor libPolicy）与题面库标签同源；提交/自测
+// 在服务端受理前还有一道静态扫描拦截（前端只是提示与引导，不是安全边界）。
+const libPolicy = computed<YakLibPolicy>(() => ({
+  allowed: challenge.value?.judge?.allowed_libs ?? null,
+  blocked: challenge.value?.judge?.blocked_libs ?? [],
+}))
+const libLabel = (lib: string) => LIB_DESC[lib] ?? 'yak 标准库'
+const blockedLibsNote = computed(() => {
+  const blocked = libPolicy.value.blocked
+  if (!blocked.length) return ''
+  return `已禁用高危库：${blocked.join('、')}`
+})
 
 // 自测运行（动态执行框）：对样例组或自定义输入跑一次当前源码，
 // 异步票据 + 1s 轮询；运营态，不产生提交/事件/计分（与提交判题互不影响）。
@@ -489,7 +505,20 @@ onUnmounted(() => {
           提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
           全部通过才算 AC；配置了组分的题目按通过组折算得分。可在下方编辑器编码，先对样例或自定义输入自测运行。
         </div>
-        <CodeEditor v-model="source" class="code-input" :disabled="polling" />
+        <!-- 库策略提示：白名单 chips + 黑名单说明（与补全过滤、服务端拦截同源） -->
+        <div class="lib-policy">
+          <div class="lib-row">
+            <span class="lib-title">本题可用库</span>
+            <template v-if="libPolicy.allowed">
+              <el-tooltip v-for="lib in libPolicy.allowed" :key="lib" :content="libLabel(lib)" placement="top">
+                <el-tag size="small" effect="plain" class="lib-chip">{{ lib }}</el-tag>
+              </el-tooltip>
+            </template>
+            <span v-else class="lib-all">全部 yak 标准库（黑名单除外）</span>
+          </div>
+          <div v-if="blockedLibsNote" class="lib-blocked">{{ blockedLibsNote }}——提交包含此类库的源码将被拒绝。</div>
+        </div>
+        <CodeEditor v-model="source" class="code-input" :disabled="polling" :lib-policy="libPolicy" />
         <div class="run-panel">
           <div class="run-bar">
             <el-radio-group v-model="runTarget" size="small" :disabled="running">
@@ -657,6 +686,16 @@ onUnmounted(() => {
   margin-bottom: 0.8rem; font-size: 0.85rem;
   color: var(--el-text-color-secondary);
 }
+.lib-policy {
+  margin-bottom: 0.7rem; padding: 0.55rem 0.75rem;
+  background: var(--el-fill-color-lighter); border-radius: 6px;
+  font-size: 0.8rem;
+}
+.lib-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.lib-title { color: var(--el-text-color-secondary); margin-right: 0.2rem; }
+.lib-chip { font-family: Consolas, monospace; }
+.lib-all { color: var(--el-text-color-regular); }
+.lib-blocked { margin-top: 0.35rem; color: var(--el-color-danger); opacity: 0.85; }
 .run-panel { margin-top: 0.6rem; }
 .run-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .stdin-input { margin-top: 0.5rem; font-family: Consolas, monospace; }

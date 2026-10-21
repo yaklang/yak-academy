@@ -142,6 +142,14 @@ func (s *JudgeService) checkCodeSubmit(ctx context.Context, userID, challengeID 
 	if len(answer) > maxCodeSource {
 		return fmt.Errorf("%w: source exceeds %d KiB limit", ErrValidation, maxCodeSource>>10)
 	}
+	// 库策略拦截（受理前静态扫描）：黑名单库（exec/file 等）或题目白名单外的库
+	// 一律 422，不进入引擎执行（yak_libpolicy.go）。配置行读取失败时放行——
+	// 数据不一致由 judgeCode 判 internal_error 兜底，不在此处引入新失败面。
+	if conf, err := s.challenges.FindACM(ctx, challengeID); err == nil {
+		if err := checkYakLibPolicy(answer, parseAllowedLibs(conf.AllowedLibs)); err != nil {
+			return err
+		}
+	}
 	pending, err := s.submissions.HasPendingCode(ctx, userID, challengeID)
 	if err != nil {
 		return err

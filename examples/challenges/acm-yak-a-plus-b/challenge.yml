@@ -49,10 +49,14 @@ description_md: |
 
 # ACM 判定段：数据组来自包内 testdata/<组名>.in + <组名>.answer，
 # 这里只声明组名与样例标记（sample=true 对学生可见，其余为隐藏数据）。
+# allowed_libs：本题库白名单——题解只用 io/os/str 三库，按「用到什么
+# 库就配什么白名单」收紧；列表外的库提交时 422 拒绝（exec/file 等高危
+# 库另有全局黑名单，任何题目都不可用）。
 judge:
   engine: yak
   time_limit_s: 5
   memory_limit_mb: 128
+  allowed_libs: [str, io, os]
   testdata:
     - name: sample-01
       sample: true

@@ -20,6 +20,11 @@ import {
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
 import { useAuthStore } from '../../stores/auth'
+import { LIB_DESC } from '../../components/yakVocab'
+
+// 库白名单候选（教学常用 12 库 + 中文说明；el-select allow-create 支持手输
+// 其他 yaklang 库名，后端按完整库表校验——exec/file 等黑名单库配置即 422）。
+const libOptions = Object.keys(LIB_DESC).map((lib) => ({ value: lib, label: `${lib}（${LIB_DESC[lib]}）` }))
 
 const auth = useAuthStore()
 const items = ref<TrainingItem[]>([])
@@ -147,6 +152,9 @@ function buildPayload(): ChallengeJSON {
       engine: 'yak',
       time_limit_s: form.judge.time_limit_s,
       memory_limit_mb: form.judge.memory_limit_mb,
+      // 库白名单（防高危库执行）：空数组语义 = 未配置（允许全部非黑名单库），
+      // 后端按空序列化列（serializeAllowedLibs）。
+      allowed_libs: form.judge.allowed_libs ?? [],
       // 数据组回传 name/sample/score（内容在库内；后端按空 input/output 走
       // 保留语义，score 覆写——元数据维护里调整组分值不出包 zip）。
       testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample, score: t.score ?? 0 })),
@@ -185,12 +193,13 @@ function fillForm(chal: ChallengeJSON) {
   form.flag_mode = chal.flag_mode ?? 'shared'
   form.type = chal.challenge?.type ?? 'static'
   form.flag = chal.challenge?.flag ?? ''
-  // ACM 编程题：judge 段回填（组名/样例标记/组分值 + 判定配置）；flag 表单项隐藏。
+  // ACM 编程题：judge 段回填（组名/样例标记/组分值 + 判定配置 + 库白名单）；flag 表单项隐藏。
   form.judge = (chal as ChallengeFullJSON).judge
     ? {
         engine: 'yak',
         time_limit_s: (chal as ChallengeFullJSON).judge!.time_limit_s,
         memory_limit_mb: (chal as ChallengeFullJSON).judge!.memory_limit_mb ?? 128,
+        allowed_libs: (chal as ChallengeFullJSON).judge!.allowed_libs ?? [],
         testdata: ((chal as ChallengeFullJSON).judge!.testdata ?? []).map((t) => ({
           name: t.name, sample: t.sample ?? false, score: t.score ?? 0,
         })),
@@ -902,6 +911,23 @@ onUnmounted(stopEnginePolling)
           <el-form-item label="内存上限（MB）">
             <el-input-number v-model="form.judge.memory_limit_mb" :min="16" :max="512" controls-position="right" />
           </el-form-item>
+          <el-form-item label="库白名单">
+            <el-select
+              v-model="form.judge.allowed_libs"
+              multiple
+              filterable
+              allow-create
+              :reserve-keyword="false"
+              placeholder="留空 = 允许全部 yak 库（黑名单除外）"
+              class="lib-select"
+            >
+              <el-option v-for="o in libOptions" :key="o.value" :value="o.value" :label="o.label" />
+            </el-select>
+            <div class="dim form-hint">
+              yak 库白名单（防高危库执行）：配置后学生源码只能引用这些库，其余库提交/自测一律 422。
+              黑名单库（exec / file / ssh 等命令执行与宿主文件访问类）任何题目不可启用，配置即被拒绝。
+            </div>
+          </el-form-item>
           <el-form-item label="测试组与分值">
             <div v-if="form.judge.testdata.length" class="testdata-list">
               <div v-for="t in form.judge.testdata" :key="t.name" class="testdata-row">
@@ -1056,6 +1082,7 @@ onUnmounted(stopEnginePolling)
 .form-errors { margin-bottom: 1rem; }
 .err-line { margin: 0.15rem 0; font-size: 0.85rem; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.8rem; }
+.lib-select { width: 100%; }
 .mono :deep(textarea) { font-family: Consolas, monospace; }
 .env-image { width: 320px; margin-left: 0.8rem; margin-right: 0.5rem; }
 .hints { width: 100%; display: flex; flex-direction: column; gap: 0.5rem; }

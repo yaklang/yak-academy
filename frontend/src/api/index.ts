@@ -112,6 +112,11 @@ export interface JudgeConfig {
   time_limit_s: number
   memory_limit_mb: number
   testdata_count: number
+  // yak 库白名单（题目配置；null = 未配置，允许全部非黑名单库）。
+  // 服务端已扣除全局黑名单；编辑器补全过滤与题面库标签以此为准。
+  allowed_libs?: string[] | null
+  // 平台全局黑名单（exec/file 等高危库）——补全排除与题面提示用。
+  blocked_libs?: string[]
 }
 // ACM 样例数据组（sample=true；隐藏组不下发）。
 export interface JudgeSample { name: string; input: string; output: string }
@@ -151,6 +156,8 @@ export interface JudgeJSON {
   engine: 'yak'
   time_limit_s: number
   memory_limit_mb?: number
+  // yak 库白名单（防高危库执行；空/缺省 = 允许全部非黑名单库；服务端校验库名）。
+  allowed_libs?: string[]
   testdata: { name: string; input?: string; output?: string; sample?: boolean; score?: number }[]
 }
 export interface ChallengeJSON {
