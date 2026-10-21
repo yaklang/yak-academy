@@ -11,31 +11,11 @@
 
 import { StreamLanguage, LanguageSupport } from '@codemirror/language'
 import type { StreamParser, StringStream } from '@codemirror/language'
+import { KEYWORDS, TYPES, BUILTINS, LIBS } from './yakVocab'
+import { yakCompletion } from './yakCompletion'
 
-const KEYWORDS = new Set([
-  'break', 'case', 'continue', 'default', 'defer', 'else', 'elif', 'for', 'go',
-  'if', 'in', 'range', 'return', 'select', 'switch', 'chan', 'func', 'fn',
-  'def', 'class', 'include', 'type', 'try', 'catch', 'finally', 'map',
-])
-// bool/true/false/nil/undefined/string/var 在 yakit 中按关键字/类型着色，
-// 这里归入类型（声明位与字面量位统一粉色，视觉上与控制流蓝色区分）。
-const TYPES = new Set([
-  'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'int', 'int8', 'int16',
-  'int32', 'int64', 'float', 'float32', 'float64', 'double', 'byte', 'string',
-  'bool', 'var', 'any', 'omap', 'true', 'false', 'nil', 'undefined',
-])
-// 全局内建函数（yakit Monarch 的 globals）。
-const BUILTINS = new Set([
-  'println', 'printf', 'print', 'panic', 'recover', 'wait', 'make', 'len',
-  'cap', 'append', 'new', 'delete', 'exit', 'typeof',
-])
-// 常用 yak 标准库前缀（仅在后随 `.` 时着色，避免误伤同名局部变量）。
-const LIBS = new Set([
-  'codec', 'str', 'cli', 'poc', 'fuzz', 'http', 'file', 'semgrep', 'so',
-  'sleep', 'rand', 'strings', 'time', 'json', 'xlsx', 'csv', 'fp', 'nmap',
-  'loader', 'yakit', 'yak', 'ui', 'graph', 'brute', 'sqli', 'space',
-  'speaker', 'engine', 'sync', 'ssh', 'rawfuzz',
-])
+// 关键字 / 类型 / 内建 / 标准库前缀统一维护在 yakVocab.ts（与补全共用单一数据源，
+// 标准库名单取自 yaklang 源码 Import 表——rand/strings 等并非 yak 标准库，不在列）。
 
 const IDENT_START = /[A-Za-z_]/
 const OPERATOR = /[+\-*/%=<>!&|^~?]/
@@ -108,9 +88,9 @@ class YakState {
       const m = stream.match(/^[A-Za-z_][A-Za-z0-9_]*/) as RegExpMatchArray | null
       const word = m?.[0] ?? ''
       const isCall = stream.peek() === '('
-      if (KEYWORDS.has(word)) return 'keyword'
-      if (TYPES.has(word)) return 'typeName'
-      if (BUILTINS.has(word)) return 'variableName.function'
+      if (KEYWORDS.includes(word)) return 'keyword'
+      if (TYPES.includes(word)) return 'typeName'
+      if (BUILTINS.includes(word)) return 'variableName.function'
       if (wasAfterDot) {
         // 成员访问：仅函数调用形态单独着色，其余回落默认白。
         return isCall ? 'variableName.function' : null
@@ -269,6 +249,7 @@ const yakStream: StreamParser<YakState> = {
   languageData: {
     commentTokens: { line: '//', block: { open: '/*', close: '*/' } },
     closeBrackets: { brackets: ['(', '[', '{', "'", '"', '`'] },
+    autocomplete: yakCompletion,
   },
 }
 
