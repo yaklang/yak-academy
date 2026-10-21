@@ -1,0 +1,15 @@
+// ACM A+B Problem —— yak 参考实现（对拍用）
+// 读入：T 行，每行两个整数；输出：每行 a+b。
+// yak 读 stdin 的正确模型：io.ReadAll(os.Stdin) 返回 [bytes, err]；
+// for...range 数组拿到的是下标，取值必须 lines[i]。
+res := io.ReadAll(os.Stdin)
+lines := str.ParseStringToLines(string(res[0]))
+out := []string{}
+for i := range lines {
+    toks := str.SplitAndTrim(lines[i], " ")
+    if len(toks) < 2 { continue }
+    a := int(toks[0])
+    b := int(toks[1])
+    out = append(out, sprintf("%d", a+b))
+}
+println(str.Join(out, "\n"))

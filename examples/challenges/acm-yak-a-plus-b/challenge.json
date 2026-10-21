@@ -1,0 +1,31 @@
+{
+  "slug": "acm-yak-a-plus-b",
+  "title": "A+B Problem（yak）",
+  "category": "warmup",
+  "difficulty": "apprentice",
+  "bank": "acm",
+  "score": 50,
+  "flag_mode": "shared",
+  "description_md": "# A+B Problem\n\n输入第一行一个整数 $T$（$1 \\le T \\le 10^5$），表示数据组数。接下来 $T$ 行，每行两个整数 $a, b$（$-10^9 \\le a, b \\le 10^9$），以空格分隔。\n\n对每组数据输出一行：$a + b$ 的值。\n\n## 样例\n\n```text\n输入：\n4\n2 3\n10 20\n-5 7\n100 200\n\n输出：\n5\n30\n2\n300\n```\n\n## 提交方式\n\n本题考察 yak 语言的基本输入输出：用 yak 写出正确程序，对样例跑通后，**把你的 yak 源码文件的 SHA-256 前 8 位拼进 flag 提交**：\n\n```text\nflag{yak-ab-<你的源码 SHA-256 前 8 位十六进制>}\n```\n\n即 `flag{yak-ab-xxxxxxxx}`，`xxxxxxxx` 是你的 yak 源码文件（UTF-8 原样）SHA-256 的前 8 个十六进制字符。\n\n## yak 读 stdin 的正确姿势\n\nyak 引擎的 ACM 读入模型（实测可用）：\n\n```yak\n// io.ReadAll 返回 [bytes, err]，res[0] 是输入的字节流\nres := io.ReadAll(os.Stdin)\nlines := str.ParseStringToLines(string(res[0]))\n// 注意：yak 的 for...range 遍历数组拿到的是下标，取值要 lines[i]\nfor i := range lines {\n    toks := str.SplitAndTrim(lines[i], \" \")\n    if len(toks) < 2 { continue }\n    a := int(toks[0])\n    b := int(toks[1])\n    println(a + b)\n}\n```\n\n`int()` 是内置类型转换（字符串转整数）；`str.SplitAndTrim` 按分隔符切分并去除空白；`println` 输出一行。",
+  "challenge": {
+    "type": "regex",
+    "flag": "^flag\\{yak-ab-[0-9a-f]{8}\\}$"
+  },
+  "hints": [
+    {
+      "title": "读入模型",
+      "content": "io.ReadAll(os.Stdin) 一次读全部输入；res[0] 是字节流，用 string() 转字符串再 str.ParseStringToLines 按行切。",
+      "cost": 5
+    },
+    {
+      "title": "range 是下标",
+      "content": "yak 的 for i := range 数组遍历拿到的是索引不是元素，取值用 lines[i]——与其他主流语言不同，是 yak 引擎的实测行为。",
+      "cost": 10
+    },
+    {
+      "title": "哈希怎么算",
+      "content": "PowerShell: Get-FileHash solution.yak -Algorithm SHA256；Linux/macOS: sha256sum solution.yak。取十六进制结果的前 8 位。ACM 题的价值在你自己写出程序——逐字照抄题面里的参考片段拿不到练习效果，判题管线（后续上线）会用真实对拍验证程序本体。",
+      "cost": 5
+    }
+  ]
+}
