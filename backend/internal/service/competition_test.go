@@ -643,13 +643,16 @@ func TestWriteupTeamSharedAndZip(t *testing.T) {
 	if blueA == nil || blueA.ZipName != "attack_v2.zip" || blueA.Content != "" {
 		t.Fatalf("admin blue A: %+v", blueA)
 	}
-	f, fname, err := e.comps.OpenWriteupZip(ctx, comp.ID, blueA.ID)
+	f, fname, size, err := e.comps.OpenWriteupZip(ctx, comp.ID, blueA.ID)
 	if err != nil {
 		t.Fatalf("open zip: %v", err)
 	}
 	defer f.Close()
 	if fname != "attack_v2.zip" {
 		t.Fatalf("download name: %q", fname)
+	}
+	if size != int64(len(zipV2)) {
+		t.Fatalf("zip size: got %d want %d", size, len(zipV2))
 	}
 	got, _ := io.ReadAll(f)
 	if !bytes.Equal(got, zipV2) {

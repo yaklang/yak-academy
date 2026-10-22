@@ -55,6 +55,29 @@ type Config struct {
 	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
 	// 服务日志，学员拿不到码会卡死在注册第一步；正式部署保持关闭。
 	SmsShowCode bool
+
+	// Strict 生产严格模式（ACADEMY_STRICT=1）：启动时拒绝开发默认/弱凭据
+	// （StrictViolations）。compose 部署已用 :? 强制变量存在，但显式设置
+	// 默认值、或直跑二进制绕过 compose 的路径仍可能带默认凭据起服务——
+	// 严格模式是第二道防线，生产部署建议恒开。
+	Strict bool
+
+	// WriteupsStoreKind WP zip 附件存储后端：fs（默认，WriteupsDir 本地目录）/
+	// s3（S3 兼容对象存储，MinIO / AWS S3 等，WriteupsS3 配置连接）。
+	WriteupsStoreKind string
+	// WriteupsS3 S3 后端连接参数（WriteupsStoreKind=s3 时生效）。
+	WriteupsS3 S3Options
+}
+
+// S3Options S3 兼容对象存储连接参数。Endpoint 形如 minio.example.com:9000
+// （不带 scheme）；path-style 恒开——MinIO 与主流私有化 S3 服务均依赖。
+type S3Options struct {
+	Endpoint  string
+	Region    string
+	Bucket    string
+	AccessKey string
+	SecretKey string
+	Prefix    string
 }
 
 // 内置默认值仅用于本地开发；生产必须通过环境变量覆盖（main 启动时对照告警）。
@@ -82,7 +105,35 @@ func Load() *Config {
 		YakBin:             getenv("ACADEMY_YAK_BIN", ""),
 		YakDownloadDir:     getenv("ACADEMY_YAK_DIR", filepath.Dir(getenv("ACADEMY_DB", "academy.db"))),
 		SmsShowCode:        getenvBool("ACADEMY_SMS_SHOW_CODE"),
+		Strict:             getenvBool("ACADEMY_STRICT"),
+		WriteupsStoreKind:  getenv("ACADEMY_WRITEUPS_STORE", "fs"),
+		WriteupsS3: S3Options{
+			Endpoint:  os.Getenv("ACADEMY_WRITEUPS_S3_ENDPOINT"),
+			Region:    getenv("ACADEMY_WRITEUPS_S3_REGION", "us-east-1"),
+			Bucket:    os.Getenv("ACADEMY_WRITEUPS_S3_BUCKET"),
+			AccessKey: os.Getenv("ACADEMY_WRITEUPS_S3_ACCESS_KEY"),
+			SecretKey: os.Getenv("ACADEMY_WRITEUPS_S3_SECRET_KEY"),
+			Prefix:    strings.Trim(os.Getenv("ACADEMY_WRITEUPS_S3_PREFIX"), "/"),
+		},
 	}
+}
+
+// StrictViolations 严格模式凭据检查：返回违规项清单（空 = 通过）。
+// JWT secret 必须非内置默认且 ≥32 字符；初始管理员密码必须非内置默认且
+// ≥12 字符。密码仅约束 users 表为空时的种子创建，但严格模式宁可误拦。
+func (c *Config) StrictViolations() []string {
+	var violations []string
+	if c.JWTSecret == DefaultJWTSecret {
+		violations = append(violations, "ACADEMY_JWT_SECRET is the built-in dev default")
+	} else if len(c.JWTSecret) < 32 {
+		violations = append(violations, "ACADEMY_JWT_SECRET is shorter than 32 chars")
+	}
+	if c.AdminPassword == DefaultAdminPassword {
+		violations = append(violations, "ACADEMY_ADMIN_PASSWORD is the built-in dev default")
+	} else if len(c.AdminPassword) < 12 {
+		violations = append(violations, "ACADEMY_ADMIN_PASSWORD is shorter than 12 chars")
+	}
+	return violations
 }
 
 func getenv(key, def string) string {

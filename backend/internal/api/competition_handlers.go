@@ -490,23 +490,19 @@ func (h *Handlers) adminDownloadWriteupZip(w http.ResponseWriter, req *http.Requ
 		writeError(w, errValidation)
 		return
 	}
-	f, filename, err := h.Competitions.OpenWriteupZip(req.Context(), id, uint(wid))
+	r, filename, size, err := h.Competitions.OpenWriteupZip(req.Context(), id, uint(wid))
 	if err != nil {
 		mapError(w, err)
 		return
 	}
-	defer f.Close()
+	defer r.Close()
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	if size, err := f.Seek(0, io.SeekEnd); err == nil && size > 0 {
+	if size >= 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			mapError(w, err)
-			return
-		}
 	}
 	w.WriteHeader(http.StatusOK)
-	io.Copy(w, f)
+	io.Copy(w, r)
 }
 
 // sourceIP 提交来源 IP（反作弊基线）：优先反向代理头（部署在 nginx 后面），

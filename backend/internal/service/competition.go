@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -21,7 +20,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
-	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
@@ -39,8 +37,9 @@ type CompetitionService struct {
 	users       repo.UserRepo
 	instances   repo.LabInstanceRepo
 	submissions repo.SubmissionRepo
-	// writeupDir WP 附带 zip 落盘根目录（SetWriteupDir 注入，测试可指向 t.TempDir）。
-	writeupDir    string
+	// writeups WP zip 附件存储（SetWriteupStore/SetWriteupDir 注入；测试用
+	// SetWriteupDir 指向 t.TempDir 的 fs 后端，或 SetWriteupStore 换 fake）。
+	writeups      WriteupStore
 	deliverInvite func(ctx context.Context, userID uint, title, bodyMd string, competitionID uint, inviteCode string) error
 	createAccount func(ctx context.Context, username, password string, role model.GlobalRole) (*model.User, error)
 	// destroyInstances 竞赛删除前销毁该赛运行容器（SetInstanceDestroyer 注入）。
@@ -66,9 +65,14 @@ func NewCompetitionService(
 	}
 }
 
-// SetWriteupDir 注入 WP zip 落盘根目录（main 装配后调用；测试用 t.TempDir）。
+// SetWriteupStore 注入 WP zip 附件存储后端（fs / s3，main 装配后调用）。
+func (s *CompetitionService) SetWriteupStore(store WriteupStore) {
+	s.writeups = store
+}
+
+// SetWriteupDir 注入 fs 后端并指定落盘根目录（测试便捷入口）。
 func (s *CompetitionService) SetWriteupDir(dir string) {
-	s.writeupDir = dir
+	s.writeups = NewFSWriteupStore(dir)
 }
 
 // SetDelivery 注入站内信投递与账号创建入口（main 装配后调用一次）。
@@ -314,10 +318,10 @@ func (s *CompetitionService) Delete(ctx context.Context, id uint) error {
 			return fmt.Errorf("destroy competition instances: %w", err)
 		}
 	}
-	// WP zip 落盘目录 = <writeupDir>/<id>/，整目录删除（不存在不算错）。
-	if s.writeupDir != "" {
-		if err := os.RemoveAll(pathutil.Join(s.writeupDir, strconv.Itoa(int(id)))); err != nil {
-			log.Printf("competition: remove writeup dir for %d failed: %v", id, err)
+	// WP zip 附件整前缀删除（<id>/ 下全部对象；不存在不算错）。
+	if s.writeups != nil {
+		if err := s.writeups.RemovePrefix(ctx, strconv.Itoa(int(id))); err != nil {
+			log.Printf("competition: remove writeup objects for %d failed: %v", id, err)
 		}
 	}
 	return s.comps.DeleteCascade(ctx, id)
@@ -1361,24 +1365,21 @@ func (s *CompetitionService) AdminWriteups(ctx context.Context, id uint) ([]Admi
 	return items, nil
 }
 
-// OpenWriteupZip 管理端下载 WP 附带 zip（打开落盘文件；未上传 404）。
-func (s *CompetitionService) OpenWriteupZip(ctx context.Context, competitionID, writeupID uint) (*os.File, string, error) {
+// OpenWriteupZip 管理端下载 WP 附带 zip（打开存储对象；未上传 404）。
+// 返回 (流, 下载展示名, 字节数)；流由调用方关闭。
+func (s *CompetitionService) OpenWriteupZip(ctx context.Context, competitionID, writeupID uint) (io.ReadCloser, string, int64, error) {
 	w, err := s.comps.FindWriteup(ctx, writeupID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	if w == nil || w.CompetitionID != competitionID || w.ZipFile == "" {
-		return nil, "", ErrNotFound
+		return nil, "", 0, ErrNotFound
 	}
-	abs, err := pathutil.SafeJoin(s.writeupDir, w.ZipFile)
+	r, size, err := s.writeups.Open(ctx, w.ZipFile)
 	if err != nil {
-		return nil, "", ErrNotFound
+		return nil, "", 0, ErrNotFound
 	}
-	f, err := os.Open(abs)
-	if err != nil {
-		return nil, "", ErrNotFound
-	}
-	return f, w.ZipName, nil
+	return r, w.ZipName, size, nil
 }
 
 // MyWriteups 本队/本人全部 WP（结束后的 WP 标签页数据源）。
@@ -1484,18 +1485,16 @@ func (s *CompetitionService) UploadWriteupZip(ctx context.Context, userID, id, c
 		return "", err
 	}
 	name := sanitizeZipName(filename)
-	// 落盘名 = <compID>/<wpID>.zip：同一份 WP 永远同一路径，覆盖即替换。
+	// 对象键 = <compID>/<wpID>.zip：同一份 WP 永远同一路径，覆盖即替换。
 	rel := fmt.Sprintf("%d/%d.zip", id, existingID(existing))
-	abs := pathutil.Join(s.writeupDir, rel)
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := s.writeups.Save(ctx, rel, data); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(abs, data, 0o644); err != nil {
-		return "", err
-	}
-	// 旧包在其他路径（历史上传）时清理，避免孤儿文件。
+	// 旧包在其他路径（历史上传）时清理，避免孤儿对象。
 	if existing != nil && existing.ZipFile != "" && existing.ZipFile != rel {
-		os.Remove(pathutil.Join(s.writeupDir, existing.ZipFile))
+		if err := s.writeups.Remove(ctx, existing.ZipFile); err != nil {
+			log.Printf("competition: remove stale writeup %q failed: %v", existing.ZipFile, err)
+		}
 	}
 	if err := s.comps.UpsertWriteup(ctx, &model.Writeup{
 		CompetitionID: id, ChallengeID: challengeID, TeamID: part.TeamID, UserID: userID,
