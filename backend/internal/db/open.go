@@ -3,16 +3,33 @@ package db
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 )
 
-// Open 打开 SQLite 并自动迁移全部实体（纯 Go 驱动，无 CGO 依赖）。
-func Open(path string) (*gorm.DB, error) {
-	return gorm.Open(sqlite.Open(path), &gorm.Config{})
+// Open 打开数据库并自动迁移全部实体。目标由入参形态决定：
+// postgres:// / postgresql:// 开头 → PostgreSQL（Phase 4 多人规模路线，
+// ACADEMY_DB_DSN）；否则视为 SQLite 文件路径（纯 Go 驱动，本地开发默认）。
+func Open(pathOrDSN string) (*gorm.DB, error) {
+	if IsPostgresDSN(pathOrDSN) {
+		gdb, err := gorm.Open(postgres.Open(pathOrDSN), &gorm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("db: postgresql (dsn host resolved by driver)")
+		return gdb, nil
+	}
+	return gorm.Open(sqlite.Open(pathOrDSN), &gorm.Config{})
+}
+
+// IsPostgresDSN 入参是否为 PostgreSQL 连接串（postgres:// / postgresql:// 前缀）。
+func IsPostgresDSN(s string) bool {
+	return strings.HasPrefix(s, "postgres://") || strings.HasPrefix(s, "postgresql://")
 }
 
 func Migrate(db *gorm.DB) error {
@@ -88,8 +105,9 @@ func migrateTwoRoleModel(db *gorm.DB) error {
 // migrateChallengeBuiltinFlag 一次性回填：is_builtin 列曾在无默认值约束下加入
 // （列 DDL 为裸 numeric），迁移前已存在的旧行为 NULL；「管理员上传」过滤
 // （is_builtin = 0）按 SQL 三值逻辑匹配不到 NULL，旧库会漏题。幂等：无 NULL 行时空操作。
+// 布尔值一律走绑定参数（SQLite 存 0/1、PostgreSQL 存 boolean，字面量 0/1 在 PG 报错）。
 func migrateChallengeBuiltinFlag(db *gorm.DB) error {
-	res := db.Exec(`UPDATE challenges SET is_builtin = 0 WHERE is_builtin IS NULL`)
+	res := db.Exec(`UPDATE challenges SET is_builtin = ? WHERE is_builtin IS NULL`, false)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -102,19 +120,25 @@ func migrateChallengeBuiltinFlag(db *gorm.DB) error {
 // migrateTutorialBuiltinFlag 一次性迁移：topics/rooms 的 is_builtin 列为后加，
 // 历史内置导入（列加入前落库）的行按 yakit- 内置命名空间回填 true，其余行
 // （含 NULL 裸列）回填 false——内置教程禁删禁编辑按此标记判定，漏标会让
-// 旧库内置教程失去保护。幂等：无匹配行为空操作。
+// 旧库内置教程失去保护。幂等：无匹配行为空操作。布尔值走绑定参数（方言可移植）。
 func migrateTutorialBuiltinFlag(db *gorm.DB) error {
-	if err := db.Exec(`UPDATE topics SET is_builtin = CASE WHEN slug LIKE 'yakit-%' THEN 1 ELSE 0 END WHERE is_builtin IS NULL OR (is_builtin = 0 AND slug LIKE 'yakit-%')`).Error; err != nil {
+	if err := db.Exec(`UPDATE topics SET is_builtin = ? WHERE slug LIKE 'yakit-%' AND (is_builtin IS NULL OR is_builtin = ?)`, true, false).Error; err != nil {
 		return err
 	}
-	return db.Exec(`UPDATE rooms SET is_builtin = CASE WHEN slug LIKE 'yakit-%' THEN 1 ELSE 0 END WHERE is_builtin IS NULL OR (is_builtin = 0 AND slug LIKE 'yakit-%')`).Error
+	if err := db.Exec(`UPDATE topics SET is_builtin = ? WHERE is_builtin IS NULL`, false).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`UPDATE rooms SET is_builtin = ? WHERE slug LIKE 'yakit-%' AND (is_builtin IS NULL OR is_builtin = ?)`, true, false).Error; err != nil {
+		return err
+	}
+	return db.Exec(`UPDATE rooms SET is_builtin = ? WHERE is_builtin IS NULL`, false).Error
 }
 
 // migrateChallengeBankOwnership 一次性迁移：教程题目 tab 收敛为专属内置题集，
 // 迁移前已上传到 tutorial 题库的普通题整体改判 ctf（独立夺旗式题目）。
 // 幂等：无匹配行为空操作。依赖 is_builtin 已物化（COALESCE 兜底 NULL）。
 func migrateChallengeBankOwnership(db *gorm.DB) error {
-	res := db.Exec(`UPDATE challenges SET bank = 'ctf' WHERE bank = 'tutorial' AND COALESCE(is_builtin, 0) = 0`)
+	res := db.Exec(`UPDATE challenges SET bank = 'ctf' WHERE bank = 'tutorial' AND COALESCE(is_builtin, ?) = ?`, false, false)
 	if res.Error != nil {
 		return res.Error
 	}

@@ -227,3 +227,20 @@ func TestMigrateReclassifiesUploadedTutorialBank(t *testing.T) {
 	}
 	assertBank("vulinbox-keep", "tutorial")
 }
+func TestIsPostgresDSN(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"postgres://user:pass@host:5432/db", true},
+		{"postgresql://user@host/db", true},
+		{"academy.db", false},
+		{"file:memdb?mode=memory", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := IsPostgresDSN(c.in); got != c.want {
+			t.Fatalf("IsPostgresDSN(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}

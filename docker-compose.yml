@@ -58,6 +58,10 @@ services:
       ACADEMY_WRITEUPS_S3_SECRET_KEY: ${ACADEMY_WRITEUPS_S3_SECRET_KEY:-}
       ACADEMY_WRITEUPS_S3_REGION: ${ACADEMY_WRITEUPS_S3_REGION:-us-east-1}
       ACADEMY_WRITEUPS_S3_PREFIX: ${ACADEMY_WRITEUPS_S3_PREFIX:-}
+      # 数据层切换（可选）：postgres:// / postgresql:// 连接串，设置即切 PostgreSQL
+      # （Phase 4 多人规模路线），不设 = 默认 SQLite（/data/academy.db）。
+      # 切换是全新库语义：SQLite 存量数据不自动迁移。
+      ACADEMY_DB_DSN: ${ACADEMY_DB_DSN:-}
       # ACM 编程题判题引擎：yak 可执行文件在容器内的绝对路径（Linux 构建，
       # 放 ./data/yak 随卷挂载即路径 /data/yak）。空 = 引擎未装配，code 题
       # 提交后判 internal_error（区别于学生代码错误，前端提示可重试）。

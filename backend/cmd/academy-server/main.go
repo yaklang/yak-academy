@@ -37,7 +37,13 @@ func main() {
 		}
 	}
 
-	gdb, err := db.Open(cfg.Database)
+	// 数据层目标：ACADEMY_DB_DSN（postgres://…）设置即切 PostgreSQL，否则
+	// SQLite 文件（本地开发默认，Phase 4 多人规模路线见 docs/architecture.md §10）。
+	dbTarget := cfg.Database
+	if cfg.DatabaseDSN != "" {
+		dbTarget = cfg.DatabaseDSN
+	}
+	gdb, err := db.Open(dbTarget)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
