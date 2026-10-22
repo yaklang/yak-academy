@@ -57,6 +57,31 @@ func waitDownloadState(t *testing.T, svc *JudgeService, state string) YakEngineS
 	return YakEngineStatus{}
 }
 
+// EngineAvailable：题目详情下发的守卫位——未装配 false（前端禁用提交/自测），
+// ConfigureYakEngine / SetCodeEngine 换装后翻 true。
+func TestEngineAvailableReflectsEngineAssembly(t *testing.T) {
+	svc := newEngineAdminService(t)
+	if svc.EngineAvailable() {
+		t.Fatal("fresh service should report engine unavailable")
+	}
+	svc.SetCodeEngine(&fakeCodeEngine{})
+	if !svc.EngineAvailable() {
+		t.Fatal("engine available after SetCodeEngine")
+	}
+
+	// 换装（下载完成）路径同样翻位：装配探测目录里的 yak 产物。
+	dir := t.TempDir()
+	target := filepath.Join(dir, yakBinaryName())
+	if err := os.WriteFile(target, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc2 := newEngineAdminService(t)
+	svc2.ConfigureYakEngine("", dir)
+	if !svc2.EngineAvailable() {
+		t.Fatal("engine available after ConfigureYakEngine autodetect")
+	}
+}
+
 // 启动装配：ACADEMY_YAK_BIN 显式路径优先；为空时探测下载目录产物，
 // 存在即装配（下载过一次后重启免配 env）。
 func TestConfigureYakEngineEnvOverrideAndAutodetect(t *testing.T) {

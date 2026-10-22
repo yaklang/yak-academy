@@ -77,6 +77,12 @@ const blockedLibsNote = computed(() => {
   return `已禁用高危库：${blocked.join('、')}`
 })
 
+// 引擎装配守卫：engine_available=false（ACADEMY_YAK_BIN 未配置且未下载）时
+// 提前禁用提交/自测入口并提示——代替点击后才收到 internal_error/422 的滞后反馈。
+const engineMissing = computed(
+  () => isCode.value && challenge.value?.judge?.engine_available === false,
+)
+
 // 自测运行（动态执行框）：对样例组或自定义输入跑一次当前源码，
 // 异步票据 + 1s 轮询；运营态，不产生提交/事件/计分（与提交判题互不影响）。
 const RUN_CUSTOM = '__custom'
@@ -505,6 +511,15 @@ onUnmounted(() => {
           提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
           全部通过才算 AC；配置了组分的题目按通过组折算得分。可在下方编辑器编码，先对样例或自定义输入自测运行。
         </div>
+        <!-- 引擎未装配：提交/自测入口整体禁用（服务端仍兜底拒绝） -->
+        <el-alert
+          v-if="engineMissing"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="engine-missing"
+          title="判题引擎未配置：提交代码与自测运行暂不可用，请联系管理员配置（ACADEMY_YAK_BIN）"
+        />
         <!-- 库策略提示：白名单 chips + 黑名单说明（与补全过滤、服务端拦截同源） -->
         <div class="lib-policy">
           <div class="lib-row">
@@ -530,7 +545,7 @@ onUnmounted(() => {
             <el-button
               size="small"
               :loading="running"
-              :disabled="!source || !runTarget"
+              :disabled="!source || !runTarget || engineMissing"
               @click="runCode"
             >运行自测</el-button>
           </div>
@@ -567,7 +582,7 @@ onUnmounted(() => {
           type="primary"
           class="submit-btn"
           :loading="submitting || polling"
-          :disabled="!source"
+          :disabled="!source || engineMissing"
           @click="submit"
         >提交代码</el-button>
       </template>
@@ -686,6 +701,7 @@ onUnmounted(() => {
   margin-bottom: 0.8rem; font-size: 0.85rem;
   color: var(--el-text-color-secondary);
 }
+.engine-missing { margin-bottom: 0.8rem; }
 .lib-policy {
   margin-bottom: 0.7rem; padding: 0.55rem 0.75rem;
   background: var(--el-fill-color-lighter); border-radius: 6px;
