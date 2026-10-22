@@ -88,4 +88,13 @@ export const E2E = {
       '}',
     ].join('\n'),
   },
+  // 1 秒时限题（bugfix-acm-boot-timeout 专用）：正确程序只需 println(42)，
+  // 执行耗时就几毫秒——判题计时必须不含 yak 引擎冷启动/退出滞留
+  //（native 热跑全程约 2.3s > 1s），否则正确提交被误判 TLE。
+  acmBoot: {
+    zip: 'acm-bootlimit-package.zip',
+    slug: 'acm-boot-limit',
+    title: 'E2E 引擎启动时限题（yak）',
+    correctSource: 'println(42)',
+  },
 } as const
