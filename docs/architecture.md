@@ -257,7 +257,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 3.9** ✅ 已完成：编辑器 yak 化：yakit Monarch 词法移植为 CodeMirror 6 StreamLanguage（关键字/类型/内建函数/标准库前缀、f-string 内插表达式、x-string、反引号原串、heredoc、注释、shebang），替换此前的 Go 近似高亮；暗色编辑器主题（yakit kurior 取色，底 #212428、代码字白）+ 外观美化（gutter/选区/激活行/焦点环/禁用态）。**代码补全**：静态补全表（yakit 走 yak 语言服务器 IPC，浏览器端无通道故改静态）——词汇表提取自 yaklang 源码标准库导出表（Import 表 → yaklib 导出 map，ref 0971cec23d，12 库 835 个真实函数名），词首补全关键字/类型/内建/库前缀（含中文说明）+ 片段（for-range / ACM stdin 模板），`lib.` 成员补全给该库导出函数。纯前端改动，无接口/数据变更。
 - **Phase 3.10** ✅ 已完成：yak 库白名单/黑名单（防高危库执行，见 §3.4 库策略）：题目级 `judge.allowed_libs` 白名单（`acm_judges.allowed_libs` JSON 文本列，空 = 允许全部非黑名单；上传校验未知/黑名单/重复项 422，宇宙 = yaklang Import 注册 135 库）+ 全局黑名单（默认 exec/cli/ssh/file/filesys/filemonitor/fileparser/filescanner，`ACADEMY_YAK_LIB_BLACKLIST` 环境变量可替换）；提交与自测受理前标识符级静态扫描（剥注释/字符串，别名同检）命中即 422、不进引擎；详情页随发扣除黑名单后的白名单与黑名单列表（题面 chips + 补全菜单同源过滤），管理端编辑弹窗可配白名单。
 - **Phase 3.11** ✅ 已完成：判题计时模型修正（时限不含引擎启动/收尾）：`CodeEngine.Run` 接口改为显式传 `limit`；引擎在源码首尾注入 `__ACADEMY_YAK_BOOT__`/`__ACADEMY_YAK_DONE__` 标记行，首标记（用户代码开跑）到末标记（执行完毕）之间才受 `time_limit_s` 约束，末标记即杀进程（省 yak 退出滞留 2~7s/组）；启动+收尾整体受 60s 兜底；stdout/stderr 改自有 `os.Pipe`（`cmd.Wait` 不再被孙辈进程拖住，排空窗口后强制关读端收尾）；自测运行 `time_ms` 汇报执行段毫秒数。回归：`e2e/bugfix-acm-boot-timeout.spec.ts`（1s 时限题正确提交，修复前误 TLE）。同 PR 补引擎未装配守卫：题目详情 judge 段新增 `engine_available`（api 层从 JudgeService 拼装），false 时前端禁用提交/自测入口并警示联系管理员（编辑器仍可编码），代替点击后才收到 internal_error/422 的滞后反馈（服务端拦截仍兜底）。回归：`e2e/bugfix-acm-engine-unconfigured-guard.spec.ts`。
-- **Phase 4** ⬜ 未开始：多人规模——SQLite → PostgreSQL、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
+- **Phase 4** 🔄 进行中：多人规模——SQLite → PostgreSQL（**已落地基础**：`ACADEMY_DB_DSN` 设 `postgres://` 连接串即切 PG，迁移与派生表路径方言兼容、真实 PG 集成测试回归；SQLite 仍为默认。待办：存量数据迁移工具）、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 11. 当前边界（明确不做）
 
@@ -265,6 +265,6 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - 排行榜未按赛季切片；实例端口默认仅回环发布，对外直连依赖 `ACADEMY_INSTANCE_PUBLIC_HOST` 显式配置（无自动 NAT/域名分发）。
 - 徽章为计算型读模型：不落库、不产生事件；如未来需要"颁发时间/稀有度"再演进为事件派生表。
 - 短信通道仅有开发投递器（验证码写服务日志）；生产接真实通道前注册不可对外开放。竞赛 WP 的 zip 附件默认落盘本地目录（`ACADEMY_WRITEUPS_DIR`），可选切 S3 兼容对象存储（`ACADEMY_WRITEUPS_STORE=s3` + `ACADEMY_WRITEUPS_S3_*`，MinIO/AWS S3 等；切换只影响新写入，存量文件不迁移）。
-- 不引入 Casbin / Redis / K8s；数据层仍为 SQLite。
+- 不引入 Casbin / Redis / K8s；数据层默认 SQLite，`ACADEMY_DB_DSN` 可选切 PostgreSQL（Phase 4 已落地的第一步；存量 SQLite 数据不自动迁移）。
 - JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限即拒绝启动，非严格路径仅启动告警）。
 - 内置训练的 vulinbox 基础镜像构建依赖官方 CDN（`oss-qn.yaklang.com`，离线部署需手工预构建镜像）且仅 amd64；二进制 sha256 锁定在 Dockerfile，上游更新会使导入 422（防靶机行为漂移，更新题集时重新锁定）。

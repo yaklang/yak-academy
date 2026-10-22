@@ -2,6 +2,9 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
@@ -25,28 +28,47 @@ func (r *eventRepo) ListAfter(ctx context.Context, afterID uint, limit int) ([]m
 	return list, err
 }
 
+// HasHintUnlocked 用户是否已解锁某提示。payload 是 JSON 文本列：SQLite 的
+// json_extract 是方言函数（PostgreSQL 无），改为 LIKE 子串下推预筛
+// （json.Marshal 序列化无空格，"hint_id":N 可作子串）+ Go 侧精确解析
+// （子串会撞前缀：1 匹配 12）。语义与原 json_extract 等价。
 func (r *eventRepo) HasHintUnlocked(ctx context.Context, userID, hintID uint) (bool, error) {
-	var n int64
+	var payloads []string
 	err := r.db.WithContext(ctx).Model(&model.Event{}).
-		Where("user_id = ? AND type = ? AND json_extract(payload, '$.hint_id') = ?",
-			userID, model.EventHintUnlocked, hintID).
-		Count(&n).Error
-	return n > 0, err
+		Where("user_id = ? AND type = ? AND payload LIKE ?",
+			userID, model.EventHintUnlocked, fmt.Sprintf(`%%"hint_id":%d%%`, hintID)).
+		Pluck("payload", &payloads).Error
+	if err != nil {
+		return false, err
+	}
+	for _, p := range payloads {
+		var v struct {
+			HintID uint `json:"hint_id"`
+		}
+		if json.Unmarshal([]byte(p), &v) == nil && v.HintID == hintID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type scoreRepo struct{ db *gorm.DB }
 
 func NewScoreRepo(db *gorm.DB) ScoreRepo { return &scoreRepo{db} }
 
+// UpdateScore 原子累加积分/通关数（upsert）。ON CONFLICT 语法 SQLite ≥3.24 与
+// PostgreSQL 均原生支持；已有行列必须表名限定（PG 中裸列名与 excluded 同名
+// 列歧义报 42702，SQLite 同样接受限定写法）；时间戳走绑定参数
+//（datetime('now') 是 SQLite 方言）。仅派生器调用（event-sourcing-rules skill）。
 func (r *scoreRepo) UpdateScore(ctx context.Context, userID uint, delta, solveDelta int) error {
 	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO score_records (user_id, score, solve_count, updated_at)
-		VALUES (?, ?, ?, datetime('now'))
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
-			score = score + excluded.score,
-			solve_count = solve_count + excluded.solve_count,
+			score = score_records.score + excluded.score,
+			solve_count = score_records.solve_count + excluded.solve_count,
 			updated_at = excluded.updated_at
-	`, userID, delta, solveDelta).Error
+	`, userID, delta, solveDelta, time.Now()).Error
 }
 
 func (r *scoreRepo) Get(ctx context.Context, userID uint) (*model.ScoreRecord, error) {

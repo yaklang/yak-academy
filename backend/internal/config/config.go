@@ -9,8 +9,11 @@ import (
 
 type Config struct {
 	Addr      string // HTTP 监听地址
-	Database  string // SQLite 文件路径
-	JWTSecret string
+	Database  string // SQLite 文件路径（本地开发默认）
+	// DatabaseDSN PostgreSQL 连接串（postgres:// / postgresql:// 前缀）：
+	// 设置即切 PostgreSQL（Phase 4 多人规模路线），此时 Database 被忽略。
+	DatabaseDSN string
+	JWTSecret   string
 
 	// 初始管理员（users 表为空时启动种子创建，见 AuthService.EnsureAdmin）。
 	AdminUsername string
@@ -91,6 +94,7 @@ func Load() *Config {
 	return &Config{
 		Addr:               getenv("ACADEMY_ADDR", ":8080"),
 		Database:           getenv("ACADEMY_DB", "academy.db"),
+		DatabaseDSN:        os.Getenv("ACADEMY_DB_DSN"),
 		JWTSecret:          getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
 		AdminUsername:      getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
 		AdminPassword:      getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
