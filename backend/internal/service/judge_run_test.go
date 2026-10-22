@@ -46,15 +46,16 @@ type scriptedRunEngine struct {
 	fn     func(input string) (string, error)
 }
 
-func (e *scriptedRunEngine) Run(_ context.Context, _, input string) (string, error) {
+func (e *scriptedRunEngine) Run(_ context.Context, _, input string, _ time.Duration) (string, int64, error) {
 	e.mu.Lock()
 	e.inputs = append(e.inputs, input)
 	fn := e.fn
 	e.mu.Unlock()
 	if fn == nil {
-		return "", nil
+		return "", 0, nil
 	}
-	return fn(input)
+	out, err := fn(input)
+	return out, 50, err
 }
 
 func (e *scriptedRunEngine) collected() []string {

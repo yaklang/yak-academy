@@ -209,15 +209,19 @@ func (s *JudgeService) executeCodeRun(run *codeRun, source, input, answer string
 		st.mu.Unlock()
 		return
 	}
-	runCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeLimitS)*time.Second)
-	defer cancel()
-	out, err := engine.Run(runCtx, source, input)
+	// 时限只约束用户代码执行段（引擎冷启动/退出滞留不占），耗时取引擎测得
+	// 的执行段毫秒数——学生看到的耗时即真实判题尺度。
+	out, execMs, err := engine.Run(context.Background(), source, input, time.Duration(timeLimitS)*time.Second)
 	elapsed := s.now().Sub(start)
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	run.status = runDone
-	run.timeMs = elapsed.Milliseconds()
+	if err == nil && execMs > 0 {
+		run.timeMs = execMs
+	} else {
+		run.timeMs = elapsed.Milliseconds()
+	}
 	switch {
 	case err == nil:
 		run.outcome = "ok"

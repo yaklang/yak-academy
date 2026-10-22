@@ -113,6 +113,19 @@ export default async function globalSetup(): Promise<void> {
       '上传 ACM 题目包',
     )
 
+    // 1 秒时限 ACM 题（bugfix-acm-boot-timeout 回归锚点：正确程序执行仅
+    // 数毫秒，引擎启动耗时不计入时限才可能 AC）。
+    const acmBootZip = await readFile(path.join(e2eDir, 'fixtures', E2E.acmBoot.zip))
+    await must(
+      ctx.post('/api/v1/admin/challenges/package', {
+        headers: auth,
+        multipart: {
+          package: { name: E2E.acmBoot.zip, mimeType: 'application/zip', buffer: acmBootZip },
+        },
+      }),
+      '上传 1s 时限 ACM 题目包',
+    )
+
     const list = await must(ctx.get('/api/v1/content/packages', { headers: auth }), '教程包列表')
     const body = (await list.json()) as { items?: Array<{ id: number; name: string }> }
     const pkg = (body.items ?? []).find((p) => p.name === E2E.tutorial.pkgName)

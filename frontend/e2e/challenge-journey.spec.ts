@@ -52,18 +52,22 @@ test.describe('题目全链路', () => {
     await expect(hintRow.locator('.hint-content')).toBeVisible()
 
     // 排行榜出现学生分数（本用例结算 C.score - 提示 5）。全量套件中字母序
-    // 更早的 acm-journey 可能已替学生判对 ACM 种子题（+其分值），期望总分
-    // 按该题 solved 态动态计算——单独跑本 spec、未装配引擎（internal_error
-    // 不判对）与全量套件三种形态下都成立。
+    // 更早的 acm-journey / bugfix-* 可能已替学生判对 ACM 种子题（+其分值），
+    // 期望总分按各题 solved 态动态计算——单独跑本 spec、未装配引擎
+    //（internal_error 不判对）与全量套件三种形态下都成立。
     const token = await studentToken(request)
-    const acmDetail = await request.get(`${E2E.apiURL}/api/v1/challenges/${E2E.acm.slug}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const acm = (await acmDetail.json()) as { solved: boolean; score: number }
+    const solvedScore = async (slug: string) => {
+      const detail = await request.get(`${E2E.apiURL}/api/v1/challenges/${slug}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const chal = (await detail.json()) as { solved: boolean; score: number }
+      return chal.solved ? chal.score : 0
+    }
+    const acmBonus = (await solvedScore(E2E.acm.slug)) + (await solvedScore(E2E.acmBoot.slug))
     await page.getByRole('link', { name: '排行榜' }).click()
     const row = page.locator('tr', { hasText: E2E.student.username })
     await expect(row).toBeVisible()
-    await expect(row).toContainText(String(C.score - C.hintCost + (acm.solved ? acm.score : 0)))
+    await expect(row).toContainText(String(C.score - C.hintCost + acmBonus))
 
     // 徽章：first_solve（初试锋芒）点亮
     await page.getByRole('link', { name: '徽章' }).click()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -69,13 +70,13 @@ type fakeRun struct {
 	err    error
 }
 
-func (f *fakeCodeEngine) Run(ctx context.Context, source, input string) (string, error) {
+func (f *fakeCodeEngine) Run(ctx context.Context, source, input string, limit time.Duration) (string, int64, error) {
 	i := f.runs
 	f.runs++
 	if i >= len(f.results) {
-		return "", errors.New("fake engine: no result preset")
+		return "", 0, errors.New("fake engine: no result preset")
 	}
-	return f.results[i].output, f.results[i].err
+	return f.results[i].output, 100, f.results[i].err
 }
 
 // ---------- 判题主流程（fake engine 驱动全链路） ----------

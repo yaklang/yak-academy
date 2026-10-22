@@ -345,14 +345,14 @@ func (s *JudgeService) judgeCode(ctx context.Context, sub *model.Submission, cha
 		return
 	}
 	// 逐组全跑：每组结论独立（pass 得组分，fail 记 verdict），全部通过才算 ac。
+	// 时限只约束用户代码执行段——引擎冷启动/退出滞留由引擎内部兜底
+	//（judge_engine.go codeBootGrace），不占 TimeLimitS。
 	verdict := model.VerdictAC
 	groups := make([]CodeGroupResult, 0, len(data))
 	passedWeight := 0
 	totalWeight := 0
 	for i := range data {
-		runCtx, cancel := context.WithTimeout(ctx, time.Duration(conf.TimeLimitS)*time.Second)
-		out, runErr := engine.Run(runCtx, sub.Answer, data[i].Input)
-		cancel()
+		out, _, runErr := engine.Run(ctx, sub.Answer, data[i].Input, time.Duration(conf.TimeLimitS)*time.Second)
 		group := CodeGroupResult{Name: data[i].Name, Sample: data[i].Sample}
 		switch {
 		case runErr == nil && compareOutput(out, data[i].Answer):
