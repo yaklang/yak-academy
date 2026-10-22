@@ -88,6 +88,12 @@ func (s *JudgeService) codeEngine() CodeEngine {
 	return s.engine
 }
 
+// EngineAvailable 判定引擎是否已装配（题目详情下发 engine_available，
+// 前端据此预先禁用提交/自测入口而不是点击后才报错）。
+func (s *JudgeService) EngineAvailable() bool {
+	return s.codeEngine() != nil
+}
+
 // Submit 提交答案：写 submission(pending) + submission.created 事件，立即返回。
 // 哨兵答案保留给检测点自动判定，用户提交一律拒绝（防伪造环境判定）。
 func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint, answer string) (*model.Submission, error) {

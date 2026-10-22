@@ -7,7 +7,8 @@ import { loginAsStudent, studentToken } from './helpers'
 // 引擎由 ACADEMY_YAK_BIN 门控（playwright.config 注入后端）：
 // - 装配（本地设 yak 可执行路径）：正确源码 AC 计分、错误输出 WA；
 //   自测运行样例模式比对期望、自定义输入模式回显 stdout；
-// - 未装配（CI）：提交判 internal_error、自测运行 422 友好提示。
+// - 未装配（CI）：详情页警示引擎未配置，提交/自测按钮禁用
+//   （完整回归见 bugfix-acm-engine-unconfigured-guard.spec.ts）。
 const engineConfigured = Boolean(process.env.ACADEMY_YAK_BIN)
 
 // CodeMirror 6 的可编辑区是 contenteditable，fill() 直接可用。
@@ -158,20 +159,23 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(page.locator('.result')).not.toContainText('判定通过')
   })
 
-  test('引擎未装配 → internal_error（平台侧失败提示，区别于代码错误）', async ({ page }) => {
-    test.skip(engineConfigured, '判题引擎已装配，internal_error 路径不适用')
+  test('引擎未装配 → 提交/自测入口禁用并事前提示', async ({ page }) => {
+    test.skip(engineConfigured, '判题引擎已装配，禁用态路径不适用')
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
     await fillSource(page, E2E.acm.correctSource)
-    await page.getByRole('button', { name: '提交代码' }).click()
-
-    await expect(page.locator('.result')).toContainText('判定服务暂不可用', { timeout: 30_000 })
+    await expect(page.locator('.engine-missing')).toContainText('判题引擎未配置')
+    await expect(page.getByRole('button', { name: '提交代码' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: '运行自测' })).toBeDisabled()
   })
 
   // 库策略拦截（e2e-bugfix 回归锚点）：静态扫描发生在受理阶段（引擎执行之前），
-  // 不依赖判题引擎装配，也不产生提交记录。种子题白名单 [str, io, os]。
+  // 也不产生提交记录。种子题白名单 [str, io, os]。经 UI 点击触发——引擎未装配
+  // 时提交/自测按钮被守卫禁用（见上方禁用态用例），点击路径不可达，需引擎装配
+  // 才跑（服务层扫描另有单测覆盖，无引擎形态不断层）。
   test('提交 exec 黑名单库源码 → 422 拒绝并点名违规库', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置），按钮被守卫禁用')
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
@@ -184,6 +188,7 @@ test.describe('ACM 编程题（源码判定）', () => {
   })
 
   test('提交白名单外库源码（codec）→ 422 拒绝', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置），按钮被守卫禁用')
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
@@ -196,6 +201,7 @@ test.describe('ACM 编程题（源码判定）', () => {
   })
 
   test('自测运行：黑名单库源码 → 受理阶段 422 拦截', async ({ page }) => {
+    test.skip(!engineConfigured, '判题引擎未装配（ACADEMY_YAK_BIN 未设置），按钮被守卫禁用')
     await loginAsStudent(page)
     await page.goto(`/training/${E2E.acm.slug}`)
 
@@ -269,16 +275,5 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
     await expect(page.locator('.run-output')).toContainText('与样例期望不一致')
     await expect(page.locator('.run-stdout')).toContainText('42')
-  })
-
-  test('引擎未装配 → 自测运行 422 友好提示', async ({ page }) => {
-    test.skip(engineConfigured, '判题引擎已装配，422 路径不适用')
-    await loginAsStudent(page)
-    await page.goto(`/training/${E2E.acm.slug}`)
-
-    await fillSource(page, E2E.acm.correctSource)
-    await page.getByRole('button', { name: '运行自测' }).click()
-
-    await expect(page.locator('.el-message')).toContainText('自测运行不可用')
   })
 })

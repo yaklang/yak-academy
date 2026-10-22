@@ -117,6 +117,9 @@ export interface JudgeConfig {
   allowed_libs?: string[] | null
   // 平台全局黑名单（exec/file 等高危库）——补全排除与题面提示用。
   blocked_libs?: string[]
+  // 判定引擎是否已装配（ACADEMY_YAK_BIN 配置或管理端下载）。false 时
+  // 前端禁用提交/自测入口并提示，代替点击后才收到 internal_error/422。
+  engine_available?: boolean
 }
 // ACM 样例数据组（sample=true；隐藏组不下发）。
 export interface JudgeSample { name: string; input: string; output: string }

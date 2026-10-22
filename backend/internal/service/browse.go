@@ -161,6 +161,9 @@ type JudgeConfigView struct {
 	AllowedLibs []string `json:"allowed_libs"`
 	// BlockedLibs 平台全局黑名单（exec/file 等高危库）——题面提示与补全排除用。
 	BlockedLibs []string `json:"blocked_libs"`
+	// EngineAvailable 判定引擎是否已装配（api 层从 JudgeService 拼装）。
+	// false 时前端禁用提交/自测入口，代替点击后才收到 internal_error/422。
+	EngineAvailable bool `json:"engine_available"`
 }
 
 // enrichTutorial 批量拼关联教程 Room 的标题（tutorial_slug → room 元数据）。

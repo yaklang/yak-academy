@@ -605,6 +605,10 @@ func (h *Handlers) getChallenge(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	// 引擎装配态在 JudgeService（运行中可换装），浏览视图在此薄拼装。
+	if detail.Judge != nil {
+		detail.Judge.EngineAvailable = h.Judge.EngineAvailable()
+	}
 	writeJSON(w, http.StatusOK, detail)
 }
 

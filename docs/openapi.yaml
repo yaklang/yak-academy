@@ -284,6 +284,12 @@ components:
                   type: array
                   description: 平台全局 yak 库黑名单（exec/cli/file 等高危库；env ACADEMY_YAK_LIB_BLACKLIST 可覆盖）——任何题目不可使用。
                   items: { type: string }
+                engine_available:
+                  type: boolean
+                  description: |
+                    判定引擎是否已装配（ACADEMY_YAK_BIN 配置或管理端下载）。
+                    false 时前端禁用提交/自测入口并提示联系管理员，代替点击后才
+                    收到 internal_error / 422 的滞后反馈。
             hints:
               type: array
               items: { $ref: '#/components/schemas/HintView' }
