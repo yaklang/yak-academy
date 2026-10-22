@@ -46,6 +46,18 @@ services:
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
       ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
       ACADEMY_SMS_SHOW_CODE: ${ACADEMY_SMS_SHOW_CODE:-} # 验证码回显（内网/演示部署）：开启后发码响应带原文、注册页内联显示；正式部署保持空
+      # 生产严格模式：开启后启动即校验凭据强度（JWT secret ≥32 字符且非内置默认、
+      # 初始管理员密码 ≥12 字符且非内置默认），不达标拒绝启动。生产部署建议恒开。
+      ACADEMY_STRICT: ${ACADEMY_STRICT:-}
+      # 竞赛 WP zip 附件存储后端：fs（默认，/data/writeups 本地目录）或
+      # s3（S3 兼容对象存储，MinIO / AWS S3 等；下方 _S3_* 连接参数同时配置）。
+      ACADEMY_WRITEUPS_STORE: ${ACADEMY_WRITEUPS_STORE:-fs}
+      ACADEMY_WRITEUPS_S3_ENDPOINT: ${ACADEMY_WRITEUPS_S3_ENDPOINT:-}
+      ACADEMY_WRITEUPS_S3_BUCKET: ${ACADEMY_WRITEUPS_S3_BUCKET:-}
+      ACADEMY_WRITEUPS_S3_ACCESS_KEY: ${ACADEMY_WRITEUPS_S3_ACCESS_KEY:-}
+      ACADEMY_WRITEUPS_S3_SECRET_KEY: ${ACADEMY_WRITEUPS_S3_SECRET_KEY:-}
+      ACADEMY_WRITEUPS_S3_REGION: ${ACADEMY_WRITEUPS_S3_REGION:-us-east-1}
+      ACADEMY_WRITEUPS_S3_PREFIX: ${ACADEMY_WRITEUPS_S3_PREFIX:-}
       # ACM 编程题判题引擎：yak 可执行文件在容器内的绝对路径（Linux 构建，
       # 放 ./data/yak 随卷挂载即路径 /data/yak）。空 = 引擎未装配，code 题
       # 提交后判 internal_error（区别于学生代码错误，前端提示可重试）。

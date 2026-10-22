@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,12 +23,18 @@ func main() {
 	defer stop()
 
 	cfg := config.Load()
-	// 默认凭据告警：本地开发默认值一旦带进生产即等于弱口令/可伪造 token。
-	if cfg.JWTSecret == config.DefaultJWTSecret {
-		log.Println("warning: ACADEMY_JWT_SECRET unset — using dev-only default; set a strong secret in production")
-	}
-	if cfg.AdminPassword == config.DefaultAdminPassword {
-		log.Println("warning: ACADEMY_ADMIN_PASSWORD unset — initial admin will use the built-in default password")
+	// 严格模式（生产建议恒开）：开发默认/弱凭据直接拒绝启动；非严格路径保留告警。
+	if cfg.Strict {
+		if v := cfg.StrictViolations(); len(v) > 0 {
+			log.Fatalf("strict mode (ACADEMY_STRICT=1): refusing to start: %s", strings.Join(v, "; "))
+		}
+	} else {
+		if cfg.JWTSecret == config.DefaultJWTSecret {
+			log.Println("warning: ACADEMY_JWT_SECRET unset — using dev-only default; set a strong secret in production")
+		}
+		if cfg.AdminPassword == config.DefaultAdminPassword {
+			log.Println("warning: ACADEMY_ADMIN_PASSWORD unset — initial admin will use the built-in default password")
+		}
 	}
 
 	gdb, err := db.Open(cfg.Database)
@@ -128,7 +135,15 @@ func main() {
 	profileSvc := service.NewProfileService(userRepo, scoreRepo, mailRepo, cfg.AvatarsDir)
 	competitionSvc := service.NewCompetitionService(competitionRepo, challengeRepo, userRepo, instanceRepo, submissionRepo)
 	competitionSvc.SetDelivery(profileSvc.DeliverInvite, authSvc.CreateUser)
-	competitionSvc.SetWriteupDir(cfg.WriteupsDir)
+	// WP zip 附件存储：fs（默认本地目录）/ s3（S3 兼容对象存储）按配置装配。
+	writeupStore, err := service.NewWriteupStore(cfg.WriteupsStoreKind, cfg.WriteupsDir, service.S3StoreOptions{
+		Endpoint: cfg.WriteupsS3.Endpoint, Region: cfg.WriteupsS3.Region, Bucket: cfg.WriteupsS3.Bucket,
+		AccessKey: cfg.WriteupsS3.AccessKey, SecretKey: cfg.WriteupsS3.SecretKey, Prefix: cfg.WriteupsS3.Prefix,
+	})
+	if err != nil {
+		log.Fatalf("writeup store: %v", err)
+	}
+	competitionSvc.SetWriteupStore(writeupStore)
 	competitionSvc.SetInstanceDestroyer(envSvc.DestroyCompetitionInstances)
 
 	// api 装配（竞赛入场锁定：已入场未结束的参赛者只能访问竞赛域接口）
