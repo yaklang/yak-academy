@@ -69,6 +69,13 @@ func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, i
 		return "", 0, fmt.Errorf("%w: invalid phone number", ErrValidation)
 	}
 	now := s.now()
+	// 手机号已注册先于限频拒绝：让学员等满 60s 倒计时只会再得到同一个拒绝，
+	// 先告知事实并引导去登录（前端据此提示）。
+	if _, err := s.users.FindByPhone(ctx, phone); err == nil {
+		return "", 0, fmt.Errorf("%w: phone already registered", ErrValidation)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", 0, err
+	}
 	// 60 秒内已发过：直接返回剩余等待时间（不重复发送）。
 	if latest, err := s.codes.LatestByPhone(ctx, phone); err == nil {
 		if wait := smsSendInterval - now.Sub(latest.CreatedAt); wait > 0 {
@@ -84,12 +91,6 @@ func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, i
 	}
 	if n >= smsWindowLimit {
 		return "", int(smsWindow.Seconds()), ErrSmsThrottled
-	}
-	// 手机号已注册则不再发码（注册前查重前置，避免验证码白白消耗）。
-	if _, err := s.users.FindByPhone(ctx, phone); err == nil {
-		return "", 0, fmt.Errorf("%w: phone already registered", ErrValidation)
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", 0, err
 	}
 	code, err := genCode()
 	if err != nil {

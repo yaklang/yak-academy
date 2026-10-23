@@ -115,6 +115,33 @@ func TestSendCodeInvalidPhoneAndRegistered(t *testing.T) {
 	}
 }
 
+// TestSendCodeRegisteredBeatsThrottle 已注册判定优先于限频：注册成功后
+// 60s 内（限频窗口内）同号再发码，学员应立刻知道"已注册、去登录"，
+// 而不是先看满 60s 倒计时再收获同一个拒绝。
+func TestSendCodeRegisteredBeatsThrottle(t *testing.T) {
+	env := newRegEnv(t)
+	ctx := context.Background()
+	const phone = "13800000003"
+	// 发码 → 注册成功（此刻验证码刚创建，60s 限频窗口内）。
+	if _, _, err := env.reg.SendCode(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := env.reg.Register(ctx, phone, env.sent[0], "regthr", "pass-123", issueTokenStub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// 限频窗口内再发码：必须是"已注册"（ErrValidation），不是限频。
+	_, _, err := env.reg.SendCode(ctx, phone)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("registered phone inside throttle window: want ErrValidation, got %v", err)
+	}
+	if errors.Is(err, ErrSmsThrottled) {
+		t.Fatal("registered-phone rejection must not be masked by sms throttle")
+	}
+	if len(env.sent) != 1 {
+		t.Fatalf("no new code should be delivered, got %v", env.sent)
+	}
+}
+
 func TestRegisterHappyPath(t *testing.T) {
 	env := newRegEnv(t)
 	ctx := context.Background()
