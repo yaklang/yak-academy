@@ -365,6 +365,21 @@ export const adminInstanceApi = {
   destroy: (id: number) => http.del<{ deleted: boolean }>(`/admin/lab-instances/${id}`),
 }
 
+// 备份归档（ops 硬化）：SQLite 快照 + 数据目录 tar.gz，受保留份数约束。
+export interface BackupInfo {
+  name: string
+  size_bytes: number
+  created_at: string
+  database: string
+  store_kinds: string
+}
+
+export const adminBackupApi = {
+  list: () => http.get<{ items: BackupInfo[] }>('/admin/backups'),
+  create: () => http.post<BackupInfo>('/admin/backups'),
+  download: (name: string) => http.download(`/admin/backups/${encodeURIComponent(name)}`),
+}
+
 export const progressApi = {
   mine: () => http.get<{ xp: number; completed_rooms: number; in_progress_rooms: number }>('/progress'),
   leaderboard: (page = 1) => http.get<Paged<LeaderboardEntry>>(`/leaderboard?page=${page}`),

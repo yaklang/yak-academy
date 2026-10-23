@@ -152,12 +152,25 @@ func main() {
 	competitionSvc.SetWriteupStore(writeupStore)
 	competitionSvc.SetInstanceDestroyer(envSvc.DestroyCompetitionInstances)
 
+	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
+	//（外部 pg_dump），调度与手动创建均拒绝并给出指引。
+	backupSvc := service.NewBackupService(repo.NewBackupRepo(gdb), db.IsPostgresDSN(dbTarget), cfg.BackupDir, cfg.BackupKeep,
+		cfg.AttachmentsDir, cfg.AvatarsDir, cfg.WriteupsDir, cfg.WriteupsStoreKind)
+	if cfg.BackupInterval > 0 {
+		if db.IsPostgresDSN(dbTarget) {
+			log.Printf("backup scheduler disabled: PostgreSQL mode requires external pg_dump backups")
+		} else {
+			go backupSvc.RunScheduler(ctx, cfg.BackupInterval)
+			log.Printf("backup scheduler: every %s (keep %d, dir %s)", cfg.BackupInterval, cfg.BackupKeep, cfg.BackupDir)
+		}
+	}
+
 	// api 装配（竞赛入场锁定：已入场未结束的参赛者只能访问竞赛域接口）
 	router := api.NewRouter(authSvc)
 	router.SetEntryLock(competitionSvc)
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
 	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, cfg.SmsShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, backupSvc, cfg.SmsShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

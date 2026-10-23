@@ -54,6 +54,15 @@ components:
         total: { type: integer }
         page: { type: integer }
         page_size: { type: integer }
+    BackupInfo:
+      type: object
+      required: [name, size_bytes, created_at, database, store_kinds]
+      properties:
+        name: { type: string, description: 归档文件名（academy-YYYYMMDD-HHMMSS.tar.gz） }
+        size_bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+        database: { type: string, description: 数据库模式（sqlite；归档内含一致性快照） }
+        store_kinds: { type: string, description: WP 附件存储后端（fs/s3；s3 时 WP zip 不在归档内） }
     LoginRequest:
       type: object
       required: [username, password]
@@ -2137,6 +2146,52 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/backups:
+    get:
+      tags: [admin]
+      summary: 备份归档列表（新→旧，受保留份数约束；ops 硬化）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BackupInfo' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: >
+        立即生成一份备份：SQLite 一致性快照（VACUUM INTO）+ attachments/avatars/
+        writeups 数据目录打包为单文件 tar.gz，超出保留份数自动清理。
+        PostgreSQL 模式（ACADEMY_DB_DSN）不支持应用内备份，返回 422（数据库走外部 pg_dump）
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupInfo' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/backups/{name}:
+    get:
+      tags: [admin]
+      summary: 下载备份归档（application/gzip；离机保存/异地容灾）
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string }, description: 归档文件名（academy-YYYYMMDD-HHMMSS.tar.gz） }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/gzip:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/competitions:
     get:

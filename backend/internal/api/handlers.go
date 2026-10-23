@@ -28,13 +28,14 @@ type Handlers struct {
 	Profile      *service.ProfileService
 	Competitions *service.CompetitionService
 	RegisterSvc  *service.RegisterService
+	Backup       *service.BackupService
 	// smsShowCode 验证码回显模式（config SmsShowCode，见 sendSmsCode）。
 	smsShowCode bool
 }
 
 // NewHandlers 构造 handler 集合；smsShowCode 见 config.SmsShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, smsShowCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, smsShowCode: smsShowCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, backup *service.BackupService, smsShowCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, Backup: backup, smsShowCode: smsShowCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -107,10 +108,15 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/active", "admin", h.listActiveInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
 	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
-	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
-	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
-	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
-	r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
+		r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
+		r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
+		r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
+		r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
+
+		// 备份（ops 硬化）：SQLite 快照 + 数据目录归档；下载离机保存。
+		r.Handle(http.MethodPost, "/api/v1/admin/backups", "admin", h.createBackup)
+		r.Handle(http.MethodGet, "/api/v1/admin/backups", "admin", h.listBackups)
+		r.Handle(http.MethodGet, "/api/v1/admin/backups/{name}", "admin", h.downloadBackup)
 
 	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)

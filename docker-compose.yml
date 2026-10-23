@@ -62,6 +62,12 @@ services:
       # （Phase 4 多人规模路线），不设 = 默认 SQLite（/data/academy.db）。
       # 切换是全新库语义：SQLite 存量数据不自动迁移。
       ACADEMY_DB_DSN: ${ACADEMY_DB_DSN:-}
+      # 备份（ops 硬化）：周期备份间隔（time.ParseDuration 格式如 6h；空 = 关闭，
+      # 仅管理端手动触发）与保留份数（超出自动清理）。归档 = SQLite 一致性快照 +
+      # 附件/头像/WP 数据目录单文件 tar.gz，落 /data/backups（随数据卷持久化）。
+      # PostgreSQL 模式应用内备份不支持（数据库走外部 pg_dump）。
+      ACADEMY_BACKUP_INTERVAL: ${ACADEMY_BACKUP_INTERVAL:-}
+      ACADEMY_BACKUP_KEEP: ${ACADEMY_BACKUP_KEEP:-7}
       # ACM 编程题判题引擎：yak 可执行文件在容器内的绝对路径（Linux 构建，
       # 放 ./data/yak 随卷挂载即路径 /data/yak）。空 = 引擎未装配，code 题
       # 提交后判 internal_error（区别于学生代码错误，前端提示可重试）。
