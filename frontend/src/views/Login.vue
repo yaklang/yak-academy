@@ -34,19 +34,8 @@ const redirect = computed(() => (route.query.redirect as string) || null)
 function errMsg(e: unknown, fallback: string) {
   return e instanceof ApiError ? e.message : fallback
 }
-
-// 注册链路错误 → 中文行动指引：后端错误信封 message 为英文（api-contract），
-// 学员看到原文无从下手——尤其"手机号已注册"（手机号仅注册凭据，登录走
-// 用户名），必须明确告知下一步，否则会反复发码卡死在第一步。
-function registerErrMsg(e: unknown, fallback: string) {
-  const raw = errMsg(e, fallback)
-  if (raw.includes('phone already registered'))
-    return '该手机号已注册过账号：请返回登录；忘记用户名或密码请联系管理员'
-  if (raw.includes('username already exists')) return '用户名已被占用，请换一个用户名'
-  if (raw.includes('code not sent or expired')) return '验证码未发送或已过期，请重新获取验证码'
-  if (raw.includes('incorrect code')) return '验证码不正确，请核对后重试'
-  return raw
-}
+// 错误信封 message 已由后端统一接入口映射为中文（api/errors.go writeError，
+// api-contract skill：禁止前端另起翻译层），这里直接透出。
 
 function startCountdown(seconds: number) {
   countdown.value = seconds
@@ -80,7 +69,7 @@ async function sendCode() {
       ElMessage.success(`验证码已发送${resp.retry_after ? '（发送过于频繁，显示的是剩余等待时间）' : '；当前为开发通道，验证码见服务端日志'}`)
     }
   } catch (e) {
-    ElMessage.error(registerErrMsg(e, '发送失败，请稍后再试'))
+    ElMessage.error(errMsg(e, '发送失败，请稍后再试'))
   } finally {
     sending.value = false
   }
@@ -128,7 +117,7 @@ async function submit() {
     ElMessage.success(`欢迎加入，${username.value}`)
     router.push(redirect.value ?? '/')
   } catch (e) {
-    ElMessage.error(registerErrMsg(e, '注册失败'))
+    ElMessage.error(errMsg(e, '注册失败'))
   } finally {
     loading.value = false
   }

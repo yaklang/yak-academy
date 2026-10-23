@@ -184,7 +184,9 @@ test.describe('ACM 编程题（源码判定）', () => {
 
     const toast = page.locator('.el-message--error')
     await expect(toast).toContainText('提交失败')
-    await expect(toast).toContainText('blacklisted yak lib(s): exec')
+    // 错误信封 message 已是后端统一接入口的中文映射，且保留点名违规库（exec）
+    await expect(toast).toContainText('平台黑名单的高危库')
+    await expect(toast).toContainText('exec')
   })
 
   test('提交白名单外库源码（codec）→ 422 拒绝', async ({ page }) => {
@@ -197,7 +199,9 @@ test.describe('ACM 编程题（源码判定）', () => {
 
     const toast = page.locator('.el-message--error')
     await expect(toast).toContainText('提交失败')
-    await expect(toast).toContainText('outside the challenge whitelist: codec')
+    // 中文映射保留点名白名单外库（codec）
+    await expect(toast).toContainText('题目白名单之外的库')
+    await expect(toast).toContainText('codec')
   })
 
   test('自测运行：黑名单库源码 → 受理阶段 422 拦截', async ({ page }) => {

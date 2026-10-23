@@ -138,8 +138,11 @@ func (r *Router) observe(method, pattern string, h http.HandlerFunc) http.Handle
 	}
 }
 
-// EnableJSONLogs 访问日志切 JSON 行格式（ACADEMY_LOG_JSON=1；main 在开始
-// 服务前调用一次，此后只读无竞态）。默认 text 键值行，同为结构化输出。
+// EnableJSONLogs 访问与错误日志切 JSON 行格式（ACADEMY_LOG_JSON=1；main 在
+// 开始服务前调用一次，此后只读无竞态）。默认 text 键值行，同为结构化输出。
+// 错误日志（writeError 的 api_error）走 slog.Default，这里一并切换，
+// 保证两种部署形态下每条错误都是一条结构化记录。
 func (r *Router) EnableJSONLogs() {
 	r.accessLog = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 }

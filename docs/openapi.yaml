@@ -31,8 +31,10 @@ components:
           properties:
             code:
               type: string
-              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, CONFLICT, INTERNAL]
-            message: { type: string }
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, CONFLICT, INSTANCE_CONFLICT, NOT_IMPLEMENTED, INTERNAL]
+            message:
+              type: string
+              description: 面向用户的中文提示（统一报错接入口 backend/internal/api/error_messages.go 映射）；英文原文记录在服务端 error 日志（slog api_error）
     YakEngineStatus:
       type: object
       required: [configured, path, version, download]
