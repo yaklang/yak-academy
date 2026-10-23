@@ -4,6 +4,8 @@
 //   active=false = 6 个月未登录（最近登录或注册超 6 个月）的不活跃账号；
 //   no_solves=true = 从未完成过题目（无判定通过的提交）。
 // 过滤条件与表格内标记（活跃/完成过题目）同口径，由服务端统一判定。
+// 行内操作「重置密码」：管理员直接设新密码（不校验旧密码），目标用户全部
+// 已登录会话立即失效——未绑定手机号的竞赛批量账号走此入口找回。
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi, type AdminUserItem } from '../../api'
@@ -13,6 +15,12 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
+
+// 重置密码对话框：目标用户 + 新密码（预填平台批量建号同款初始密码 123456，可改）。
+const resetVisible = ref(false)
+const resetTarget = ref<AdminUserItem | null>(null)
+const resetPassword = ref('123456')
+const resetting = ref(false)
 
 // 过滤状态：q/role/active/noSolves。active/noSolves 用 '' | 'true' | 'false' 三态。
 const q = ref('')
@@ -53,6 +61,30 @@ function filterStaleNoSolves() {
 
 function fmt(ts: string | null | undefined) {
   return ts ? new Date(ts).toLocaleString() : '-'
+}
+
+function openReset(row: AdminUserItem) {
+  resetTarget.value = row
+  resetPassword.value = '123456'
+  resetVisible.value = true
+}
+
+async function confirmReset() {
+  if (!resetTarget.value) return
+  if (resetPassword.value.length < 6) {
+    ElMessage.warning('新密码至少 6 位')
+    return
+  }
+  resetting.value = true
+  try {
+    await adminApi.resetPassword(resetTarget.value.id, resetPassword.value)
+    ElMessage.success(`已重置 ${resetTarget.value.username} 的密码，其登录状态已全部失效`)
+    resetVisible.value = false
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    resetting.value = false
+  }
 }
 
 onMounted(load)
@@ -118,6 +150,11 @@ onMounted(load)
       <el-table-column label="注册时间" width="160">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
       </el-table-column>
+      <el-table-column label="操作" width="110" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="openReset(row)">重置密码</el-button>
+        </template>
+      </el-table-column>
     </el-table>
     <el-pagination
       background
@@ -129,6 +166,27 @@ onMounted(load)
       class="pager"
     />
   </el-card>
+
+  <!-- 管理员重置密码：不校验旧密码，重置后该用户全部已登录会话立即失效。
+       默认填平台批量建号同款初始密码 123456，可改。 -->
+  <el-dialog v-model="resetVisible" title="重置密码" width="420px">
+    <template v-if="resetTarget">
+      <p class="reset-who">
+        目标账号：<b>{{ resetTarget.username }}</b>
+        <code v-if="resetTarget.account_code">{{ resetTarget.account_code }}</code>
+      </p>
+      <el-form @submit.prevent="confirmReset">
+        <el-form-item label="新密码">
+          <el-input v-model="resetPassword" type="password" show-password placeholder="至少 6 位" />
+        </el-form-item>
+        <p class="hint">重置后该用户的全部登录状态立即失效，需用新密码重新登录。</p>
+      </el-form>
+    </template>
+    <template #footer>
+      <el-button @click="resetVisible = false">取消</el-button>
+      <el-button type="primary" :loading="resetting" @click="confirmReset">重置</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -137,4 +195,6 @@ onMounted(load)
 .q-input { width: 260px; }
 .sel { width: 200px; }
 .pager { margin-top: 1rem; }
+.reset-who { font-size: 0.92rem; }
+.reset-who code { margin-left: 0.5rem; color: var(--el-text-color-secondary); }
 </style>
