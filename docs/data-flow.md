@@ -179,22 +179,39 @@ FE(未登录)         API                register SVC          repo            D
 
 ```
 FE(admin)          API                competition SVC        repo            DB
-   │  POST /admin/competitions {name, start, end}            │               │
-   ├─────────────────────────────────→│ 校验(起止/名称) → 落库 ─────────────→│ Competition
+   │  POST /admin/competitions {name, kind, start, end}      │               │
+   ├─────────────────────────────────→│ 校验(起止/名称/kind 二选一，创建后   │
+   │                                  │ 不可改) → 落库 ─────────────────────→│ Competition
    │  绑题 POST .../challenges {slugs|JSON}                   │               │
    ├─────────────────────────────────→│ JSON 走 content 管线导入后绑定；      │
    │                                  │ running 禁止解绑（保榜单现场）         │
-   │  导入参赛者 POST .../participants {teams|users}          │               │
-   ├─────────────────────────────────→│ 用户不存在 → 自动建号(随机密码) ────→│ User
+   │  导入参赛者 POST .../participants {teams|individuals}    │               │
+   ├─────────────────────────────────→│ 仅邀请赛；条目=账号编码或用户名，       │
+   │                                  │ 只引用既有账号（不自动建号）；          │
+   │                                  │ 未命中 → missing[] 回报（不阻断）      │
    │                                  │ 每人生成唯一邀请码 ─────────────────→│ Participant
    │                                  │ 站内邀请邮件（失败仅标记可重发）─────→│ Mail
-   │   200 {created_accounts(仅本次), participants[]}          │               │
+   │   200 {participants[], missing[]} │                      │               │
+   │←─────────────────────────────────┤                      │               │
+   │  一键生成 POST .../generate-users {prefix, count,        │               │
+   │                                team_size, password}     │               │
+   ├─────────────────────────────────→│ 仅邀请赛；批量建号(默认密码 123456，  │
+   │                                  │ 编码统一分配)并导入为参赛者；          │
+   │                                  │ team_size>0 自动编入「第 n 队」──────→│ User/Team/Participant
+   │   200 {accounts[](初始密码仅本次), teams[], participants[]}               │
+   │←─────────────────────────────────┤                      │               │
+
+FE(学生)           API                competition SVC
+   │  竞赛广场 GET /competitions（仅公开赛，含本人报名状态）    │               │
+   │  报名 POST /competitions/{id}/register（幂等；邀请赛 422）│               │
+   ├─────────────────────────────────→│ 个人参赛（不投递邮件，报名即可入场）──→│ Participant
    │←─────────────────────────────────┤                      │               │
 
 FE(参赛者)         API middleware                competition SVC
    │  邮件邀请 → /competitions/enter/{id}?code=                │               │
-   │  POST /competitions/{id}/enter {code}     │              │               │
-   ├─────────────────────────────────→│ 仅 running 有效（scheduled/ended → 422）
+   │  POST /competitions/{id}/enter {code}     │              │
+   ├─────────────────────────────────→│ 邀请码或公开赛已报名免码；             │
+   │                                  │ 仅 running 有效（scheduled/ended → 422）
    │                                  │ Participant.entered_at 落库           │
    │   200 {locked:true}               │                                      │
    │←─────────────────────────────────┤                                      │
