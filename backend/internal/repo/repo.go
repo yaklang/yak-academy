@@ -16,8 +16,12 @@ type UserRepo interface {
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
 	// FindByPhone 注册手机号查重（自助注册）。调用前应保证 phone 非空。
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
+	// FindByAccountCode 账号编码查人（邀请赛表格导入解析编码引用）。
+	FindByAccountCode(ctx context.Context, code string) (*model.User, error)
 	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
+	// TouchLogin 记录最近登录时刻（不活跃用户判定基线；登录签发处 best-effort 调用）。
+	TouchLogin(ctx context.Context, id uint, t time.Time) error
 	// UpdatePassword 改密 + 同时推进 token 失效阈值（全量吊销已签发 token）。
 	UpdatePassword(ctx context.Context, id uint, passwordHash string, invalidBefore time.Time) error
 	// UpdateBio 更新账号简介（账号信息面板）。

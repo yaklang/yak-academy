@@ -38,6 +38,11 @@ type User struct {
 	Username     string     `gorm:"uniqueIndex;size:64" json:"username"`
 	PasswordHash string     `json:"-"`
 	GlobalRole   GlobalRole `gorm:"size:16;index" json:"global_role"`
+	// AccountCode 用户账号编码（学号式固定编码 YA{YY}-{NNNNN}，如 YA26-00042）：
+	// 管理端用户管理与邀请赛表格导入的稳定外部标识，与登录用户名解耦。
+	// 由 userRepo.Create 统一分配（同年序号 MAX+1），不参与登录鉴权。
+	// 唯一性排除空串：旧库回填前的空值行（NULL/''）互不冲突（同 phone 先例）。
+	AccountCode string `gorm:"size:16;index:idx_users_account_code,unique,where:account_code <> ''" json:"account_code"`
 	// Phone 注册手机号（自助注册凭据，唯一；竞赛导入建号可为空）。不参与登录。
 	// SQLite 唯一索引允许多个 NULL，但空串不空——竞赛批量建号的空 Phone 会撞唯一索引，
 	// 故唯一性排除空串（手机号已注册的查重由 service FindByPhone 兜住）。
@@ -49,7 +54,10 @@ type User struct {
 	// TokenInvalidBefore 改密/管理员重置后置为当时时刻：签发时间早于该值的
 	// token 一律拒绝（全量失效，无需逐个撤销）。零值 = 不失效。
 	TokenInvalidBefore time.Time `json:"-"`
-	CreatedAt          time.Time `json:"created_at"`
+	// LastLoginAt 最近一次签发登录 token 的时刻（登录/注册即登录都算）：
+	// 不活跃用户判定基线（6 个月未登录），best-effort 更新不阻塞登录。
+	LastLoginAt *time.Time `json:"last_login_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // Mail 站内邮件（只收不发）：用户收件箱，来源为系统投递（如竞赛邀请）。
