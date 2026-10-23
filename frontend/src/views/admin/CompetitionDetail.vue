@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// 管理面板：竞赛详情页。配置编辑 + 题目绑定/批量导入 + 参赛人员与队伍批量导入
-// （自动建号/邀请码/站内邀请邮件）+ 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
+// 管理面板：竞赛详情页。配置编辑 + 题目绑定/批量导入 + 参赛人员管理
+// （邀请赛：固定格式表格导入 / 一键生成账号并导出；公开赛：广场自助报名）
+// + 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
 // 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）；
 // 进行中的竞赛可手动结束，已结束的竞赛可重新配置起止时间再次开赛。
 import { computed, onMounted, ref } from 'vue'
@@ -8,12 +9,14 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminCompetitionApi,
+  KIND_LABELS,
   type AdminLabInstance,
   type ChallengeJSON,
   type CheatWarningItem,
   type Competition,
   type CompetitionDetail,
   type CompetitionParticipantItem,
+  type GenerateUsersResult,
   type ParticipantImportResult,
   type TeamLeaderboardEntry,
   type TrainingItem,
@@ -257,41 +260,96 @@ async function loadParticipants() {
   }
 }
 
+const invitational = computed(() => detail.value?.kind === 'invitational')
+
+// ---------- 固定格式表格导入（仅邀请赛） ----------
+// 条目 = 账号编码（YA26-00001）或用户名，引用既有账号；未命中的条目在导入
+// 结果 missing 中回报（不自动建号——补号走「一键生成账号」）。
+interface StagedTeam {
+  key: number
+  name: string
+  members: string[]
+}
 const showImport = ref(false)
 const importing = ref(false)
-const teamJSON = ref('')
-const individualNames = ref('')
+const importMode = ref<'individuals' | 'teams'>('individuals')
+const stagedIndividuals = ref<string[]>([])
+const stagedTeams = ref<StagedTeam[]>([])
+const teamSeq = ref(0)
 const importResult = ref<ParticipantImportResult | null>(null)
 const showResult = ref(false)
 
 function openImport() {
-  teamJSON.value = '[{"name": "一队", "members": ["alice", "bob"]}]'
-  individualNames.value = ''
+  importMode.value = 'individuals'
+  stagedIndividuals.value = []
+  stagedTeams.value = []
   showImport.value = true
 }
 
-async function submitImport() {
-  let teamsReq: { name: string; members: string[] }[] = []
-  if (teamJSON.value.trim()) {
-    try {
-      const parsed = JSON.parse(teamJSON.value)
-      if (!Array.isArray(parsed)) throw new Error('not array')
-      teamsReq = parsed
-    } catch {
-      ElMessage.warning('队伍 JSON 解析失败，应为 [{"name":"队伍名","members":["用户名",...]}]')
-      return
+// CSV 解析：中英文逗号均作分隔；首列为表头（账号/队伍等）的行跳过；
+// 个人名单每行取首列，队伍名单每行 = 队伍名,成员1,成员2,…。
+function parseCsvCells(line: string): string[] {
+  return line.split(/[,，]/).map((c) => c.trim()).filter(Boolean)
+}
+function isHeaderCell(cell: string): boolean {
+  return /^(账号|用户名|成员|参赛者|entry|account|username)$/i.test(cell)
+}
+function isHeaderRow(cells: string[]): boolean {
+  return cells.length > 0 && isHeaderCell(cells[0]) && cells.slice(1).every((c) => isHeaderCell(c) || !c)
+}
+
+async function onImportFile(file: File) {
+  const text = await file.text()
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const rows = lines.map((l) => parseCsvCells(l)).filter((cells) => cells.length)
+  if (rows.length && isHeaderRow(rows[0])) rows.shift()
+  if (importMode.value === 'individuals') {
+    const entries = rows.map((cells) => cells[0]).filter(Boolean)
+    const seen = new Set(stagedIndividuals.value)
+    for (const e of entries) if (!seen.has(e)) { stagedIndividuals.value.push(e); seen.add(e) }
+  } else {
+    const seen = new Set(stagedTeams.value.map((t) => t.name))
+    for (const cells of rows) {
+      const [name, ...members] = cells
+      if (!name || !members.length) continue
+      if (seen.has(name)) continue
+      stagedTeams.value.push({ key: teamSeq.value++, name, members })
+      seen.add(name)
     }
   }
-  const individuals = individualNames.value.split(/[\s,，;；]+/).filter(Boolean)
-  if (!teamsReq.length && !individuals.length) {
-    ElMessage.warning('请至少填写一支队伍或一名个人参赛者')
+  return false // 阻止 el-upload 默认上传行为
+}
+
+// 模板下载（带 BOM，Excel 直接打开不乱码）。
+function downloadTemplate(mode: 'individuals' | 'teams') {
+  const content =
+    mode === 'individuals'
+      ? '\uFEFF账号\nYA26-00001\nalice\n'
+      : '\uFEFF队伍,成员1,成员2\n一队,YA26-00001,alice\n二队,YA26-00002,bob\n'
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = mode === 'individuals' ? '参赛名单-个人.csv' : '参赛名单-队伍.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function removeStagedTeam(row: StagedTeam) {
+  stagedTeams.value = stagedTeams.value.filter((t) => t.key !== row.key)
+}
+
+async function submitImport() {
+  const teamsReq = stagedTeams.value.map((t) => ({ name: t.name, members: t.members }))
+  if (!teamsReq.length && !stagedIndividuals.value.length) {
+    ElMessage.warning('请先上传名单表格（每行一条：账号编码或用户名）')
     return
   }
   importing.value = true
   try {
     importResult.value = await adminCompetitionApi.importParticipants(compId, {
       teams: teamsReq,
-      individuals,
+      individuals: stagedIndividuals.value,
     })
     showImport.value = false
     showResult.value = true
@@ -301,6 +359,57 @@ async function submitImport() {
   } finally {
     importing.value = false
   }
+}
+
+// ---------- 一键生成账号（仅邀请赛） ----------
+const showGenerate = ref(false)
+const generating = ref(false)
+const genForm = ref({ prefix: '', count: 10, teamSize: 0, password: '' })
+const genResult = ref<GenerateUsersResult | null>(null)
+
+function openGenerate() {
+  genForm.value = { prefix: '', count: 10, teamSize: 0, password: '' }
+  genResult.value = null
+  showGenerate.value = true
+}
+
+async function submitGenerate() {
+  if (!genForm.value.prefix.trim()) {
+    ElMessage.warning('请填写用户名前缀（如 class26，生成 class26-01、class26-02…）')
+    return
+  }
+  generating.value = true
+  try {
+    genResult.value = await adminCompetitionApi.generateUsers(compId, {
+      prefix: genForm.value.prefix.trim(),
+      count: genForm.value.count,
+      team_size: genForm.value.teamSize,
+      password: genForm.value.password || undefined,
+    })
+    await Promise.all([loadParticipants(), loadDetail()])
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    generating.value = false
+  }
+}
+
+// 导出生成账号（username,账号编码,初始密码,队伍；Excel 友好带 BOM）。
+// 复用既有账号 initial_password 为空（沿用原密码）。
+function exportGeneratedCsv() {
+  if (!genResult.value) return
+  const teamOf = new Map(genResult.value.participants.map((p) => [p.username, p.team_name ?? '']))
+  const lines = ['\uFEFF用户名,账号编码,初始密码,队伍']
+  for (const a of genResult.value.accounts) {
+    lines.push(`${a.username},${a.account_code},${a.initial_password ?? ''},${teamOf.get(a.username) ?? ''}`)
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `参赛账号-${genForm.value.prefix.trim()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // ---------- 容器 ----------
@@ -453,6 +562,9 @@ onMounted(async () => {
     <div class="head">
       <h2>
         {{ detail?.name ?? '竞赛详情' }}
+        <el-tag v-if="detail" :type="detail.kind === 'public' ? 'success' : 'warning'" size="small">
+          {{ KIND_LABELS[detail.kind] }}
+        </el-tag>
         <el-tag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</el-tag>
       </h2>
       <router-link to="/admin/panel/competitions"><el-button size="small">← 返回列表</el-button></router-link>
@@ -550,10 +662,21 @@ onMounted(async () => {
           <template #header>
             <div class="card-head">
               <span>参赛人员</span>
-              <el-button type="primary" size="small" @click="openImport">批量导入队伍 / 人员</el-button>
+              <div v-if="invitational">
+                <el-button size="small" @click="openGenerate">一键生成账号</el-button>
+                <el-button type="primary" size="small" @click="openImport">表格导入队伍 / 人员</el-button>
+              </div>
             </div>
           </template>
-          <el-table :data="participants" v-loading="partLoading" empty-text="尚未导入参赛人员">
+          <el-alert
+            v-if="!invitational"
+            type="info"
+            :closable="false"
+            class="block"
+            title="公开赛无需导入参赛者"
+            description="公开赛展示在竞赛广场，用户自助报名；已报名者开赛后免邀请码直接入场。"
+          />
+          <el-table :data="participants" v-loading="partLoading" empty-text="尚无参赛人员">
             <el-table-column prop="username" label="用户" width="130" />
             <el-table-column label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
@@ -795,40 +918,85 @@ onMounted(async () => {
     </template>
   </el-dialog>
 
-  <!-- 参赛人员批量导入 -->
-  <el-dialog v-model="showImport" title="批量导入队伍 / 参赛人员" width="680px">
+  <!-- 参赛人员表格导入（固定格式 CSV；仅邀请赛） -->
+  <el-dialog v-model="showImport" title="表格导入队伍 / 参赛人员" width="720px">
     <p class="dim">
-      成员按用户名引用，不存在的用户自动创建（随机初始密码，导入结果中显示一次）。每人生成唯一邀请码并投递站内邀请邮件。
+      条目 = 账号编码（YA26-00001）或用户名，引用既有账号（不自动建号，缺失条目在导入结果中列出——
+      可用「一键生成账号」补号后重导）。每人生成唯一邀请码并投递站内邀请邮件。
     </p>
-    <el-form label-width="90px">
-      <el-form-item label="队伍 JSON">
-        <el-input v-model="teamJSON" type="textarea" :rows="6" />
-      </el-form-item>
-      <el-form-item label="个人参赛">
-        <el-input v-model="individualNames" type="textarea" :rows="2" placeholder="用户名，逗号或换行分隔（可留空）" />
-      </el-form-item>
-    </el-form>
+    <el-radio-group v-model="importMode" class="bind-mode">
+      <el-radio-button value="individuals">个人名单</el-radio-button>
+      <el-radio-button value="teams">队伍名单</el-radio-button>
+    </el-radio-group>
+    <div class="stage-actions">
+      <div class="tpl-row">
+        <el-upload accept=".csv,text/csv" :show-file-list="false" :before-upload="onImportFile" :disabled="importing">
+          <el-button size="small">选择 CSV 文件</el-button>
+        </el-upload>
+        <el-button size="small" link type="primary" @click="downloadTemplate(importMode)">下载模板</el-button>
+        <span class="dim tpl-hint">
+          {{ importMode === 'individuals' ? '每行一条：账号编码或用户名' : '每行：队伍名,成员1,成员2,…（成员 = 账号编码或用户名）' }}
+        </span>
+      </div>
+    </div>
+    <template v-if="importMode === 'individuals'">
+      <el-table v-if="stagedIndividuals.length" :data="stagedIndividuals.map((v, i) => ({ i, v }))" size="small" max-height="240">
+        <el-table-column label="序号" width="70">
+          <template #default="{ row }">{{ row.i + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="条目（账号编码或用户名）">
+          <template #default="{ row }">
+            <code>{{ row.v }}</code>
+            <el-button size="small" type="danger" link class="stage-del" @click="stagedIndividuals.splice(row.i, 1)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <p v-else class="dim">尚未解析到条目：选择 CSV 文件后在此列出，可反复上传合并。</p>
+    </template>
+    <template v-else>
+      <el-table v-if="stagedTeams.length" :data="stagedTeams" size="small" max-height="240">
+        <el-table-column prop="name" label="队伍" width="140" />
+        <el-table-column label="成员">
+          <template #default="{ row }">
+            <code v-for="m in row.members" :key="m" class="member-chip">{{ m }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button size="small" type="danger" link @click="removeStagedTeam(row)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <p v-else class="dim">尚未解析到队伍：选择 CSV 文件后在此列出，可反复上传合并。</p>
+    </template>
     <template #footer>
       <el-button @click="showImport = false">取消</el-button>
-      <el-button type="primary" :loading="importing" @click="submitImport">导入</el-button>
+      <el-button
+        type="primary"
+        :loading="importing"
+        :disabled="!stagedIndividuals.length && !stagedTeams.length"
+        @click="submitImport"
+      >
+        导入{{ stagedTeams.length ? `（${stagedTeams.length} 队` : '' }}{{ stagedTeams.length && stagedIndividuals.length ? ' + ' : '' }}{{ stagedIndividuals.length ? `${stagedIndividuals.length} 人` : '' }}）
+      </el-button>
     </template>
   </el-dialog>
 
   <!-- 导入结果 -->
-  <el-dialog v-model="showResult" title="导入结果" width="720px">
+  <el-dialog v-model="showResult" title="导入结果" width="760px">
     <el-alert
-      v-if="importResult && importResult.created_accounts.length"
+      v-if="importResult && importResult.missing.length"
       type="warning"
       :closable="false"
       class="block"
-      title="以下账号为自动创建，初始密码仅本次显示，请立即分发给参赛者。"
+      :title="`以下 ${importResult.missing.length} 个条目未匹配到账号（账号编码与用户名均未命中），未导入：`"
+      :description="importResult.missing.join('、') + '。可修正条目重导，或先用「一键生成账号」补号。'"
     />
-    <el-table v-if="importResult" :data="importResult.created_accounts" class="block" empty-text="本次无新建账号">
-      <el-table-column prop="username" label="新建账号" width="160" />
-      <el-table-column prop="initial_password" label="初始密码" min-width="180" />
-    </el-table>
     <el-table v-if="importResult" :data="importResult.participants" empty-text="无参赛者">
       <el-table-column prop="username" label="参赛者" width="130" />
+      <el-table-column prop="account_code" label="账号编码" width="130">
+        <template #default="{ row }"><code>{{ row.account_code || '-' }}</code></template>
+      </el-table-column>
       <el-table-column label="队伍" width="140">
         <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
       </el-table-column>
@@ -843,6 +1011,61 @@ onMounted(async () => {
     </el-table>
     <template #footer>
       <el-button @click="showResult = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 一键生成账号（仅邀请赛） -->
+  <el-dialog v-model="showGenerate" title="一键生成参赛账号" width="680px">
+    <template v-if="!genResult">
+      <p class="dim">
+        按前缀批量生成账号（用户名 = 前缀-零填充序号，如 class26-01…class26-10）并全部导入为本场参赛者；
+        可配置自动组队（按生成顺序每 N 人一队，余数进最后一队）。初始密码默认 123456。
+      </p>
+      <el-form label-width="90px">
+        <el-form-item label="用户名前缀" required>
+          <el-input v-model="genForm.prefix" placeholder="如 class26（1-16 位小写字母/数字/连字符）" />
+        </el-form-item>
+        <el-form-item label="生成数量" required>
+          <el-input-number v-model="genForm.count" :min="1" :max="500" />
+        </el-form-item>
+        <el-form-item label="每队人数">
+          <el-input-number v-model="genForm.teamSize" :min="0" :max="10" />
+          <div class="dim">0 = 不组队（个人参赛）；&gt;0 = 自动编入「第 N 队」</div>
+        </el-form-item>
+        <el-form-item label="初始密码">
+          <el-input v-model="genForm.password" placeholder="留空 = 默认 123456" clearable />
+        </el-form-item>
+      </el-form>
+      <p class="dim">同名既有账号复用（沿用原密码），新建账号的初始密码仅在生成结果中显示，请导出后立即分发。</p>
+    </template>
+    <template v-else>
+      <el-alert type="success" :closable="false" class="block"
+        :title="`生成完成：新建 ${genResult.accounts.filter((a) => a.created).length} 个账号、复用 ${genResult.accounts.filter((a) => !a.created).length} 个既有账号${genResult.teams.length ? `，编入 ${genResult.teams.length} 支队伍` : ''}。`" />
+      <el-table :data="genResult.accounts" size="small" max-height="320">
+        <el-table-column prop="username" label="用户名" width="140" />
+        <el-table-column prop="account_code" label="账号编码" width="130">
+          <template #default="{ row }"><code>{{ row.account_code }}</code></template>
+        </el-table-column>
+        <el-table-column label="初始密码" width="140">
+          <template #default="{ row }"><code>{{ row.initial_password ?? '（复用既有账号，沿用原密码）' }}</code></template>
+        </el-table-column>
+        <el-table-column label="队伍" min-width="120">
+          <template #default="{ row }">
+            {{ genResult.participants.find((p) => p.username === row.username)?.team_name ?? '（个人）' }}
+          </template>
+        </el-table-column>
+      </el-table>
+    </template>
+    <template #footer>
+      <template v-if="!genResult">
+        <el-button @click="showGenerate = false">取消</el-button>
+        <el-button type="primary" :loading="generating" @click="submitGenerate">生成并导入</el-button>
+      </template>
+      <template v-else>
+        <el-button @click="showGenerate = false">关闭</el-button>
+        <el-button type="primary" @click="exportGeneratedCsv">导出账号 CSV</el-button>
+        <el-button @click="genResult = null">再生成一批</el-button>
+      </template>
     </template>
   </el-dialog>
 
@@ -886,6 +1109,13 @@ onMounted(async () => {
 .dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
 .pager { margin-top: 1rem; }
 .bind-mode { margin-bottom: 0.8rem; }
+.tpl-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.tpl-hint { margin: 0; }
+.stage-del { margin-left: 0.8rem; }
+.member-chip {
+  display: inline-block; margin: 0 0.4rem 0.3rem 0; padding: 0 0.4rem;
+  background: var(--el-fill-color-light); border-radius: 3px;
+}
 .stage-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.8rem; }
 .stage-actions .el-button { margin-left: 0; }
 .stage-table { margin-bottom: 0.4rem; }

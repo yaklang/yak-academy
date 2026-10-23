@@ -55,7 +55,8 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
 
     await loginAsAdmin(page)
     await page.goto(`/admin/panel/competitions/${comp.id}`)
-    const statusTag = page.locator('h2 .el-tag')
+    // 详情标题含赛制 + 状态两枚 tag（竞赛分公开/邀请两档引入），按文案锚定状态。
+    const statusTag = page.locator('h2 .el-tag', { hasText: '已结束' })
     await expect(statusTag).toHaveText('已结束', { timeout: 15_000 })
 
     // 修复前：已结束竞赛的开始时间输入框仍禁用（红）
@@ -71,6 +72,6 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
     await endInput.press('Enter')
     await page.getByRole('button', { name: '保存配置' }).click()
     await expect(page.locator('.el-message', { hasText: '配置已保存' })).toBeVisible()
-    await expect(statusTag).toHaveText('未开始')
+    await expect(page.locator('h2 .el-tag', { hasText: '未开始' })).toHaveText('未开始')
   })
 })

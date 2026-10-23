@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 管理端布局：教程 | 题库 | 资源管理 三组导航（资源管理含教程管理、题目管理、
-// 容器管理、竞赛管理——教程与题目是两类独立上传资源）。
-// 用户与角色不再提供管理页：两档角色模型下角色是账号固有属性，
-// 管理员建号入口在竞赛「导入参赛者」（自动建号+初始密码）。
+// 容器管理、竞赛管理、用户管理——教程与题目是两类独立上传资源）。
+// 用户管理为只读画像表格（过滤/搜索/不活跃标记）；建号入口在邀请赛
+// 「一键生成账号」与自助注册，角色为账号固有属性（两档模型）。
 // 改密码在账号信息面板（/profile）。底部提供"返回普通端"入口。
 // 教程/题库与管理端预览共用普通端视图。
 import { useAuthStore } from '../stores/auth'
@@ -31,6 +31,7 @@ function logout() {
         <router-link to="/admin/panel/backups" class="sub">备份管理</router-link>
         <router-link to="/admin/panel/audit-logs" class="sub">操作审计</router-link>
         <router-link to="/admin/panel/competitions" class="sub">竞赛管理</router-link>
+        <router-link to="/admin/panel/users" class="sub">用户管理</router-link>
       </nav>
       <div class="side-footer">
         <div>

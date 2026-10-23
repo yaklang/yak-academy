@@ -5,7 +5,7 @@
 // （end_time 置为当前时刻），已结束的竞赛可在详情页重新配置再次开赛。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { adminCompetitionApi, type Competition } from '../../api'
+import { adminCompetitionApi, KIND_LABELS, type Competition, type CompetitionKind } from '../../api'
 
 const items = ref<Competition[]>([])
 const total = ref(0)
@@ -15,10 +15,15 @@ const loading = ref(false)
 
 const showCreate = ref(false)
 const creating = ref(false)
-const form = ref({ name: '', description: '', range: null as [Date, Date] | null })
+const form = ref({
+  name: '',
+  description: '',
+  kind: 'invitational' as CompetitionKind,
+  range: null as [Date, Date] | null,
+})
 
 function openCreate() {
-  form.value = { name: '', description: '', range: null }
+  form.value = { name: '', description: '', kind: 'invitational', range: null }
   showCreate.value = true
 }
 
@@ -46,6 +51,7 @@ async function submitCreate() {
       description: form.value.description,
       start_time: startTime,
       end_time: endTime,
+      kind: form.value.kind,
     })
     ElMessage.success('竞赛已创建')
     showCreate.value = false
@@ -156,6 +162,13 @@ onMounted(load)
     <el-table :data="items" v-loading="loading" empty-text="暂无竞赛">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="name" label="名称" min-width="160" />
+      <el-table-column label="赛制" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.kind === 'public' ? 'success' : 'warning'" size="small">
+            {{ KIND_LABELS[row.kind as CompetitionKind] }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
@@ -209,6 +222,13 @@ onMounted(load)
       <el-form-item label="竞赛说明">
         <el-input v-model="form.description" type="textarea" :rows="3" placeholder="展示给参赛者的说明（Markdown，可选）" />
       </el-form-item>
+      <el-form-item label="赛制" required>
+        <el-radio-group v-model="form.kind">
+          <el-radio value="invitational">邀请赛（定向导入/生成参赛者，凭邀请码入场）</el-radio>
+          <el-radio value="public">公开赛（竞赛广场自助报名，已报名者免码入场）</el-radio>
+        </el-radio-group>
+        <div class="dim">赛制创建后不可更改。</div>
+      </el-form-item>
       <el-form-item label="起止时间" required>
         <el-date-picker
           v-model="form.range"
@@ -228,6 +248,7 @@ onMounted(load)
 
 <style scoped>
 .hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; margin-top: 4px; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 .pager { margin-top: 1rem; }

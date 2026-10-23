@@ -2,7 +2,18 @@
 import { http } from './client'
 
 export interface TokenResponse { token: string; expires_at: string }
-export interface User { id: number; username: string; global_role: 'student' | 'admin' }
+// account_code：学号式账号编码（YA{YY}-{NNNNN}，建号时按年分配；旧库迁移行可能为空串）。
+// last_login_at：最近登录（从未登录为 null；管理端不活跃判定 = 最近登录或注册超 6 个月）。
+export interface User {
+  id: number
+  username: string
+  global_role: 'student' | 'admin'
+  account_code: string
+  phone: string
+  bio: string
+  last_login_at: string | null
+  created_at: string
+}
 
 export interface Topic { slug: string; title: string; summary: string; room_count: number }
 export interface Room {
@@ -238,10 +249,34 @@ export interface ContentVersion {
 // 删除内容包的结果（教程内容连带移除，事件历史按 append-only 保留）。
 export interface PackageDeleteResult { deleted: boolean; topics: number; rooms: number }
 
-// 用户与角色管理页已下线（两档模型角色为账号固有属性，无独立管理入口），
-// 但管理 API 保留：竞赛「导入参赛者」建号、E2E 账号生命周期重置密码仍走这些接口。
+// 管理端用户列表条目：用户行 + 画像标记（active = 最近登录或注册在 6 个月内；
+// solved_any = 存在判定通过的提交）。过滤条件与标记同口径。
+export interface AdminUserItem extends User {
+  active: boolean
+  solved_any: boolean
+}
+
+// 用户列表过滤（GET /admin/users）：全部可选，零值 = 不过滤。
+export interface AdminUserQuery {
+  page?: number
+  q?: string
+  role?: 'student' | 'admin'
+  active?: boolean
+  no_solves?: boolean
+}
+
+// 用户管理页（表格 + 过滤/搜索；建号入口在邀请赛导入/一键生成与自助注册）。
 export const adminApi = {
-  listUsers: (page = 1) => http.get<Paged<User>>(`/admin/users?page=${page}`),
+  listUsers: (query: AdminUserQuery = {}) => {
+    const params = new URLSearchParams()
+    if (query.page) params.set('page', String(query.page))
+    if (query.q) params.set('q', query.q)
+    if (query.role) params.set('role', query.role)
+    if (query.active !== undefined) params.set('active', String(query.active))
+    if (query.no_solves !== undefined) params.set('no_solves', String(query.no_solves))
+    const qs = params.toString()
+    return http.get<Paged<AdminUserItem>>(`/admin/users${qs ? `?${qs}` : ''}`)
+  },
   createUser: (username: string, password: string, globalRole: string) =>
     http.post<User>('/admin/users', { username, password, global_role: globalRole }),
   updateRoles: (id: number, globalRole: string) =>
@@ -597,6 +632,13 @@ export function downloadAttachment(slug: string, filename: string) {
 // --- 竞赛域（管理端 + 参赛者） ---
 
 export type CompetitionStatus = 'scheduled' | 'running' | 'ended'
+// 赛制：public = 公开赛（竞赛广场可见，自助报名，已报名者免邀请码入场）；
+// invitational = 邀请赛（定向导入/生成参赛者，凭邀请码入场）。创建后不可更改。
+export type CompetitionKind = 'public' | 'invitational'
+export const KIND_LABELS: Record<CompetitionKind, string> = {
+  public: '公开赛',
+  invitational: '邀请赛',
+}
 export interface Competition {
   id: number
   name: string
@@ -604,6 +646,7 @@ export interface Competition {
   start_time: string
   end_time: string
   status: CompetitionStatus
+  kind: CompetitionKind
   created_at: string
 }
 export interface CompetitionDetail extends Competition {
@@ -683,14 +726,54 @@ export interface LeaderboardResp {
   mode: 'team' | 'individual'
   items: TeamLeaderboardEntry[]
 }
-// 批量导入请求：队伍（成员按用户名，缺失自动建号）+ 个人参赛者。
+// 批量导入请求（仅邀请赛）：队伍 + 个人参赛者。条目按「账号编码或用户名」
+// 引用既有账号，不自动建号——缺失条目在响应 missing 回报（补号走一键生成）。
 export interface ParticipantImportRequest {
   teams?: { name: string; members: string[] }[]
   individuals?: string[]
 }
+export interface InvitedParticipant {
+  username: string
+  account_code: string
+  team_name: string | null
+  invite_code: string
+  mail_delivered: boolean
+}
 export interface ParticipantImportResult {
-  created_accounts: { username: string; initial_password: string }[]
-  participants: { username: string; team_name: string | null; invite_code: string; mail_delivered: boolean }[]
+  participants: InvitedParticipant[]
+  // 未匹配到账号的条目原文（账号编码与用户名均未命中），排序返回。
+  missing: string[]
+}
+// 一键生成参赛账号（仅邀请赛）：用户名 = 前缀-零填充序号，可配置自动组队
+// 与初始密码（默认 123456）。initial_password 仅新建账号返回，供导出分发；
+// 复用既有同名账号为 null（沿用原密码）。
+export interface GenerateUsersRequest {
+  prefix: string
+  count: number
+  team_size?: number
+  password?: string
+}
+export interface GeneratedAccount {
+  username: string
+  account_code: string
+  initial_password: string | null
+  created: boolean
+}
+export interface GenerateUsersResult {
+  accounts: GeneratedAccount[]
+  teams: string[]
+  participants: InvitedParticipant[]
+}
+// 竞赛广场条目（仅公开赛；含当前用户报名状态与报名人数）。
+export interface PublicCompetitionItem {
+  id: number
+  name: string
+  description: string
+  start_time: string
+  end_time: string
+  status: CompetitionStatus
+  registered: boolean
+  participants: number
 }
 export interface MyCompetitionEntry {
   competition: Competition | null
@@ -711,7 +794,7 @@ export interface CompetitionHomeView {
 export const adminCompetitionApi = {
   list: (page = 1, pageSize = 20) =>
     http.get<Paged<Competition>>(`/admin/competitions?page=${page}&page_size=${pageSize}`),
-  create: (body: { name: string; description?: string; start_time: string; end_time: string }) =>
+  create: (body: { name: string; description?: string; start_time: string; end_time: string; kind: CompetitionKind }) =>
     http.post<Competition>('/admin/competitions', body),
   detail: (id: number) => http.get<CompetitionDetail>(`/admin/competitions/${id}`),
   update: (id: number, body: { name?: string; description?: string; start_time?: string; end_time?: string }) =>
@@ -732,6 +815,9 @@ export const adminCompetitionApi = {
       `/admin/competitions/${id}/participants?page=${page}&page_size=${pageSize}`),
   importParticipants: (id: number, body: ParticipantImportRequest) =>
     http.post<ParticipantImportResult>(`/admin/competitions/${id}/participants`, body),
+  // 一键生成参赛账号（仅邀请赛）：生成 + 自动组队 + 导入参赛者一步完成。
+  generateUsers: (id: number, body: GenerateUsersRequest) =>
+    http.post<GenerateUsersResult>(`/admin/competitions/${id}/generate-users`, body),
   instances: (id: number, page = 1, pageSize = 20) =>
     http.get<Paged<AdminLabInstance>>(`/admin/competitions/${id}/instances?page=${page}&page_size=${pageSize}`),
   warnings: (id: number) =>
@@ -746,9 +832,15 @@ export const adminCompetitionApi = {
 
 // 竞赛参赛（学生端）。
 export const competitionApi = {
+  // 竞赛广场：分页列出公开赛（含当前用户报名状态）；邀请赛不出现在广场。
+  plaza: (page = 1, pageSize = 20) =>
+    http.get<Paged<PublicCompetitionItem>>(`/competitions?page=${page}&page_size=${pageSize}`),
+  // 公开赛自助报名（幂等；个人参赛，不投递邀请邮件——报名即入场资格）。
+  register: (id: number) => http.post<PublicCompetitionItem>(`/competitions/${id}/register`),
   myEntry: () => http.get<MyCompetitionEntry>('/competitions/me'),
-  enter: (id: number, inviteCode: string) =>
-    http.post<MyCompetitionEntry>(`/competitions/${id}/enter`, { invite_code: inviteCode }),
+  // 入场：邀请码入场（两档通用）；公开赛已报名者可省略邀请码。
+  enter: (id: number, inviteCode?: string) =>
+    http.post<MyCompetitionEntry>(`/competitions/${id}/enter`, inviteCode ? { invite_code: inviteCode } : {}),
   view: (id: number) => http.get<CompetitionHomeView>(`/competitions/${id}/view`),
   startInstance: (id: number, slug: string) =>
     http.post<LabInstance>(`/competitions/${id}/challenges/${slug}/instance`),
