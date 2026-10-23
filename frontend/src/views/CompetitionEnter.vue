@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // 竞赛入场页（满屏独立布局，不在 StudentLayout 内）。
-// 参赛者从站内邀请邮件跳转至此（带 competition_id + invite_code 预填），
-// 显式输入邀请码入场 —— 入场后平台其余入口锁定，直到比赛结束。
+// 邀请赛参赛者从站内邀请邮件跳转至此（带 competition_id + invite_code 预填），
+// 显式输入邀请码入场；公开赛已报名者可留空邀请码直接入场
+// （报名入口在竞赛广场 /competitions）。
+// 入场后平台其余入口锁定，直到比赛结束。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -36,13 +38,10 @@ async function load() {
 }
 
 async function enter() {
-  if (!code.value.trim()) {
-    ElMessage.warning('请输入邀请码（见站内邀请邮件）')
-    return
-  }
+  // 邀请码可留空：公开赛已报名者免码入场（未报名/邀请赛无码由后端报错提示）。
   entering.value = true
   try {
-    const entry = await competitionApi.enter(compId, code.value.trim())
+    const entry = await competitionApi.enter(compId, code.value.trim() || undefined)
     if (!entry.locked || !entry.competition) {
       loadFailed.value = '入场失败：竞赛可能已结束'
       return
@@ -64,9 +63,12 @@ onMounted(load)
   <div class="enter-page">
     <el-card shadow="never" class="enter-card">
       <h2>{{ title }}</h2>
-      <p class="dim">凭邀请码入场（邀请码在站内邮箱的竞赛邀请邮件中）。</p>
+      <p class="dim">
+        凭邀请码入场（邀请码在站内邮箱的竞赛邀请邮件中）；
+        公开赛已报名者可留空邀请码直接进入。
+      </p>
       <el-form label-position="top" @submit.prevent="enter">
-        <el-form-item label="邀请码">
+        <el-form-item label="邀请码（公开赛已报名可留空）">
           <el-input v-model="code" placeholder="邀请码" size="large" @keyup.enter="enter" />
         </el-form-item>
         <el-button type="primary" size="large" :loading="entering" class="enter-btn" @click="enter">
@@ -81,9 +83,11 @@ onMounted(load)
       />
       <p v-if="loadFailed" class="dim">{{ loadFailed }}</p>
       <p class="dim">
-        还没有邀请邮件？请先到
+        还没有邀请邮件？邀请赛参赛者请到
         <router-link to="/mailbox">站内邮箱</router-link>
-        查收竞赛邀请。
+        查收竞赛邀请；公开赛可先到
+        <router-link to="/competitions">竞赛广场</router-link>
+        报名。
       </p>
     </el-card>
   </div>

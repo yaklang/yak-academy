@@ -29,6 +29,8 @@ const router = createRouter({
         { path: 'training/:challengeSlug', name: 'challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
         // 徽章（计算型读模型视图）
         { path: 'badges', name: 'badges', component: () => import('../views/Badges.vue') },
+        // 竞赛广场（公开赛列表 + 自助报名；邀请赛凭邀请码从邮件入场，不经此页）
+        { path: 'competitions', name: 'competitions', component: () => import('../views/Competitions.vue') },
         // 次级页面（不进主导航）
         { path: 'leaderboard', name: 'leaderboard', component: () => import('../views/Leaderboard.vue') },
         // 账号信息面板 + 站内邮箱（次级页面，入口在头部用户区）
@@ -49,14 +51,16 @@ const router = createRouter({
         // 题库板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 资源管理（教程管理 / 题目管理 + 容器、竞赛）。
-        // 用户与角色不再提供管理页（两档模型下角色为账号固有属性；建号入口在竞赛导入参赛者）。
+        // 资源管理（教程管理 / 题目管理 + 容器、竞赛、用户管理）。
+        // 用户管理为只读画像表格（过滤/搜索/不活跃标记）；建号入口在邀请赛
+        // 导入/一键生成与自助注册，角色为账号固有属性。
         { path: 'panel', redirect: '/admin/panel/tutorials' },
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
         { path: 'panel/backups', name: 'admin-backups', component: () => import('../views/admin/Backups.vue') },
         { path: 'panel/audit-logs', name: 'admin-audit-logs', component: () => import('../views/admin/AuditLogs.vue') },
+        { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
         { path: 'panel/competitions', name: 'admin-competitions', component: () => import('../views/admin/Competitions.vue') },
         {
           path: 'panel/competitions/:id',

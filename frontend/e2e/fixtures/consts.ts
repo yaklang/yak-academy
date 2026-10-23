@@ -38,6 +38,10 @@ export const E2E = {
     reloginName: 'E2E 重登仍锁赛',
     manualEndName: 'E2E 手动结束赛',
     reviveName: 'E2E 结束重排赛',
+    // 公开赛/邀请赛分档旅程（competition-public / competition-invitational-generate）
+    publicName: 'E2E 公开广场赛',
+    hiddenName: 'E2E 广场隐藏邀请赛',
+    generateName: 'E2E 一键生成赛',
   },
   // 删除旅程专用包（独立 slug，避免与 e2e-test 种子冲突）：
   // spec 内经 UI 上传→发布→删除，验证两侧消失。

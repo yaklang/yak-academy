@@ -76,6 +76,7 @@ function logout() {
           <router-link to="/" exact-active-class="main-nav-exact">教程</router-link>
           <router-link to="/training" exact-active-class="main-nav-exact">题库</router-link>
           <router-link to="/leaderboard" exact-active-class="main-nav-exact">排行榜</router-link>
+          <router-link to="/competitions" exact-active-class="main-nav-exact">竞赛</router-link>
         </nav>
         <div class="spacer" />
         <div v-if="xp !== null" class="chips" title="事件派生的 Progress：已完成 / 进行中的教程 Room">
