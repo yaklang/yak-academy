@@ -55,7 +55,7 @@ func newCheckpointTestEnv(t *testing.T) (*Router, *gorm.DB, *service.EnvService)
 	badges := service.NewBadgeService(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb))
 	auth := service.NewAuthService(repo.NewUserRepo(gdb), "test-secret")
 	router := NewRouter(auth)
-	NewHandlers(auth, nil, nil, judge, nil, nil, envSvc, badges, nil, nil, nil, nil, false).Register(router)
+	NewHandlers(auth, nil, nil, judge, nil, nil, envSvc, badges, nil, nil, nil, nil, nil, false).Register(router)
 	return router, gdb, envSvc
 }
 

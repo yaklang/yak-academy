@@ -380,6 +380,31 @@ export const adminBackupApi = {
   download: (name: string) => http.download(`/admin/backups/${encodeURIComponent(name)}`),
 }
 
+// 管理操作审计（ops 硬化）：append-only 审计行，与 Event 学生行为流分工。
+export interface AdminAuditLog {
+  id: number
+  admin_id: number
+  admin_name: string
+  action: string
+  target_type: string
+  target_id: string
+  detail: Record<string, unknown> | null
+  ip: string
+  created_at: string
+}
+
+export const auditApi = {
+  list: (params: { page?: number; page_size?: number; action?: string; admin_id?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.page) q.set('page', String(params.page))
+    if (params.page_size) q.set('page_size', String(params.page_size))
+    if (params.action) q.set('action', params.action)
+    if (params.admin_id) q.set('admin_id', String(params.admin_id))
+    const qs = q.toString()
+    return http.get<Paged<AdminAuditLog>>(`/admin/audit-logs${qs ? `?${qs}` : ''}`)
+  },
+}
+
 export const progressApi = {
   mine: () => http.get<{ xp: number; completed_rooms: number; in_progress_rooms: number }>('/progress'),
   leaderboard: (page = 1) => http.get<Paged<LeaderboardEntry>>(`/leaderboard?page=${page}`),

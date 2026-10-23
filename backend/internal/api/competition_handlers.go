@@ -48,6 +48,8 @@ func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Reque
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.create", "competition", strconv.FormatUint(uint64(comp.ID), 10),
+		map[string]any{"name": body.Name})
 	writeJSON(w, http.StatusCreated, comp)
 }
 
@@ -99,6 +101,7 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.update", "competition", strconv.FormatUint(uint64(id), 10), nil)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -114,6 +117,7 @@ func (h *Handlers) adminEndCompetition(w http.ResponseWriter, req *http.Request)
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.end", "competition", strconv.FormatUint(uint64(id), 10), nil)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -128,6 +132,7 @@ func (h *Handlers) adminDeleteCompetition(w http.ResponseWriter, req *http.Reque
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.delete", "competition", strconv.FormatUint(uint64(id), 10), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -164,6 +169,8 @@ func (h *Handlers) adminBindChallenges(w http.ResponseWriter, req *http.Request)
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.bind", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"added": result.Added})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -186,6 +193,8 @@ func (h *Handlers) adminUnbindChallenges(w http.ResponseWriter, req *http.Reques
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.unbind", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"slugs": body.Slugs, "removed": removed})
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
 }
 
@@ -229,6 +238,8 @@ func (h *Handlers) adminImportParticipants(w http.ResponseWriter, req *http.Requ
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "competition.import_participants", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"teams": len(body.Teams), "individuals": len(body.Individuals), "created_accounts": len(result.CreatedAccounts)})
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -179,7 +179,9 @@ func main() {
 	}
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
 	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, backupSvc, cfg.SmsShowCode).Register(router)
+	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
+	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, backupSvc, auditSvc, cfg.SmsShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

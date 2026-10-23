@@ -29,13 +29,14 @@ type Handlers struct {
 	Competitions *service.CompetitionService
 	RegisterSvc  *service.RegisterService
 	Backup       *service.BackupService
+	Audit        *service.AuditService
 	// smsShowCode 验证码回显模式（config SmsShowCode，见 sendSmsCode）。
 	smsShowCode bool
 }
 
 // NewHandlers 构造 handler 集合；smsShowCode 见 config.SmsShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, backup *service.BackupService, smsShowCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, Backup: backup, smsShowCode: smsShowCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, backup *service.BackupService, audit *service.AuditService, smsShowCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, Backup: backup, Audit: audit, smsShowCode: smsShowCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -121,6 +122,9 @@ func (h *Handlers) Register(r *Router) {
 		r.Handle(http.MethodPost, "/api/v1/admin/backups", "admin", h.createBackup)
 		r.Handle(http.MethodGet, "/api/v1/admin/backups", "admin", h.listBackups)
 		r.Handle(http.MethodGet, "/api/v1/admin/backups/{name}", "admin", h.downloadBackup)
+
+		// 管理操作审计（ops 硬化）：全部 admin 写操作的 append-only 审计视图。
+		r.Handle(http.MethodGet, "/api/v1/admin/audit-logs", "admin", h.listAuditLogs)
 
 	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)
@@ -383,6 +387,7 @@ func (h *Handlers) resetPasswordByAdmin(w http.ResponseWriter, req *http.Request
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "user.reset_password", "user", req.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -705,6 +710,8 @@ func (h *Handlers) updateChallengeVisibility(w http.ResponseWriter, req *http.Re
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "challenge.visibility", "challenge", req.PathValue("slug"),
+		map[string]any{"is_visible": chal.IsVisible, "release_at": chal.ReleaseAt})
 	writeJSON(w, http.StatusOK, chal)
 }
 
@@ -735,6 +742,8 @@ func (h *Handlers) uploadAttachment(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "attachment.upload", "challenge", req.PathValue("slug"),
+		map[string]any{"filename": att.Filename})
 	writeJSON(w, http.StatusCreated, att)
 }
 
@@ -744,6 +753,8 @@ func (h *Handlers) deleteAttachment(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "attachment.delete", "challenge", req.PathValue("slug"),
+		map[string]any{"filename": req.PathValue("filename")})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
@@ -781,6 +792,7 @@ func (h *Handlers) uploadChallenges(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "challenge.import", "challenge", "batch", map[string]any{"imported": imported, "slugs": slugs})
 	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
 }
 
@@ -810,6 +822,7 @@ func (h *Handlers) uploadChallengePackage(w http.ResponseWriter, req *http.Reque
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "challenge.package_import", "challenge", "batch", map[string]any{"imported": imported, "slugs": slugs})
 	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "slugs": slugs})
 }
 
@@ -820,6 +833,7 @@ func (h *Handlers) importBuiltinChallenges(w http.ResponseWriter, req *http.Requ
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "builtin.import", "builtin", "vulinbox", nil)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -852,6 +866,7 @@ func (h *Handlers) buildBuiltinImage(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "builtin.image_build", "builtin", "vulinbox", nil)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -868,6 +883,7 @@ func (h *Handlers) downloadYakEngine(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "engine.download", "engine", "yak", nil)
 	writeJSON(w, http.StatusAccepted, h.Judge.YakEngineStatus())
 }
 
@@ -929,6 +945,7 @@ func (h *Handlers) deleteChallenge(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "challenge.delete", "challenge", req.PathValue("slug"), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
@@ -979,6 +996,7 @@ func (h *Handlers) adminDestroyInstance(w http.ResponseWriter, req *http.Request
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "instance.destroy", "instance", req.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
@@ -1065,6 +1083,8 @@ func (h *Handlers) uploadPackage(w http.ResponseWriter, req *http.Request) {
 		writeError(w, errValidation)
 		return
 	}
+	h.audit(req, "content.upload", "package", strconv.FormatUint(uint64(pkg.ID), 10),
+		map[string]any{"name": pkg.Name})
 	writeJSON(w, http.StatusCreated, pkg)
 }
 
@@ -1107,6 +1127,8 @@ func (h *Handlers) deletePackage(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "content.delete", "package", req.PathValue("id"),
+		map[string]any{"deleted_rooms": res.Rooms, "deleted_topics": res.Topics})
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -1121,6 +1143,7 @@ func (h *Handlers) publishPackage(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "content.publish", "package", req.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, pkg)
 }
 
@@ -1149,6 +1172,7 @@ func (h *Handlers) archivePackage(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "content.archive", "package", req.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, pkg)
 }
 
@@ -1170,6 +1194,8 @@ func (h *Handlers) rollbackPackage(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "content.rollback", "package", req.PathValue("id"),
+		map[string]any{"version_id": body.VersionID})
 	writeJSON(w, http.StatusOK, pkg)
 }
 
@@ -1187,6 +1213,7 @@ func (h *Handlers) updateTopic(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "topic.update", "topic", req.PathValue("topicSlug"), nil)
 	writeJSON(w, http.StatusOK, topic)
 }
 
@@ -1217,6 +1244,8 @@ func (h *Handlers) createUser(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "user.create", "user", strconv.FormatUint(uint64(user.ID), 10),
+		map[string]any{"username": user.Username, "global_role": body.GlobalRole})
 	writeJSON(w, http.StatusCreated, user)
 }
 
@@ -1238,6 +1267,8 @@ func (h *Handlers) updateRoles(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "user.roles", "user", req.PathValue("id"),
+		map[string]any{"global_role": body.GlobalRole})
 	writeJSON(w, http.StatusOK, user)
 }
 

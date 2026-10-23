@@ -253,6 +253,19 @@ type InstanceLogRepo interface {
 	List(ctx context.Context, offset, limit int) ([]model.InstanceLog, int64, error)
 }
 
+// AuditFilter 审计查询过滤（零值 = 不过滤）。
+type AuditFilter struct {
+	AdminID uint
+	Action  string
+}
+
+// AuditLogRepo 管理操作审计（append-only：只 Create 与过滤分页查询；
+// 见 model.AdminAuditLog 与 Event 表的分工注释）。
+type AuditLogRepo interface {
+	Create(ctx context.Context, l *model.AdminAuditLog) error
+	List(ctx context.Context, f AuditFilter, offset, limit int) ([]model.AdminAuditLog, int64, error)
+}
+
 // CompetitionRepo 竞赛域聚合仓库（competition/team/participant/binding/
 // warning/writeup/派生积分七表；SQLite 唯一实现）。
 type CompetitionRepo interface {
