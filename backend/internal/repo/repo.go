@@ -297,6 +297,8 @@ type CompetitionRepo interface {
 	Create(ctx context.Context, c *model.Competition) error
 	FindByID(ctx context.Context, id uint) (*model.Competition, error)
 	List(ctx context.Context, offset, limit int) ([]model.Competition, int64, error)
+	// ListPublic 竞赛广场分页：仅公开赛（kind=public），开始时间倒序。
+	ListPublic(ctx context.Context, offset, limit int) ([]model.Competition, int64, error)
 	// UpdateSelective 局部更新（map 形式字段，零值可更新）。
 	UpdateSelective(ctx context.Context, id uint, fields map[string]any) error
 	// DeleteCascade 删除竞赛及其全部关联行（参赛者/队伍/题目绑定/反作弊警告/

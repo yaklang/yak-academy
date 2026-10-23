@@ -12,16 +12,34 @@ const (
 	CompetitionEnded     CompetitionStatus = "ended"
 )
 
+// CompetitionKind 竞赛两档（创建时选定，此后不可更改）：
+// public = 公开赛（竞赛广场展示、自助报名、已报名者免邀请码入场）；
+// invitational = 邀请赛（默认；定向导入/一键生成参赛者，凭邀请码入场）。
+type CompetitionKind string
+
+const (
+	CompetitionPublic       CompetitionKind = "public"
+	CompetitionInvitational CompetitionKind = "invitational"
+)
+
+// Valid 是否合法档位。
+func (k CompetitionKind) Valid() bool {
+	return k == CompetitionPublic || k == CompetitionInvitational
+}
+
 // Competition 竞赛实体：管理员创建并配置起止时间。
 // 状态全程由时间派生；结束前已入场参赛者被锁定在竞赛入口（见 Participant）。
 type Competition struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	Name        string    `gorm:"uniqueIndex;size:128" json:"name"`
 	Description string    `gorm:"size:2000" json:"description"`
-	StartTime   time.Time `gorm:"index" json:"start_time"`
-	EndTime     time.Time `gorm:"index" json:"end_time"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// Kind 公开/邀请两档（见 CompetitionKind）；旧库行为 AutoMigrate 默认
+	// 补 invitational（改动前创建的竞赛全部走定向导入语义）。
+	Kind      CompetitionKind `gorm:"size:16;index;default:invitational" json:"kind"`
+	StartTime time.Time       `gorm:"index" json:"start_time"`
+	EndTime   time.Time       `gorm:"index" json:"end_time"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // Status 当前时刻的派生状态。

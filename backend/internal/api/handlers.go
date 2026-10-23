@@ -139,14 +139,17 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodDelete, "/api/v1/admin/competitions/{id}/challenges", "admin", h.adminUnbindChallenges)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/participants", "admin", h.adminCompetitionParticipants)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/participants", "admin", h.adminImportParticipants)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/generate-users", "admin", h.adminGenerateUsers)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/instances", "admin", h.adminCompetitionInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/warnings", "admin", h.adminCompetitionWarnings)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups", "admin", h.adminCompetitionWriteups)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups/{wid}/zip", "admin", h.adminDownloadWriteupZip)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/leaderboard", "admin", h.adminCompetitionLeaderboard)
 
-	// 竞赛：参赛者（入场/首页/容器/提交/榜单/WP——登录即可，入场校验在 service）
+	// 竞赛：参赛者（广场/报名/入场/首页/容器/提交/榜单/WP——登录即可，入场校验在 service）
+	r.Handle(http.MethodGet, "/api/v1/competitions", "", h.listPublicCompetitions)
 	r.Handle(http.MethodGet, "/api/v1/competitions/me", "", h.myCompetitionEntry)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/register", "", h.registerCompetition)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/enter", "", h.enterCompetition)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/view", "", h.competitionView)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/challenges/{slug}/instance", "", h.competitionStartInstance)

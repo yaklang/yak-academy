@@ -38,7 +38,9 @@ type compEnv struct {
 	users  repo.UserRepo
 	// inviteMail 投递记录（SetDelivery 注入的探针）。
 	inviteMails []string
-	now         time.Time
+	// createdAccounts 建号探针记录（username:password）。
+	createdAccounts []string
+	now time.Time
 }
 
 func newCompEnv(t *testing.T) *compEnv {
@@ -85,18 +87,24 @@ func newCompEnv(t *testing.T) *compEnv {
 			if err := users.Create(ctx, u); err != nil {
 				return nil, err
 			}
+			env.createdAccounts = append(env.createdAccounts, username+":"+password)
 			return u, nil
 		},
 	)
 	return env
 }
 
-// createRunningComp 建一场 now 时刻 running 的竞赛。
+// createRunningComp 建一场 now 时刻 running 的竞赛（kind 缺省 = 邀请赛）。
 func (e *compEnv) createRunningComp(t *testing.T, name string) *CompetitionView {
+	t.Helper()
+	return e.createComp(t, name, "")
+}
+
+func (e *compEnv) createComp(t *testing.T, name, kind string) *CompetitionView {
 	t.Helper()
 	start := e.now.Add(-time.Hour)
 	end := e.now.Add(2 * time.Hour)
-	comp, err := e.comps.Create(context.Background(), name, "", start, end)
+	comp, err := e.comps.Create(context.Background(), name, "", start, end, kind)
 	if err != nil {
 		t.Fatalf("create competition: %v", err)
 	}
@@ -152,10 +160,10 @@ func (e *compEnv) drainJudge() {
 func TestCompetitionCreateValidatesTimes(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	if _, err := e.comps.Create(ctx, "倒时间赛", "", e.now.Add(time.Hour), e.now); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Create(ctx, "倒时间赛", "", e.now.Add(time.Hour), e.now, ""); !errors.Is(err, ErrValidation) {
 		t.Fatalf("end before start: want ErrValidation, got %v", err)
 	}
-	if _, err := e.comps.Create(ctx, "  ", "", e.now, e.now.Add(time.Hour)); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Create(ctx, "  ", "", e.now, e.now.Add(time.Hour), ""); !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty name: want ErrValidation, got %v", err)
 	}
 	comp := e.createRunningComp(t, "合法赛")
@@ -227,7 +235,7 @@ func TestEndCompetitionManually(t *testing.T) {
 	// scheduled：未开赛不存在"结束"，422。
 	futureStart := e.now.Add(time.Hour)
 	futureEnd := e.now.Add(3 * time.Hour)
-	scheduled, err := e.comps.Create(ctx, "未开赛赛", "", futureStart, futureEnd)
+	scheduled, err := e.comps.Create(ctx, "未开赛赛", "", futureStart, futureEnd, "")
 	if err != nil {
 		t.Fatalf("create scheduled: %v", err)
 	}
@@ -301,34 +309,49 @@ func TestBindChallengesBySlugsAndUnbind(t *testing.T) {
 	}
 }
 
-// TestImportParticipantsCreatesTeamsAndInvites 批量导入：建队/建号/邀请码/邮件。
-func TestImportParticipantsCreatesTeamsAndInvites(t *testing.T) {
+// TestImportParticipantsResolvesReferencesAndReportsMissing 批量导入新语义：
+// 条目按账号编码/用户名引用既有账号（不建号），缺失条目回报 missing；
+// 建队/邀请码/邮件投递照旧，重复导入幂等。
+func TestImportParticipantsResolvesReferencesAndReportsMissing(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
 	comp := e.createRunningComp(t, "导入赛")
 	alice := e.ensureUser(t, "alice")
+	_ = e.ensureUser(t, "solo")
 	req := ParticipantImportRequest{
-		Teams:       []TeamImport{{Name: "一队", Members: []string{"alice", "newbie1"}}},
+		Teams: []TeamImport{{
+			Name:    "一队",
+			Members: []string{"alice", alice.AccountCode, "YA26-99999", "ghost-user"},
+		}},
 		Individuals: []string{"solo"},
 	}
 	res, err := e.comps.ImportParticipants(ctx, comp.ID, req)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if len(res.CreatedAccounts) != 2 {
-		t.Fatalf("created accounts: want 2 (newbie1, solo), got %d", len(res.CreatedAccounts))
+	// alice 条目（用户名 + 编码两次引用）与 solo 各建参赛行；缺失两条进 missing。
+	if len(res.Participants) != 3 {
+		t.Fatalf("participants: want 3 (alice×2, solo), got %d", len(res.Participants))
 	}
-	if len(res.Participants) != 3 || len(e.inviteMails) != 3 {
-		t.Fatalf("participants=%d mails=%d", len(res.Participants), len(e.inviteMails))
+	if len(res.Missing) != 2 || res.Missing[0] != "YA26-99999" || res.Missing[1] != "ghost-user" {
+		t.Fatalf("missing = %v, want [YA26-99999 ghost-user]", res.Missing)
 	}
-	// 已存在用户 alice 不重复建号（FindByUsername 直接命中）。
-	if _, err := e.users.FindByUsername(ctx, "alice"); err != nil {
-		t.Fatalf("alice should exist: %v", err)
+	if len(e.inviteMails) != 3 {
+		t.Fatalf("mails = %d, want 3", len(e.inviteMails))
 	}
+	if len(e.createdAccounts) != 0 {
+		t.Fatalf("import must not create accounts, created %v", e.createdAccounts)
+	}
+	for _, p := range res.Participants {
+		if p.AccountCode == "" {
+			t.Fatalf("participant %s missing account_code", p.Username)
+		}
+	}
+	// 编码引用与用户名引用解析到同一参赛行（alice 一行，TeamID 挂一队）。
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	parts, total, _ := compRepo.ListParticipants(ctx, comp.ID, 0, 100)
-	if total != 3 {
-		t.Fatalf("participant rows: %d", total)
+	if total != 2 {
+		t.Fatalf("participant rows: %d, want 2", total)
 	}
 	var alicePart model.Participant
 	for _, p := range parts {
@@ -339,22 +362,152 @@ func TestImportParticipantsCreatesTeamsAndInvites(t *testing.T) {
 	if alicePart.ID == 0 || alicePart.InviteCode == "" || alicePart.TeamID == 0 {
 		t.Fatalf("alice participant not linked: %+v", alicePart)
 	}
-	// 重复导入幂等：不建号、不重建参赛行、沿用邀请码。
+	// 重复导入幂等：不重建参赛行、沿用邀请码、missing 稳定。
 	res2, err := e.comps.ImportParticipants(ctx, comp.ID, req)
 	if err != nil {
 		t.Fatalf("reimport: %v", err)
 	}
-	if len(res2.CreatedAccounts) != 0 {
-		t.Fatalf("reimport should create 0 accounts, got %d", len(res2.CreatedAccounts))
+	if len(res2.Participants) != 3 || len(res2.Missing) != 2 {
+		t.Fatalf("reimport participants=%d missing=%d", len(res2.Participants), len(res2.Missing))
 	}
 	if res2.Participants[0].InviteCode != res.Participants[0].InviteCode {
 		t.Fatalf("invite code changed on reimport")
 	}
-	parts2, total2, _ := compRepo.ListParticipants(ctx, comp.ID, 0, 100)
-	if total2 != 3 {
+	if _, total2, _ := compRepo.ListParticipants(ctx, comp.ID, 0, 100); total2 != 2 {
 		t.Fatalf("reimport participant rows: %d", total2)
 	}
-	_ = parts2
+	// 公开赛拒绝导入（参赛者走广场自助报名）。
+	pub := e.createComp(t, "公开赛", "public")
+	if _, err := e.comps.ImportParticipants(ctx, pub.ID, ParticipantImportRequest{Individuals: []string{"alice"}}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("import into public comp: want ErrValidation, got %v", err)
+	}
+}
+
+// TestGenerateUsersTeamsAndPasswords 一键生成：默认密码 123456、账号编码
+// 随建号分配、自动组队（第 n 队）、同名既有账号复用沿用原密码。
+func TestGenerateUsersTeamsAndPasswords(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	comp := e.createRunningComp(t, "生成赛")
+	// 预置同名账号：生成时复用（created=false，无初始密码返回）。
+	preset := e.ensureUser(t, "class26-03")
+	req := GenerateUsersRequest{Prefix: "class26", Count: 6, TeamSize: 3}
+	res, err := e.comps.GenerateUsers(ctx, comp.ID, req)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(res.Accounts) != 6 || len(res.Participants) != 6 {
+		t.Fatalf("accounts=%d participants=%d, want 6/6", len(res.Accounts), len(res.Participants))
+	}
+	if len(res.Teams) != 2 || res.Teams[0] != "第1队" || res.Teams[1] != "第2队" {
+		t.Fatalf("teams = %v, want [第1队 第2队]", res.Teams)
+	}
+	for i, a := range res.Accounts {
+		want := fmt.Sprintf("class26-%02d", i+1)
+		if a.Username != want {
+			t.Fatalf("account[%d] = %q, want %q", i, a.Username, want)
+		}
+		if a.AccountCode == "" {
+			t.Fatalf("account %s missing account_code", a.Username)
+		}
+		if i == 2 { // 预置账号复用
+			if a.Created || a.InitialPassword != nil || a.Username != preset.Username {
+				t.Fatalf("preset account not reused: %+v", a)
+			}
+			continue
+		}
+		if !a.Created || a.InitialPassword == nil || *a.InitialPassword != "123456" {
+			t.Fatalf("account %s = %+v, want created with default password", a.Username, a)
+		}
+	}
+	// 组队归属：前 3 人第1队、后 3 人第2队。
+	for i, p := range res.Participants {
+		if p.TeamName == nil || *p.TeamName != fmt.Sprintf("第%d队", i/3+1) {
+			t.Fatalf("participant[%d] team = %v", i, p.TeamName)
+		}
+		if p.InviteCode == "" || !p.MailDelivered {
+			t.Fatalf("participant[%d] not invited: %+v", i, p)
+		}
+	}
+	// 6 人全为新建（复用的 class26-03 不重复建号）。
+	created := 0
+	for _, c := range e.createdAccounts {
+		if strings.HasSuffix(c, ":123456") {
+			created++
+		}
+	}
+	if created != 5 {
+		t.Fatalf("created with default password = %d, want 5", created)
+	}
+	// 参数校验：count 越界 / 前缀非法 / 密码过短。
+	bad := []GenerateUsersRequest{
+		{Prefix: "class26", Count: 0},
+		{Prefix: "class26", Count: 501},
+		{Prefix: "Bad!", Count: 3},
+		{Prefix: "class26", Count: 3, Password: "123"},
+		{Prefix: "class26", Count: 3, TeamSize: 11},
+	}
+	for _, r := range bad {
+		if _, err := e.comps.GenerateUsers(ctx, comp.ID, r); !errors.Is(err, ErrValidation) {
+			t.Fatalf("generate %+v: want ErrValidation, got %v", r, err)
+		}
+	}
+	// 公开赛拒绝生成。
+	pub := e.createComp(t, "公开赛2", "public")
+	if _, err := e.comps.GenerateUsers(ctx, pub.ID, GenerateUsersRequest{Prefix: "x", Count: 1}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("generate for public comp: want ErrValidation, got %v", err)
+	}
+}
+
+// TestPublicCompetitionPlazaAndRegister 竞赛广场（仅公开赛）与自助报名：
+// 报名幂等、邀请赛禁报名、公开赛已报名免码入场、未报名免码拒绝。
+func TestPublicCompetitionPlazaAndRegister(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	pub := e.createComp(t, "广场公开赛", "public")
+	inv := e.createRunningComp(t, "定向邀请赛")
+	runner := e.ensureUser(t, "runner")
+	another := e.ensureUser(t, "another")
+
+	// 广场只列公开赛，未报名 registered=false。
+	items, total, err := e.comps.ListPublic(ctx, runner.ID, 1, 20)
+	if err != nil || total != 1 {
+		t.Fatalf("plaza: total=%d err=%v", total, err)
+	}
+	if items[0].ID != pub.ID || items[0].Registered || items[0].Status != model.CompetitionRunning {
+		t.Fatalf("plaza item = %+v", items[0])
+	}
+
+	// 邀请赛禁自助报名。
+	if _, err := e.comps.Register(ctx, runner.ID, inv.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("register invitational: want ErrValidation, got %v", err)
+	}
+	// 公开赛报名（幂等）→ registered=true、人数 1。
+	first, err := e.comps.Register(ctx, runner.ID, pub.ID)
+	if err != nil || !first.Registered || first.Participants != 1 {
+		t.Fatalf("register: %+v err=%v", first, err)
+	}
+	again, err := e.comps.Register(ctx, runner.ID, pub.ID)
+	if err != nil || !again.Registered || again.Participants != 1 {
+		t.Fatalf("re-register not idempotent: %+v err=%v", again, err)
+	}
+	// 广场状态同步。
+	items, _, _ = e.comps.ListPublic(ctx, runner.ID, 1, 20)
+	if !items[0].Registered {
+		t.Fatal("plaza should reflect registration")
+	}
+
+	// 已报名者免码入场；未报名者免码拒绝；邀请赛免码拒绝。
+	entry, err := e.comps.Enter(ctx, runner.ID, pub.ID, "")
+	if err != nil || !entry.Entered || !entry.Locked {
+		t.Fatalf("enter without code: %+v err=%v", entry, err)
+	}
+	if _, err := e.comps.Enter(ctx, another.ID, pub.ID, ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("unregistered enter: want ErrValidation, got %v", err)
+	}
+	if _, err := e.comps.Enter(ctx, another.ID, inv.ID, ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("invitational codeless enter: want ErrValidation, got %v", err)
+	}
 }
 
 // TestEnterLocksUntilEnd 入场与锁定：仅 running 可入场，锁定直到结束，
@@ -408,6 +561,9 @@ func TestCompetitionScopedScoringAndLeaderboard(t *testing.T) {
 	if _, err := e.comps.BindChallenges(ctx, comp.ID, body, nil); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
+	// 新语义：导入只引用既有账号，先建号再导入。
+	e.ensureUser(t, "bob")
+	e.ensureUser(t, "cat")
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
 		Teams: []TeamImport{{Name: "蓝队", Members: []string{"bob", "cat"}}},
 	})
@@ -547,17 +703,14 @@ func TestWriteupTeamSharedAndZip(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
 		Teams: []TeamImport{{Name: "Blue", Members: []string{"alice", "bob"}}},
 	})
-	// rival 走导入建号（ImportParticipants 内部 createAccount）→ 按用户名取回。
+	// rival 个人参赛（先建号再导入——新语义导入只引用既有账号）。
+	rival := e.ensureUser(t, "rival")
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"rival"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	parts, _, _ := compRepo.ListParticipants(ctx, comp.ID, 0, 100)
 	codes := map[uint]string{}
 	for _, p := range parts {
 		codes[p.UserID] = p.InviteCode
-	}
-	rival, err := e.users.FindByUsername(context.Background(), "rival")
-	if err != nil {
-		t.Fatalf("load rival: %v", err)
 	}
 	for _, u := range []*model.User{alice, bob, rival} {
 		if _, err := e.comps.Enter(ctx, u.ID, comp.ID, codes[u.ID]); err != nil {
@@ -684,6 +837,9 @@ func TestCrossTeamFlagWarning(t *testing.T) {
 	chal := e.seedChallenge(t, "inst-a", "instance")
 	body, _ := json.Marshal(map[string]any{"slugs": []string{chal.Slug}})
 	e.comps.BindChallenges(ctx, comp.ID, body, nil)
+	// 先建号再导入——新语义导入只引用既有账号。
+	aa := e.ensureUser(t, "aa")
+	bb := e.ensureUser(t, "bb")
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
 		Teams: []TeamImport{
 			{Name: "甲队", Members: []string{"aa"}},
@@ -692,8 +848,6 @@ func TestCrossTeamFlagWarning(t *testing.T) {
 	})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	instRepo := repo.NewLabInstanceRepo(e.gdb)
-	aa, _ := e.users.FindByUsername(ctx, "aa")
-	bb, _ := e.users.FindByUsername(ctx, "bb")
 	aaPart, _ := compRepo.FindParticipant(ctx, comp.ID, aa.ID)
 	bbPart, _ := compRepo.FindParticipant(ctx, comp.ID, bb.ID)
 	e.comps.Enter(ctx, aa.ID, comp.ID, aaPart.InviteCode)

@@ -84,6 +84,18 @@ var exactDetails = map[string]string{
 	"name cannot be empty":                                      "名称不能为空",
 	"end_time must be after start_time":                         "结束时间必须晚于开始时间",
 
+	// 竞赛 kind / 广场报名 / 一键生成 / 表格导入
+	"invalid competition kind":                                       "竞赛类型无效（公开赛 public / 邀请赛 invitational 二选一，创建后不可更改）",
+	"cannot register for an invitational competition":               "邀请赛不开放自助报名，参赛账号由管理员导入或生成",
+	"register before entering a public competition":                 "请先在竞赛广场报名，再进入公开赛",
+	"participants can only be imported into an invitational competition": "只有邀请赛支持导入参赛者；公开赛由用户在广场自行报名",
+	"user generation is only available for invitational competitions":   "只有邀请赛支持一键生成参赛账号",
+	"prefix must be 1-16 lowercase letters, digits or hyphens":      "生成前缀需为 1-16 位小写字母、数字或连字符（如 class26）",
+	"count must be between 1 and 500":                               "生成数量需在 1-500 之间",
+	"team_size must be between 0 and 10":                            "每队人数需在 0-10 之间（0 = 不自动组队）",
+	"empty entry":                                                   "导入条目不能为空（账号编码或用户名）",
+	"account creation unavailable":                                  "账号创建入口未装配，请联系管理员",
+
 	// 代码判题 / 自测
 	"code engine not configured (self-test unavailable)":  "判题引擎未配置，自测暂不可用（请联系管理员）",
 	"exactly one of sample or stdin is required":          "样例组与自定义输入必须二选一",

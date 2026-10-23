@@ -39,6 +39,21 @@ func (r *competitionRepo) List(ctx context.Context, offset, limit int) ([]model.
 	return list, total, err
 }
 
+// ListPublic 竞赛广场分页：仅公开赛（kind=public；邀请赛定向，不对外展示），
+// 开始时间倒序（最近开赛的排前面），同刻按 id 倒序稳定排序。
+func (r *competitionRepo) ListPublic(ctx context.Context, offset, limit int) ([]model.Competition, int64, error) {
+	var (
+		list  []model.Competition
+		total int64
+	)
+	q := r.db.WithContext(ctx).Model(&model.Competition{}).Where("kind = ?", model.CompetitionPublic)
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := q.Order("start_time DESC").Order("id DESC").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
+}
+
 // UpdateSelective 只更新请求里出现的字段（map 形式，零值可更新）。
 func (r *competitionRepo) UpdateSelective(ctx context.Context, id uint, fields map[string]any) error {
 	return r.db.WithContext(ctx).Model(&model.Competition{}).Where("id = ?", id).Updates(fields).Error
