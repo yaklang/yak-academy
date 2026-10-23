@@ -232,10 +232,21 @@ func TestDockerEnsureInstanceFullSlice(t *testing.T) {
 }
 
 // TestDockerHostStats 性能面板真实路径：docker info/stats 解析 + /proc 采样
-//（Linux 部署形态下宿主全局视图）。
+//（Linux 部署形态下宿主全局视图）。容器数断言不依赖 daemon 的环境容器
+//（CI runner 上测试进程不在容器内、前序用例的容器也已销毁）：先自建一个
+// 再断言计数与列表都包含它。
 func TestDockerHostStats(t *testing.T) {
 	ctx := requireDocker(t)
-	driver := NewDockerDriver("", "", "")
+	driver := NewDockerDriver("256m", "0.25", "")
+	const instanceID = 94203 // 高位编号，避免与其他测试容器撞名
+	t.Cleanup(func() { _ = driver.Destroy(context.Background(), instanceID) })
+	if _, err := driver.Create(ctx, InstanceSpec{
+		InstanceID: instanceID, ChallengeID: 1, UserID: 7,
+		Image: dockerTestImage, Port: 80,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
 	stats, err := driver.HostStats(ctx)
 	if err != nil {
 		t.Fatalf("HostStats: %v", err)
@@ -246,9 +257,11 @@ func TestDockerHostStats(t *testing.T) {
 	if stats.MemTotalBytes <= 0 {
 		t.Errorf("MemTotalBytes = %d, want > 0", stats.MemTotalBytes)
 	}
-	if stats.ContainersTotal < 1 {
-		t.Errorf("ContainersTotal = %d（docker daemon 至少有测试自身容器）", stats.ContainersTotal)
+	if stats.ContainersTotal < 1 || stats.ContainersRunning < 1 {
+		t.Errorf("ContainersTotal = %d, Running = %d（已自建运行中容器，至少应报 1）",
+			stats.ContainersTotal, stats.ContainersRunning)
 	}
+	found := false
 	for _, c := range stats.Containers {
 		if c.ID == "" || c.Name == "" {
 			t.Errorf("容器行缺 ID/Name: %+v", c)
@@ -256,6 +269,12 @@ func TestDockerHostStats(t *testing.T) {
 		if c.MemLimitBytes < c.MemUsedBytes {
 			t.Errorf("容器 %s 内存超限: used %d > limit %d", c.Name, c.MemUsedBytes, c.MemLimitBytes)
 		}
+		if c.Name == containerName(instanceID) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("容器列表缺少刚创建的 %s", containerName(instanceID))
 	}
 	if stats.Host == nil {
 		t.Fatalf("Host 段缺失")
