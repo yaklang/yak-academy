@@ -1220,7 +1220,28 @@ func (h *Handlers) updateTopic(w http.ResponseWriter, req *http.Request) {
 
 func (h *Handlers) listUsers(w http.ResponseWriter, req *http.Request) {
 	page, pageSize := pageParams(req)
-	items, total, err := h.Auth.ListUsers(req.Context(), (page-1)*pageSize, pageSize)
+	filter := repo.UserListFilter{Q: strings.TrimSpace(req.URL.Query().Get("q"))}
+	if role := req.URL.Query().Get("role"); role != "" {
+		if role != string(model.GlobalRoleStudent) && role != string(model.GlobalRoleAdmin) {
+			writeError(w, errValidation)
+			return
+		}
+		filter.Role = role
+	}
+	// active/no_solves 是布尔开关：缺省 = 不过滤，仅接受 true/false 字面量。
+	for name, dst := range map[string]**bool{"active": &filter.Active, "no_solves": &filter.NoSolves} {
+		v := req.URL.Query().Get(name)
+		if v == "" {
+			continue
+		}
+		b := v == "true"
+		if !b && v != "false" {
+			writeError(w, errValidation)
+			return
+		}
+		*dst = &b
+	}
+	items, total, err := h.Auth.ListUsers(req.Context(), filter, (page-1)*pageSize, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return
