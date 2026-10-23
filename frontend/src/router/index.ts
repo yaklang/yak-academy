@@ -55,6 +55,7 @@ const router = createRouter({
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
         { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
+        { path: 'panel/backups', name: 'admin-backups', component: () => import('../views/admin/Backups.vue') },
         { path: 'panel/competitions', name: 'admin-competitions', component: () => import('../views/admin/Competitions.vue') },
         {
           path: 'panel/competitions/:id',

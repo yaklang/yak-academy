@@ -4,7 +4,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -70,6 +72,15 @@ type Config struct {
 	WriteupsStoreKind string
 	// WriteupsS3 S3 后端连接参数（WriteupsStoreKind=s3 时生效）。
 	WriteupsS3 S3Options
+
+	// BackupDir 备份归档目录（SQLite 快照 + 数据目录 tar.gz 落盘；
+	// 默认数据库同级 backups/，compose 内随 ./data 卷持久化）。
+	BackupDir string
+	// BackupKeep 备份保留份数（超出自动清理，默认 7；<1 收敛为 1）。
+	BackupKeep int
+	// BackupInterval 自动备份间隔（time.ParseDuration 格式如 "6h"/"30m"；
+	// 0/未设置 = 关闭周期备份，仅管理端手动触发）。
+	BackupInterval time.Duration
 }
 
 // S3Options S3 兼容对象存储连接参数。Endpoint 形如 minio.example.com:9000
@@ -119,6 +130,9 @@ func Load() *Config {
 			SecretKey: os.Getenv("ACADEMY_WRITEUPS_S3_SECRET_KEY"),
 			Prefix:    strings.Trim(os.Getenv("ACADEMY_WRITEUPS_S3_PREFIX"), "/"),
 		},
+		BackupDir:      getenv("ACADEMY_BACKUP_DIR", filepath.Join(filepath.Dir(getenv("ACADEMY_DB", "academy.db")), "backups")),
+		BackupKeep:     getenvInt("ACADEMY_BACKUP_KEEP", 7),
+		BackupInterval: getenvDuration("ACADEMY_BACKUP_INTERVAL", 0),
 	}
 }
 
@@ -155,4 +169,24 @@ func getenvBool(key string) bool {
 	default:
 		return false
 	}
+}
+
+// getenvInt 整型环境变量（非法/缺省回退 def）。
+func getenvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// getenvDuration 时长环境变量（time.ParseDuration 格式；非法/缺省回退 def）。
+func getenvDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
 }
