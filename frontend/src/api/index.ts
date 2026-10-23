@@ -295,6 +295,16 @@ export const authApi = {
   // 凭验证码建号（角色固定 student），成功直接返回登录 token。
   register: (phone: string, code: string, username: string, password: string) =>
     http.post<TokenResponse>('/auth/register', { phone, code, username, password }),
+  // 找回密码发码：限频语义同注册发码（200 + retry_after；code 仅回显模式返回）。
+  sendResetCode: (phone: string) =>
+    http.post<{ ok: boolean; retry_after?: number; code?: string }>('/auth/password-reset/code', { phone }),
+  // 凭找回验证码重置密码；返回用户名与账号编码（忘记用户名的学员凭手机号找回账号）。
+  resetPassword: (phone: string, code: string, newPassword: string) =>
+    http.post<{ username: string; account_code: string }>('/auth/password-reset', {
+      phone,
+      code,
+      new_password: newPassword,
+    }),
   me: () => http.get<User>('/me'),
   logout: () => http.post<{ ok: boolean }>('/auth/logout'),
   changePassword: (currentPassword: string, newPassword: string) =>
