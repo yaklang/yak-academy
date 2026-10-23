@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.5（Phase 2/3 完成 + 竞赛系统 + 自助注册 + 部署约定）
+> 版本：v0.6（Phase 2/3 完成 + 竞赛系统（公开/邀请分档）+ 账号编码 + 用户画像管理 + 自助注册 + 部署约定）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -29,10 +29,11 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 ┌────────────────────────────────────────────────────────────┐
 │ 表现层  frontend/  Vue3 + TS + Vite                          │
 │   学生端：Topic/Room 教程浏览、题库（题目分组列表+详情）、       │
-│           进度、排行榜、竞赛（入场/做题/双榜/WP）              │
-│   管理端：资源管理（教程/题目/容器/竞赛管理）                  │
-│           （用户与角色不设管理页：两档模型下角色是账号固有     │
-│            属性，建号入口在竞赛「导入参赛者」）                │
+│           进度、排行榜、竞赛广场（公开赛报名+入场/做题/双榜/WP）│
+│   管理端：资源管理（教程/题目/容器/竞赛/用户管理）              │
+│           （用户管理为只读画像表格：搜索/过滤/不活跃标记；      │
+│            建号入口在邀请赛「一键生成账号」与自助注册，         │
+│            角色是账号固有属性）                                 │
 ├────────────────────────────────────────────────────────────┤
 │ 服务层  backend/internal/api  REST + JWT + RBAC 中间件        │
 │   ├─ auth        登录 / JWT / 两档角色 RBAC / 自助注册        │
@@ -60,6 +61,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 登录换取 JWT（HS256），中间件解析并注入请求上下文。
 - 两档角色：`student`（普通人，仅学习端）/ `admin`（管理员，管理端全部能力）；普通人前端不显示管理入口。
 - 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
+- **账号编码（学号式）**：每号分配唯一编码 `YA{YY}-{NNNNN}`（建号年两位 + 年内序号 1~99999 零填充，如 `YA26-00042`），建号入口统一在 `userRepo.Create`（同年前缀字典序 MAX+1 分配，唯一冲突重试）；序号按建号年分组互不挤占。旧库迁移按 created_at 年分组回填（幂等，起始取该年已有最大序号+1）；部分唯一索引（`account_code <> ''`）兼容旧空值行。编码是用户对外可报读的稳定标识（区别于可读用户名），邀请赛导入表格、用户管理搜索均支持按编码引用/检索。
+- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为只读画像表格（不活跃 ∩ 从未解题可组合过滤），建号走邀请赛一键生成或自助注册。
 - **自助注册（手机验证码）**：登录页提供注册入口，流程为 `POST /auth/sms/code`（发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同手机号 60 秒限频、10 分钟内最多 3 次；`SmsSender` 为接口抽象，默认实现为开发投递器（验证码写服务日志，供本地联调与 E2E 断言），生产以环境变量切换真实通道（第一版不接第三方）。内网/演示部署可开回显模式（`ACADEMY_SMS_SHOW_CODE=1`）：发码响应携带验证码原文、注册页内联显示，学员无需访问服务端日志即可自助注册；正式部署保持关闭。手机号作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复手机号注册拒绝。
 
 ### 3.2 content — 教程包管线
@@ -119,10 +122,12 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 ### 3.8 competition — 竞赛域
 
+- **赛制分档（kind）**：创建时二选一——`public`（公开赛）/ `invitational`（邀请赛，旧库缺省回填），**创建后不可更改**。公开赛不发邀请函：展示在竞赛广场（`GET /competitions`，仅 kind=public），学生自助报名（`POST /competitions/{id}/register`，幂等个人报名；仍生成备用邀请码但不投递），已报名者免邀请码入场。邀请赛不对外展示，参赛者由管理端定向导入或一键生成。
 - **赛程状态机**：`scheduled → running → ended`（派生自 start_time/end_time，非落库列）；运行中的竞赛只允许延后 end_time 与改描述（收紧起止时间会破坏已入场的锁定语义）。
 - **题目绑定**：三种入参统一入口——题目 JSON（对象/数组，复用 content 管线导入后绑定）、`{"slugs": [...]}` 绑定既有题目、zip 题目包；单题失败整体拒绝，已绑定幂等跳过；running 竞赛禁止解绑（榜单已产生，撤题破坏现场）。
-- **参赛者与队伍**：批量导入按用户名引用，不存在自动创建账号（随机初始密码仅本次响应返回）；每人生成唯一邀请码并投递站内邀请邮件（投递失败仅标记，不回滚，管理端可重发）；已参赛幂等跳过并沿用原邀请码；队伍归属以首次导入为准。
-- **入场与锁定**：凭邀请码入场仅 running 竞赛有效；入场后不可退出，锁定状态 = `(已入场 且 running)`，比赛结束自动解锁。中间件层面强制：已锁定的普通用户访问平台任何非竞赛接口 → 403，前端路由守卫做同语义 UX 重定向（服务端是兜底权威）；管理员不受锁定约束。
+- **参赛者与队伍（仅邀请赛）**：批量导入条目按「账号编码或用户名」引用既有账号，**不自动建号**——未命中条目在响应 `missing[]` 排序回报（管理端可先用一键生成补号再重导）；每人生成唯一邀请码并投递站内邀请邮件（投递失败仅标记，不回滚，管理端可重发）；已参赛幂等跳过并沿用原邀请码；队伍归属以首次导入为准。前端导入走固定格式 CSV（个人名单每行一条；队伍名单每行 `队伍名,成员,…`，首行表头自动跳过）。
+- **一键生成参赛账号（仅邀请赛）**：`POST /admin/competitions/{id}/generate-users`——按前缀批量建号（用户名 = `前缀-零填充序号`，count ≤500）并全部导入为本场参赛者；可配置自动组队（team_size >0 按生成顺序每 N 人编入「第 n 队」，余数进最后一队）与初始密码（默认 `123456`，≥6 位）。新建账号的初始密码仅本次响应返回（管理端可导出 CSV 分发）；同名既有账号复用（沿用原密码）。
+- **入场与锁定**：凭邀请码入场仅 running 竞赛有效；公开赛已报名者可免码入场（未报名先去广场报名，邀请赛无码拒绝）。入场后不可退出，锁定状态 = `(已入场 且 running)`，比赛结束自动解锁。中间件层面强制：已锁定的普通用户访问平台任何非竞赛接口 → 403，前端路由守卫做同语义 UX 重定向（服务端是兜底权威）；管理员不受锁定约束。
 - **竞赛做题**：题目/容器/提交都在 `/competitions/{id}/...` 命名空间下复用训练场能力（容器按竞赛隔离管理），判定走与平台完全相同的 judge 管线（异步、恒时比较、动态计分）。
 - **反作弊**：judge 在竞赛提交上执行跨队检测——提交串命中「本竞赛其他队伍成员」的运行中实例 flag（cross_team_flag）等类型写 CheatWarning，只产生管理端警告，不打断提交与判定。
 - **双榜**：队伍榜/个人榜均从 CompetitionScore 派生表只读聚合（派生行由事件派生器在竞赛首通时写入，AddScore 幂等）；竞赛服务不触碰派生表写入（event-sourcing-rules）。
@@ -149,7 +154,7 @@ Challenge(slug 主键, category, difficulty, description_md,     # 独立题目�
 Event(id, user_id, type, payload, created_at)   # append-only
 ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 
-Competition(name, start_time, end_time → status 派生)            # 竞赛域
+Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域（kind: public|invitational，创建后不可改）
   ─┬─ CompetitionChallenge(绑定题目+分值快照)
    ├─ Team(name) ← Participant(user, invite_code, entered_at, last_ip)
    ├─ CheatWarning(user, team, type, reason)                     # 反作弊警告
@@ -168,7 +173,7 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 3. **做题判定流**：student 在题目详情页提交 → 入队 pending → worker 恒时比较 → `submission.judged` 事件 → 派生器更新积分/进度/排行榜（题目关联教程时同步发 Room 通关事件；竞赛提交另派生 CompetitionScore 并做跨队反作弊检测）；
 4. **鉴权流**：请求 → JWT 解析 → 角色中间件（student/admin）→ handler；
 5. **注册流**：登录页发码（限频/窗口校验 → SmsCode 落库 → 开发投递器写日志）→ 凭码建号（核销一次性 → 建号角色固定 student → 签发登录 token）；
-6. **竞赛流**：admin 建赛/绑题/导参赛者（自动建号+邀请码+站内邀请）→ 参赛者凭码入场（锁定至比赛结束）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）。
+6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请码或公开赛报名免码；锁定至比赛结束）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）。
 
 ## 6. API 契约总览
 
@@ -204,11 +209,13 @@ Competition(name, start_time, end_time → status 派生)            # 竞赛域
 | `GET /admin/challenges` | admin | 题目管理表格 |
 | `GET /admin/challenges/{slug}` | admin | 读取单题完整定义（上传 JSON 同构，管理端行内编辑回填用；含完整 flag 列表） |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
-| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（管理页已下线；API 保留供竞赛批量建号与账号运维） |
-| `POST /admin/competitions` 等 13 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD/题目绑定/参赛者批量导入（自动建号+邀请码）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
+| `GET /admin/users` | admin | 用户管理表格：`q`（用户名/账号编码/手机号子串）/`role`/`active`/`no_solves` 过滤，条目附 active（6 个月口径）与 solved_any 标记 |
+| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（建号入口在邀请赛一键生成与自助注册；API 保留供账号运维） |
+| `POST /admin/competitions` 等 14 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind，不可改）/题目绑定/参赛者导入（仅邀请赛，编码或用户名引用，missing 回报）/一键生成账号（仅邀请赛，自动组队+初始密码导出）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
 | `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/题目绑定/提交/WP/容器记录，事件历史保留） |
+| `GET /competitions` / `POST /competitions/{id}/register` | student | 竞赛广场（仅公开赛，含报名状态）/ 公开赛自助报名（幂等；邀请赛拒绝） |
 | `GET /competitions/me` | student | 本人参赛与锁定状态（路由守卫轮询） |
-| `POST /competitions/{id}/enter` | student | 凭邀请码入场（running 限定，入场后锁定至结束） |
+| `POST /competitions/{id}/enter` | student | 入场：邀请码（两档通用）或公开赛已报名免码（running 限定，入场后锁定至结束） |
 | `/competitions/{id}/view`、`.../challenges/{slug}/instance`、`.../submissions`、`.../leaderboard`、`.../writeups*` | 参赛者 | 竞赛内做题闭环：题目列表/容器/提交/双榜/WP 提交与覆盖（ended 后） |
 
 ## 7. 技术选型

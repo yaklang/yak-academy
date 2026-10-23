@@ -27,8 +27,10 @@ description: yak-academy 两档角色权限模型约束。涉及用户、角色�
 | 操作 | 最低角色 |
 |---|---|
 | 浏览已发布教程与训练场、提交答案、查看自己进度、徽章 | student（登录即可） |
+| 竞赛广场（GET /competitions，仅公开赛）、公开赛自助报名（POST /competitions/{id}/register，幂等）与入场 | student（登录即可） |
 | 环境检测点回调（容器内 checker） | 公开（checkpoint token 鉴权） |
-| 上传/发布教程包、题目管理、容器、用户 | admin |
+| 上传/发布教程包、题目管理、容器、用户管理（GET /admin/users 过滤画像） | admin |
+| 竞赛管理（创建选 public/invitational、参赛者导入与一键生成账号——仅邀请赛） | admin |
 
 - 鉴权失败统一返回 403 + 错误码（见 api-contract skill），**禁止**返回 404 掩盖权限问题。
 
