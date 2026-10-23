@@ -46,6 +46,10 @@ func (h *Handlers) Register(r *Router) {
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/register", h.register)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
 	r.HandlePublic(http.MethodGet, "/health", h.health)
+	// /metrics：token 门控的采集端点（见 metrics.go；不在 observe 包装内——
+	// 采集高频，不进指标与访问日志）。路由恒注册保持契约一致。
+	r.routes = append(r.routes, RouteInfo{Method: http.MethodGet, Pattern: "/metrics", Public: true})
+	r.mux.HandleFunc("GET /metrics", r.serveMetrics)
 
 	// student：浏览、提交、进度、排行榜
 	r.Handle(http.MethodGet, "/api/v1/me", "", h.me)

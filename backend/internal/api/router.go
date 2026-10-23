@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -22,6 +24,11 @@ type Router struct {
 	routes []RouteInfo
 	// entryLock 竞赛入场锁定检查（可选注入；nil = 未启用，测试/早期装配兼容）。
 	entryLock EntryLockChecker
+	// metricsToken /metrics 采集令牌（ACADEMY_METRICS_TOKEN；空 = 端点关闭 404）。
+	metricsToken string
+	// metrics 请求指标聚合 + accessLog 结构化访问日志（见 metrics.go）。
+	metrics   *collector
+	accessLog *slog.Logger
 }
 
 // EntryLockChecker 竞赛入场锁：已入场且竞赛未结束的参赛者，
@@ -61,8 +68,17 @@ type RouteInfo struct {
 }
 
 func NewRouter(auth *service.AuthService) *Router {
-	return &Router{mux: http.NewServeMux(), auth: auth}
+	return &Router{
+		mux:       http.NewServeMux(),
+		auth:      auth,
+		metrics:   newCollector(),
+		accessLog: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
 }
+
+// SetMetricsToken 注入 /metrics 采集令牌（main 装配后、Register 前调用；
+// 空 = 端点关闭，路由仍注册以保持契约一致）。
+func (r *Router) SetMetricsToken(token string) { r.metricsToken = token }
 
 // Handle 注册路由。requiredRole 为空串表示仅需登录（student 即可）。
 func (r *Router) Handle(method, pattern string, required model.GlobalRole, h http.HandlerFunc) {
@@ -86,14 +102,19 @@ func (r *Router) Handle(method, pattern string, required model.GlobalRole, h htt
 			}
 		}
 		ctx := context.WithValue(req.Context(), userKey, user)
-		h(w, req.WithContext(ctx))
+		r.observe(method, pattern, h)(w, req.WithContext(ctx))
 	})
 }
 
-// HandlePublic 注册公开路由（仅 /auth/login、/checkpoints/{token}、/health）。
+// HandlePublic 注册公开路由（仅 /auth/login、/checkpoints/{token}、/health、/metrics）。
 func (r *Router) HandlePublic(method, pattern string, h http.HandlerFunc) {
 	r.routes = append(r.routes, RouteInfo{Method: method, Pattern: pattern, Public: true})
-	r.mux.HandleFunc(method+" "+pattern, h)
+	// /health 是 compose/systemd 探针高频路径：不进指标与访问日志（与 /metrics 同理）。
+	if pattern == "/health" {
+		r.mux.HandleFunc(method+" "+pattern, h)
+		return
+	}
+	r.mux.HandleFunc(method+" "+pattern, r.observe(method, pattern, h))
 }
 
 // Routes 返回已注册路由的快照（契约测试与调试用，不暴露 mux 本体）。

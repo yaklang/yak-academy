@@ -168,6 +168,15 @@ func main() {
 	// api 装配（竞赛入场锁定：已入场未结束的参赛者只能访问竞赛域接口）
 	router := api.NewRouter(authSvc)
 	router.SetEntryLock(competitionSvc)
+	router.SetMetricsToken(cfg.MetricsToken)
+	if cfg.LogJSON {
+		router.EnableJSONLogs()
+	}
+	if cfg.MetricsToken == "" {
+		log.Println("metrics endpoint disabled (set ACADEMY_METRICS_TOKEN to enable Prometheus scraping at /metrics)")
+	} else {
+		log.Println("metrics endpoint enabled at /metrics (Prometheus text format, token-gated)")
+	}
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
 	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
 	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, backupSvc, cfg.SmsShowCode).Register(router)

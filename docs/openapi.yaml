@@ -660,6 +660,23 @@ paths:
                 type: object
                 properties:
                   status: { type: string, enum: [ok] }
+  /metrics:
+    get:
+      tags: [public]
+      security: []
+      summary: >
+        Prometheus 文本格式指标（ops 硬化）：HTTP 请求计数/耗时按路由 pattern 聚合
+        （method/route/status 标签）+ 运行时指标（goroutine/内存/uptime）。
+        Bearer 令牌与 ACADEMY_METRICS_TOKEN 恒时比对；未配置 token = 端点关闭 404。
+        告警由外部 Prometheus + Alertmanager 完成（平台不内置）
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
   /auth/login:
     post:
       tags: [auth]
