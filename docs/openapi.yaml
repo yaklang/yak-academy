@@ -141,6 +141,20 @@ components:
         id: { type: integer }
         username: { type: string }
         global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
+        account_code: { type: string, description: 用户账号编码（YA+两位年份-五位零填充序号，如 YA26-00042；建号自动分配、不可变，用于表格导入与人工对照） }
+    AdminUserItem:
+      type: object
+      description: 管理端用户条目：基础字段 + 活跃度与解题画像（过滤/标记依据）
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        account_code: { type: string }
+        global_role: { type: string, enum: [student, admin] }
+        phone: { type: string, description: 注册手机号（导入/生成建号可为空） }
+        created_at: { type: string, description: 注册时间（RFC3339） }
+        last_login_at: { type: string, nullable: true, description: 最近登录时间（从未登录为 null） }
+        active: { type: boolean, description: 是否活跃：最近登录（无则注册时间）在 6 个月内 }
+        solved_any: { type: boolean, description: 是否完成过任意题目（存在判定通过的提交） }
     UserProfile:
       type: object
       description: 账号信息面板（本人视角）：内置账号 ID、账号名称、简介、总得分、头像。
@@ -524,6 +538,7 @@ components:
       properties:
         id: { type: integer }
         name: { type: string }
+        kind: { type: string, enum: [public, invitational], description: public=公开赛（竞赛广场公开展示，用户自助报名）/ invitational=邀请赛（定向导入参赛者，凭邀请码入场）；创建后不可更改 }
         description: { type: string, description: 竞赛说明（Markdown） }
         start_time: { type: string, format: date-time, description: 开赛时间（RFC3339） }
         end_time: { type: string, format: date-time, description: 结束时间（RFC3339）；结束后解除参赛锁定、开放 WP 提交 }
@@ -648,8 +663,10 @@ components:
     ParticipantImportRequest:
       type: object
       description: |
-        参赛人员与队伍批量导入（JSON）。成员按用户名引用：
-        不存在的用户自动创建（随机初始密码，响应中返回供管理员分发）。
+        参赛人员与队伍批量导入（固定格式表格的 JSON 形态，前端由 CSV 解析而来）。
+        成员条目按「账号编码或用户名」引用（先按账号编码精确匹配，再按用户名）；
+        只导入已存在的账号——新建账号走一键生成（/generate-users）。
+        缺失条目不阻断导入，在响应 missing 中回报。
       properties:
         teams:
           type: array
@@ -658,28 +675,72 @@ components:
             required: [name, members]
             properties:
               name: { type: string, description: 战队名（竞赛内唯一） }
-              members: { type: array, items: { type: string }, description: 成员用户名 }
-        individuals: { type: array, items: { type: string }, description: 个人参赛者用户名（不编队） }
+              members: { type: array, items: { type: string }, description: 成员（账号编码或用户名） }
+        individuals: { type: array, items: { type: string }, description: 个人参赛者（账号编码或用户名，不编队） }
     ParticipantImportResult:
       type: object
-      description: 批量导入结果：新建账号（含初始密码）与全部参赛者邀请码
+      description: 批量导入结果：全部参赛者邀请码与未匹配到的条目（导入只引用既有账号，新建走一键生成）
       properties:
-        created_accounts:
-          type: array
-          items:
-            type: object
-            properties:
-              username: { type: string }
-              initial_password: { type: string, description: 自动创建账号的随机初始密码（仅本次响应返回） }
         participants:
           type: array
           items:
             type: object
             properties:
               username: { type: string }
+              account_code: { type: string }
               team_name: { type: string, nullable: true }
               invite_code: { type: string }
               mail_delivered: { type: boolean, description: 站内邀请邮件是否投递成功 }
+        missing:
+          type: array
+          items: { type: string }
+          description: 未匹配到账号的条目原文（账号编码或用户名均未命中）
+    GenerateUsersRequest:
+      type: object
+      required: [prefix, count]
+      properties:
+        prefix: { type: string, description: "生成用户名前缀（小写字母/数字/连字符，1-16 位；用户名 = 前缀-零填充序号，如 class26-01）" }
+        count: { type: integer, minimum: 1, maximum: 500, description: 生成数量 }
+        team_size: { type: integer, minimum: 0, maximum: 10, default: 0, description: 自动组队人数（0=全部个人参赛；>0 按人数依次编入「第 n 队」，余数进最后一队） }
+        password: { type: string, default: "123456", description: 新建账号初始密码（默认 123456，仅新建账号使用；已存在账号沿用原密码） }
+    GenerateUsersResult:
+      type: object
+      description: 一键生成结果：账号清单（含初始密码，供导出分发）与参赛/组队/邀请码
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              username: { type: string }
+              account_code: { type: string }
+              initial_password: { type: string, nullable: true, description: 新建账号的初始密码（本次请求指定；已存在账号为 null，沿用原密码） }
+              created: { type: boolean, description: 本次是否新建（false=复用既有账号） }
+        teams:
+          type: array
+          items: { type: string }
+          description: 自动创建的队伍名（第 n 队；team_size=0 为空）
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              username: { type: string }
+              account_code: { type: string }
+              team_name: { type: string, nullable: true }
+              invite_code: { type: string }
+    PublicCompetitionItem:
+      type: object
+      description: 竞赛广场条目（仅公开赛；邀请赛不对外展示）
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        status: { type: string, enum: [scheduled, running, ended] }
+        registered: { type: boolean, description: 当前用户是否已报名 }
+        participants: { type: integer, description: 已报名人数 }
     MyCompetitionEntry:
       type: object
       description: 当前用户参赛/锁定状态（前端路由守卫用）
@@ -2139,10 +2200,14 @@ paths:
   /admin/users:
     get:
       tags: [admin]
-      summary: 用户列表（分页）
+      summary: 用户列表（分页 + 过滤/搜索：关键字/角色/活跃度/从未完成题目）
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+        - { name: q, in: query, schema: { type: string }, description: 关键字（用户名/账号编码/手机号模糊匹配） }
+        - { name: role, in: query, schema: { type: string, enum: [student, admin] } }
+        - { name: active, in: query, schema: { type: string, enum: [true, false] }, description: 活跃过滤：false=仅不活跃（最近登录或注册距今超 6 个月） }
+        - { name: no_solves, in: query, schema: { type: string, enum: [true, false] }, description: true=仅从未完成过题目的用户（不存在判定通过的提交） }
       responses:
         '200':
           description: OK
@@ -2153,7 +2218,7 @@ paths:
                   - $ref: '#/components/schemas/Page'
                   - type: object
                     properties:
-                      items: { type: array, items: { $ref: '#/components/schemas/User' } }
+                      items: { type: array, items: { $ref: '#/components/schemas/AdminUserItem' } }
         '403': { $ref: '#/components/responses/ErrorResp' }
     post:
       tags: [admin]
@@ -2331,7 +2396,7 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
     post:
       tags: [admin]
-      summary: 创建竞赛（name/起止时间；描述可选）
+      summary: 创建竞赛（name/起止时间/类型；描述可选）
       requestBody:
         required: true
         content:
@@ -2341,6 +2406,7 @@ paths:
               required: [name, start_time, end_time]
               properties:
                 name: { type: string, minLength: 1 }
+                kind: { type: string, enum: [public, invitational], default: invitational, description: public=公开赛（广场展示+自助报名）/ invitational=邀请赛（定向导入+邀请码入场）；创建后不可更改 }
                 description: { type: string }
                 start_time: { type: string, format: date-time }
                 end_time: { type: string, format: date-time }
@@ -2556,6 +2622,27 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/generate-users:
+    post:
+      tags: [admin]
+      summary: 邀请赛一键生成参赛新用户（可配置自动组队；结果含初始密码供导出分发）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerateUsersRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateUsersResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/competitions/{id}/instances:
     get:
       tags: [admin]
@@ -2650,6 +2737,40 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /competitions:
+    get:
+      tags: [competitions]
+      summary: 竞赛广场（仅公开赛按开始时间倒序分页；邀请赛不展示）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/PublicCompetitionItem' } }
+
+  /competitions/{id}/register:
+    post:
+      tags: [competitions]
+      summary: 公开赛报名（仅 public 竞赛；未结束即可报名；已报名幂等返回；邀请赛 422）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicCompetitionItem' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /competitions/me:
     get:
       tags: [competitions]
@@ -2664,18 +2785,17 @@ paths:
   /competitions/{id}/enter:
     post:
       tags: [competitions]
-      summary: 竞赛入场（站内邀请邮件携带邀请码；成功后锁定至比赛结束）
+      summary: 竞赛入场（邀请赛凭站内邀请邮件的邀请码；公开赛已报名用户免码进入；成功后锁定至比赛结束）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [invite_code]
               properties:
-                invite_code: { type: string }
+                invite_code: { type: string, description: 邀请码（邀请赛必填；公开赛已报名用户可省略） }
       responses:
         '200':
           description: OK

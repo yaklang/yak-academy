@@ -38,6 +38,18 @@ func TestZhMessage(t *testing.T) {
 		{"动态中段：白名单外库名保留", "VALIDATION_FAILED",
 			"source uses yak lib(s) outside the challenge whitelist: codec",
 			"源码引用了题目白名单之外的库：codec"},
+		{"精确：竞赛 kind 非法", "VALIDATION_FAILED", "invalid competition kind",
+			"竞赛类型无效（公开赛 public / 邀请赛 invitational 二选一，创建后不可更改）"},
+		{"精确：邀请赛禁自助报名", "VALIDATION_FAILED", "cannot register for an invitational competition",
+			"邀请赛不开放自助报名，参赛账号由管理员导入或生成"},
+		{"精确：公开赛未报名先入场", "VALIDATION_FAILED", "register before entering a public competition",
+			"请先在竞赛广场报名，再进入公开赛"},
+		{"精确：公开赛禁导入", "VALIDATION_FAILED",
+			"participants can only be imported into an invitational competition",
+			"只有邀请赛支持导入参赛者；公开赛由用户在广场自行报名"},
+		{"精确：生成前缀非法", "VALIDATION_FAILED",
+			"prefix must be 1-16 lowercase letters, digits or hyphens",
+			"生成前缀需为 1-16 位小写字母、数字或连字符（如 class26）"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -31,11 +31,12 @@ func (h *Handlers) adminListCompetitions(w http.ResponseWriter, req *http.Reques
 	})
 }
 
-// adminCreateCompetition 创建竞赛。
+// adminCreateCompetition 创建竞赛（kind 创建后不可更改）。
 func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Name        string    `json:"name"`
 		Description string    `json:"description"`
+		Kind        string    `json:"kind"`
 		StartTime   time.Time `json:"start_time"`
 		EndTime     time.Time `json:"end_time"`
 	}
@@ -43,13 +44,13 @@ func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Reque
 		writeError(w, errValidation)
 		return
 	}
-	comp, err := h.Competitions.Create(req.Context(), body.Name, body.Description, body.StartTime, body.EndTime)
+	comp, err := h.Competitions.Create(req.Context(), body.Name, body.Description, body.StartTime, body.EndTime, body.Kind)
 	if err != nil {
 		mapError(w, err)
 		return
 	}
 	h.audit(req, "competition.create", "competition", strconv.FormatUint(uint64(comp.ID), 10),
-		map[string]any{"name": body.Name})
+		map[string]any{"name": body.Name, "kind": comp.Kind})
 	writeJSON(w, http.StatusCreated, comp)
 }
 
@@ -239,7 +240,36 @@ func (h *Handlers) adminImportParticipants(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	h.audit(req, "competition.import_participants", "competition", strconv.FormatUint(uint64(id), 10),
-		map[string]any{"teams": len(body.Teams), "individuals": len(body.Individuals), "created_accounts": len(result.CreatedAccounts)})
+		map[string]any{"teams": len(body.Teams), "individuals": len(body.Individuals),
+			"participants": len(result.Participants), "missing": len(result.Missing)})
+	writeJSON(w, http.StatusOK, result)
+}
+
+// adminGenerateUsers 一键生成参赛账号（仅邀请赛；自动组队 + 初始密码导出）。
+func (h *Handlers) adminGenerateUsers(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body service.GenerateUsersRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Prefix == "" {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.Competitions.GenerateUsers(req.Context(), id, body)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	created := 0
+	for _, a := range result.Accounts {
+		if a.Created {
+			created++
+		}
+	}
+	h.audit(req, "competition.generate_users", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"prefix": body.Prefix, "count": body.Count, "team_size": body.TeamSize, "created": created})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -308,6 +338,36 @@ func (h *Handlers) adminCompetitionLeaderboard(w http.ResponseWriter, req *http.
 
 // ---------- 参赛者 ----------
 
+// listPublicCompetitions 竞赛广场：分页列出公开赛（含报名状态）。
+func (h *Handlers) listPublicCompetitions(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	page, pageSize := pageParams(req)
+	items, total, err := h.Competitions.ListPublic(req.Context(), user.ID, page, pageSize)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total": total, "page": page, "page_size": pageSize, "items": items,
+	})
+}
+
+// registerCompetition 公开赛自助报名（幂等）。
+func (h *Handlers) registerCompetition(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	item, err := h.Competitions.Register(req.Context(), user.ID, id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 // myCompetitionEntry 当前用户参赛/锁定状态（前端路由守卫）。
 func (h *Handlers) myCompetitionEntry(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
@@ -319,7 +379,8 @@ func (h *Handlers) myCompetitionEntry(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, http.StatusOK, entry)
 }
 
-// enterCompetition 凭邀请码入场。
+// enterCompetition 入场：邀请码（邀请赛/公开赛通用）或公开赛已报名免码
+// （body 可整体省略）。
 func (h *Handlers) enterCompetition(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {
@@ -329,7 +390,8 @@ func (h *Handlers) enterCompetition(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		InviteCode string `json:"invite_code"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.InviteCode == "" {
+	// 空请求体合法（公开赛已报名免码入场），仅解析失败拒绝。
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil && err != io.EOF {
 		writeError(w, errValidation)
 		return
 	}

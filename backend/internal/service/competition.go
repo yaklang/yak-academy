@@ -97,7 +97,7 @@ func toView(c *model.Competition, now time.Time) CompetitionView {
 	return CompetitionView{Competition: *c, Status: c.Status(now)}
 }
 
-func (s *CompetitionService) Create(ctx context.Context, name, description string, start, end time.Time) (*CompetitionView, error) {
+func (s *CompetitionService) Create(ctx context.Context, name, description string, start, end time.Time, kind string) (*CompetitionView, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrValidation)
@@ -105,9 +105,18 @@ func (s *CompetitionService) Create(ctx context.Context, name, description strin
 	if !end.After(start) {
 		return nil, fmt.Errorf("%w: end_time must be after start_time", ErrValidation)
 	}
+	k := model.CompetitionKind(strings.TrimSpace(kind))
+	if k == "" {
+		k = model.CompetitionInvitational
+	}
+	if !k.Valid() {
+		return nil, fmt.Errorf("%w: invalid competition kind", ErrValidation)
+	}
 	// 起止时间统一以 UTC 落库：SQLite 按文本比较时间，混用时区偏移会导致
 	// ActiveCompetitions 的区间判定失真（锁定/入场窗口错判）。
-	c := &model.Competition{Name: name, Description: description, StartTime: start.UTC(), EndTime: end.UTC()}
+	// kind 创建后不可更改：Update 白名单不含 kind，两条参赛通路（报名/导入）
+	// 的语义都以档位为前提，中途切换会让既有参赛者失去入场依据。
+	c := &model.Competition{Name: name, Description: description, Kind: k, StartTime: start.UTC(), EndTime: end.UTC()}
 	if err := s.comps.Create(ctx, c); err != nil {
 		return nil, mapRecordNotFound(err)
 	}
@@ -434,7 +443,7 @@ func (s *CompetitionService) UnbindChallenges(ctx context.Context, id uint, slug
 	return s.comps.UnbindChallenges(ctx, id, ids)
 }
 
-// ---------- 管理端：参赛者与队伍批量导入 ----------
+// ---------- 管理端：参赛者与队伍批量导入 / 一键生成 ----------
 
 type ParticipantImportRequest struct {
 	Teams       []TeamImport `json:"teams"`
@@ -447,84 +456,105 @@ type TeamImport struct {
 }
 
 type ParticipantImportResult struct {
-	CreatedAccounts []CreatedAccount     `json:"created_accounts"`
-	Participants    []InvitedParticipant `json:"participants"`
-}
-
-type CreatedAccount struct {
-	Username        string `json:"username"`
-	InitialPassword string `json:"initial_password"`
+	Participants []InvitedParticipant `json:"participants"`
+	// Missing 未匹配到账号的条目原文（账号编码与用户名均未命中）。
+	// 导入只引用既有账号——新建账号走一键生成（GenerateUsers）。
+	Missing []string `json:"missing"`
 }
 
 type InvitedParticipant struct {
 	Username      string  `json:"username"`
+	AccountCode   string  `json:"account_code"`
 	TeamName      *string `json:"team_name"`
 	InviteCode    string  `json:"invite_code"`
 	MailDelivered bool    `json:"mail_delivered"`
 }
 
-// ImportParticipants 批量导入：队伍/个人按用户名引用，不存在自动创建
-// （随机初始密码，仅本次响应返回）。每人生成唯一邀请码并投递站内邀请邮件。
-// 竞赛已结束拒绝导入；已参赛用户幂等跳过并沿用原邀请码（队伍按新归属更新不覆盖，
-// 以首次导入为准——重复导入以补投邮件为主要用途）。
+// resolveUser 条目解析：形如账号编码（YA26-00042）的条目先按编码精确匹配、
+// 未命中再按用户名；其余条目直接按用户名。返回 nil = 两种引用都未命中。
+func (s *CompetitionService) resolveUser(ctx context.Context, entry string) (*model.User, error) {
+	if _, ok := model.AccountCodeSeq(entry); ok {
+		if u, err := s.users.FindByAccountCode(ctx, entry); err == nil {
+			return u, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	u, err := s.users.FindByUsername(ctx, entry)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// ImportParticipants 批量导入（仅邀请赛）：条目按「账号编码或用户名」引用
+// 既有账号，不自动建号；缺失条目不阻断，在响应 missing 回报（配合一键生成
+// 先补号再重导）。每人生成唯一邀请码并投递站内邀请邮件。
+// 竞赛已结束拒绝导入；已参赛用户幂等跳过并沿用原邀请码（队伍按新归属更新
+// 不覆盖，以首次导入为准——重复导入以补投邮件为主要用途）。
 func (s *CompetitionService) ImportParticipants(ctx context.Context, id uint, req ParticipantImportRequest) (*ParticipantImportResult, error) {
 	c, err := s.find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	if c.Kind != model.CompetitionInvitational {
+		return nil, fmt.Errorf("%w: participants can only be imported into an invitational competition", ErrValidation)
+	}
 	if c.Status(s.now()) == model.CompetitionEnded {
 		return nil, fmt.Errorf("%w: competition has ended", ErrValidation)
 	}
-	// 1. 请求级校验（队伍名/成员名非空、请求内用户名不重复占位由建参赛记录唯一索引兜底）。
+	// 1. 请求级校验（队伍名/成员条目非空）。
 	for _, t := range req.Teams {
 		if strings.TrimSpace(t.Name) == "" || len(t.Members) == 0 {
 			return nil, fmt.Errorf("%w: team name and members are required", ErrValidation)
 		}
 		for _, m := range t.Members {
 			if strings.TrimSpace(m) == "" {
-				return nil, fmt.Errorf("%w: empty username", ErrValidation)
+				return nil, fmt.Errorf("%w: empty entry", ErrValidation)
 			}
 		}
 	}
 	for _, m := range req.Individuals {
 		if strings.TrimSpace(m) == "" {
-			return nil, fmt.Errorf("%w: empty username", ErrValidation)
+			return nil, fmt.Errorf("%w: empty entry", ErrValidation)
 		}
 	}
-	// 2. 用户解析：存在即用，缺失建号（随机初始密码，仅本次响应返回）。
+	// 2. 用户解析（账号编码或用户名；缺失记入 missing，不建号）。
 	userCache := map[string]*model.User{}
-	created := []CreatedAccount{}
-	allNames := []string{}
+	missing := []string{}
+	resolve := func(raw string) error {
+		entry := strings.TrimSpace(raw)
+		if _, done := userCache[entry]; done {
+			return nil
+		}
+		u, err := s.resolveUser(ctx, entry)
+		if err != nil {
+			return err
+		}
+		userCache[entry] = u // nil 也缓存：同一条目重复出现只报一次 missing
+		return nil
+	}
 	for _, t := range req.Teams {
-		allNames = append(allNames, t.Members...)
+		for _, m := range t.Members {
+			if err := resolve(m); err != nil {
+				return nil, err
+			}
+		}
 	}
-	allNames = append(allNames, req.Individuals...)
-	for _, name := range allNames {
-		if _, ok := userCache[name]; ok {
-			continue
-		}
-		u, err := s.users.FindByUsername(ctx, name)
-		if err == nil {
-			userCache[name] = u
-			continue
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+	for _, m := range req.Individuals {
+		if err := resolve(m); err != nil {
 			return nil, err
 		}
-		if s.createAccount == nil {
-			return nil, fmt.Errorf("%w: account creation unavailable", ErrValidation)
-		}
-		pwd, err := randomPassword()
-		if err != nil {
-			return nil, err
-		}
-		acc, err := s.createAccount(ctx, name, pwd, model.GlobalRoleStudent)
-		if err != nil {
-			return nil, err
-		}
-		userCache[name] = acc
-		created = append(created, CreatedAccount{Username: name, InitialPassword: pwd})
 	}
+	for entry, u := range userCache {
+		if u == nil {
+			missing = append(missing, entry)
+		}
+	}
+	sort.Strings(missing)
 	// 3. 建队伍（竞赛内重名沿用既有——重复导入幂等）。
 	teamID := map[string]uint{}
 	for _, t := range req.Teams {
@@ -544,19 +574,28 @@ func (s *CompetitionService) ImportParticipants(ctx context.Context, id uint, re
 		}
 	}
 	// 4. 逐人建参赛记录（幂等：已参赛沿用原记录）+ 投递邀请邮件。
-	result := &ParticipantImportResult{
-		CreatedAccounts: created,
-		Participants:    []InvitedParticipant{},
+	result := &ParticipantImportResult{Participants: []InvitedParticipant{}, Missing: missing}
+	importEntry := func(raw string, team uint) error {
+		u := userCache[strings.TrimSpace(raw)]
+		if u == nil {
+			return nil // 缺失条目已在 missing 回报
+		}
+		item, err := s.importOne(ctx, c, u, team)
+		if err != nil {
+			return err
+		}
+		result.Participants = append(result.Participants, item)
+		return nil
 	}
 	for _, t := range req.Teams {
 		for _, m := range t.Members {
-			if err := s.importOne(ctx, c, userCache[m], teamID[strings.TrimSpace(t.Name)], result); err != nil {
+			if err := importEntry(m, teamID[strings.TrimSpace(t.Name)]); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for _, m := range req.Individuals {
-		if err := s.importOne(ctx, c, userCache[m], 0, result); err != nil {
+		if err := importEntry(m, 0); err != nil {
 			return nil, err
 		}
 	}
@@ -566,18 +605,15 @@ func (s *CompetitionService) ImportParticipants(ctx context.Context, id uint, re
 // importOne 单人导入：参赛记录存在 → 沿用邀请码；不存在 → 生成邀请码、
 // 落库、投递站内邀请邮件（失败只标记 mail_delivered=false，不回滚——
 // 管理端可从参赛者列表拿到邀请码重发）。
-func (s *CompetitionService) importOne(ctx context.Context, c *model.Competition, u *model.User, teamID uint, result *ParticipantImportResult) error {
-	if u == nil {
-		return fmt.Errorf("%w: unknown user", ErrValidation)
-	}
+func (s *CompetitionService) importOne(ctx context.Context, c *model.Competition, u *model.User, teamID uint) (InvitedParticipant, error) {
 	part, err := s.comps.FindParticipant(ctx, c.ID, u.ID)
 	if err != nil {
-		return err
+		return InvitedParticipant{}, err
 	}
 	if part == nil {
 		code, err := randomInviteCode()
 		if err != nil {
-			return err
+			return InvitedParticipant{}, err
 		}
 		part = &model.Participant{
 			CompetitionID: c.ID,
@@ -586,7 +622,7 @@ func (s *CompetitionService) importOne(ctx context.Context, c *model.Competition
 			InviteCode:    code,
 		}
 		if err := s.comps.CreateParticipant(ctx, part); err != nil {
-			return err
+			return InvitedParticipant{}, err
 		}
 	}
 	var teamName *string
@@ -602,13 +638,140 @@ func (s *CompetitionService) importOne(ctx context.Context, c *model.Competition
 			c.Name, c.StartTime.Format("2006-01-02 15:04"), c.EndTime.Format("2006-01-02 15:04"))
 		delivered = s.deliverInvite(ctx, u.ID, title, body, c.ID, part.InviteCode) == nil
 	}
-	result.Participants = append(result.Participants, InvitedParticipant{
+	return InvitedParticipant{
 		Username:      u.Username,
+		AccountCode:   u.AccountCode,
 		TeamName:      teamName,
 		InviteCode:    part.InviteCode,
 		MailDelivered: delivered,
-	})
-	return nil
+	}, nil
+}
+
+// GenerateUsersRequest 一键生成参赛账号（仅邀请赛；默认密码 123456）。
+type GenerateUsersRequest struct {
+	Prefix   string `json:"prefix"`
+	Count    int    `json:"count"`
+	TeamSize int    `json:"team_size"`
+	Password string `json:"password"`
+}
+
+// GeneratedAccount 生成账号条目（initial_password 仅新建账号返回，
+// 供管理端导出分发；复用既有账号为 null，沿用原密码）。
+type GeneratedAccount struct {
+	Username        string  `json:"username"`
+	AccountCode     string  `json:"account_code"`
+	InitialPassword *string `json:"initial_password"`
+	Created         bool    `json:"created"`
+}
+
+type GenerateUsersResult struct {
+	Accounts     []GeneratedAccount   `json:"accounts"`
+	Teams        []string             `json:"teams"`
+	Participants []InvitedParticipant `json:"participants"`
+}
+
+var generatePrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,15}$`)
+
+// GenerateUsers 一键生成 count 个参赛账号（用户名 = 前缀-零填充序号）并全部
+// 导入为本场参赛者：可配置自动组队（team_size > 0 按序编入「第 n 队」，余数
+// 进最后一队）与初始密码（默认 123456）。已存在的同名账号复用（沿用原密码，
+// created=false）。账号编码由建号入口统一分配。
+func (s *CompetitionService) GenerateUsers(ctx context.Context, id uint, req GenerateUsersRequest) (*GenerateUsersResult, error) {
+	c, err := s.find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if c.Kind != model.CompetitionInvitational {
+		return nil, fmt.Errorf("%w: user generation is only available for invitational competitions", ErrValidation)
+	}
+	if c.Status(s.now()) == model.CompetitionEnded {
+		return nil, fmt.Errorf("%w: competition has ended", ErrValidation)
+	}
+	prefix := strings.TrimSpace(req.Prefix)
+	if !generatePrefixPattern.MatchString(prefix) {
+		return nil, fmt.Errorf("%w: prefix must be 1-16 lowercase letters, digits or hyphens", ErrValidation)
+	}
+	if req.Count < 1 || req.Count > 500 {
+		return nil, fmt.Errorf("%w: count must be between 1 and 500", ErrValidation)
+	}
+	if req.TeamSize < 0 || req.TeamSize > 10 {
+		return nil, fmt.Errorf("%w: team_size must be between 0 and 10", ErrValidation)
+	}
+	password := req.Password
+	if password == "" {
+		password = "123456"
+	}
+	if len(password) < 6 {
+		return nil, fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
+	}
+	if s.createAccount == nil {
+		return nil, fmt.Errorf("%w: account creation unavailable", ErrValidation)
+	}
+	// 用户名序号零填充：至少两位、按 count 位数（class26-01 … class26-06）。
+	width := len(strconv.Itoa(req.Count))
+	if width < 2 {
+		width = 2
+	}
+	result := &GenerateUsersResult{Accounts: []GeneratedAccount{}, Teams: []string{}, Participants: []InvitedParticipant{}}
+	users := make([]*model.User, 0, req.Count)
+	for i := 1; i <= req.Count; i++ {
+		username := fmt.Sprintf("%s-%0*d", prefix, width, i)
+		existing, err := s.users.FindByUsername(ctx, username)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if existing != nil {
+			result.Accounts = append(result.Accounts, GeneratedAccount{
+				Username: existing.Username, AccountCode: existing.AccountCode, Created: false,
+			})
+			users = append(users, existing)
+			continue
+		}
+		acc, err := s.createAccount(ctx, username, password, model.GlobalRoleStudent)
+		if err != nil {
+			return nil, err
+		}
+		pwd := password
+		result.Accounts = append(result.Accounts, GeneratedAccount{
+			Username: acc.Username, AccountCode: acc.AccountCode, InitialPassword: &pwd, Created: true,
+		})
+		users = append(users, acc)
+	}
+	// 自动组队：按生成顺序每 team_size 人一队，余数进最后一队。
+	teamID := make([]uint, req.Count)
+	if req.TeamSize > 0 {
+		teamCount := (req.Count + req.TeamSize - 1) / req.TeamSize
+		for t := 1; t <= teamCount; t++ {
+			name := fmt.Sprintf("第%d队", t)
+			existing, err := s.comps.FindTeamByName(ctx, id, name)
+			if err != nil {
+				return nil, err
+			}
+			if existing == nil {
+				team := &model.Team{CompetitionID: id, Name: name}
+				if err := s.comps.CreateTeam(ctx, team); err != nil {
+					return nil, err
+				}
+				result.Teams = append(result.Teams, name)
+				for i := (t - 1) * req.TeamSize; i < t*req.TeamSize && i < req.Count; i++ {
+					teamID[i] = team.ID
+				}
+			} else {
+				// 重复生成同名队伍沿用（与导入幂等语义一致）。
+				for i := (t - 1) * req.TeamSize; i < t*req.TeamSize && i < req.Count; i++ {
+					teamID[i] = existing.ID
+				}
+			}
+		}
+	}
+	for i, u := range users {
+		item, err := s.importOne(ctx, c, u, teamID[i])
+		if err != nil {
+			return nil, err
+		}
+		result.Participants = append(result.Participants, item)
+	}
+	return result, nil
 }
 
 // AdminParticipants 管理端参赛者分页（含队伍富化）。
@@ -728,6 +891,100 @@ func (s *CompetitionService) LockedCompetition(ctx context.Context, userID uint)
 
 // ---------- 参赛者：入场与锁定 ----------
 
+// ---------- 参赛者：竞赛广场 / 报名 / 入场与锁定 ----------
+
+// PublicCompetitionItem 竞赛广场条目（仅公开赛；邀请赛定向，不对外展示）。
+type PublicCompetitionItem struct {
+	ID           uint                    `json:"id"`
+	Name         string                  `json:"name"`
+	Description  string                  `json:"description"`
+	StartTime    time.Time               `json:"start_time"`
+	EndTime      time.Time               `json:"end_time"`
+	Status       model.CompetitionStatus `json:"status"`
+	Registered   bool                    `json:"registered"`
+	Participants int64                   `json:"participants"`
+}
+
+// ListPublic 竞赛广场（学生侧）：分页列出公开赛，标注当前用户报名状态与
+// 报名人数。邀请赛不出现在广场。
+func (s *CompetitionService) ListPublic(ctx context.Context, userID uint, page, pageSize int) ([]PublicCompetitionItem, int64, error) {
+	list, total, err := s.comps.ListPublic(ctx, (page-1)*pageSize, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	now := s.now()
+	items := make([]PublicCompetitionItem, len(list))
+	for i := range list {
+		c := &list[i]
+		_, pTotal, err := s.comps.ListParticipants(ctx, c.ID, 0, 1)
+		if err != nil {
+			return nil, 0, err
+		}
+		registered := false
+		if part, err := s.comps.FindParticipant(ctx, c.ID, userID); err != nil {
+			return nil, 0, err
+		} else if part != nil {
+			registered = true
+		}
+		items[i] = PublicCompetitionItem{
+			ID: c.ID, Name: c.Name, Description: c.Description,
+			StartTime: c.StartTime, EndTime: c.EndTime, Status: c.Status(now),
+			Registered: registered, Participants: pTotal,
+		}
+	}
+	return items, total, nil
+}
+
+// Register 公开赛自助报名（幂等）：个人参赛（不编队），仍生成邀请码作备用
+// 入场凭据但不投递邮件（报名即入场资格）。邀请赛拒绝（参赛者由管理端定向
+// 导入/生成）；已结束拒绝。已报名重复调用返回当前条目。
+func (s *CompetitionService) Register(ctx context.Context, userID, id uint) (*PublicCompetitionItem, error) {
+	c, err := s.find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if c.Kind != model.CompetitionPublic {
+		return nil, fmt.Errorf("%w: cannot register for an invitational competition", ErrValidation)
+	}
+	if c.Status(s.now()) == model.CompetitionEnded {
+		return nil, fmt.Errorf("%w: competition has ended", ErrValidation)
+	}
+	part, err := s.comps.FindParticipant(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if part == nil {
+		code, err := randomInviteCode()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.comps.CreateParticipant(ctx, &model.Participant{
+			CompetitionID: id, UserID: userID, InviteCode: code,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return s.publicItem(ctx, c, userID)
+}
+
+func (s *CompetitionService) publicItem(ctx context.Context, c *model.Competition, userID uint) (*PublicCompetitionItem, error) {
+	_, pTotal, err := s.comps.ListParticipants(ctx, c.ID, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	registered := false
+	if part, err := s.comps.FindParticipant(ctx, c.ID, userID); err != nil {
+		return nil, err
+	} else if part != nil {
+		registered = true
+	}
+	return &PublicCompetitionItem{
+		ID: c.ID, Name: c.Name, Description: c.Description,
+		StartTime: c.StartTime, EndTime: c.EndTime, Status: c.Status(s.now()),
+		Registered: registered, Participants: pTotal,
+	}, nil
+}
+
 // MyEntry 当前用户参赛状态：已入场且竞赛 running → locked=true
 // （前端据此锁定平台入口；服务端所有竞赛接口同样校验）。
 func (s *CompetitionService) MyEntry(ctx context.Context, userID uint) (*MyCompetitionEntry, error) {
@@ -760,22 +1017,35 @@ type MyCompetitionEntry struct {
 	TeamName    *string          `json:"team_name"`
 }
 
-// Enter 凭邀请码入场：仅 running 竞赛有效（scheduled 未开赛、ended 已结束 → 422）。
-// 入场后不可退出：锁定状态派生自 (entered 且 running)，直到比赛结束。
+// Enter 入场：仅 running 竞赛有效（scheduled 未开赛、ended 已结束 → 422）。
+// 凭据两种：邀请码（邀请赛/公开赛通用——参赛者列表可查码），或公开赛已报名
+// 者免码（报名即入场资格）。入场后不可退出：锁定状态派生自 (entered 且
+// running)，直到比赛结束。
 func (s *CompetitionService) Enter(ctx context.Context, userID, id uint, inviteCode string) (*MyCompetitionEntry, error) {
 	c, err := s.find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if inviteCode == "" {
+	var part *model.Participant
+	if inviteCode != "" {
+		part, err = s.comps.FindParticipantByCode(ctx, inviteCode)
+		if err != nil {
+			return nil, err
+		}
+		if part == nil || part.CompetitionID != id || part.UserID != userID {
+			return nil, fmt.Errorf("%w: invalid invite code", ErrValidation)
+		}
+	} else if c.Kind == model.CompetitionPublic {
+		// 公开赛已报名者免码入场；未报名先去广场报名。
+		part, err = s.comps.FindParticipant(ctx, id, userID)
+		if err != nil {
+			return nil, err
+		}
+		if part == nil {
+			return nil, fmt.Errorf("%w: register before entering a public competition", ErrValidation)
+		}
+	} else {
 		return nil, fmt.Errorf("%w: invite_code is required", ErrValidation)
-	}
-	part, err := s.comps.FindParticipantByCode(ctx, inviteCode)
-	if err != nil {
-		return nil, err
-	}
-	if part == nil || part.CompetitionID != id || part.UserID != userID {
-		return nil, fmt.Errorf("%w: invalid invite code", ErrValidation)
 	}
 	switch c.Status(s.now()) {
 	case model.CompetitionScheduled:
@@ -1584,13 +1854,4 @@ func randomInviteCode() (string, error) {
 		return "", err
 	}
 	return strings.ToUpper(hex.EncodeToString(b)), nil
-}
-
-// randomPassword 自动建号的随机初始密码（仅导入响应返回一次，管理员分发）。
-func randomPassword() (string, error) {
-	b := make([]byte, 9)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
