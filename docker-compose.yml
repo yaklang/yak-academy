@@ -68,6 +68,11 @@ services:
       # PostgreSQL 模式应用内备份不支持（数据库走外部 pg_dump）。
       ACADEMY_BACKUP_INTERVAL: ${ACADEMY_BACKUP_INTERVAL:-}
       ACADEMY_BACKUP_KEEP: ${ACADEMY_BACKUP_KEEP:-7}
+      # 可观测性（ops 硬化）：/metrics 采集令牌（Prometheus scrape 的 bearer_token；
+      # 空 = 端点关闭）与访问日志 JSON 行格式（结构化输出，日志采集器可直接解析）。
+      # 告警由外部 Prometheus + Alertmanager 完成（平台不内置）。
+      ACADEMY_METRICS_TOKEN: ${ACADEMY_METRICS_TOKEN:-}
+      ACADEMY_LOG_JSON: ${ACADEMY_LOG_JSON:-}
       # ACM 编程题判题引擎：yak 可执行文件在容器内的绝对路径（Linux 构建，
       # 放 ./data/yak 随卷挂载即路径 /data/yak）。空 = 引擎未装配，code 题
       # 提交后判 internal_error（区别于学生代码错误，前端提示可重试）。

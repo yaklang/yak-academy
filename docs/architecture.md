@@ -266,6 +266,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - 徽章为计算型读模型：不落库、不产生事件；如未来需要"颁发时间/稀有度"再演进为事件派生表。
 - 短信通道仅有开发投递器（验证码写服务日志）；生产接真实通道前注册不可对外开放。竞赛 WP 的 zip 附件默认落盘本地目录（`ACADEMY_WRITEUPS_DIR`），可选切 S3 兼容对象存储（`ACADEMY_WRITEUPS_STORE=s3` + `ACADEMY_WRITEUPS_S3_*`，MinIO/AWS S3 等；切换只影响新写入，存量文件不迁移）。
 - 备份为应用内单机快照（SQLite `VACUUM INTO` + 数据目录 tar.gz，`ACADEMY_BACKUP_INTERVAL` 周期触发 / 管理端手动触发，按 `ACADEMY_BACKUP_KEEP` 保留份数自动清理）：PostgreSQL 模式不支持（外部 pg_dump）；归档落数据卷本地目录，数据卷整卷损坏时备份同失——异地容灾由运维侧下载归档离机保存或同步 backups/ 目录（平台不内置）。
+- 可观测性为「暴露而不内置」：`/metrics`（Prometheus 文本格式，HTTP 按路由聚合 + 运行时指标，`ACADEMY_METRICS_TOKEN` 令牌门控，未配置即关闭）与 slog 结构化访问日志（`ACADEMY_LOG_JSON=1` 切 JSON 行）；采集、存储、看板与告警由外部 Prometheus + Alertmanager / 日志采集器完成，平台不内置监控栈。`/health` 探针与 `/metrics` 采集不进指标与访问日志（高频探针噪音）。
 - 不引入 Casbin / Redis / K8s；数据层默认 SQLite，`ACADEMY_DB_DSN` 可选切 PostgreSQL（Phase 4 已落地的第一步；存量 SQLite 数据不自动迁移）。
 - JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限即拒绝启动，非严格路径仅启动告警）。
 - 内置训练的 vulinbox 基础镜像构建依赖官方 CDN（`oss-qn.yaklang.com`，离线部署需手工预构建镜像）且仅 amd64；二进制 sha256 锁定在 Dockerfile，上游更新会使导入 422（防靶机行为漂移，更新题集时重新锁定）。

@@ -81,6 +81,13 @@ type Config struct {
 	// BackupInterval 自动备份间隔（time.ParseDuration 格式如 "6h"/"30m"；
 	// 0/未设置 = 关闭周期备份，仅管理端手动触发）。
 	BackupInterval time.Duration
+
+	// MetricsToken /metrics 采集令牌（Prometheus scrape 的 bearer_token，
+	// 恒时比对；空 = 端点关闭返回 404，不暴露任何信息）。
+	MetricsToken string
+	// LogJSON 访问日志 JSON 行格式（ACADEMY_LOG_JSON=1；默认 text 键值行，
+	// 同为结构化输出，可被日志采集器直接解析）。
+	LogJSON bool
 }
 
 // S3Options S3 兼容对象存储连接参数。Endpoint 形如 minio.example.com:9000
@@ -133,6 +140,8 @@ func Load() *Config {
 		BackupDir:      getenv("ACADEMY_BACKUP_DIR", filepath.Join(filepath.Dir(getenv("ACADEMY_DB", "academy.db")), "backups")),
 		BackupKeep:     getenvInt("ACADEMY_BACKUP_KEEP", 7),
 		BackupInterval: getenvDuration("ACADEMY_BACKUP_INTERVAL", 0),
+		MetricsToken:   os.Getenv("ACADEMY_METRICS_TOKEN"),
+		LogJSON:        getenvBool("ACADEMY_LOG_JSON"),
 	}
 }
 
