@@ -877,6 +877,70 @@ paths:
               schema: { $ref: '#/components/schemas/TokenResponse' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /auth/password-reset/code:
+    post:
+      tags: [auth]
+      security: []
+      summary: 发送找回密码验证码
+      description: >
+        向已注册手机号发送 6 位验证码（5 分钟有效，核销一次性）。
+        手机号未注册 → 422（发码即拒；竞赛批量建号未绑定手机号，此类账号请联系管理员重置）。
+        限频与注册发码同策略：同手机号 60 秒内仅一次、10 分钟内最多 3 次（限频返回 200 + retry_after）。
+        验证码用途隔离（purpose=password_reset）：注册验证码不可用于重置，反之亦然。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+      responses:
+        '200':
+          description: OK（已发送；60 秒内重复请求返回此状态并带 retry_after 提示）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
+                  code: { type: string, description: 验证码原文；仅在回显模式（ACADEMY_SMS_SHOW_CODE=1）下返回 }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /auth/password-reset:
+    post:
+      tags: [auth]
+      security: []
+      summary: 凭验证码重置密码（找回账号）
+      description: >
+        核销找回验证码并更新密码，该账号全部已签发 token 随即失效。
+        成功响应返回用户名与账号编码——忘记用户名的学员凭手机号即可找回账号。
+        验证码错误/过期/已核销或手机号未注册 → 422。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code, new_password]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                code: { type: string, minLength: 6, maxLength: 6 }
+                new_password: { type: string, minLength: 6 }
+      responses:
+        '200':
+          description: OK（密码已重置，返回账号标识供找回）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  account_code: { type: string, description: "学号式账号编码 YA{YY}-{NNNNN}" }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /auth/logout:
     post:
       tags: [auth]

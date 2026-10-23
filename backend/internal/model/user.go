@@ -88,16 +88,23 @@ type TokenRevocation struct {
 	CreatedAt time.Time
 }
 
-// SmsCode 注册验证码（自助注册，手机验证码核销）。鉴权辅助状态而非派生数据，
-// 不进事件表（同 TokenRevocation）。核销一次性：Used 置位后不可重复注册。
+// SmsCode 手机验证码（自助注册 / 找回密码核销）。鉴权辅助状态而非派生数据，
+// 不进事件表（同 TokenRevocation）。核销一次性：Used 置位后不可重复使用。
 type SmsCode struct {
 	ID        uint      `gorm:"primaryKey"`
 	Phone     string    `gorm:"size:20;index"`
 	Code      string    `gorm:"size:6"`
+	Purpose   string    `gorm:"size:32;index;default:register"` // register / password_reset，发码与核销同用途比对
 	ExpiresAt time.Time `gorm:"index"` // 5 分钟有效
 	Used      bool      // 核销一次性标记
 	CreatedAt time.Time
 }
+
+// 验证码用途（SmsCode.Purpose）：发码与核销按用途隔离，注册码不可用于重置密码，反之亦然。
+const (
+	SmsPurposeRegister      = "register"
+	SmsPurposePasswordReset = "password_reset"
+)
 
 // CourseRole 已废弃的课程级角色表（历史双层 RBAC 遗留）。
 // 两档角色模型下不再参与鉴权；表保留以免破坏既有库，新代码禁止依赖。
