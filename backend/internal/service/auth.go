@@ -238,9 +238,10 @@ func (s *AuthService) UpdateRoles(ctx context.Context, userID uint, globalRole m
 	return s.users.FindByID(ctx, userID)
 }
 
-// ListUsers 用户列表（分页）。
-func (s *AuthService) ListUsers(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
-	return s.users.List(ctx, offset, limit)
+// ListUsers 用户列表（分页 + 过滤/搜索：关键字/角色/活跃度/从未完成题目，
+// 语义见 repo.UserListFilter；返回条目附 active/solved_any 画像标记）。
+func (s *AuthService) ListUsers(ctx context.Context, filter repo.UserListFilter, offset, limit int) ([]repo.UserItem, int64, error) {
+	return s.users.List(ctx, filter, offset, limit)
 }
 
 // EnsureAdmin users 表为空时创建初始管理员。

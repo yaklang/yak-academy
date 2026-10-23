@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -57,16 +58,63 @@ func (r *userRepo) FindByPhone(ctx context.Context, phone string) (*model.User, 
 	return &u, nil
 }
 
-func (r *userRepo) List(ctx context.Context, offset, limit int) ([]model.User, int64, error) {
-	var (
-		list  []model.User
-		total int64
-	)
-	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+// List 管理端用户分页（filter 零值 = 全量）。active/solved_any 与过滤条件
+// 共用同一 SQL 口径（COALESCE(last_login_at, created_at) 与 EXISTS 提交
+// correct 行），时间比较绑定参数（与 LabInstance 过期扫描同款方言中立做法）。
+func (r *userRepo) List(ctx context.Context, filter UserListFilter, offset, limit int) ([]UserItem, int64, error) {
+	now := filter.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	scope := userFilterScope(filter, now)
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Scopes(scope).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err := r.db.WithContext(ctx).Order("id").Offset(offset).Limit(limit).Find(&list).Error
-	return list, total, err
+	var items []UserItem
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Select("users.*, (COALESCE(users.last_login_at, users.created_at) >= ?) AS active, "+
+			"EXISTS (SELECT 1 FROM submissions WHERE submissions.user_id = users.id AND submissions.status = ?) AS solved_any",
+			now.AddDate(0, -6, 0), model.SubmissionCorrect).
+		Scopes(scope).
+		Order("users.id").Offset(offset).Limit(limit).
+		Find(&items).Error
+	return items, total, err
+}
+
+// userFilterScope 用户列表过滤条件（零值字段不参与 WHERE）。不活跃 = 最近
+// 登录（无登录记录则注册时间）早于 6 个月 cutoff；从未完成题目 = 不存在
+// status=correct 的提交行。
+func userFilterScope(f UserListFilter, now time.Time) func(*gorm.DB) *gorm.DB {
+	cutoff := now.AddDate(0, -6, 0)
+	solved := "EXISTS (SELECT 1 FROM submissions WHERE submissions.user_id = users.id AND submissions.status = ?)"
+	return func(db *gorm.DB) *gorm.DB {
+		if f.Q != "" {
+			like := "%" + strings.ToLower(f.Q) + "%"
+			db = db.Where(
+				"LOWER(username) LIKE ? OR LOWER(account_code) LIKE ? OR phone LIKE ?",
+				like, like, like,
+			)
+		}
+		if f.Role != "" {
+			db = db.Where("global_role = ?", f.Role)
+		}
+		if f.Active != nil {
+			if *f.Active {
+				db = db.Where("COALESCE(last_login_at, created_at) >= ?", cutoff)
+			} else {
+				db = db.Where("COALESCE(last_login_at, created_at) < ?", cutoff)
+			}
+		}
+		if f.NoSolves != nil {
+			if *f.NoSolves {
+				db = db.Where("NOT "+solved, model.SubmissionCorrect)
+			} else {
+				db = db.Where(solved, model.SubmissionCorrect)
+			}
+		}
+		return db
+	}
 }
 
 func (r *userRepo) UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error {

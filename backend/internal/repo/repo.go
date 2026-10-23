@@ -18,7 +18,8 @@ type UserRepo interface {
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	// FindByAccountCode 账号编码查人（邀请赛表格导入解析编码引用）。
 	FindByAccountCode(ctx context.Context, code string) (*model.User, error)
-	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
+	// List 管理端用户分页（filter 零值 = 全量；返回条目附活跃/解题画像标记）。
+	List(ctx context.Context, filter UserListFilter, offset, limit int) ([]UserItem, int64, error)
 	UpdateGlobalRole(ctx context.Context, id uint, role model.GlobalRole) error
 	// TouchLogin 记录最近登录时刻（不活跃用户判定基线；登录签发处 best-effort 调用）。
 	TouchLogin(ctx context.Context, id uint, t time.Time) error
@@ -28,6 +29,26 @@ type UserRepo interface {
 	UpdateBio(ctx context.Context, id uint, bio string) error
 	// UpdateAvatar 更新头像文件名（空串 = 未上传）。
 	UpdateAvatar(ctx context.Context, id uint, avatarFile string) error
+}
+
+// UserListFilter 管理端用户列表过滤（零值 = 不过滤）：Q 对用户名/账号编码/
+// 手机号做 LOWER LIKE 子串匹配（方言中立）；Role 空 = 不限角色；Active nil =
+// 不限（true = 活跃，false = 6 个月不活跃）；NoSolves nil = 不限（true = 从未
+// 完成题目，false = 完成过）；Now 为活跃判定基准时刻（零值取 time.Now，测试可注入）。
+type UserListFilter struct {
+	Q        string
+	Role     string
+	Active   *bool
+	NoSolves *bool
+	Now      time.Time
+}
+
+// UserItem 管理端用户条目：用户行 + 画像标记（active = 最近登录或注册在
+// 6 个月内；solved_any = 存在判定通过的提交）。过滤/标记共用同一判定口径。
+type UserItem struct {
+	model.User
+	Active    bool `json:"active"`
+	SolvedAny bool `json:"solved_any"`
 }
 
 // SmsCodeRepo 注册验证码（自助注册）：发码入库、限频计数、核销。
