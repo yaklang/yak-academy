@@ -29,6 +29,7 @@ function logout() {
         <router-link to="/admin/panel/challenges" class="sub">题目管理</router-link>
         <router-link to="/admin/panel/containers" class="sub">容器管理</router-link>
         <router-link to="/admin/panel/backups" class="sub">备份管理</router-link>
+        <router-link to="/admin/panel/audit-logs" class="sub">操作审计</router-link>
         <router-link to="/admin/panel/competitions" class="sub">竞赛管理</router-link>
       </nav>
       <div class="side-footer">

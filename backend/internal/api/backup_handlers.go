@@ -17,6 +17,7 @@ func (h *Handlers) createBackup(w http.ResponseWriter, req *http.Request) {
 		mapError(w, err)
 		return
 	}
+	h.audit(req, "backup.create", "backup", info.Name, map[string]any{"size_bytes": info.SizeBytes})
 	writeJSON(w, http.StatusCreated, info)
 }
 
