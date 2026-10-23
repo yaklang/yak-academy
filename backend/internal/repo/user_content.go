@@ -14,7 +14,13 @@ type userRepo struct{ db *gorm.DB }
 
 func NewUserRepo(db *gorm.DB) UserRepo { return &userRepo{db} }
 
+// Create 建号。账号编码为空时统一在此分配（学号式 YA{YY}-{NNNNN}，同年
+// MAX+1，唯一冲突重试）——注册、管理端建号、竞赛批量生成全走本入口，
+// 保证编码不重不漏；已带编码（迁移回填/测试固定码）则原样落库。
 func (r *userRepo) Create(ctx context.Context, u *model.User) error {
+	if u.AccountCode == "" {
+		return r.createWithAccountCode(ctx, u)
+	}
 	return r.db.WithContext(ctx).Create(u).Error
 }
 

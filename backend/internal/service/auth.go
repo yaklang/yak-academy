@@ -89,7 +89,13 @@ func (s *AuthService) issueToken(ctx context.Context, user *model.User) (string,
 		"exp":  expires.Unix(),
 	})
 	signed, err := tok.SignedString(s.secret)
-	return signed, expires, err
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	// 不活跃判定基线：签发即视为一次登录（登录/注册即登录都经此处）。
+	// best-effort——基线写失败不阻塞登录。
+	_ = s.users.TouchLogin(ctx, user.ID, now)
+	return signed, expires, nil
 }
 
 // ValidateToken 中间件验签入口：签名校验 + jti 撤销检查 + 改密失效阈值检查。

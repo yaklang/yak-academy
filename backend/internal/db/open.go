@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
@@ -63,7 +64,57 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateWriteupScope(db); err != nil {
 		return err
 	}
-	return migrateTwoRoleModel(db)
+	if err := migrateTwoRoleModel(db); err != nil {
+		return err
+	}
+	return migrateUserAccountCode(db)
+}
+
+// migrateUserAccountCode 一次性回填：账号编码列加入前已存在的用户按
+// created_at 年份分组、id 升序补编码（与运行时 Create 的同年 MAX+1 规则一致，
+// 起始序号取该年已有编码最大值 +1，部分回填后重跑不撞号）。幂等：无空编码
+// 行时为空操作。
+func migrateUserAccountCode(db *gorm.DB) error {
+	var users []model.User
+	if err := db.Where("account_code IS NULL OR account_code = ''").Order("id").Find(&users).Error; err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	next := map[int]int{}
+	for _, u := range users {
+		year := u.CreatedAt.Year()
+		if u.CreatedAt.IsZero() {
+			year = time.Now().Year()
+		}
+		seq, seeded := next[year]
+		if !seeded {
+			var codes []string
+			if err := db.Model(&model.User{}).
+				Where("account_code LIKE ?", model.AccountCodePrefix(year)+"%").
+				Order("account_code DESC").Limit(1).
+				Pluck("account_code", &codes).Error; err != nil {
+				return err
+			}
+			seq = 1
+			if len(codes) > 0 {
+				if prev, ok := model.AccountCodeSeq(codes[0]); ok {
+					seq = prev + 1
+				}
+			}
+		}
+		code := model.FormatAccountCode(year, seq)
+		if code == "" {
+			return fmt.Errorf("migrate users: account code seq %d overflow for year %d", seq, year)
+		}
+		if err := db.Model(&model.User{}).Where("id = ?", u.ID).Update("account_code", code).Error; err != nil {
+			return err
+		}
+		next[year] = seq + 1
+	}
+	log.Printf("migrate users: backfilled account codes for %d users", len(users))
+	return nil
 }
 
 // migrateWriteupScope 一次性迁移：WP 模型从"每人一份"改为"题目 × 队伍/个人"后，
