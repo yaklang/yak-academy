@@ -405,6 +405,50 @@ export const auditApi = {
   },
 }
 
+// 主机/容器性能快照（ops 硬化）：docker info/stats + Linux /proc + 数据卷 statfs；
+// 非 Linux 开发态宿主占用与数据卷用量为 null。
+export interface HostUsage {
+  cpu_percent: number | null
+  mem_total_bytes: number
+  mem_used_bytes: number | null
+}
+
+export interface VolumeUsage {
+  path: string
+  total_bytes: number
+  used_bytes: number
+  avail_bytes: number
+}
+
+export interface ContainerResource {
+  id: string
+  name: string
+  cpu_percent: number
+  mem_used_bytes: number
+  mem_limit_bytes: number
+  mem_percent: number
+  net_io_bytes: [number | null, number | null]
+  block_io_bytes: [number | null, number | null]
+  pids: number
+}
+
+export interface PerformanceReport {
+  ncpu: number
+  mem_total_bytes: number
+  containers_total: number
+  containers_running: number
+  containers_paused: number
+  containers_stopped: number
+  images: number
+  host: HostUsage | null
+  data_volume: VolumeUsage | null
+  containers: ContainerResource[]
+}
+
+export const performanceApi = {
+  get: () => http.get<PerformanceReport>('/admin/performance'),
+}
+
 export const progressApi = {
   mine: () => http.get<{ xp: number; completed_rooms: number; in_progress_rooms: number }>('/progress'),
   leaderboard: (page = 1) => http.get<Paged<LeaderboardEntry>>(`/leaderboard?page=${page}`),

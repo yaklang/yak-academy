@@ -43,6 +43,10 @@ func (f *fakeDriver) Destroy(ctx context.Context, instanceID uint) error {
 	return nil
 }
 
+func (f *fakeDriver) HostStats(ctx context.Context) (*HostStats, error) {
+	return nil, errNotImplemented("fake driver host stats")
+}
+
 // newEnvTestService 构造带 env 题目与无 env 题目的 EnvService，返回两题真实 ID。
 func newEnvTestService(t *testing.T, d InstanceDriver) (*EnvService, *gorm.DB, uint, uint) {
 	t.Helper()

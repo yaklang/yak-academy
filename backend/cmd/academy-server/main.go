@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -135,6 +136,7 @@ func main() {
 	progressSvc := service.NewUserProgressService(scoreRepo, progressRepo, userRepo)
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)
 	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver, cfg.PublicURL)
+	envSvc.SetDataDir(filepath.Dir(dbTarget))
 	challengeSvc.SetEnvService(envSvc)
 	envSvc.StartReaper(ctx, time.Minute)
 	badgeSvc := service.NewBadgeService(scoreRepo, progressRepo)

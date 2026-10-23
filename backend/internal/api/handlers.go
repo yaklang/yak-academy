@@ -113,6 +113,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/active", "admin", h.listActiveInstances)
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
 	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
+	r.Handle(http.MethodGet, "/api/v1/admin/performance", "admin", h.performance)
 		r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
 		r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
 		r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
