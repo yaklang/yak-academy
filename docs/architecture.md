@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.6（Phase 2/3 完成 + 竞赛系统（公开/邀请分档）+ 账号编码 + 用户画像管理 + 自助注册 + 部署约定）
+> 版本：v0.6（Phase 2/3 完成 + 竞赛系统（公开/邀请分档）+ 账号编码 + 用户画像管理 + 自助注册与找回密码 + 部署约定）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -36,7 +36,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │            角色是账号固有属性）                                 │
 ├────────────────────────────────────────────────────────────┤
 │ 服务层  backend/internal/api  REST + JWT + RBAC 中间件        │
-│   ├─ auth        登录 / JWT / 两档角色 RBAC / 自助注册        │
+│   ├─ auth        登录 / JWT / 两档角色 RBAC / 自助注册与找回密码│
 │   ├─ content     教程包上传→解析→校验→入库→发布（五步管线）    │
 │   ├─ challenge   Challenge/Flag/Hint 业务（题目独立资源）      │
 │   ├─ judge       异步判题 worker（恒时比较、动态计分、反作弊）  │
@@ -62,8 +62,9 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 两档角色：`student`（普通人，仅学习端）/ `admin`（管理员，管理端全部能力）；普通人前端不显示管理入口。
 - 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
 - **账号编码（学号式）**：每号分配唯一编码 `YA{YY}-{NNNNN}`（建号年两位 + 年内序号 1~99999 零填充，如 `YA26-00042`），建号入口统一在 `userRepo.Create`（同年前缀字典序 MAX+1 分配，唯一冲突重试）；序号按建号年分组互不挤占。旧库迁移按 created_at 年分组回填（幂等，起始取该年已有最大序号+1）；部分唯一索引（`account_code <> ''`）兼容旧空值行。编码是用户对外可报读的稳定标识（区别于可读用户名），邀请赛导入表格、用户管理搜索均支持按编码引用/检索。
-- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为只读画像表格（不活跃 ∩ 从未解题可组合过滤），建号走邀请赛一键生成或自助注册。
+- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走邀请赛一键生成或自助注册。
 - **自助注册（手机验证码）**：登录页提供注册入口，流程为 `POST /auth/sms/code`（发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同手机号 60 秒限频、10 分钟内最多 3 次；`SmsSender` 为接口抽象，默认实现为开发投递器（验证码写服务日志，供本地联调与 E2E 断言），生产以环境变量切换真实通道（第一版不接第三方）。内网/演示部署可开回显模式（`ACADEMY_SMS_SHOW_CODE=1`）：发码响应携带验证码原文、注册页内联显示，学员无需访问服务端日志即可自助注册；正式部署保持关闭。手机号作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复手机号注册拒绝。
+- **找回密码/找回账号（手机验证码重置）**：登录页「找回账号」入口，流程为 `POST /auth/password-reset/code`（发码，公开；限频策略与注册发码一致）→ `POST /auth/password-reset`（凭 code 重置密码，公开）。验证码按**用途隔离**（`SmsCode.purpose` = register / password_reset，发码与核销同用途比对，注册码不可用于重置、反之亦然；限频窗口也按用途独立计数）。重置成功返回用户名与账号编码——忘记用户名的学员凭手机号一并找回（「找回账号」）；密码更新与本人改密/管理员重置同语义：bcrypt 更新 + `TokenInvalidBefore` 推进（该账号全部已签发 token 立即失效），不自动登录（回登录页用新密码登录）。未注册手机号发码即拒（422）；竞赛批量建号未绑定手机号，此类账号走管理端用户管理「重置密码」（`POST /admin/users/{id}/reset-password`，不校验旧密码，同样全量失效 token，预填平台初始密码 123456 可改）。
 
 ### 3.2 content — 教程包管线
 
@@ -184,6 +185,8 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 | `POST /auth/login` | 公开 | 登录换 JWT |
 | `POST /auth/sms/code` | 公开 | 注册发验证码（限频返回 retry_after） |
 | `POST /auth/register` | 公开 | 凭验证码建号（角色固定 student）并签发 token |
+| `POST /auth/password-reset/code` | 公开 | 找回密码发验证码（已注册手机号；限频返回 retry_after） |
+| `POST /auth/password-reset` | 公开 | 凭验证码重置密码，返回用户名与账号编码（找回账号） |
 | `GET /me` | student | 当前用户与角色 |
 | `GET /topics` / `GET /topics/{slug}` | student | 主题列表/详情（含 Room 列表） |
 | `GET /topics/{slug}/rooms/{roomSlug}` | student | Room 教程详情（文字+视频，含关联题目 slug） |
@@ -211,6 +214,7 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
 | `GET /admin/users` | admin | 用户管理表格：`q`（用户名/账号编码/手机号子串）/`role`/`active`/`no_solves` 过滤，条目附 active（6 个月口径）与 solved_any 标记 |
 | `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（建号入口在邀请赛一键生成与自助注册；API 保留供账号运维） |
+| `POST /admin/users/{id}/reset-password` | admin | 重置用户密码（不校验旧密码，目标用户全部 token 失效；未绑定手机号的账号找回入口） |
 | `POST /admin/competitions` 等 14 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind，不可改）/题目绑定/参赛者导入（仅邀请赛，编码或用户名引用，missing 回报）/一键生成账号（仅邀请赛，自动组队+初始密码导出）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
 | `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/题目绑定/提交/WP/容器记录，事件历史保留） |
 | `GET /competitions` / `POST /competitions/{id}/register` | student | 竞赛广场（仅公开赛，含报名状态）/ 公开赛自助报名（幂等；邀请赛拒绝） |

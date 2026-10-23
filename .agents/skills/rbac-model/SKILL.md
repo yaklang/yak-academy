@@ -20,7 +20,7 @@ description: yak-academy 两档角色权限模型约束。涉及用户、角色�
 - **每个接口必须声明所需角色**（路由注册时的声明式元数据），由统一中间件执行。
 - **禁止**在 handler 函数体内写 `if user.Role == ...` 这类散落权限判断。
 - 资源属主判断放 service 层，角色/权限检查放中间件。
-- **公开接口仅四个**：`POST /auth/login`（JWT 换取）、`POST /auth/sms/code`（注册发验证码）、`POST /auth/register`（验证码核销后建号，角色固定 student）与 `POST /checkpoints/{token}`（环境检测点回调，token 即能力凭证——每实例随机生成、注入容器、实例销毁即失效；无 JWT 语义，不适用角色判定）。新增公开接口必须先在 architecture.md 立项。
+- **公开接口仅六个**：`POST /auth/login`（JWT 换取）、`POST /auth/sms/code`（注册发验证码）、`POST /auth/register`（验证码核销后建号，角色固定 student）、`POST /auth/password-reset/code` 与 `POST /auth/password-reset`（找回密码发码/凭码重置，验证码按用途 purpose 隔离，与注册码互不通用）与 `POST /checkpoints/{token}`（环境检测点回调，token 即能力凭证——每实例随机生成、注入容器、实例销毁即失效；无 JWT 语义，不适用角色判定）。新增公开接口必须先在 architecture.md 立项。
 
 ## 接口 → 最低角色速查
 
@@ -28,8 +28,9 @@ description: yak-academy 两档角色权限模型约束。涉及用户、角色�
 |---|---|
 | 浏览已发布教程与训练场、提交答案、查看自己进度、徽章 | student（登录即可） |
 | 竞赛广场（GET /competitions，仅公开赛）、公开赛自助报名（POST /competitions/{id}/register，幂等）与入场 | student（登录即可） |
+| 找回密码/找回账号（/auth/password-reset*，手机验证码重置，返回用户名与账号编码） | 公开（验证码即凭证） |
 | 环境检测点回调（容器内 checker） | 公开（checkpoint token 鉴权） |
-| 上传/发布教程包、题目管理、容器、用户管理（GET /admin/users 过滤画像） | admin |
+| 上传/发布教程包、题目管理、容器、用户管理（GET /admin/users 过滤画像、POST /admin/users/{id}/reset-password 重置密码） | admin |
 | 竞赛管理（创建选 public/invitational、参赛者导入与一键生成账号——仅邀请赛） | admin |
 
 - 鉴权失败统一返回 403 + 错误码（见 api-contract skill），**禁止**返回 404 掩盖权限问题。

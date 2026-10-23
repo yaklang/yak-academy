@@ -175,6 +175,38 @@ FE(未登录)         API                register SVC          repo            D
 - 角色固定 `student`，接口无角色入参（禁止自选）。
 - 限频对客户端表现为 200 + retry_after（与真实短信通道行为一致），前端据此倒计时。
 
+### 6.1 找回密码流（手机验证码重置，同套验证码设施）
+
+```
+FE(未登录)         API                reset SVC             repo            DB
+   │  登录页「找回账号」→ POST /auth/password-reset/code {phone}             │
+   ├─────────────────────────────────→│ 手机号必须已注册（422 未注册，       │
+   │                                  │ 先于限频告知；竞赛批量号无手机号     │
+   │                                  │ → 引导管理端重置）                   │
+   │                                  │ 限频同注册(60s/10min≤3，按 purpose  │
+   │                                  │ 独立计数)                            │
+   │                                  │ genCode ───────────────────────────→│ SmsCode(purpose=password_reset)
+   │   200 {ok}（限频 → {ok, retry_after}；回显模式附 code）                  │
+   │←─────────────────────────────────┤                      │               │
+   │  POST /auth/password-reset {phone, code, new_password}   │               │
+   ├─────────────────────────────────→│ 账号存在性(FindByPhone)→ 核销        │
+   │                                  │ (purpose=password_reset 的一码，     │
+   │                                  │  恒时比较 + MarkUsed 条件更新)       │
+   │                                  │ bcrypt 改密 + TokenInvalidBefore   │
+   │                                  │ 推进(签发秒+1) ───────────────────→│ User
+   │   200 {username, account_code}（忘记用户名的学员凭手机号一并找回）       │
+   │←─────────────────────────────────┤                      │               │
+   │  （不自动登录：回登录页用新密码登录；原 token 已全量失效）               │
+
+管理端路径（未绑定手机号的账号）：admin 用户管理行内「重置密码」
+  POST /admin/users/{id}/reset-password {password} → 不校验旧密码，同语义
+  改密 + token 全量失效（预填平台初始密码 123456 可改），写管理审计。
+```
+
+要点：
+- 验证码**用途隔离**（`SmsCode.purpose` = register / password_reset）：注册码不可重置、重置码不可注册；限频窗口同样按用途独立。
+- 改密失效语义与本人改密（`POST /auth/change-password`）、管理员重置完全一致：`TokenInvalidBefore` 推进，已签发 token 全量吊销。
+
 ## 7. 竞赛生命周期与入场锁定流
 
 ```
