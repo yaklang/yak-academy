@@ -1,10 +1,19 @@
 <script setup lang="ts">
-// 管理面板：容器管理。整体视图 = 当前活跃容器概览（含题目信息，可强制销毁）
-// + 下方容器生命周期日志（append-only，记录每次启动/停止及失败原因）。
-// 两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
-import { onMounted, ref } from 'vue'
+// 管理面板：容器管理。整体视图 = 主机性能面板（宿主 CPU/内存/容器与镜像计数/
+// 数据卷用量 + 全容器资源占用表，可自动刷新）+ 当前活跃容器概览（含题目信息，
+// 可强制销毁）+ 下方容器生命周期日志（append-only，记录每次启动/停止及失败原因）。
+// 后两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
+import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { adminInstanceApi, type AdminLabInstance, type InstanceLog } from '../../api'
+import {
+  adminInstanceApi, performanceApi,
+  type AdminLabInstance, type InstanceLog, type PerformanceReport,
+} from '../../api'
+
+const perf = ref<PerformanceReport | null>(null)
+const perfLoading = ref(false)
+const autoRefresh = ref(true)
+let perfTimer: number | undefined
 
 const active = ref<AdminLabInstance[]>([])
 const activeLoading = ref(false)
@@ -15,6 +24,37 @@ const logTotal = ref(0)
 const logPage = ref(1)
 const logPageSize = ref(20)
 const logLoading = ref(false)
+
+const REFRESH_MS = 10000
+
+async function loadPerf(silent = true) {
+  if (!silent) perfLoading.value = true
+  try {
+    perf.value = await performanceApi.get()
+  } catch (e) {
+    // 自动刷新失败不打断页面（瞬时抖动）；手动刷新显式提示。
+    if (!silent) ElMessage.error((e as Error).message)
+  } finally {
+    perfLoading.value = false
+  }
+}
+
+function schedulePerf() {
+  stopPerf()
+  if (autoRefresh.value) perfTimer = window.setInterval(() => loadPerf(), REFRESH_MS)
+}
+
+function stopPerf() {
+  if (perfTimer !== undefined) {
+    window.clearInterval(perfTimer)
+    perfTimer = undefined
+  }
+}
+
+function onAutoRefreshChange() {
+  schedulePerf()
+  if (autoRefresh.value) loadPerf()
+}
 
 async function loadActive() {
   activeLoading.value = true
@@ -52,7 +92,7 @@ async function onLogSizeChange() {
 }
 
 async function load() {
-  await Promise.all([loadActive(), loadLogs()])
+  await Promise.all([loadPerf(false), loadActive(), loadLogs()])
 }
 
 async function forceDestroy(inst: AdminLabInstance) {
@@ -95,14 +135,146 @@ function fmtTime(ts: string) {
   return ts ? new Date(ts).toLocaleTimeString() : '-'
 }
 
-onMounted(load)
+function fmtBytes(bytes: number | null | undefined) {
+  if (bytes === null || bytes === undefined) return '—'
+  if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(2)} GB`
+  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`
+  if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
+// 资源占用水位着色：<60% 健康、60–85% 警告、>85% 危险（进度条与数字标签共用）。
+function usageColor(pct: number) {
+  return pct > 85 ? '#f56c6c' : pct > 60 ? '#e6a23c' : '#67c23a'
+}
+
+function memPercentOf(rep: PerformanceReport) {
+  if (!rep.host) return null
+  const used = rep.host.mem_used_bytes
+  if (used === null || !rep.host.mem_total_bytes) return null
+  return (used / rep.host.mem_total_bytes) * 100
+}
+
+function volPercent() {
+  const v = perf.value?.data_volume
+  if (!v || !v.total_bytes) return 0
+  return (v.used_bytes / v.total_bytes) * 100
+}
+
+onMounted(() => {
+  load()
+  schedulePerf()
+})
+
+onUnmounted(stopPerf)
 </script>
 
 <template>
   <h2>容器管理</h2>
   <p class="hint">
-    当前打开的容器与操作日志。强制销毁会回收真实容器资源；每次启动/停止均记录日志（含来源与失败原因）。
+    主机性能、当前打开的容器与操作日志。强制销毁会回收真实容器资源；每次启动/停止均记录日志（含来源与失败原因）。
   </p>
+
+  <!-- 主机性能面板 -->
+  <el-card class="block" shadow="never" v-loading="perfLoading">
+    <template #header>
+      <div class="card-head">
+        <span>主机性能</span>
+        <div class="head-actions">
+          <span v-if="autoRefresh" class="dim">每 {{ REFRESH_MS / 1000 }}s 自动刷新</span>
+          <el-switch v-model="autoRefresh" size="small" @change="onAutoRefreshChange" />
+          <el-button size="small" @click="loadPerf(false)">刷新</el-button>
+        </div>
+      </div>
+    </template>
+    <template v-if="perf">
+      <div class="host-grid">
+        <div class="metric">
+          <div class="metric-title">CPU（{{ perf.ncpu }} 核）</div>
+          <div v-if="perf.host?.cpu_percent !== null && perf.host?.cpu_percent !== undefined">
+            <el-progress
+              :percentage="Math.min(100, Math.round(perf.host.cpu_percent))"
+              :color="usageColor(perf.host.cpu_percent)"
+            />
+            <div class="dim" :style="{ color: usageColor(perf.host.cpu_percent) }">
+              宿主占用 {{ perf.host.cpu_percent.toFixed(1) }}%（多核可超 100%）
+            </div>
+          </div>
+          <div v-else class="dim">宿主占用采样不可用（非 Linux 部署）</div>
+        </div>
+        <div class="metric">
+          <div class="metric-title">内存</div>
+          <template v-if="memPercentOf(perf) !== null">
+            <el-progress
+              :percentage="Math.min(100, Math.round(memPercentOf(perf)!))"
+              :color="usageColor(memPercentOf(perf)!)"
+            />
+            <div class="dim">
+              {{ fmtBytes(perf.host!.mem_used_bytes) }} / {{ fmtBytes(perf.host!.mem_total_bytes) }}
+            </div>
+          </template>
+          <div v-else class="dim">总量 {{ fmtBytes(perf.mem_total_bytes) }}；占用采样不可用</div>
+        </div>
+        <div class="metric">
+          <div class="metric-title">容器 / 镜像</div>
+          <div class="metric-line">
+            共 {{ perf.containers_total }}：
+            <el-tag size="small" type="success">运行 {{ perf.containers_running }}</el-tag>
+            <el-tag size="small" type="warning" v-if="perf.containers_paused">暂停 {{ perf.containers_paused }}</el-tag>
+            <el-tag size="small" type="info">停止 {{ perf.containers_stopped }}</el-tag>
+          </div>
+          <div class="dim">镜像 {{ perf.images }} 个</div>
+        </div>
+        <div class="metric">
+          <div class="metric-title">数据卷</div>
+          <template v-if="perf.data_volume">
+            <el-progress :percentage="Math.min(100, Math.round(volPercent()))" :color="usageColor(volPercent())" />
+            <div class="dim">
+              {{ fmtBytes(perf.data_volume.used_bytes) }} / {{ fmtBytes(perf.data_volume.total_bytes) }}
+              （可用 {{ fmtBytes(perf.data_volume.avail_bytes) }}）
+            </div>
+          </template>
+          <div v-else class="dim">数据卷用量统计不可用（非 Linux 部署）</div>
+        </div>
+      </div>
+
+      <el-table :data="perf.containers" max-height="320" empty-text="当前没有容器" class="res-table">
+        <el-table-column prop="name" label="容器" min-width="180">
+          <template #default="{ row }">
+            <span>{{ row.name }}</span>
+            <div class="dim">{{ row.id }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="CPU" width="140">
+          <template #default="{ row }">
+            <el-tag size="small" :color="usageColor(row.cpu_percent / (perf!.ncpu || 1))" effect="dark">
+              {{ row.cpu_percent.toFixed(2) }}%
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="内存" min-width="200">
+          <template #default="{ row }">
+            <div class="mem-line">
+              <span>{{ fmtBytes(row.mem_used_bytes) }} / {{ fmtBytes(row.mem_limit_bytes) }}</span>
+              <el-tag size="small" :type="row.mem_percent > 85 ? 'danger' : row.mem_percent > 60 ? 'warning' : 'success'">
+                {{ row.mem_percent.toFixed(1) }}%
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="网络 ↓/↑" width="170">
+          <template #default="{ row }">{{ fmtBytes(row.net_io_bytes[0]) }} / {{ fmtBytes(row.net_io_bytes[1]) }}</template>
+        </el-table-column>
+        <el-table-column label="磁盘读/写" width="170">
+          <template #default="{ row }">{{ fmtBytes(row.block_io_bytes[0]) }} / {{ fmtBytes(row.block_io_bytes[1]) }}</template>
+        </el-table-column>
+        <el-table-column prop="pids" label="PIDs" width="70" />
+      </el-table>
+    </template>
+    <div v-else-if="!perfLoading" class="dim">
+      性能数据不可用：未配置容器运行时（Docker）或守护进程不可达。
+    </div>
+  </el-card>
 
   <!-- 当前活跃容器概览 -->
   <el-card class="block" shadow="never">
@@ -214,6 +386,12 @@ onMounted(load)
 .hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
+.head-actions { display: flex; align-items: center; gap: 0.6rem; }
 .dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
 .pager { margin-top: 1rem; }
+.host-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.2rem; margin-bottom: 1rem; }
+.metric-title { font-weight: 600; margin-bottom: 0.5rem; }
+.metric-line { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.res-table { width: 100%; }
+.mem-line { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 </style>

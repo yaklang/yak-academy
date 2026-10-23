@@ -230,3 +230,34 @@ func TestDockerEnsureInstanceFullSlice(t *testing.T) {
 		t.Errorf("实例销毁后容器仍存在: %s", containerName(inst.ID))
 	}
 }
+
+// TestDockerHostStats 性能面板真实路径：docker info/stats 解析 + /proc 采样
+//（Linux 部署形态下宿主全局视图）。
+func TestDockerHostStats(t *testing.T) {
+	ctx := requireDocker(t)
+	driver := NewDockerDriver("", "", "")
+	stats, err := driver.HostStats(ctx)
+	if err != nil {
+		t.Fatalf("HostStats: %v", err)
+	}
+	if stats.NCPU < 1 {
+		t.Errorf("NCPU = %d, want >= 1", stats.NCPU)
+	}
+	if stats.MemTotalBytes <= 0 {
+		t.Errorf("MemTotalBytes = %d, want > 0", stats.MemTotalBytes)
+	}
+	if stats.ContainersTotal < 1 {
+		t.Errorf("ContainersTotal = %d（docker daemon 至少有测试自身容器）", stats.ContainersTotal)
+	}
+	for _, c := range stats.Containers {
+		if c.ID == "" || c.Name == "" {
+			t.Errorf("容器行缺 ID/Name: %+v", c)
+		}
+		if c.MemLimitBytes < c.MemUsedBytes {
+			t.Errorf("容器 %s 内存超限: used %d > limit %d", c.Name, c.MemUsedBytes, c.MemLimitBytes)
+		}
+	}
+	if stats.Host == nil {
+		t.Fatalf("Host 段缺失")
+	}
+}

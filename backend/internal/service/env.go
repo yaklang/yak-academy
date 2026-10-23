@@ -52,6 +52,8 @@ type InstanceDriver interface {
 	Create(ctx context.Context, spec InstanceSpec) (endpoint string, err error)
 	// Destroy 按 InstanceID 销毁实例（幂等：实例不存在视为成功）。
 	Destroy(ctx context.Context, instanceID uint) error
+	// HostStats 宿主与全部容器的资源占用快照（性能面板）。
+	HostStats(ctx context.Context) (*HostStats, error)
 }
 
 // NoopDriver 占位驱动：未配置容器运行时的 stub，调用一律报错。
@@ -62,6 +64,9 @@ func (NoopDriver) Create(ctx context.Context, spec InstanceSpec) (string, error)
 }
 func (NoopDriver) Destroy(ctx context.Context, instanceID uint) error {
 	return errNotImplemented("env driver destroy")
+}
+func (NoopDriver) HostStats(ctx context.Context) (*HostStats, error) {
+	return nil, errNotImplemented("env driver host stats")
 }
 func (NoopDriver) Build(ctx context.Context, tag, contextDir string) error {
 	return fmt.Errorf("%w: docker unavailable: cannot build image %s", ErrValidation, tag)
@@ -83,6 +88,8 @@ type EnvService struct {
 	publicURL  string // CHECKPOINT_URL 前缀（容器内回达平台）
 	// now 时钟注入，测试可固定时间；生产用 time.Now。
 	now func() time.Time
+	// dataDir 数据卷目录（性能面板 statfs 用量统计；空 = 不统计）。
+	dataDir string
 }
 
 func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver, publicURL string) *EnvService {
@@ -91,6 +98,23 @@ func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, ch
 		events: events, bus: bus,
 		driver: d, publicURL: publicURL, now: time.Now,
 	}
+}
+
+// SetDataDir 性能面板的数据卷占用统计目录（可选装配；与备份目录同源的
+// 数据库所在目录）。空或非 Linux 不统计（DataVolume 为 null）。
+func (s *EnvService) SetDataDir(dir string) { s.dataDir = dir }
+
+// HostStats 性能面板快照：驱动侧采集（docker info/stats + /proc），
+// 服务侧补数据卷用量。
+func (s *EnvService) HostStats(ctx context.Context) (*HostStats, error) {
+	stats, err := s.driver.HostStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.dataDir != "" {
+		stats.DataVolume = volumeUsage(s.dataDir)
+	}
+	return stats, nil
 }
 
 // EnsureInstance 幂等启动：已有 running 实例直接返回；

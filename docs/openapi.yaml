@@ -76,6 +76,52 @@ components:
         detail: { type: object, nullable: true, description: 动作附加详情（JSON；无则为 null） }
         ip: { type: string, description: 来源地址（剥端口后的 host） }
         created_at: { type: string, format: date-time }
+    PerformanceReport:
+      type: object
+      description: 主机/容器性能快照（docker info/stats + Linux /proc + statfs；不可用字段为 null）
+      properties:
+        ncpu: { type: integer, description: 宿主 CPU 核数（docker info） }
+        mem_total_bytes: { type: integer, description: 宿主内存总量（docker info） }
+        containers_total: { type: integer }
+        containers_running: { type: integer }
+        containers_paused: { type: integer }
+        containers_stopped: { type: integer }
+        images: { type: integer }
+        host:
+          type: object
+          nullable: true
+          properties:
+            cpu_percent: { type: number, nullable: true, description: 宿主 CPU 占用率（/proc/stat 两次采样；非 Linux 为 null） }
+            mem_total_bytes: { type: integer }
+            mem_used_bytes: { type: integer, nullable: true, description: 宿主已用内存（/proc/meminfo；非 Linux 为 null） }
+        data_volume:
+          type: object
+          nullable: true
+          properties:
+            path: { type: string }
+            total_bytes: { type: integer }
+            used_bytes: { type: integer }
+            avail_bytes: { type: integer }
+        containers:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              cpu_percent: { type: number }
+              mem_used_bytes: { type: integer }
+              mem_limit_bytes: { type: integer }
+              mem_percent: { type: number }
+              net_io_bytes:
+                type: array
+                items: { type: integer, nullable: true }
+                description: "[收, 发]；解析失败为 null 元素"
+              block_io_bytes:
+                type: array
+                items: { type: integer, nullable: true }
+                description: "[读, 写]；解析失败为 null 元素"
+              pids: { type: integer }
     LoginRequest:
       type: object
       required: [username, password]
@@ -2245,6 +2291,22 @@ paths:
                       items: { type: array, items: { $ref: '#/components/schemas/AdminAuditLog' } }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/performance:
+    get:
+      tags: [admin]
+      summary: >
+        主机/容器性能快照（容器管理页性能面板；ops 硬化）：docker info 宿主
+        概览 + docker stats 全容器资源占用 + Linux /proc 宿主 CPU/内存采样 +
+        数据卷 statfs 用量。容器运行时未配置（无 docker）返回 501
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerformanceReport' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '501': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/competitions:
     get:
