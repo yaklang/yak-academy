@@ -28,6 +28,7 @@ type Handlers struct {
 	Profile      *service.ProfileService
 	Competitions *service.CompetitionService
 	RegisterSvc  *service.RegisterService
+	ResetSvc     *service.PasswordResetService
 	Backup       *service.BackupService
 	Audit        *service.AuditService
 	// smsShowCode 验证码回显模式（config SmsShowCode，见 sendSmsCode）。
@@ -35,16 +36,19 @@ type Handlers struct {
 }
 
 // NewHandlers 构造 handler 集合；smsShowCode 见 config.SmsShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, backup *service.BackupService, audit *service.AuditService, smsShowCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, Backup: backup, Audit: audit, smsShowCode: smsShowCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, smsShowCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, smsShowCode: smsShowCode}
 }
 
 func (h *Handlers) Register(r *Router) {
-	// 公开接口：登录（JWT）、检测点回调（token 能力鉴权，容器内 checker 调用）
-	// 与健康检查（进程存活探针，无鉴权；compose healthcheck 用）。
+	// 公开接口：登录（JWT）、注册/找回密码（手机验证码，发码+核销）、检测点回调
+	// （token 能力鉴权，容器内 checker 调用）与健康检查（进程存活探针，无鉴权；
+	// compose healthcheck 用）。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/sms/code", h.sendSmsCode)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/register", h.register)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset/code", h.sendPasswordResetCode)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset", h.passwordReset)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
 	r.HandlePublic(http.MethodGet, "/health", h.health)
 	// /metrics：token 门控的采集端点（见 metrics.go；不在 observe 包装内——
@@ -230,6 +234,52 @@ func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
+}
+
+// sendPasswordResetCode 找回密码发码（公开）。限频不报错（同注册发码）：
+// 200 + retry_after，回显模式附带验证码原文。
+func (h *Handlers) sendPasswordResetCode(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Phone string `json:"phone"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" {
+		writeError(w, errValidation)
+		return
+	}
+	code, retryAfter, err := h.ResetSvc.SendResetCode(req.Context(), body.Phone)
+	if err != nil {
+		if errors.Is(err, service.ErrSmsThrottled) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "retry_after": retryAfter})
+			return
+		}
+		mapError(w, err)
+		return
+	}
+	resp := map[string]any{"ok": true}
+	if h.smsShowCode {
+		resp["code"] = code
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// passwordReset 凭找回验证码重置密码（公开）。返回账号标识（用户名/账号编码）
+// 供「找回账号」：忘记用户名的学员凭手机号即可找回。
+func (h *Handlers) passwordReset(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Phone       string `json:"phone"`
+		Code        string `json:"code"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" || body.Code == "" || body.NewPassword == "" {
+		writeError(w, errValidation)
+		return
+	}
+	user, err := h.ResetSvc.ResetPassword(req.Context(), body.Phone, body.Code, body.NewPassword)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"username": user.Username, "account_code": user.AccountCode})
 }
 
 func (h *Handlers) me(w http.ResponseWriter, req *http.Request) {

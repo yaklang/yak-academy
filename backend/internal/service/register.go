@@ -76,28 +76,17 @@ func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, i
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", 0, err
 	}
-	// 60 秒内已发过：直接返回剩余等待时间（不重复发送）。
-	if latest, err := s.codes.LatestByPhone(ctx, phone); err == nil {
-		if wait := smsSendInterval - now.Sub(latest.CreatedAt); wait > 0 {
-			return "", int(wait.Seconds()) + 1, ErrSmsThrottled
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", 0, err
-	}
-	// 10 分钟窗口内最多 3 条。
-	n, err := s.codes.CountSince(ctx, phone, now.Add(-smsWindow))
-	if err != nil {
-		return "", 0, err
-	}
-	if n >= smsWindowLimit {
-		return "", int(smsWindow.Seconds()), ErrSmsThrottled
+	// 60 秒内已发过 + 10 分钟窗口内最多 3 条（与找回密码发码共用同一套限频策略，
+	// 按 purpose 分别计数，见 smsThrottle）。
+	if retryAfter, err := smsThrottle(ctx, s.codes, phone, model.SmsPurposeRegister, now); err != nil {
+		return "", retryAfter, err
 	}
 	code, err := genCode()
 	if err != nil {
 		return "", 0, err
 	}
 	if err := s.codes.Create(ctx, &model.SmsCode{
-		Phone: phone, Code: code, ExpiresAt: now.Add(smsCodeTTL),
+		Phone: phone, Code: code, Purpose: model.SmsPurposeRegister, ExpiresAt: now.Add(smsCodeTTL),
 	}); err != nil {
 		return "", 0, err
 	}
@@ -105,6 +94,28 @@ func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, i
 		return "", 0, err
 	}
 	return code, 0, nil
+}
+
+// smsThrottle 发码限频（注册与找回密码共用）：同手机号同用途 60 秒内仅一次、
+// 10 分钟窗口内最多 3 次。命中限频返回 (retryAfter, ErrSmsThrottled)。
+func smsThrottle(ctx context.Context, codes repo.SmsCodeRepo, phone, purpose string, now time.Time) (int, error) {
+	// 60 秒内已发过：直接返回剩余等待时间（不重复发送）。
+	if latest, err := codes.LatestByPhone(ctx, phone, purpose); err == nil {
+		if wait := smsSendInterval - now.Sub(latest.CreatedAt); wait > 0 {
+			return int(wait.Seconds()) + 1, ErrSmsThrottled
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	// 10 分钟窗口内最多 3 条。
+	n, err := codes.CountSince(ctx, phone, purpose, now.Add(-smsWindow))
+	if err != nil {
+		return 0, err
+	}
+	if n >= smsWindowLimit {
+		return int(smsWindow.Seconds()), ErrSmsThrottled
+	}
+	return 0, nil
 }
 
 // Register 凭验证码建号（角色固定 student）并直接签发登录 token。
@@ -123,7 +134,7 @@ func (s *RegisterService) Register(ctx context.Context, phone, code, username, p
 		return "", time.Time{}, nil, fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
 	}
 	now := s.now()
-	latest, err := s.codes.LatestByPhone(ctx, phone)
+	latest, err := s.codes.LatestByPhone(ctx, phone, model.SmsPurposeRegister)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", time.Time{}, nil, fmt.Errorf("%w: code not sent or expired", ErrValidation)

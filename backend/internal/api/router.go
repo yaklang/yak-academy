@@ -106,7 +106,8 @@ func (r *Router) Handle(method, pattern string, required model.GlobalRole, h htt
 	})
 }
 
-// HandlePublic 注册公开路由（仅 /auth/login、/checkpoints/{token}、/health、/metrics）。
+// HandlePublic 注册公开路由（/auth/login、/auth/sms/code、/auth/register、
+// /auth/password-reset*（手机验证码注册与找回）、/checkpoints/{token}、/health、/metrics）。
 func (r *Router) HandlePublic(method, pattern string, h http.HandlerFunc) {
 	r.routes = append(r.routes, RouteInfo{Method: method, Pattern: pattern, Public: true})
 	// /health 是 compose/systemd 探针高频路径：不进指标与访问日志（与 /metrics 同理）。

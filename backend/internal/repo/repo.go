@@ -51,14 +51,15 @@ type UserItem struct {
 	SolvedAny bool `json:"solved_any"`
 }
 
-// SmsCodeRepo 注册验证码（自助注册）：发码入库、限频计数、核销。
+// SmsCodeRepo 手机验证码（自助注册/找回密码）：发码入库、限频计数、核销。
+// 查询按 purpose（register / password_reset）隔离：一种用途的码不可被另一种用途核销。
 type SmsCodeRepo interface {
 	Create(ctx context.Context, c *model.SmsCode) error
-	// LatestByPhone 该手机号最近一条验证码（含已用/已过期，供核销判定）；
+	// LatestByPhone 该手机号指定用途最近一条验证码（含已用/已过期，供核销判定）；
 	// gorm.ErrRecordNotFound = 从未发过。
-	LatestByPhone(ctx context.Context, phone string) (*model.SmsCode, error)
-	// CountSince 该手机号 windowStart 之后已发送条数（限频窗口计数）。
-	CountSince(ctx context.Context, phone string, windowStart time.Time) (int64, error)
+	LatestByPhone(ctx context.Context, phone, purpose string) (*model.SmsCode, error)
+	// CountSince 该手机号指定用途 windowStart 之后已发送条数（限频窗口计数）。
+	CountSince(ctx context.Context, phone, purpose string, windowStart time.Time) (int64, error)
 	// MarkUsed 核销（一次性；返回 0 = 已被并发核销或不存在）。
 	MarkUsed(ctx context.Context, id uint) (int64, error)
 }
