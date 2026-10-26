@@ -21,7 +21,7 @@ RUN printf 'module flaggateway\n\ngo 1.26\n' > go.mod \
 FROM alpine:3.21
 
 ARG VULINBOX_BIN_URL=https://oss-qn.yaklang.com/vulinbox/latest/vulinbox_linux_amd64
-ARG VULINBOX_SHA256=8d113c86ef8ca852db330063a6273f62cfde1594238fc7362905d8e0266907fc
+ARG VULINBOX_SHA256=52f5a0db7f5f158424e15fd0a289b65fe86fc6deca6fdc0de60413c59131bcca
 
 RUN apk add --no-cache ca-certificates wget \
     && wget -q --tries=3 --timeout=60 -O /usr/local/bin/vulinbox "${VULINBOX_BIN_URL}" \
