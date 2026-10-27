@@ -44,6 +44,13 @@ export async function studentToken(request: APIRequestContext): Promise<string> 
   return token
 }
 
+// 管理员登录换 API token（用例内经管理 API 建竞赛等播种动作用）。
+export async function adminToken(request: APIRequestContext): Promise<string> {
+  const login = await request.post(`${E2E.apiURL}/api/v1/auth/login`, { data: E2E.admin })
+  const { token } = (await login.json()) as { token: string }
+  return token
+}
+
 // 建一个进行中的竞赛（now-1min 起、+30min 止），绑给定种子题并把学生导入为
 // 个人参赛者（自动投递站内邀请邮件），返回 (竞赛ID, 邀请码)。
 // 竞赛起止时间相对“现在”，只能用例内即时创建（global-setup 预播种会过期/提前结束）；
