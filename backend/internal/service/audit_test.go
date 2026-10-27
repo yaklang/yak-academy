@@ -33,7 +33,7 @@ func TestAuditRecordMarshalsDetailAndStripsPort(t *testing.T) {
 	svc := newAuditTestService(t)
 	admin := &model.User{ID: 7, Username: "ops-admin", GlobalRole: model.GlobalRoleAdmin}
 	if err := svc.Record(context.Background(), admin, "content.publish", "package", "3",
-		"192.168.1.5:52344", map[string]any{"version": 2}); err != nil {
+		"192.0.2.5:52344", map[string]any{"version": 2}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	items, total, err := svc.List(context.Background(), repo.AuditFilter{}, 0, 20)
@@ -45,7 +45,7 @@ func TestAuditRecordMarshalsDetailAndStripsPort(t *testing.T) {
 		got.TargetType != "package" || got.TargetID != "3" {
 		t.Fatalf("unexpected row: %+v", got.AdminAuditLog)
 	}
-	if got.IP != "192.168.1.5" {
+	if got.IP != "192.0.2.5" {
 		t.Fatalf("ip = %q, want host without port", got.IP)
 	}
 	if string(got.Detail) != `{"version":2}` {
