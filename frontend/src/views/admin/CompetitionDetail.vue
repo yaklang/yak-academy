@@ -4,10 +4,11 @@
 // + 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
 // 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）；
 // 进行中的竞赛可手动结束，已结束的竞赛可重新配置起止时间再次开赛。
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  adminChallengeApi,
   adminCompetitionApi,
   KIND_LABELS,
   type AdminLabInstance,
@@ -130,10 +131,79 @@ async function loadChallenges() {
 }
 
 const showBind = ref(false)
-const bindMode = ref<'slugs' | 'json'>('slugs')
+const bindMode = ref<'pick' | 'slugs' | 'json'>('pick')
 const bindSlugs = ref('')
 const binding = ref(false)
 const unbinding = ref('')
+
+// 从题库勾选：管理端题目列表（GET /admin/challenges，搜索/分页/bank 过滤）
+// + 表格多选。已绑定题目禁选并打「已绑定」标记（绑定为幂等，但再选只是
+// 白跑一趟，直接禁掉更清楚）。勾选跨页保留（selection 与列表数据独立维护）。
+const pickQuery = ref('')
+const pickBank = ref<'ctf' | 'acm' | 'tutorial' | ''>('')
+const pickPage = ref(1)
+const pickTotal = ref(0)
+const pickItems = ref<TrainingItem[]>([])
+const pickLoading = ref(false)
+const pickedSlugs = ref<string[]>([])
+const pickTable = ref()
+// 翻页回填 selection 的过渡窗口：此间 selection-change 是数据替换的副作用，
+// 不同步 pickedSlugs（避免跨页勾选被清空事件误删）。
+const suspending = ref(false)
+
+async function loadPickList() {
+  pickLoading.value = true
+  try {
+    const resp = await adminChallengeApi.list({
+      page: pickPage.value,
+      q: pickQuery.value.trim() || undefined,
+      bank: pickBank.value || undefined,
+    })
+    pickItems.value = resp.items
+    pickTotal.value = resp.total
+    // 数据替换会触发 selection-change（全量清空）——先挂起同步，回填完成再恢复，
+    // 否则跨页勾选会被这次清空事件误删。
+    suspending.value = true
+    restorePickSelection()
+    await nextTick()
+    suspending.value = false
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    pickLoading.value = false
+  }
+}
+
+// selectable：已绑定的题目禁选（按 slug 对照当前已绑定列表）。
+function pickSelectable(row: TrainingItem) {
+  return !challenges.value.some((c) => c.slug === row.slug)
+}
+
+// 翻页/过滤后恢复此前页勾上的行（selection 随数据清空，需手动回填）。
+function restorePickSelection() {
+  const table = pickTable.value
+  if (!table) return
+  for (const row of pickItems.value) {
+    if (pickedSlugs.value.includes(row.slug)) table.toggleRowSelection(row, true)
+  }
+}
+
+function searchPick() {
+  pickPage.value = 1
+  loadPickList()
+}
+
+// 表格 selection-change：以 pickedSlugs 为准增删当前页变化量
+//（跨页勾选的行不在当前页数据里，保留不动）。suspending 窗口内跳过（回填）。
+function onPickSelectionChange(rows: TrainingItem[]) {
+  if (suspending.value) return
+  const pageSlugs = pickItems.value.map((i) => i.slug)
+  const offPage = pickedSlugs.value.filter((s) => !pageSlugs.includes(s))
+  const onPage = rows.map((r) => r.slug)
+  pickedSlugs.value = [...offPage, ...onPage]
+}
+
+const pickedCount = computed(() => pickedSlugs.value.length)
 
 // 导入模式：文件（可多选）与粘贴共用一个暂存列表，逐题校验（challengeFormat），
 // 全部通过后一次性提交；修正编辑仍走题目管理，此处只做导入与绑定。
@@ -148,11 +218,16 @@ const stagedSeq = ref(0)
 const bindPaste = ref('')
 
 function openBind() {
-  bindMode.value = 'slugs'
+  bindMode.value = 'pick'
   bindSlugs.value = ''
   staged.value = []
   bindPaste.value = ''
+  pickedSlugs.value = []
+  pickQuery.value = ''
+  pickBank.value = ''
+  pickPage.value = 1
   showBind.value = true
+  loadPickList()
 }
 
 function stageChallenges(text: string, source: string): boolean {
@@ -190,7 +265,13 @@ async function submitBind() {
   binding.value = true
   try {
     let body: { slugs: string[] } | ChallengeJSON[]
-    if (bindMode.value === 'slugs') {
+    if (bindMode.value === 'pick') {
+      if (!pickedSlugs.value.length) {
+        ElMessage.warning('请先勾选要绑定的题目')
+        return
+      }
+      body = { slugs: pickedSlugs.value }
+    } else if (bindMode.value === 'slugs') {
       const slugs = bindSlugs.value.split(/[\s,，;；]+/).filter(Boolean)
       if (!slugs.length) {
         ElMessage.warning('请填写题目 slug')
@@ -861,13 +942,79 @@ onMounted(async () => {
     </el-tabs>
   </div>
 
-  <!-- 绑定/导入题目（既有 slug 绑定，或文件/粘贴导入 challenge.json） -->
-  <el-dialog v-model="showBind" title="绑定 / 导入题目" width="760px">
+  <!-- 绑定/导入题目（从题库勾选 / slug 直填 / 文件粘贴导入 challenge.json） -->
+  <el-dialog v-model="showBind" title="绑定 / 导入题目" width="860px">
     <el-radio-group v-model="bindMode" class="bind-mode">
-      <el-radio-button value="slugs">绑定既有题目</el-radio-button>
+      <el-radio-button value="pick">从题库勾选</el-radio-button>
+      <el-radio-button value="slugs">填写 slug</el-radio-button>
       <el-radio-button value="json">导入题目 JSON</el-radio-button>
     </el-radio-group>
-    <template v-if="bindMode === 'slugs'">
+    <template v-if="bindMode === 'pick'">
+      <p class="dim">
+        从题库勾选已有题目绑定进本场（跨页可累计勾选；已绑定的题不再列出可选）。
+      </p>
+      <div class="pick-filters">
+        <el-input
+          v-model="pickQuery"
+          placeholder="搜索：标题 / slug / 分类"
+          clearable
+          class="pick-q"
+          @keyup.enter="searchPick"
+          @clear="searchPick"
+        />
+        <el-select v-model="pickBank" placeholder="题库（全部）" clearable class="pick-bank" @change="searchPick">
+          <el-option label="CTF 题库" value="ctf" />
+          <el-option label="ACM 题库" value="acm" />
+          <el-option label="教程题目" value="tutorial" />
+        </el-select>
+        <el-button @click="searchPick">搜索</el-button>
+        <span class="dim picked-sum">已勾选 {{ pickedCount }} 题</span>
+      </div>
+      <el-table
+        ref="pickTable"
+        :data="pickItems"
+        v-loading="pickLoading"
+        size="small"
+        max-height="340"
+        row-key="slug"
+        empty-text="题库为空或无匹配题目"
+        @selection-change="onPickSelectionChange"
+      >
+        <el-table-column type="selection" width="42" :selectable="pickSelectable" />
+        <el-table-column prop="title" label="题目" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.title }}
+            <span class="dim">（{{ row.slug }}）</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="category" label="分类" width="110" show-overflow-tooltip />
+        <el-table-column label="题库" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.bank === 'ctf' ? 'danger' : row.bank === 'acm' ? 'warning' : 'info'">
+              {{ row.bank === 'ctf' ? 'CTF' : row.bank === 'acm' ? 'ACM' : '教程' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="难度" width="80">
+          <template #default="{ row }">{{ row.difficulty }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="!pickSelectable(row)" type="success" size="small">已绑定</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        background
+        layout="total, prev, pager, next"
+        :total="pickTotal"
+        :page-size="20"
+        :current-page="pickPage"
+        @current-change="loadPickList"
+        class="pick-pager"
+      />
+    </template>
+    <template v-else-if="bindMode === 'slugs'">
       <p class="dim">填写题库已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，题库侧不受影响。</p>
       <el-input v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
     </template>
@@ -913,7 +1060,7 @@ onMounted(async () => {
     <template #footer>
       <el-button @click="showBind = false">取消</el-button>
       <el-button type="primary" :loading="binding" @click="submitBind">
-        {{ bindMode === 'slugs' ? '绑定' : `导入并绑定（${staged.length} 题）` }}
+        {{ bindMode === 'pick' ? `绑定所选（${pickedCount} 题）` : bindMode === 'slugs' ? '绑定' : `导入并绑定（${staged.length} 题）` }}
       </el-button>
     </template>
   </el-dialog>
@@ -1109,6 +1256,11 @@ onMounted(async () => {
 .dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
 .pager { margin-top: 1rem; }
 .bind-mode { margin-bottom: 0.8rem; }
+.pick-filters { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.pick-q { width: 240px; }
+.pick-bank { width: 150px; }
+.picked-sum { margin-left: auto; }
+.pick-pager { margin-top: 0.6rem; display: flex; justify-content: flex-end; }
 .tpl-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .tpl-hint { margin: 0; }
 .stage-del { margin-left: 0.8rem; }
