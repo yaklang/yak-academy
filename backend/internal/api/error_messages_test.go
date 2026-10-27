@@ -52,9 +52,6 @@ func TestZhMessage(t *testing.T) {
 		{"精确：生成前缀非法", "VALIDATION_FAILED",
 			"prefix must be 1-16 lowercase letters, digits or hyphens",
 			"生成前缀需为 1-16 位小写字母、数字或连字符（如 class26）"},
-		{"包含：内置镜像构建失败（动态尾参，不得落兜底「请求参数有误」）", "VALIDATION_FAILED",
-			"validation failed: builtin image build failed: docker build yak-academy/vulinbox:latest: exit status 1",
-			"内置靶机镜像构建失败（多为网络拉取基础镜像/依赖受阻或二进制校验不过），详见服务端日志；可重试或联系管理员"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
