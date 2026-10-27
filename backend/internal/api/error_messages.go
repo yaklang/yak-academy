@@ -131,6 +131,7 @@ var matchRules = []struct{ pat, zh string }{
 	{"builtin manifest ", "内置题集清单损坏或缺失，请重新导入"},
 	{"builtin tutorials ", "内置教程数据损坏或缺失，请重新导入"},
 	{"builtin challenges ", "内置题目数据损坏或缺失，请重新导入"},
+	{"builtin image build failed", "内置靶机镜像构建失败（多为网络拉取基础镜像/依赖受阻或二进制校验不过），详见服务端日志；可重试或联系管理员"},
 	{"is a builtin tutorial and cannot be deleted", "内置教程内容由内置导入统一管理，不能删除"},
 
 	// 题目/内容包校验（where 前缀形态："rooms[0]: ..." 与 "challenge %q ..."）
