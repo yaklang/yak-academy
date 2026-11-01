@@ -26,6 +26,18 @@ docker compose up -d --build
 - **检测点回调**：题目容器经 `host.docker.internal` 回达后端——`DockerDriver.Create` 以 `--add-host host-gateway` 注入解析，Linux 与 Docker Desktop 默认值均开箱即用；仅当宿主防火墙拦截容器→宿主 8080（如 firewalld 默认拦 docker0）时改 `ACADEMY_PUBLIC_URL` 为宿主 LAN IP
 - **边界**：题目容器端口固定发布到宿主 `127.0.0.1`（`DockerDriver.Create`），学员必须在本机访问题目 endpoint——多用户远程访问属 Phase 4 范围
 
+## academy.yaklang.com 自动部署
+
+`.github/workflows/deploy.yml` 的 **Deploy academy** 在 PR 中构建部署包；推送 main 或在 Actions 手动运行时，构建 Linux amd64 前后端镜像，通过 SSH 上传并在目标机执行 Docker Compose。目标机复用已有 Nginx 与 acme.sh，缺少 Docker 时自动安装 Ubuntu 的 Docker/Compose 软件包，镜像编译在 GitHub runner 完成。
+
+仓库 Actions Secrets：`DEPLOY_HOST`（真实服务器地址）、`DEPLOY_USER`（有 root 权限的 SSH 用户，当前脚本要求直接以 root 运行）、`DEPLOY_PRIVATE_KEY`（专用 SSH 私钥）、`DEPLOY_KNOWN_HOSTS`（已核验的服务器 SSH host key，主机字段须匹配 `DEPLOY_HOST`）。域名在 Cloudflare 添加 `academy` A 记录到该服务器，使用仅 DNS 模式；服务器签发独立的 Let's Encrypt 证书。
+
+- 首次部署自动生成强 JWT 密钥与随机管理员密码，开启 `ACADEMY_STRICT=1`；凭据位于服务器 `/etc/yak-academy/bootstrap-admin.txt`（root 只读），升级保留原有配置。
+- 数据持久化于 `/var/lib/yak-academy`；环境文件为 `/etc/yak-academy/academy.env`，均不进入仓库或 Actions 制品。应用每 6 小时备份一次，升级前另做 SQLite 一致性快照。
+- 平台容器端口仅绑定宿主回环 `18080/18081`，由宿主 Nginx 对外提供 HTTPS。后端上限 768MiB / 0.75 核，前端上限 128MiB / 0.25 核；题目实例默认 256MiB / 0.25 核。
+- 题目实例地址使用 `academy.yaklang.com`；远程学员直连题目动态端口还需宿主防火墙和云安全组允许相应端口，DNS 记录应保持仅 DNS 模式。
+- 每次部署保留带源码 SHA 的镜像与 Compose 配置，容器启动失败时尝试恢复上一个版本；数据卷不会随升级重建。
+
 ## 环境搭建与镜像加速（本地开发）
 
 本地起环境最常见的两类卡点与对策：

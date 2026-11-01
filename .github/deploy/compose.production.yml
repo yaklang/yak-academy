@@ -1,0 +1,25 @@
+# Applied after docker-compose.yml; only operational settings differ.
+services:
+  backend:
+    volumes:
+      - ${ACADEMY_DATA_DIR:?Set ACADEMY_DATA_DIR}:/data
+    mem_limit: 768m
+    cpus: 0.75
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  frontend:
+    volumes:
+      - ./.github/deploy/frontend.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
