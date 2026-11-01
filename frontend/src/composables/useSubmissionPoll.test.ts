@@ -7,8 +7,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const elMessageSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
 const apiSpy = vi.hoisted(() => ({ submit: vi.fn(), get: vi.fn() }))
 
-vi.mock('element-plus', () => ({
-  ElMessage: elMessageSpy,
+vi.mock('@/lib/notifications', () => ({
+  notify: elMessageSpy,
 }))
 
 vi.mock('../api', () => ({

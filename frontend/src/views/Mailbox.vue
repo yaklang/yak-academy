@@ -2,7 +2,7 @@
 // 站内邮箱：只收不发——系统投递的竞赛邀请等通知。点开标记已读。
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { profileApi, type MailItem } from '../api'
 
 const router = useRouter()
@@ -23,7 +23,7 @@ async function load() {
     total.value = resp.total
     unread.value = resp.unread
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -41,7 +41,7 @@ async function openMail(m: MailItem) {
       unread.value = Math.max(0, unread.value - 1)
       window.dispatchEvent(new CustomEvent('academy:mails-read'))
     } catch (e) {
-      ElMessage.error((e as Error).message)
+      notify.error((e as Error).message)
     }
   }
 }
@@ -74,37 +74,37 @@ onMounted(load)
     只收不发：竞赛邀请等系统通知投递到这里；当前未读 {{ unread }} 封。点开邮件即标记已读。
   </p>
 
-  <el-table
+  <UiTable
     :data="mails"
-    v-loading="loading"
+    v-busy="loading"
     max-height="560"
     empty-text="暂无邮件"
     :row-class-name="rowClass"
   >
-    <el-table-column label="状态" width="80">
+    <UiTableColumn label="状态" width="80">
       <template #default="{ row }">
         <!-- 单个 el-tag 绑定属性切换，避免 v-if/v-else 双标签的进出过渡在
              el-table 单元格重渲染时停滞、残留两个标签 -->
-        <el-tag :type="row.read ? 'info' : 'danger'" size="small">
+        <UiTag :type="row.read ? 'info' : 'danger'" size="small">
           {{ row.read ? '已读' : '未读' }}
-        </el-tag>
+        </UiTag>
       </template>
-    </el-table-column>
-    <el-table-column prop="title" label="标题" min-width="200" />
-    <el-table-column label="类型" width="100">
+    </UiTableColumn>
+    <UiTableColumn prop="title" label="标题" min-width="200" />
+    <UiTableColumn label="类型" width="100">
       <template #default="{ row }">{{ kindLabel(row.kind) }}</template>
-    </el-table-column>
-    <el-table-column label="时间" width="170">
+    </UiTableColumn>
+    <UiTableColumn label="时间" width="170">
       <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-    </el-table-column>
-    <el-table-column label="操作" width="90">
+    </UiTableColumn>
+    <UiTableColumn label="操作" width="90">
       <template #default="{ row }">
-        <el-button size="small" @click="openMail(row)">查看</el-button>
+        <UiButton size="small" @click="openMail(row)">查看</UiButton>
       </template>
-    </el-table-column>
-  </el-table>
+    </UiTableColumn>
+  </UiTable>
 
-  <el-pagination
+  <UiPagination
     background
     layout="total, prev, pager, next"
     :total="total"
@@ -115,14 +115,14 @@ onMounted(load)
   />
 
   <!-- 邮件正文对话框（含邀请码） -->
-  <el-dialog v-model="dialogVisible" :title="current?.title" width="560px">
+  <UiDialog v-model="dialogVisible" :title="current?.title" width="560px">
     <div v-if="current" class="mail-body">
       <div class="mail-meta">
-        <el-tag size="small">{{ kindLabel(current.kind) }}</el-tag>
+        <UiTag size="small">{{ kindLabel(current.kind) }}</UiTag>
         <span>{{ fmt(current.created_at) }}</span>
       </div>
       <pre class="body-text">{{ current.body_md }}</pre>
-      <el-alert
+      <UiAlert
         v-if="current.kind === 'invite' && current.invite_code"
         :title="`邀请码：${current.invite_code}`"
         type="success"
@@ -130,22 +130,22 @@ onMounted(load)
         class="invite"
       />
       <!-- 竞赛邀请直达：邮件携带竞赛 ID + 邀请码，一键进入入场页（预填邀请码） -->
-      <el-button
+      <UiButton
         v-if="current.kind === 'invite' && current.competition_id && current.invite_code"
         type="primary"
         class="enter-btn"
         @click="goEnter"
-      >进入竞赛</el-button>
+      >进入竞赛</UiButton>
     </div>
-  </el-dialog>
+  </UiDialog>
 </template>
 
 <style scoped>
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .pager { margin-top: 1rem; }
 :deep(.unread) { font-weight: 600; }
 .mail-body { display: flex; flex-direction: column; gap: 0.8rem; }
-.mail-meta { display: flex; align-items: center; gap: 0.8rem; color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.mail-meta { display: flex; align-items: center; gap: 0.8rem; color: var(--muted-foreground); font-size: 0.85rem; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .invite { margin-top: 0.5rem; }
 .enter-btn { margin-top: 0.8rem; }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// 根组件：仅承载路由出口。
+import NotificationHost from './components/NotificationHost.vue'
 </script>
 
 <template>
   <router-view />
+  <NotificationHost />
 </template>

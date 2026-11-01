@@ -10,6 +10,7 @@ import { useCompetitionStore } from '../stores/competition'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/', name: 'landing', component: () => import('../views/Landing.vue') },
     {
       path: '/login',
       name: 'login',
@@ -21,7 +22,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
       children: [
         // 教程板块
-        { path: '', name: 'topics', component: () => import('../views/Topics.vue') },
+        { path: 'learn', name: 'topics', component: () => import('../views/Topics.vue') },
         { path: 'topics/:topicSlug', name: 'topic-detail', component: () => import('../views/TopicDetail.vue') },
         { path: 'topics/:topicSlug/rooms/:roomSlug', name: 'room', component: () => import('../views/RoomDetail.vue') },
         // 题库板块
@@ -89,6 +90,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.name === 'login') return true
+  if (to.name === 'landing' && !auth.token) return true
   if (!auth.token) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
@@ -98,6 +100,7 @@ router.beforeEach(async (to) => {
     try {
       await auth.fetchMe()
     } catch {
+      if (to.name === 'landing') return true
       return { name: 'login', query: { redirect: to.fullPath } }
     }
   }

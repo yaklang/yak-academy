@@ -28,17 +28,17 @@ test.describe('内置训练一键导入', () => {
     // 首次导入：确认弹窗 → 汇总提示（全新库为新增 12 + 教程 12；KEEP_STATE 复跑可能全量更新，故只锚定句式）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
-    await expect(page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ })).toBeVisible()
 
     // 管理表格出现内置题（覆盖 regex 判定题与 static 问答题各抽一）
-    const table = page.locator('.el-table')
+    const table = page.locator('[data-slot=table]')
     await expect(table.locator('tr', { hasText: 'vulinbox-ssrf-basic' })).toBeVisible()
     await expect(table.locator('tr', { hasText: 'vulinbox-jwt-none' })).toBeVisible()
 
     // 重复导入 = 更新：本次运行首轮已全量落库，第二轮必然新增 0、更新 12、教程 12 篇（upsert 不重复）
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
-    await expect(page.locator('.el-message', { hasText: '新增 0 题、更新 12 题、教程 12 篇' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '新增 0 题、更新 12 题、教程 12 篇' })).toBeVisible()
 
     // 学生题库：「教程题目」tab 专属内置题集，vulinbox 分类分组可见
     await loginAsStudent(page)
@@ -59,20 +59,20 @@ test.describe('内置训练一键导入', () => {
     // CTF tab 全是上传（筛内置为空）——两个 tab 的题集归属互不稀释。
     await page.getByRole('tab', { name: '教程题目' }).click()
     await expect(page.locator('h3.cat', { hasText: 'ssrf' })).toBeVisible()
-    await page.locator('.filters .el-select').nth(1).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '来源：管理员上传' }).click()
+    await page.locator('.filters [role=combobox]').nth(1).click()
+    await page.locator('[role=option]', { hasText: '来源：管理员上传' }).click()
     await expect(page.locator('.row')).toHaveCount(0)
     // 过滤条件跨 tab 保留：CTF tab 仍按「管理员上传」筛出种子题
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
     await expect(page.locator('.row', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
-    await page.locator('.filters .el-select').nth(1).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '来源：内置题集' }).click()
+    await page.locator('.filters [role=combobox]').nth(1).click()
+    await page.locator('[role=option]', { hasText: '来源：内置题集' }).click()
     await expect(page.locator('.row')).toHaveCount(0)
 
     // 题目可进详情（教程题目 tab 恢复「全部」后进入内置题）
     await page.getByRole('tab', { name: '教程题目' }).click()
-    await page.locator('.filters .el-select').nth(1).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '来源：全部' }).click()
+    await page.locator('.filters [role=combobox]').nth(1).click()
+    await page.locator('[role=option]', { hasText: '来源：全部' }).click()
     await page.getByRole('link', { name: 'SSRF 基础：让服务器替你访问内网接口' }).click()
     await expect(page).toHaveURL(/\/training\/vulinbox-ssrf-basic$/)
     await expect(

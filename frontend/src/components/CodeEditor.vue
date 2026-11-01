@@ -82,15 +82,16 @@ onUnmounted(() => view?.destroy())
 
 <style scoped>
 .code-editor {
-  border: 1px solid #383e46;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .code-editor:focus-within {
-  border-color: #4a7db3;
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.18);
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--accent);
 }
 .code-editor.is-disabled {
   opacity: 0.55;

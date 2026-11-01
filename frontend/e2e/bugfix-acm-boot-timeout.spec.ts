@@ -24,6 +24,6 @@ test.describe('回归：ACM 时限不含引擎启动', () => {
 
     // 执行段仅数毫秒：AC 证明计时起点是用户代码而非引擎进程启动
     await expect(page.locator('.result')).toContainText('判定通过，得分', { timeout: 30_000 })
-    await expect(page.locator('.result')).toHaveClass(/el-alert--success/)
+    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'success')
   })
 })

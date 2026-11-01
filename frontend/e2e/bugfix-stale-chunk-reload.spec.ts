@@ -12,7 +12,7 @@ import { loginAsStudent } from './helpers'
 test.describe('回归：重新部署后旧页面 chunk 失效自动刷新', () => {
   test('路由 chunk 加载失败时自动 reload，刷新后导航恢复（回归：点击无反应）', async ({ page }) => {
     await loginAsStudent(page)
-    await page.goto('/')
+    await page.goto('/learn')
     await expect(page.getByRole('heading', { name: '学习路线' })).toBeVisible()
 
     // 部署切换的等价模拟：首次请求题库路由的懒加载组件模块时返回 404
@@ -40,7 +40,7 @@ test.describe('回归：重新部署后旧页面 chunk 失效自动刷新', () =
     await page.getByRole('link', { name: '题库' }).click()
     await reloaded
     // 导航中止时 URL 未变：reload 落回当前页（按 pathname 断言，兼容 dev/docker 两种 baseURL）
-    expect(new URL(page.url()).pathname).toBe('/')
+    expect(new URL(page.url()).pathname).toBe('/learn')
     expect(await page.evaluate(() => sessionStorage.getItem('chunk-reloaded'))).toBe('1')
 
     // reload 落回当前页（导航中止时 URL 未变）：新 bundle 下应用恢复响应，

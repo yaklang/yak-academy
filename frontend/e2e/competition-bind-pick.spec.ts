@@ -50,12 +50,10 @@ test.describe('竞赛绑定：从题库勾选', () => {
     // 打开对话框默认落在「从题库勾选」（el-radio-button 可访问树是 generic，
     // 无 radio role，按类名断言选中态），题库列表已加载（含种子题）
     await page.getByRole('button', { name: '绑定 / 导入题目' }).click()
-    const dialog = page.locator('.el-dialog')
-    await expect(dialog.locator('.el-dialog__title')).toHaveText('绑定 / 导入题目')
-    await expect(dialog.locator('.el-radio-button', { hasText: '从题库勾选' })).toHaveClass(
-      /is-active/,
-    )
-    const pickTable = dialog.locator('.el-table')
+    const dialog = page.locator('[data-slot=dialog-content]')
+    await expect(dialog.locator('[data-slot=dialog-title]')).toHaveText('绑定 / 导入题目')
+    await expect(dialog.getByRole('radio', { name: '从题库勾选' })).toBeChecked()
+    const pickTable = dialog.locator('[data-slot=table]')
     await expect(pickTable).toContainText(C.title, { timeout: 15_000 })
 
     // 搜索定位（管理员视角的定位习惯）：按标题关键词过滤出目标行
@@ -66,16 +64,16 @@ test.describe('竞赛绑定：从题库勾选', () => {
 
     // 未勾选直接提交被拦：提示后按钮计数仍为 0
     await dialog.getByRole('button', { name: /绑定所选（0 题）/ }).click()
-    await expect(page.locator('.el-message', { hasText: '请先勾选要绑定的题目' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '请先勾选要绑定的题目' })).toBeVisible()
 
     // 勾选目标行提交：成功提示 + 对话框关闭
     await pickTable
       .locator('tr', { hasText: C.title })
-      .locator('.el-checkbox')
+      .locator('[role=checkbox]')
       .click()
     await expect(dialog.getByText(`已勾选 1 题`)).toBeVisible()
     await dialog.getByRole('button', { name: '绑定所选（1 题）' }).click()
-    await expect(page.locator('.el-message', { hasText: '绑定完成：新增 1 题' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '绑定完成：新增 1 题' })).toBeVisible()
     await expect(dialog).toBeHidden()
 
     // 竞赛题目表出现刚绑的题。关闭的勾选对话框 display:none 但 DOM 还在，
@@ -88,7 +86,7 @@ test.describe('竞赛绑定：从题库勾选', () => {
     await expect(pickTable).toContainText(C.title, { timeout: 15_000 })
     const boundRow = pickTable.locator('tr', { hasText: C.title })
     await expect(boundRow).toContainText('已绑定')
-    await expect(boundRow.locator('.el-checkbox')).toHaveClass(/is-disabled/)
+    await expect(boundRow.getByRole('checkbox')).toBeDisabled()
   })
 
   test('题库过滤与换模式互不影响：ACM tab 只列 ACM 题，slug 直填通道仍在', async ({
@@ -103,22 +101,22 @@ test.describe('竞赛绑定：从题库勾选', () => {
     await page.goto(`/admin/panel/competitions/${comp.id}`)
     await page.getByRole('tab', { name: '题目', exact: true }).click()
     await page.getByRole('button', { name: '绑定 / 导入题目' }).click()
-    const dialog = page.locator('.el-dialog')
-    const pickTable = dialog.locator('.el-table')
+    const dialog = page.locator('[data-slot=dialog-content]')
+    const pickTable = dialog.locator('[data-slot=table]')
     await expect(pickTable).toContainText(C.title, { timeout: 15_000 })
 
     // 题库过滤（el-select）：只选 ACM 题库 → 列表只剩 ACM 题（CTF 种子题消失）
-    await dialog.locator('.el-select').click()
-    await page.locator('.el-select-dropdown__item', { hasText: 'ACM 题库' }).click()
+    await dialog.locator('[role=combobox]').click()
+    await page.locator('[role=option]', { hasText: 'ACM 题库' }).click()
     await expect(pickTable).toContainText(ACM_TITLE)
     await expect(pickTable).not.toContainText(C.title)
 
     // 切到「填写 slug」：勾选列表让位给 textarea，直填通道照常可用
-    await dialog.locator('.el-radio-button', { hasText: '填写 slug' }).click()
+    await dialog.locator('.ui-radio', { hasText: '填写 slug' }).click()
     await expect(dialog.getByPlaceholder(/web-lfi/)).toBeVisible()
     await dialog.getByPlaceholder(/web-lfi/).fill(C.slug)
     await dialog.getByRole('button', { name: '绑定', exact: true }).click()
-    await expect(page.locator('.el-message', { hasText: '绑定完成：新增 1 题' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '绑定完成：新增 1 题' })).toBeVisible()
     await expect(
       page.getByRole('tabpanel', { name: '题目' }).locator('tr', { hasText: C.slug }),
     ).toContainText(C.title)

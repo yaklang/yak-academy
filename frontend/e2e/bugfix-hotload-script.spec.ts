@@ -19,7 +19,7 @@ test.describe('回归：热加载脚本使用引擎真实钩子', () => {
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+/ }),
+      page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+/ }),
     ).toBeVisible()
 
     // 用户路径：打开配套教程页读脚本（与既有 spec 同用普通端教程路由）

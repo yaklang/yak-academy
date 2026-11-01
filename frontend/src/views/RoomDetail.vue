@@ -3,7 +3,7 @@
 // 本页不再内嵌 Lab——有关联题目时给"前往题目"入口跳题目详情页。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { topicApi, type Room } from '../api'
@@ -25,7 +25,7 @@ async function load() {
   try {
     room.value = await topicApi.room(topicSlug, roomSlug)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   }
 }
 
@@ -35,7 +35,7 @@ onMounted(load)
 <template>
   <div v-if="room" class="page">
     <h2>{{ room.title }}</h2>
-    <el-tag size="small">{{ room.difficulty }}</el-tag>
+    <UiTag size="small">{{ room.difficulty }}</UiTag>
 
     <router-link
       v-if="room.related_challenge_slug"
@@ -57,10 +57,10 @@ onMounted(load)
 
 <style scoped>
 .page { max-width: 860px; }
-.challenge-link { display: inline-block; margin: 0.8rem 0 0; color: var(--el-color-primary); text-decoration: none; font-weight: 600; }
+.challenge-link { display: inline-block; margin: 0.8rem 0 0; color: var(--accent-foreground); text-decoration: none; font-weight: 600; }
 .lesson { line-height: 1.7; margin: 1rem 0 2rem; }
-.lesson :deep(pre) { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; overflow: auto; }
-.lesson :deep(code) { background: var(--el-fill-color-light); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.lesson :deep(pre) { background: var(--muted); padding: 0.8rem; border-radius: 4px; overflow: auto; }
+.lesson :deep(code) { background: var(--muted); padding: 0.1rem 0.3rem; border-radius: 3px; }
 .video { width: 100%; max-width: 720px; border-radius: 4px; background: #000; }
-.embed { aspect-ratio: 16/9; height: auto; border: 1px solid var(--el-border-color); }
+.embed { aspect-ratio: 16/9; height: auto; border: 1px solid var(--border); }
 </style>

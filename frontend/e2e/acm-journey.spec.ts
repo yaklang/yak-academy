@@ -43,14 +43,14 @@ test.describe('ACM 编程题（源码判定）', () => {
 
     // 暗色编辑器 + 白色代码字 + yak 语法着色（yakit 词法移植的回归锚点：
     // 底色 #212428、默认字白、内建函数橙 #e0873c、字符串绿 #98c379）
-    await expect(editor).toHaveCSS('background-color', 'rgb(33, 36, 40)')
-    await expect(page.locator('.solve .cm-content')).toHaveCSS('color', 'rgb(255, 255, 255)')
+    await expect(editor).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+    await expect(page.locator('.solve .cm-content')).toHaveCSS('color', 'rgb(23, 23, 23)')
     await fillSource(page, 'println("hi")')
     const tokenColors = await page.locator('.solve .cm-line span').evaluateAll(
       (spans) => spans.map((s) => getComputedStyle(s).color),
     )
-    expect(tokenColors).toContain('rgb(224, 135, 60)') // println 内建函数
-    expect(tokenColors).toContain('rgb(152, 195, 121)') // "hi" 字符串
+    expect(tokenColors).toContain('rgb(161, 75, 11)') // println 内建函数
+    expect(tokenColors).toContain('rgb(67, 116, 27)') // "hi" 字符串
 
     // 库策略提示：题面 chips 显示白名单（fixture 配 [str, io, os]），
     // 黑名单高危库说明可见（exec/file 在默认黑名单内）
@@ -96,7 +96,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('判定通过，得分', { timeout: 30_000 })
-    await expect(page.locator('.result')).toHaveClass(/el-alert--success/)
+    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'success')
   })
 
   test('提交错误输出的源码 → WA 判定不通过', async ({ page }) => {
@@ -108,7 +108,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.getByRole('button', { name: '提交代码' }).click()
 
     await expect(page.locator('.result')).toContainText('答案错误（WA）', { timeout: 30_000 })
-    await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
   })
 
   // 部分得分回归（e2e-bugfix）：种子题 scores.json 按 2/1/1/1 配分，
@@ -139,7 +139,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(page.locator('.result')).toContainText(
       `部分通过，得分 ${expected}`, { timeout: 30_000 },
     )
-    await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
     // 逐组结论：通过组绿色「通过」并显示组分；失败组红色 WA 且无分
     for (const name of Object.keys(E2E.acm.partialGroups)) {
       await expect(page.locator('.group-row', { hasText: name })).toBeVisible()
@@ -155,7 +155,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     // 题目未通关：部分通过不翻转 solved——页面保持未通关态
     // （全量套件下 AC 用例先通关属正常前置，solved 一旦翻转不回退，
     // 因此断言收敛为「通关标记与结算文案互斥且部分通过为 error 警示」）。
-    await expect(page.locator('.result')).toHaveClass(/el-alert--error/)
+    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
     await expect(page.locator('.result')).not.toContainText('判定通过')
   })
 
@@ -182,7 +182,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, 'exec.Command("id")')
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    const toast = page.locator('.el-message--error')
+    const toast = page.locator('[data-sonner-toast][data-type=error]')
     await expect(toast).toContainText('提交失败')
     // 错误信封 message 已是后端统一接入口的中文映射，且保留点名违规库（exec）
     await expect(toast).toContainText('平台黑名单的高危库')
@@ -197,7 +197,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, 'codec.EncodeToHex("a")')
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    const toast = page.locator('.el-message--error')
+    const toast = page.locator('[data-sonner-toast][data-type=error]')
     await expect(toast).toContainText('提交失败')
     // 中文映射保留点名白名单外库（codec）
     await expect(toast).toContainText('题目白名单之外的库')
@@ -212,7 +212,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, 'file.IsDir("/etc")')
     await page.getByRole('button', { name: '运行自测' }).click()
 
-    const toast = page.locator('.el-message--error')
+    const toast = page.locator('[data-sonner-toast][data-type=error]')
     await expect(toast).toContainText('自测运行失败')
     await expect(toast).toContainText('file')
   })
@@ -226,13 +226,13 @@ test.describe('ACM 编程题（源码判定）', () => {
     for (const name of E2E.acm.samples) {
       await expect(page.locator('.run-bar').getByText(`样例 ${name}`)).toBeVisible()
     }
-    await expect(page.locator('.run-bar .el-radio-button').first()).toHaveClass(/is-active/)
+    await expect(page.locator('.run-bar input[type=radio]').first()).toBeChecked()
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
 
     // 切到自定义输入出现 stdin 输入框，切回样例收起
-    await page.locator('.run-bar').getByText('自定义输入').click()
+    await page.locator('.run-bar').getByRole('radio', { name: '自定义输入', exact: true }).check()
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toBeVisible()
-    await page.locator('.run-bar').getByText(`样例 ${E2E.acm.samples[0]}`).click()
+    await page.locator('.run-bar').getByRole('radio', { name: `样例 ${E2E.acm.samples[0]}`, exact: true }).check()
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
   })
 
@@ -257,7 +257,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.goto(`/training/${E2E.acm.slug}`)
 
     await fillSource(page, E2E.acm.correctSource)
-    await page.locator('.run-bar').getByText('自定义输入').click()
+    await page.locator('.run-bar').getByRole('radio', { name: '自定义输入', exact: true }).check()
     await page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）').fill('10 20\n2 5')
     await page.getByRole('button', { name: '运行自测' }).click()
 

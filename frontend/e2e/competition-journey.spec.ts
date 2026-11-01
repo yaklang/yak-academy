@@ -44,7 +44,7 @@ test.describe('竞赛隔离旅程', () => {
     // 前端：直接输入管理端 URL 被守卫送回学生首页
     await loginAsStudent(page)
     await page.goto('/admin/panel/competitions')
-    await page.waitForURL((u) => u.pathname === '/')
+    await page.waitForURL((u) => u.pathname === '/learn')
 
     // —— 邀请邮件 → 入场页（邀请码预填）→ 入场 ——
     await page.getByRole('link', { name: /邮箱/ }).click()
@@ -53,12 +53,12 @@ test.describe('竞赛隔离旅程', () => {
     const inviteRow = page.locator('tr', { hasText: E2E.competition.lockName })
     await expect(inviteRow).toContainText('竞赛邀请')
     await inviteRow.getByRole('button', { name: '查看' }).click()
-    const mailDialog = page.locator('.el-dialog')
+    const mailDialog = page.locator('[data-slot=dialog-content]')
     await expect(mailDialog).toContainText('邀请码：')
     await mailDialog.getByRole('button', { name: '进入竞赛' }).click()
     await page.waitForURL((u) => u.pathname.startsWith('/competitions/enter/'))
     await page.getByRole('button', { name: '进入竞赛' }).click()
-    await expect(page.locator('.el-message', { hasText: '入场成功' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '入场成功' })).toBeVisible()
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`)
     await expect(page.getByRole('heading', { name: E2E.competition.lockName })).toBeVisible()
     // 绑定的种子题出现在题目表
@@ -90,11 +90,11 @@ test.describe('竞赛隔离旅程', () => {
 
     // —— 竞赛域内可用：题目抽屉提交 flag，异步判对转「已通关」 ——
     // 题目标题是 el-link（a 无 href，无 link role），按类名定位点击
-    await page.locator('tr', { hasText: C.title }).locator('.el-link').click()
-    await expect(page.locator('.el-drawer')).toBeVisible()
+    await page.locator('tr', { hasText: C.title }).locator('.ui-link').click()
+    await expect(page.locator('[data-slot=sheet-content]')).toBeVisible()
     await page.getByPlaceholder('flag{...}').fill(C.flag)
     await page.getByRole('button', { name: '提交', exact: true }).click()
-    await expect(page.locator('.el-message', { hasText: '已提交，异步判定中' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已提交，异步判定中' })).toBeVisible()
     await page.reload()
     await expect(page.locator('tr', { hasText: C.title })).toContainText('已通关', {
       timeout: 15_000,

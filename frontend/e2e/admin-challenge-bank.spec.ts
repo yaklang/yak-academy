@@ -25,7 +25,7 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     const table = page.locator('.chal-table')
     await expect(table.getByRole('button', { name: '编辑' })).toHaveCount(0)
     await expect(table.getByRole('button', { name: '删除' })).toHaveCount(0)
-    await expect(table.locator('.el-switch')).toHaveCount(0)
+    await expect(table.locator('[role=switch]')).toHaveCount(0)
 
     // global-setup 的 CTF 种子题不属于内置集：内置 tab 永不出现
     await expect(table.locator('tr', { hasText: C.slug })).toHaveCount(0)
@@ -52,17 +52,17 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(page.locator('.image-card')).toHaveCount(0)
 
     // 筛选条内下拉按 DOM 序：分类 / 难度 / 来源（内置 tab 无来源项）
-    const selects = page.locator('.filter-bar .el-select')
+    const selects = page.locator('.filter-bar [role=combobox]')
     // 分类筛选：cryptography 同样收敛到凯撒
     await selects.nth(0).click()
-    await page.locator('.el-select-dropdown__item', { hasText: 'cryptography' }).click()
+    await page.locator('[role=option]', { hasText: 'cryptography' }).click()
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
 
     // 难度筛选（与分类叠加）：expert 与种子（apprentice）不相交 → 空表
     await selects.nth(1).click()
-    await page.locator('.el-select-dropdown__item', { hasText: 'expert' }).click()
-    await expect(table.locator('.el-table__empty-text')).toBeVisible()
+    await page.locator('[role=option]', { hasText: 'expert' }).click()
+    await expect(table.locator('[data-slot=table-empty]')).toBeVisible()
 
     // 清除筛选：关键字+分类+难度一次回到全量
     await page.locator('.filter-clear').click()
@@ -71,10 +71,10 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
 
     // 来源筛选：CTF tab 只含管理员上传题，筛「内置题集」恒空（内置集 bank=tutorial）
     await selects.nth(2).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '来源：内置题集' }).click()
-    await expect(table.locator('.el-table__empty-text')).toBeVisible()
+    await page.locator('[role=option]', { hasText: '来源：内置题集' }).click()
+    await expect(table.locator('[data-slot=table-empty]')).toBeVisible()
     await selects.nth(2).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '来源：管理员上传' }).click()
+    await page.locator('[role=option]', { hasText: '来源：管理员上传' }).click()
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
   })
 
@@ -90,7 +90,7 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(table.locator('tr', { hasText: E2E.acm.slug })).toBeVisible()
     await expect(table.locator('tr', { hasText: C.slug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
-    await expect(page.locator('button.el-button', { hasText: '选择 challenge.json' })).toBeVisible()
+    await expect(page.locator('button.ui-button', { hasText: '选择 challenge.json' })).toBeVisible()
   })
 
   test('ACM tab：yak 判题引擎状态卡（OSS 下载入口，不触发真实下载）', async ({ page }) => {
@@ -107,11 +107,11 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
 
     // 装配态随 e2e 启动方向（ACADEMY_YAK_BIN 是否注入引擎）
     const engineConfigured = Boolean(process.env.ACADEMY_YAK_BIN)
-    await expect(card.locator('.el-tag').first()).toContainText(engineConfigured ? '已装配' : '未装配')
+    await expect(card.locator('[data-slot=badge]').first()).toContainText(engineConfigured ? '已装配' : '未装配')
 
     // 下载为后台任务（约 220MB）：只走确认弹窗文案，不点「开始下载」
     await card.getByRole('button', { name: '从 OSS 下载引擎' }).click()
-    const dialog = page.locator('.el-message-box')
+    const dialog = page.locator('[role=alertdialog]')
     await expect(dialog).toContainText('yak 引擎二进制')
     await expect(dialog).toContainText('220MB')
     await dialog.getByRole('button', { name: '取消' }).click()

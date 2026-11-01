@@ -3,7 +3,7 @@
 // 打包为单文件 tar.gz，按保留份数自动清理；支持立即备份与下载离机保存。
 // PostgreSQL 模式应用内备份不支持（创建返回 422，数据库走外部 pg_dump）。
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { adminBackupApi, type BackupInfo } from '../../api'
 
 const items = ref<BackupInfo[]>([])
@@ -17,7 +17,7 @@ async function load() {
     const resp = await adminBackupApi.list()
     items.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -27,10 +27,10 @@ async function createBackup() {
   creating.value = true
   try {
     const info = await adminBackupApi.create()
-    ElMessage.success(`备份完成：${info.name}（${fmtSize(info.size_bytes)}）`)
+    notify.success(`备份完成：${info.name}（${fmtSize(info.size_bytes)}）`)
     await load()
   } catch (e) {
-    ElMessage.error(`备份失败：${(e as Error).message}`)
+    notify.error(`备份失败：${(e as Error).message}`)
   } finally {
     creating.value = false
   }
@@ -47,7 +47,7 @@ async function download(item: BackupInfo) {
     a.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    ElMessage.error(`下载失败：${(e as Error).message}`)
+    notify.error(`下载失败：${(e as Error).message}`)
   } finally {
     downloading.value = ''
   }
@@ -74,46 +74,46 @@ onMounted(load)
     归档落在数据卷的 backups/ 目录——数据卷损坏时备份同样丢失，请定期下载离机保存（异地容灾）。
   </p>
 
-  <el-card class="block" shadow="never">
+  <UiCard class="block" shadow="never">
     <template #header>
       <div class="card-head">
         <span>归档列表</span>
         <div>
-          <el-button size="small" :loading="creating" type="primary" @click="createBackup">立即备份</el-button>
-          <el-button size="small" @click="load">刷新</el-button>
+          <UiButton size="small" :loading="creating" type="primary" @click="createBackup">立即备份</UiButton>
+          <UiButton size="small" @click="load">刷新</UiButton>
         </div>
       </div>
     </template>
-    <el-table :data="items" v-loading="loading" empty-text="暂无备份；点击「立即备份」生成第一份">
-      <el-table-column prop="name" label="归档" min-width="240">
+    <UiTable :data="items" v-busy="loading" empty-text="暂无备份；点击「立即备份」生成第一份">
+      <UiTableColumn prop="name" label="归档" min-width="240">
         <template #default="{ row }">
           <code>{{ row.name }}</code>
         </template>
-      </el-table-column>
-      <el-table-column label="大小" width="110">
+      </UiTableColumn>
+      <UiTableColumn label="大小" width="110">
         <template #default="{ row }">{{ fmtSize(row.size_bytes) }}</template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="180">
+      </UiTableColumn>
+      <UiTableColumn label="创建时间" width="180">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="WP 存储" width="100">
+      </UiTableColumn>
+      <UiTableColumn label="WP 存储" width="100">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.store_kinds === 's3' ? 'warning' : 'info'">
+          <UiTag size="small" :type="row.store_kinds === 's3' ? 'warning' : 'info'">
             {{ row.store_kinds === 's3' ? 's3（zip 不在归档）' : '本地' }}
-          </el-tag>
+          </UiTag>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="110">
+      </UiTableColumn>
+      <UiTableColumn label="操作" width="110">
         <template #default="{ row }">
-          <el-button size="small" :loading="downloading === row.name" @click="download(row)">下载</el-button>
+          <UiButton size="small" :loading="downloading === row.name" @click="download(row)">下载</UiButton>
         </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+      </UiTableColumn>
+    </UiTable>
+  </UiCard>
 </template>
 
 <style scoped>
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 </style>

@@ -21,14 +21,14 @@ test.describe('竞赛删除旅程', () => {
 
     await loginAsAdmin(page)
     await page.goto('/admin/panel/competitions')
-    const row = page.locator('.el-table tr', { hasText: 'E2E 删除验证赛' })
+    const row = page.locator('[data-slot=table] tr', { hasText: 'E2E 删除验证赛' })
     await expect(row).toBeVisible()
     await expect(row).toContainText('进行中')
 
     // running：确认后删除被拒，提示「进行中的竞赛不可删除」
     await row.getByRole('button', { name: '删除' }).click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
-    await expect(page.locator('.el-message', { hasText: '进行中的竞赛不可删除' })).toBeVisible()
+    await page.locator('[role=alertdialog]').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '进行中的竞赛不可删除' })).toBeVisible()
     // 行仍在（未误删）
     await expect(row).toBeVisible()
 
@@ -38,12 +38,12 @@ test.describe('竞赛删除旅程', () => {
 
     // 回列表删除：确认后成功，行消失
     await page.goto('/admin/panel/competitions')
-    const row2 = page.locator('.el-table tr', { hasText: 'E2E 删除验证赛' })
+    const row2 = page.locator('[data-slot=table] tr', { hasText: 'E2E 删除验证赛' })
     await expect(row2).toBeVisible()
     await row2.getByRole('button', { name: '删除' }).click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
-    await expect(page.locator('.el-message', { hasText: '已删除' })).toBeVisible()
-    await expect(page.locator('.el-table tr', { hasText: 'E2E 删除验证赛' })).toHaveCount(0)
+    await page.locator('[role=alertdialog]').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已删除' })).toBeVisible()
+    await expect(page.locator('[data-slot=table] tr', { hasText: 'E2E 删除验证赛' })).toHaveCount(0)
 
     // 详情直访 404（真删，非仅前端隐藏）
     const resp = await request.get(`${E2E.apiURL}/api/v1/admin/competitions/${comp.id}`, {

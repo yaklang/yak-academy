@@ -60,7 +60,7 @@ test.describe('找回账号与重置密码', () => {
 
     await page.getByPlaceholder('手机号（注册时绑定的手机号）').fill(phone)
     await page.getByRole('button', { name: '获取验证码' }).click()
-    const hint = page.locator('.code-hint')
+    const hint = page.locator('[data-testid=sms-code]')
     await expect(hint).toBeVisible()
     const code = (await hint.textContent())!.match(/(\d{6})/)![1]
 
@@ -69,10 +69,10 @@ test.describe('找回账号与重置密码', () => {
     await page.getByRole('button', { name: '重置密码并找回账号' }).click()
 
     // 找回结果：回显用户名与学号式账号编码（忘记用户名也能找回）。
-    const panel = page.locator('.el-result', { hasText: '账号找回成功' })
+    const panel = page.locator('.auth-recovered', { hasText: '账号找回成功' })
     await expect(panel).toBeVisible()
-    await expect(panel).toContainText(`用户名：${username}`)
-    await expect(panel.getByText(/账号编码：YA\d{2}-\d{5}/)).toBeVisible()
+    await expect(panel.getByText(username, { exact: true })).toBeVisible()
+    await expect(panel.locator('dd').nth(1)).toHaveText(/^YA\d{2}-\d{5}$/)
 
     // 旧密码立即失效，新密码可登录（先 API 验证再走 UI 登录进入平台）。
     expect(await apiLogin(request, username, oldPass)).toBe(401)
@@ -102,13 +102,13 @@ test.describe('找回账号与重置密码', () => {
     await expect(row).toHaveCount(1)
 
     await row.getByRole('button', { name: '重置密码' }).click()
-    const dialog = page.locator('.el-dialog').filter({ has: page.locator('.el-dialog__title', { hasText: '重置密码' }) })
+    const dialog = page.locator('[data-slot=dialog-content]').filter({ has: page.locator('[data-slot=dialog-title]', { hasText: '重置密码' }) })
     await expect(dialog).toBeVisible()
     // 预填平台批量建号同款初始密码 123456，此处改为自定义密码。
     await expect(dialog.getByPlaceholder('至少 6 位')).toHaveValue('123456')
     await dialog.getByPlaceholder('至少 6 位').fill(newPass)
     await dialog.getByRole('button', { name: '重置', exact: true }).click()
-    await expect(page.locator('.el-message', { hasText: '已重置' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已重置' })).toBeVisible()
 
     expect(await apiLogin(request, username, oldPass)).toBe(401)
     expect(await apiLogin(request, username, newPass)).toBe(200)

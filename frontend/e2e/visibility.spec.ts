@@ -12,15 +12,15 @@ test.describe('可见性旅程', () => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
     await switchAdminChallengeBank(page, 'CTF 题目')
-    const row = page.locator('.el-table tr', { hasText: C.slug })
-    const toggle = row.locator('.el-switch')
-    await expect(toggle).toHaveClass(/is-checked/, { timeout: 10_000 })
+    const row = page.locator('[data-slot=table] tr', { hasText: C.slug })
+    const toggle = row.locator('[role=switch]')
+    await expect(toggle).toBeChecked({ timeout: 10_000 })
 
     // 关闭可见性开关
     await toggle.click()
-    await expect(page.locator('.el-message', { hasText: '已隐藏' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已隐藏' })).toBeVisible()
     // 开关状态翻转
-    await expect(row.locator('.el-switch')).not.toHaveClass(/is-checked/)
+    await expect(row.locator('[role=switch]')).not.toBeChecked()
 
     // 学生端：列表无此题
     await loginAsStudent(page)
@@ -30,15 +30,15 @@ test.describe('可见性旅程', () => {
     // 学生端：直连详情 404（错误提示 + 页面无题目标题，骨架外无内容）
     await page.goto(`/training/${C.slug}`)
     await expect(page.getByRole('heading', { name: C.title })).toHaveCount(0)
-    await expect(page.locator('.el-message')).toContainText(/not found|不存在/i)
+    await expect(page.locator('[data-sonner-toast]')).toContainText(/not found|不存在/i)
 
     // 恢复可见：学生立即可见
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
     await switchAdminChallengeBank(page, 'CTF 题目')
-    const row2 = page.locator('.el-table tr', { hasText: C.slug })
-    await row2.locator('.el-switch').click()
-    await expect(page.locator('.el-message', { hasText: '已对学生可见' })).toBeVisible()
+    const row2 = page.locator('[data-slot=table] tr', { hasText: C.slug })
+    await row2.locator('[role=switch]').click()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已对学生可见' })).toBeVisible()
 
     await loginAsStudent(page)
     await page.goto('/training')

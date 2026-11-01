@@ -21,13 +21,13 @@ test.describe('回归：内置导入清理目录外残留', () => {
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 12 篇/ }),
+      page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 12 篇/ }),
     ).toBeVisible()
     // 全新库无目录外残留：不得出现清理文案（removed=0 时不加后缀）
-    await expect(page.locator('.el-message', { hasText: '清理目录外残留' })).toHaveCount(0)
+    await expect(page.locator('[data-sonner-toast]', { hasText: '清理目录外残留' })).toHaveCount(0)
 
     // 终态断言：目录内题目在表格可见，已下线的 3 道旧模块题永不可见
-    const table = page.locator('.el-table')
+    const table = page.locator('[data-slot=table]')
     await expect(table.locator('tr', { hasText: 'vulinbox-mall-chain' })).toBeVisible()
     for (const staleSlug of ['vulinbox-fuzzer-headers', 'vulinbox-mitm-session', 'vulinbox-codec-pipeline']) {
       await expect(table.locator('tr', { hasText: staleSlug })).toHaveCount(0)
@@ -37,8 +37,8 @@ test.describe('回归：内置导入清理目录外残留', () => {
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
-      page.locator('.el-message', { hasText: '新增 0 题、更新 12 题、教程 12 篇' }),
+      page.locator('[data-sonner-toast]', { hasText: '新增 0 题、更新 12 题、教程 12 篇' }),
     ).toBeVisible()
-    await expect(page.locator('.el-message', { hasText: '清理目录外残留' })).toHaveCount(0)
+    await expect(page.locator('[data-sonner-toast]', { hasText: '清理目录外残留' })).toHaveCount(0)
   })
 })

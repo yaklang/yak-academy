@@ -1,77 +1,35 @@
 <script setup lang="ts">
-// 管理端布局：教程 | 题库 | 资源管理 三组导航（资源管理含教程管理、题目管理、
-// 容器管理、竞赛管理、用户管理——教程与题目是两类独立上传资源）。
-// 用户管理为画像表格（过滤/搜索/不活跃标记）+ 行内「重置密码」（未绑定手机号
-// 的竞赛批量账号走此入口找回）；建号入口在邀请赛「一键生成账号」与自助注册，
-// 角色为账号固有属性（两档模型）。
-// 改密码在账号信息面板（/profile）。底部提供"返回普通端"入口。
-// 教程/题库与管理端预览共用普通端视图。
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Menu, BookOpen, Flag, Package, Braces, Server, Database, ScrollText, Trophy, Users, ArrowLeft, LogOut } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
-import { useRouter } from 'vue-router'
-
+import Brand from '@/components/Brand.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import { Button } from '@/components/ui/button'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 const auth = useAuthStore()
 const router = useRouter()
-
-function logout() {
-  auth.logout()
-  router.push('/login')
-}
+const route = useRoute()
+const mobileOpen = ref(false)
+const sections = [
+  { label: '学习预览', items: [{ title:'教程',to:'/admin/tutorials',icon:BookOpen },{title:'题库',to:'/admin/training',icon:Flag}] },
+  { label: '资源管理', items: [{title:'教程管理',to:'/admin/panel/tutorials',icon:Package},{title:'题目管理',to:'/admin/panel/challenges',icon:Braces},{title:'容器管理',to:'/admin/panel/containers',icon:Server},{title:'备份管理',to:'/admin/panel/backups',icon:Database},{title:'操作审计',to:'/admin/panel/audit-logs',icon:ScrollText},{title:'竞赛管理',to:'/admin/panel/competitions',icon:Trophy},{title:'用户管理',to:'/admin/panel/users',icon:Users}] },
+]
+const currentTitle = computed(() => sections.flatMap(section => section.items).find(item => route.path.startsWith(item.to))?.title || '管理工作台')
+watch(() => route.fullPath, () => { mobileOpen.value = false })
+async function logout() { await auth.logout(); router.push('/login') }
 </script>
-
 <template>
-  <el-container class="layout">
-    <el-aside width="220px" class="side">
-      <div class="brand"><span class="prompt">#</span> yak-academy 管理端</div>
-      <nav>
-        <router-link to="/admin/tutorials">教程</router-link>
-        <router-link to="/admin/training">题库</router-link>
-        <div class="group-title">资源管理</div>
-        <router-link to="/admin/panel/tutorials" class="sub">教程管理</router-link>
-        <router-link to="/admin/panel/challenges" class="sub">题目管理</router-link>
-        <router-link to="/admin/panel/containers" class="sub">容器管理</router-link>
-        <router-link to="/admin/panel/backups" class="sub">备份管理</router-link>
-        <router-link to="/admin/panel/audit-logs" class="sub">操作审计</router-link>
-        <router-link to="/admin/panel/competitions" class="sub">竞赛管理</router-link>
-        <router-link to="/admin/panel/users" class="sub">用户管理</router-link>
-      </nav>
-      <div class="side-footer">
-        <div>
-          <router-link to="/" class="back">← 返回普通端</router-link>
-          <div class="who" v-if="auth.user">{{ auth.user.username }}（管理员）</div>
-        </div>
-        <div>
-          <el-button v-if="auth.token" link size="small" @click="logout">登出</el-button>
-        </div>
-      </div>
-    </el-aside>
-    <el-main>
-      <router-view />
-    </el-main>
-  </el-container>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="admin-brand"><Brand to="/admin/tutorials" /><span class="workspace-label">管理工作台</span></div>
+      <nav class="admin-navigation" aria-label="管理导航"><section v-for="section in sections" :key="section.label"><p>{{ section.label }}</p><RouterLink v-for="item in section.items" :key="item.to" :to="item.to"><component :is="item.icon" :size="17" :stroke-width="1.6" />{{ item.title }}</RouterLink></section></nav>
+      <div class="admin-side-footer"><RouterLink to="/learn"><ArrowLeft :size="16" />返回普通端</RouterLink><div class="admin-identity"><span class="avatar">{{ auth.user?.username.slice(0,1).toUpperCase() }}</span><span>{{ auth.user?.username }}<small>管理员</small></span></div></div>
+    </aside>
+    <div class="admin-workspace">
+      <header class="admin-header"><div class="admin-header-title"><Button variant="ghost" size="icon" class="mobile-admin-trigger" aria-label="打开管理导航" @click="mobileOpen = true"><Menu :size="20" /></Button><span class="admin-desktop-label">工作台 /</span><span>{{ currentTitle }}</span></div><div class="public-actions"><ThemeToggle /><Button variant="ghost" @click="logout"><LogOut :size="15" /><span>登出</span></Button></div></header>
+      <main class="admin-main"><RouterView /></main>
+    </div>
+    <Sheet v-model:open="mobileOpen"><SheetContent side="left" class="w-[calc(100vw-2rem)] max-w-xs overflow-y-auto"><SheetHeader><SheetTitle>管理导航</SheetTitle><SheetDescription>Yak Academy 管理工作台</SheetDescription></SheetHeader><nav class="admin-navigation" aria-label="移动管理导航"><section v-for="section in sections" :key="section.label"><p>{{ section.label }}</p><RouterLink v-for="item in section.items" :key="item.to" :to="item.to" @click="mobileOpen = false"><component :is="item.icon" :size="17" />{{ item.title }}</RouterLink></section><RouterLink to="/learn" @click="mobileOpen = false"><ArrowLeft :size="16" />返回普通端</RouterLink></nav></SheetContent></Sheet>
+  </div>
 </template>
-
-<style scoped>
-.layout { min-height: 100vh; }
-.side {
-  display: flex; flex-direction: column;
-  border-right: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
-}
-.brand { font-weight: 700; padding: 1rem; font-family: Consolas, monospace; color: var(--el-text-color-primary); }
-.brand .prompt { color: var(--el-color-primary); }
-nav { display: flex; flex-direction: column; padding: 0 1rem; gap: 0.5rem; flex: 1; }
-nav a { color: var(--el-text-color-regular); text-decoration: none; padding: 2px 6px; border-radius: 3px; }
-nav a.router-link-active {
-  color: var(--el-color-primary); background: rgba(0, 230, 118, 0.08);
-}
-nav .sub { padding-left: 1rem; font-size: 0.92rem; color: var(--el-text-color-secondary); }
-nav .sub.router-link-active { color: var(--el-color-primary); }
-.group-title {
-  margin-top: 0.5rem; font-size: 0.75rem; color: var(--el-text-color-secondary);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  font-family: Consolas, monospace;
-}
-.side-footer { display: flex; align-items: center; justify-content: space-between; padding: 1rem; }
-.back { color: var(--el-color-warning); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
-.who { margin-top: 0.35rem; font-size: 0.8rem; color: var(--el-text-color-secondary); }
-</style>

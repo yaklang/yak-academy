@@ -29,7 +29,7 @@ test.describe('回归：SSRF 课程演示假 flag 一眼可辨', () => {
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新' }).click()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ }),
+      page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 \d+ 篇/ }),
     ).toBeVisible()
 
     // 第一课（yakit-ssrf-first）：详细步骤展示固定假 flag 并声明不是答案
