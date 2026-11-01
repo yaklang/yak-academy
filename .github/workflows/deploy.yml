@@ -1,0 +1,136 @@
+name: Deploy academy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deploy.yml'
+      - '.github/deploy/**'
+      - '.github/scripts/deploy-academy.sh'
+      - 'deploy/**'
+      - 'docker-compose.yml'
+      - 'backend/**'
+      - 'frontend/**'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: academy-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build deployment bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Validate deployment configuration
+        run: |
+          bash -n .github/scripts/deploy-academy.sh
+          ACADEMY_JWT_SECRET=validation-only-not-a-production-secret \
+          ACADEMY_ADMIN_PASSWORD=validation-only-password \
+          ACADEMY_DATA_DIR=/var/lib/yak-academy \
+          ACADEMY_IMAGE_TAG="$IMAGE_TAG" \
+          docker compose -f docker-compose.yml -f .github/deploy/compose.production.yml config --quiet
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/backend.Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: yak-academy/backend:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=academy-backend
+          cache-to: type=gha,mode=max,scope=academy-backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/frontend.Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: yak-academy/frontend:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=academy-frontend
+          cache-to: type=gha,mode=max,scope=academy-frontend
+
+      - name: Package immutable images and deployment files
+        run: |
+          mkdir -p bundle/.github/deploy bundle/.github/scripts
+          docker save "yak-academy/backend:$IMAGE_TAG" "yak-academy/frontend:$IMAGE_TAG" \
+            | gzip -1 > bundle/academy-images.tar.gz
+          cp docker-compose.yml bundle/
+          cp .github/deploy/compose.production.yml bundle/.github/deploy/
+          cp .github/deploy/frontend.nginx.conf bundle/.github/deploy/
+          cp .github/scripts/deploy-academy.sh bundle/.github/scripts/
+          printf '%s\n' "$IMAGE_TAG" > bundle/source-sha
+          (cd bundle && sha256sum academy-images.tar.gz > checksums.txt)
+          tar -czf academy-deploy.tar.gz -C bundle .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: academy-deploy
+          path: academy-deploy.tar.gz
+          compression-level: 0
+          retention-days: 7
+
+  deploy:
+    name: Deploy academy.yaklang.com
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: academy-deploy
+
+      - name: Configure SSH with the pinned server host key
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST}"
+          : "${DEPLOY_USER:?Missing DEPLOY_USER}"
+          : "${DEPLOY_PRIVATE_KEY:?Missing DEPLOY_PRIVATE_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing DEPLOY_KNOWN_HOSTS}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/academy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/academy ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/academy > /dev/null
+
+      - name: Upload and deploy the verified bundle
+        run: |
+          set -euo pipefail
+          remote_bundle="/tmp/yak-academy-${SOURCE_SHA}.tar.gz"
+          remote_stage="/opt/yak-academy/staging/${SOURCE_SHA}"
+          ssh_options=(-i "$HOME/.ssh/academy" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes)
+          scp "${ssh_options[@]}" academy-deploy.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_bundle}"
+          ssh "${ssh_options[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "set -eu; umask 077; mkdir -p '${remote_stage}'; tar -xzf '${remote_bundle}' -C '${remote_stage}'; bash '${remote_stage}/.github/scripts/deploy-academy.sh' '${SOURCE_SHA}'"
+
+      - name: Verify the public website and API
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 https://academy.yaklang.com/health \
+            | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ok"'
+          curl --fail --silent --show-error https://academy.yaklang.com/ > /dev/null
+          echo 'Academy is available at https://academy.yaklang.com' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the temporary SSH identity
+        if: always()
+        run: rm -f ~/.ssh/academy
