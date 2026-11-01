@@ -132,8 +132,8 @@ NGINX
       cat <<NGINX
 }
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name $DOMAIN;
     ssl_certificate $CERT_DIR/fullchain.pem;
     ssl_certificate_key $CERT_DIR/key.pem;
@@ -159,7 +159,9 @@ if [[ ! -s "$CERT_DIR/fullchain.pem" || ! -s "$CERT_DIR/key.pem" ]]; then
   write_nginx
 fi
 
-curl --fail --silent --show-error --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/health" \
+curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+  --retry 6 --retry-delay 2 --retry-all-errors \
+  --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/health" \
   | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ok"'
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 printf 'Deployed %s at https://%s\nBootstrap credentials: %s/bootstrap-admin.txt\n' "$SOURCE_SHA" "$DOMAIN" "$CONFIG_DIR"
