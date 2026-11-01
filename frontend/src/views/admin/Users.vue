@@ -7,7 +7,7 @@
 // 行内操作「重置密码」：管理员直接设新密码（不校验旧密码），目标用户全部
 // 已登录会话立即失效——未绑定手机号的竞赛批量账号走此入口找回。
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { adminApi, type AdminUserItem } from '../../api'
 
 const items = ref<AdminUserItem[]>([])
@@ -41,7 +41,7 @@ async function load() {
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -72,16 +72,16 @@ function openReset(row: AdminUserItem) {
 async function confirmReset() {
   if (!resetTarget.value) return
   if (resetPassword.value.length < 6) {
-    ElMessage.warning('新密码至少 6 位')
+    notify.warning('新密码至少 6 位')
     return
   }
   resetting.value = true
   try {
     await adminApi.resetPassword(resetTarget.value.id, resetPassword.value)
-    ElMessage.success(`已重置 ${resetTarget.value.username} 的密码，其登录状态已全部失效`)
+    notify.success(`已重置 ${resetTarget.value.username} 的密码，其登录状态已全部失效`)
     resetVisible.value = false
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     resetting.value = false
   }
@@ -97,9 +97,9 @@ onMounted(load)
     （从未登录的账号按注册时间起算）。
   </p>
 
-  <el-card shadow="never">
+  <UiCard shadow="never">
     <div class="filters">
-      <el-input
+      <UiInput
         v-model="q"
         placeholder="搜索：用户名 / 账号编码 / 手机号"
         clearable
@@ -107,56 +107,56 @@ onMounted(load)
         @keyup.enter="search"
         @clear="search"
       />
-      <el-select v-model="role" placeholder="角色（全部）" clearable class="sel" @change="search">
-        <el-option label="普通人" value="student" />
-        <el-option label="管理员" value="admin" />
-      </el-select>
-      <el-select v-model="active" placeholder="活跃状态（全部）" clearable class="sel" @change="search">
-        <el-option label="活跃" value="true" />
-        <el-option label="不活跃（6 个月未登录）" value="false" />
-      </el-select>
-      <el-select v-model="noSolves" placeholder="解题情况（全部）" clearable class="sel" @change="search">
-        <el-option label="从未完成题目" value="true" />
-        <el-option label="完成过题目" value="false" />
-      </el-select>
-      <el-button type="primary" @click="search">搜索</el-button>
-      <el-button @click="filterStaleNoSolves">不活跃且从未解题</el-button>
+      <UiSelect v-model="role" placeholder="角色（全部）" clearable class="sel" @change="search">
+        <UiOption label="普通人" value="student" />
+        <UiOption label="管理员" value="admin" />
+      </UiSelect>
+      <UiSelect v-model="active" placeholder="活跃状态（全部）" clearable class="sel" @change="search">
+        <UiOption label="活跃" value="true" />
+        <UiOption label="不活跃（6 个月未登录）" value="false" />
+      </UiSelect>
+      <UiSelect v-model="noSolves" placeholder="解题情况（全部）" clearable class="sel" @change="search">
+        <UiOption label="从未完成题目" value="true" />
+        <UiOption label="完成过题目" value="false" />
+      </UiSelect>
+      <UiButton type="primary" @click="search">搜索</UiButton>
+      <UiButton @click="filterStaleNoSolves">不活跃且从未解题</UiButton>
     </div>
 
-    <el-table :data="items" v-loading="loading" empty-text="暂无用户">
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="username" label="用户名" min-width="130" />
-      <el-table-column label="账号编码" width="130">
+    <UiTable :data="items" v-busy="loading" empty-text="暂无用户">
+      <UiTableColumn prop="id" label="ID" width="70" />
+      <UiTableColumn prop="username" label="用户名" min-width="130" />
+      <UiTableColumn label="账号编码" width="130">
         <template #default="{ row }"><code>{{ row.account_code || '-' }}</code></template>
-      </el-table-column>
-      <el-table-column label="角色" width="90">
+      </UiTableColumn>
+      <UiTableColumn label="角色" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.global_role === 'admin' ? 'danger' : 'info'" size="small">
+          <UiTag :type="row.global_role === 'admin' ? 'danger' : 'info'" size="small">
             {{ row.global_role === 'admin' ? '管理员' : '普通人' }}
-          </el-tag>
+          </UiTag>
         </template>
-      </el-table-column>
-      <el-table-column label="活跃" width="100">
+      </UiTableColumn>
+      <UiTableColumn label="活跃" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.active ? 'success' : 'warning'" size="small">{{ row.active ? '活跃' : '不活跃' }}</el-tag>
+          <UiTag :type="row.active ? 'success' : 'warning'" size="small">{{ row.active ? '活跃' : '不活跃' }}</UiTag>
         </template>
-      </el-table-column>
-      <el-table-column label="完成题目" width="100">
+      </UiTableColumn>
+      <UiTableColumn label="完成题目" width="100">
         <template #default="{ row }">{{ row.solved_any ? '有' : '从未' }}</template>
-      </el-table-column>
-      <el-table-column label="最近登录" width="160">
+      </UiTableColumn>
+      <UiTableColumn label="最近登录" width="160">
         <template #default="{ row }">{{ fmt(row.last_login_at) }}</template>
-      </el-table-column>
-      <el-table-column label="注册时间" width="160">
+      </UiTableColumn>
+      <UiTableColumn label="注册时间" width="160">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      </UiTableColumn>
+      <UiTableColumn label="操作" width="110" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openReset(row)">重置密码</el-button>
+          <UiButton link type="primary" size="small" @click="openReset(row)">重置密码</UiButton>
         </template>
-      </el-table-column>
-    </el-table>
-    <el-pagination
+      </UiTableColumn>
+    </UiTable>
+    <UiPagination
       background
       layout="total, prev, pager, next"
       :total="total"
@@ -165,36 +165,36 @@ onMounted(load)
       @current-change="load"
       class="pager"
     />
-  </el-card>
+  </UiCard>
 
   <!-- 管理员重置密码：不校验旧密码，重置后该用户全部已登录会话立即失效。
        默认填平台批量建号同款初始密码 123456，可改。 -->
-  <el-dialog v-model="resetVisible" title="重置密码" width="420px">
+  <UiDialog v-model="resetVisible" title="重置密码" width="420px">
     <template v-if="resetTarget">
       <p class="reset-who">
         目标账号：<b>{{ resetTarget.username }}</b>
         <code v-if="resetTarget.account_code">{{ resetTarget.account_code }}</code>
       </p>
-      <el-form @submit.prevent="confirmReset">
-        <el-form-item label="新密码">
-          <el-input v-model="resetPassword" type="password" show-password placeholder="至少 6 位" />
-        </el-form-item>
+      <UiForm @submit.prevent="confirmReset">
+        <UiFormItem label="新密码">
+          <UiInput v-model="resetPassword" type="password" show-password placeholder="至少 6 位" />
+        </UiFormItem>
         <p class="hint">重置后该用户的全部登录状态立即失效，需用新密码重新登录。</p>
-      </el-form>
+      </UiForm>
     </template>
     <template #footer>
-      <el-button @click="resetVisible = false">取消</el-button>
-      <el-button type="primary" :loading="resetting" @click="confirmReset">重置</el-button>
+      <UiButton @click="resetVisible = false">取消</UiButton>
+      <UiButton type="primary" :loading="resetting" @click="confirmReset">重置</UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 </template>
 
 <style scoped>
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .filters { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
 .q-input { width: 260px; }
 .sel { width: 200px; }
 .pager { margin-top: 1rem; }
 .reset-who { font-size: 0.92rem; }
-.reset-who code { margin-left: 0.5rem; color: var(--el-text-color-secondary); }
+.reset-who code { margin-left: 0.5rem; color: var(--muted-foreground); }
 </style>

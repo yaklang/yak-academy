@@ -1,7 +1,7 @@
 // 提交判定轮询：2s 间隔，上限 30 次（异步判题，event-sourcing-rules skill）。
 // ChallengeDetail 页共用；判定中禁用重复提交。ACM 编程题按 verdict 展示错误文案。
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { submissionApi, verdictLabels, type Submission } from '../api'
 
 export function useSubmissionPoll(onCorrect?: (sub: Submission) => void) {
@@ -20,25 +20,25 @@ export function useSubmissionPoll(onCorrect?: (sub: Submission) => void) {
           result.value = sub
           if (sub.status === 'correct') {
             // 分值只结算一次：重复判对 score=0，不显示 +0 分。
-            ElMessage.success(sub.score > 0 ? `回答正确！+${sub.score} 分` : '回答正确（本题已结算过，不重复计分）')
+            notify.success(sub.score > 0 ? `回答正确！+${sub.score} 分` : '回答正确（本题已结算过，不重复计分）')
             onCorrect?.(sub)
           } else if (sub.verdict) {
             // ACM 编程题：verdict 区分代码错误与平台侧失败（internal_error 可重试）。
-            ElMessage.error(verdictLabels[sub.verdict])
+            notify.error(verdictLabels[sub.verdict])
           } else {
-            ElMessage.error('回答错误，再试试')
+            notify.error('回答错误，再试试')
           }
           polling.value = false
           return
         }
       } catch (e) {
         polling.value = false
-        ElMessage.error((e as Error).message)
+        notify.error((e as Error).message)
         return
       }
     }
     polling.value = false
-    ElMessage.warning('判定超时，请稍后刷新查看')
+    notify.warning('判定超时，请稍后刷新查看')
   }
 
   async function submit(challengeSlug: string, answer: string) {
@@ -51,7 +51,7 @@ export function useSubmissionPoll(onCorrect?: (sub: Submission) => void) {
       await poll(sub.id)
     } catch (e) {
       submitting.value = false
-      ElMessage.error(`提交失败：${(e as Error).message}`)
+      notify.error(`提交失败：${(e as Error).message}`)
     }
   }
 

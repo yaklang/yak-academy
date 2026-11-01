@@ -17,7 +17,7 @@ test.describe('回归：/flag 403 排查信息', () => {
     await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
     await page.getByRole('button', { name: '导入/更新', exact: true }).click()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+/ }),
+      page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+/ }),
     ).toBeVisible({ timeout: 60_000 })
 
     // 用户路径：打开配套教程页，展开详细步骤找答案

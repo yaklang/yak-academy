@@ -24,7 +24,7 @@ test.describe('回归：已注册手机号再次发码给出中文登录指引',
     await page.getByText('手机验证码注册').click()
     await page.getByPlaceholder('手机号（仅用于注册验证）').fill(phone)
     await page.getByRole('button', { name: '获取验证码' }).click()
-    const hint = page.locator('.code-hint')
+    const hint = page.locator('[data-testid=sms-code]')
     await expect(hint).toBeVisible()
     const code = (await hint.textContent())!.match(/(\d{6})/)![1]
     await page.getByPlaceholder('验证码').fill(code)
@@ -47,7 +47,7 @@ test.describe('回归：已注册手机号再次发码给出中文登录指引',
     // 4. 指引可执行：页面能切回登录 tab（学员的出路确实存在）
     //    （toast 文案也含「返回登录」；el-link 无 href 不暴露 link 角色，
     //     定位 switch 容器内的 el-link 本体，避免歧义与点空容器）
-    await page.locator('.switch .el-link', { hasText: '返回登录' }).click()
+    await page.locator('.auth-switch .auth-text-button', { hasText: '返回登录' }).click()
     await expect(page.getByRole('heading', { name: 'yak-academy 登录' })).toBeVisible()
   })
 })

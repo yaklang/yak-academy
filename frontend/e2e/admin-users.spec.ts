@@ -15,8 +15,8 @@ test.describe('管理端用户管理', () => {
     const stuRow = page.locator('tr', { hasText: E2E.student.username })
     await expect(stuRow).toBeVisible()
     await expect(stuRow.locator('code')).toHaveText(/^YA\d{2}-\d{5}$/)
-    await expect(stuRow.locator('.el-tag', { hasText: '活跃' })).toBeVisible()
-    await expect(stuRow.locator('.el-tag', { hasText: '普通人' })).toBeVisible()
+    await expect(stuRow.locator('[data-slot=badge]', { hasText: '活跃' })).toBeVisible()
+    await expect(stuRow.locator('[data-slot=badge]', { hasText: '普通人' })).toBeVisible()
 
     // 搜索：按账号编码（新维度的核心断言——编码是导入表格的条目来源）。
     const code = await stuRow.locator('code').textContent()
@@ -35,9 +35,9 @@ test.describe('管理端用户管理', () => {
     // 角色过滤：管理员只剩 admin 行（下拉按 DOM 序：角色/活跃/解题）。
     await page.getByPlaceholder('搜索：用户名 / 账号编码 / 手机号').fill('')
     await page.getByRole('button', { name: '搜索' }).click()
-    const selects = page.locator('.filters .el-select')
+    const selects = page.locator('.filters [role=combobox]')
     await selects.nth(0).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '管理员' }).click()
+    await page.locator('[role=option]', { hasText: '管理员' }).click()
     await expect(page.locator('tr', { hasText: E2E.admin.username })).toBeVisible()
     await expect(page.locator('tr', { hasText: E2E.student.username })).toHaveCount(0)
 
@@ -47,7 +47,7 @@ test.describe('管理端用户管理', () => {
     const stuRow2 = page.locator('tr', { hasText: E2E.student.username })
     await expect(stuRow2).toBeVisible()
     await selects.nth(1).click()
-    await page.locator('.el-select-dropdown__item', { hasText: '不活跃（6 个月未登录）' }).click()
+    await page.locator('[role=option]', { hasText: '不活跃（6 个月未登录）' }).click()
     await expect(page.locator('tr', { hasText: E2E.student.username })).toHaveCount(0)
 
     // 组合画像过滤按钮：不活跃 ∩ 从未完成题目（表格正常出数即可——

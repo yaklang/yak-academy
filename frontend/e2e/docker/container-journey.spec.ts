@@ -48,7 +48,7 @@ test.describe('容器生命周期', () => {
 
     // 续期 1 小时（剩 2 次的第一次）
     await page.getByRole('button', { name: /续期/ }).click()
-    await expect(page.locator('.el-message', { hasText: '已续期 1 小时' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已续期 1 小时' })).toBeVisible()
 
     // 单容器约束：另一道容器题启动被 409 拦（用 API 直接种第二道 + UI 点）。
     // 回归（PR #22，2026-10-19）：弹窗主按钮从「前往关闭」改为「关闭并启动本题」——
@@ -70,13 +70,13 @@ test.describe('容器生命周期', () => {
     })
     await page.goto(`/training/${slug2}`)
     await page.getByRole('button', { name: '启动容器' }).click()
-    const conflict = page.locator('.el-message-box', { hasText: '已有运行中的容器' })
+    const conflict = page.locator('[role=alertdialog]', { hasText: '已有运行中的容器' })
     await expect(conflict).toBeVisible({ timeout: 30_000 })
     await expect(conflict).toContainText(`你在「容器旅程：nginx」题目上还有运行中的环境`)
     // 弹窗内直接关闭上一环境并启动本题（销毁性操作，danger 主按钮）
     await conflict.getByRole('button', { name: '关闭并启动本题' }).click()
     await expect(
-      page.locator('.el-message', { hasText: '已关闭上一个环境，本题环境启动成功' }),
+      page.locator('[data-sonner-toast]', { hasText: '已关闭上一个环境，本题环境启动成功' }),
     ).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.endpoint')).toBeVisible({ timeout: 60_000 })
 

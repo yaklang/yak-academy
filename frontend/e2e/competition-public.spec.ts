@@ -54,14 +54,14 @@ test.describe('公开赛广场与免码入场', () => {
 
     // 自助报名：原位置换为「已报名 + 进入竞赛」（比赛进行中，报名即可入场）。
     await publicRow.getByRole('button', { name: '报名' }).click()
-    await expect(page.locator('.el-message', { hasText: '报名成功' })).toBeVisible()
-    await expect(publicRow.locator('.el-tag', { hasText: '已报名' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '报名成功' })).toBeVisible()
+    await expect(publicRow.locator('[data-slot=badge]', { hasText: '已报名' })).toBeVisible()
 
     // 免码入场：入场页邀请码留空直接进入，落在竞赛首页。
     await publicRow.getByRole('link', { name: '进入竞赛' }).click()
     await page.waitForURL((u) => u.pathname === `/competitions/enter/${publicId}`)
     await page.getByRole('button', { name: '进入竞赛' }).click()
-    await expect(page.locator('.el-message', { hasText: '入场成功' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '入场成功' })).toBeVisible()
     await page.waitForURL((u) => u.pathname === `/competitions/${publicId}`)
     await expect(page.getByRole('heading', { name: E2E.competition.publicName })).toBeVisible()
   })

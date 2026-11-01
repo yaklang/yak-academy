@@ -21,11 +21,11 @@ test.describe('内容包删除', () => {
     await admin.setInputFiles('input[type=file]', path.join(e2eDir, 'fixtures', del.zip))
     const row = admin.getByRole('row', { name: new RegExp(del.name) })
     await expect(row).toBeVisible()
-    await expect(row.locator('.el-tag', { hasText: 'draft' })).toBeVisible()
+    await expect(row.locator('[data-slot=badge]', { hasText: 'draft' })).toBeVisible()
 
     // 发布 → 状态转 published。
     await row.getByRole('button', { name: '发布', exact: true }).click()
-    await expect(row.locator('.el-tag', { hasText: 'published' })).toBeVisible()
+    await expect(row.locator('[data-slot=badge]', { hasText: 'published' })).toBeVisible()
 
     // 学生侧：专题入口可见（另一上下文，保持两端同时在线）。
     const stuCtx = await browser.newContext()
@@ -35,12 +35,12 @@ test.describe('内容包删除', () => {
 
     // 管理端删除：行按钮触发，强确认弹窗（MessageBox）里再点删除。
     await row.getByRole('button', { name: '删除', exact: true }).click()
-    const confirmBox = admin.locator('.el-message-box')
+    const confirmBox = admin.locator('[role=alertdialog]')
     await expect(confirmBox).toContainText('不可恢复')
     await confirmBox.getByRole('button', { name: '删除' }).click()
     // 成功提示携带清扫计数（发布 toast 可能仍在，按文本过滤）；管理列表行消失。
     await expect(
-      admin.locator('.el-message--success').filter({ hasText: '移除' }),
+      admin.locator('[data-sonner-toast][data-type=success]').filter({ hasText: '移除' }),
     ).toContainText(`移除 1 个专题 / 1 篇教程`)
     await expect(admin.getByRole('row', { name: new RegExp(del.name) })).toHaveCount(0)
 

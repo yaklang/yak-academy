@@ -4,7 +4,7 @@
 // 简介可编辑（≤500 字）；头像 png/jpg/gif/webp ≤2MB，重复上传覆盖。
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { authApi, profileApi, type UserProfile } from '../api'
 import { useAuthStore } from '../stores/auth'
 
@@ -39,7 +39,7 @@ async function load() {
       avatarUrl.value = null
     }
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -47,16 +47,16 @@ async function load() {
 
 async function saveBio() {
   if (bio.value.length > 500) {
-    ElMessage.warning('简介不能超过 500 字')
+    notify.warning('简介不能超过 500 字')
     return
   }
   bioLoading.value = true
   try {
     profile.value = await profileApi.updateBio(bio.value)
     editing.value = false
-    ElMessage.success('简介已更新')
+    notify.success('简介已更新')
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     bioLoading.value = false
   }
@@ -65,20 +65,20 @@ async function saveBio() {
 async function onAvatarChange(file: File) {
   const okTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
   if (!okTypes.includes(file.type)) {
-    ElMessage.warning('仅支持 png / jpg / gif / webp 图片')
+    notify.warning('仅支持 png / jpg / gif / webp 图片')
     return
   }
   if (file.size > 2 * 1024 * 1024) {
-    ElMessage.warning('头像不能超过 2MB')
+    notify.warning('头像不能超过 2MB')
     return
   }
   avatarUploading.value = true
   try {
     await profileApi.uploadAvatar(file)
-    ElMessage.success('头像已更新')
+    notify.success('头像已更新')
     await load()
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     avatarUploading.value = false
   }
@@ -86,23 +86,23 @@ async function onAvatarChange(file: File) {
 
 async function submitChangePassword() {
   if (!pwdForm.current || pwdForm.next.length < 6) {
-    ElMessage.warning('请填写当前密码，且新密码至少 6 位')
+    notify.warning('请填写当前密码，且新密码至少 6 位')
     return
   }
   if (pwdForm.next !== pwdForm.confirm) {
-    ElMessage.warning('两次输入的新密码不一致')
+    notify.warning('两次输入的新密码不一致')
     return
   }
   pwdLoading.value = true
   try {
     await authApi.changePassword(pwdForm.current, pwdForm.next)
     pwdVisible.value = false
-    ElMessage.success('密码已修改，请重新登录')
+    notify.success('密码已修改，请重新登录')
     // 改密后全部 token 失效：清本地态回登录页
     await auth.logout()
     router.push('/login')
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     pwdLoading.value = false
   }
@@ -115,12 +115,12 @@ onMounted(load)
   <h2 class="page-title">账号<span class="accent">信息</span></h2>
   <p class="hint">账号 ID、名称、简介与总得分；头像支持 png / jpg / gif / webp（≤2MB）。</p>
 
-  <el-skeleton v-if="loading" :rows="4" animated />
+  <UiSkeleton v-if="loading" :rows="4" animated />
   <div v-else-if="profile" class="panel">
     <div class="avatar-wrap">
-      <el-avatar :size="96" :src="avatarUrl ?? undefined" class="avatar">
+      <UiAvatar :size="96" :src="avatarUrl ?? undefined" class="avatar">
         {{ profile.username.slice(0, 1).toUpperCase() }}
-      </el-avatar>
+      </UiAvatar>
       <label class="upload" :class="{ disabled: avatarUploading }">
         {{ avatarUploading ? '上传中…' : '更换头像' }}
         <input
@@ -135,28 +135,28 @@ onMounted(load)
       </label>
     </div>
 
-    <el-descriptions :column="2" border class="desc">
-      <el-descriptions-item label="账号 ID">{{ profile.id }}</el-descriptions-item>
-      <el-descriptions-item label="账号名称">{{ profile.username }}</el-descriptions-item>
-      <el-descriptions-item label="角色">
+    <UiDescriptions :column="2" border class="desc">
+      <UiDescriptionsItem label="账号 ID">{{ profile.id }}</UiDescriptionsItem>
+      <UiDescriptionsItem label="账号名称">{{ profile.username }}</UiDescriptionsItem>
+      <UiDescriptionsItem label="角色">
         {{ profile.global_role === 'admin' ? '管理员' : '普通人' }}
-      </el-descriptions-item>
-      <el-descriptions-item label="总得分">{{ profile.score }}（解题 {{ profile.solve_count }}）</el-descriptions-item>
-      <el-descriptions-item label="注册时间">
+      </UiDescriptionsItem>
+      <UiDescriptionsItem label="总得分">{{ profile.score }}（解题 {{ profile.solve_count }}）</UiDescriptionsItem>
+      <UiDescriptionsItem label="注册时间">
         {{ new Date(profile.created_at).toLocaleString() }}
-      </el-descriptions-item>
-      <el-descriptions-item label="邮箱">
+      </UiDescriptionsItem>
+      <UiDescriptionsItem label="邮箱">
         <router-link to="/mailbox">站内邮箱</router-link>
-      </el-descriptions-item>
-    </el-descriptions>
+      </UiDescriptionsItem>
+    </UiDescriptions>
 
     <div class="bio-block">
       <div class="bio-head">
         <span>描述简介</span>
-        <el-button v-if="!editing" size="small" @click="editing = true">编辑</el-button>
+        <UiButton v-if="!editing" size="small" @click="editing = true">编辑</UiButton>
         <template v-else>
-          <el-button size="small" :loading="bioLoading" @click="saveBio">保存</el-button>
-          <el-button
+          <UiButton size="small" :loading="bioLoading" @click="saveBio">保存</UiButton>
+          <UiButton
             size="small"
             @click="
               () => {
@@ -164,10 +164,10 @@ onMounted(load)
                 bio = profile?.bio ?? ''
               }
             "
-          >取消</el-button>
+          >取消</UiButton>
         </template>
       </div>
-      <el-input
+      <UiInput
         v-if="editing"
         v-model="bio"
         type="textarea"
@@ -182,33 +182,33 @@ onMounted(load)
     <div class="bio-block">
       <div class="bio-head">
         <span>账号安全</span>
-        <el-button size="small" @click="pwdVisible = true">修改密码</el-button>
+        <UiButton size="small" @click="pwdVisible = true">修改密码</UiButton>
       </div>
       <p class="bio-text">修改后需重新登录（全部已登录会话失效）。</p>
     </div>
   </div>
 
-  <el-dialog v-model="pwdVisible" title="修改密码" width="420px">
-    <el-form label-width="90px">
-      <el-form-item label="当前密码">
-        <el-input v-model="pwdForm.current" type="password" show-password />
-      </el-form-item>
-      <el-form-item label="新密码">
-        <el-input v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
-      </el-form-item>
-      <el-form-item label="确认新密码">
-        <el-input v-model="pwdForm.confirm" type="password" show-password />
-      </el-form-item>
-    </el-form>
+  <UiDialog v-model="pwdVisible" title="修改密码" width="420px">
+    <UiForm label-width="90px">
+      <UiFormItem label="当前密码">
+        <UiInput v-model="pwdForm.current" type="password" show-password />
+      </UiFormItem>
+      <UiFormItem label="新密码">
+        <UiInput v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
+      </UiFormItem>
+      <UiFormItem label="确认新密码">
+        <UiInput v-model="pwdForm.confirm" type="password" show-password />
+      </UiFormItem>
+    </UiForm>
     <template #footer>
-      <el-button @click="pwdVisible = false">取消</el-button>
-      <el-button type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</el-button>
+      <UiButton @click="pwdVisible = false">取消</UiButton>
+      <UiButton type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 </template>
 
 <style scoped>
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .panel { max-width: 760px; display: flex; flex-direction: column; gap: 1.2rem; }
 .avatar-wrap { display: flex; align-items: center; gap: 1rem; }
 .avatar { font-size: 2rem; }
@@ -216,16 +216,16 @@ onMounted(load)
   position: relative;
   overflow: hidden;
   padding: 4px 12px;
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.85rem;
-  color: var(--el-text-color-regular);
+  color: var(--foreground);
 }
 .upload.disabled { opacity: 0.5; cursor: wait; }
 .upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .desc { width: 100%; }
 .bio-block { display: flex; flex-direction: column; gap: 0.5rem; }
 .bio-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-.bio-text { color: var(--el-text-color-regular); white-space: pre-wrap; margin: 0; }
+.bio-text { color: var(--foreground); white-space: pre-wrap; margin: 0; }
 </style>

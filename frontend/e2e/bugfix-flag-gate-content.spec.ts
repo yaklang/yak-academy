@@ -21,7 +21,7 @@ async function importBuiltin(page: Page) {
   await page.getByRole('button', { name: '导入内置训练（vulinbox）' }).click()
   await page.getByRole('button', { name: '导入/更新' }).click()
   await expect(
-    page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：/ }),
+    page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+：/ }),
   ).toBeVisible({ timeout: 60_000 })
 }
 

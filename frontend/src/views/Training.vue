@@ -7,12 +7,12 @@
 // 普通端与管理端共用。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { BANK_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
 
 const route = useRoute()
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
-const activeBank = ref<ChallengeBank>('tutorial')
+const activeBank = ref<ChallengeBank>(banks.includes(route.query.bank as ChallengeBank) ? route.query.bank as ChallengeBank : 'tutorial')
 // 教程题目 tab 专属内置题集，空态文案与上传型 tab 区分。
 const emptyHint: Record<ChallengeBank, string> = {
   tutorial: '暂无教程题目：内置题集尚未导入，请联系管理员在管理端一键导入内置训练（vulinbox）',
@@ -61,7 +61,7 @@ async function load() {
     // 超过 100 条时分页拉余下页。
     if (resp.total > resp.items.length) await loadRemaining(filter, resp.items.length)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -83,6 +83,9 @@ function difficultyType(d: TrainingItem['difficulty']) {
 }
 
 watch([activeBank, builtinFilter], load)
+watch(() => route.query.bank, value => {
+  if (banks.includes(value as ChallengeBank)) activeBank.value = value as ChallengeBank
+})
 onMounted(load)
 </script>
 
@@ -91,30 +94,30 @@ onMounted(load)
     <h2 class="page-title">题<span class="accent">库</span></h2>
     <div v-if="total" class="solve-progress">
       <span class="label">{{ solvedCount }}/{{ total }}</span>
-      <el-progress :percentage="solvedPercent" :stroke-width="8" class="bar" />
+      <UiProgress :percentage="solvedPercent" :stroke-width="8" class="bar" />
       <span class="label">{{ solvedPercent }}%</span>
     </div>
   </header>
 
-  <el-tabs v-model="activeBank" class="bank-tabs">
-    <el-tab-pane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
-  </el-tabs>
+  <UiTabs v-model="activeBank" class="bank-tabs">
+    <UiTabPane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
+  </UiTabs>
 
   <!-- 过滤条在结果为空时也要保留，否则选了过滤条件后无法切回「来源：全部」。 -->
   <div v-if="!loading" class="filters">
-    <el-select v-model="categoryFilter" class="filter" placeholder="题目类型：全部">
-      <el-option label="题目类型：全部" value="" />
-      <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
-    </el-select>
-    <el-select v-model="builtinFilter" class="filter">
-      <el-option label="来源：全部" value="" />
-      <el-option label="来源：内置题集" value="yes" />
-      <el-option label="来源：管理员上传" value="no" />
-    </el-select>
+    <UiSelect v-model="categoryFilter" class="filter" placeholder="题目类型：全部">
+      <UiOption label="题目类型：全部" value="" />
+      <UiOption v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
+    </UiSelect>
+    <UiSelect v-model="builtinFilter" class="filter">
+      <UiOption label="来源：全部" value="" />
+      <UiOption label="来源：内置题集" value="yes" />
+      <UiOption label="来源：管理员上传" value="no" />
+    </UiSelect>
   </div>
 
-  <el-skeleton v-if="loading" :rows="6" animated />
-  <el-empty
+  <UiSkeleton v-if="loading" :rows="6" animated />
+  <UiEmpty
     v-else-if="groups.length === 0"
     :description="emptyHint[activeBank]"
   />
@@ -137,14 +140,14 @@ onMounted(load)
               <span v-if="it.solved" class="solved-check" title="已通关">✓</span>
             </div>
             <div class="card-meta">
-              <el-tag :type="difficultyType(it.difficulty)" size="small" effect="plain">
+              <UiTag :type="difficultyType(it.difficulty)" size="small" effect="plain">
                 {{ it.difficulty }}
-              </el-tag>
+              </UiTag>
               <span class="score">{{ it.score }} 分</span>
               <span class="spacer" />
-              <el-tag v-if="it.solved" type="success" size="small">已通关</el-tag>
-              <el-tag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器环境</el-tag>
-              <el-tag v-if="it.is_builtin" size="small" effect="plain">内置</el-tag>
+              <UiTag v-if="it.solved" type="success" size="small">已通关</UiTag>
+              <UiTag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器环境</UiTag>
+              <UiTag v-if="it.is_builtin" size="small" effect="plain">内置</UiTag>
             </div>
           </div>
         </router-link>
@@ -155,10 +158,10 @@ onMounted(load)
 
 <style scoped>
 .head { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
-.accent { color: var(--el-color-primary); }
+.accent { color: var(--accent-foreground); }
 .solve-progress { flex: 1; min-width: 220px; max-width: 380px; }
 .solve-progress .bar { flex: 1; }
-.solve-progress .bar :deep(.el-progress__text) { display: none; }
+.solve-progress .bar :deep(.ui-progress-label) { display: none; }
 .bank-tabs { margin-bottom: 0.25rem; }
 .filters { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; }
 .filter { width: 200px; }
@@ -166,36 +169,36 @@ onMounted(load)
 .cat-head {
   display: flex; align-items: baseline; gap: 0.7rem;
   margin-bottom: 0.9rem;
-  border-bottom: 1px solid var(--el-border-color);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 0.45rem;
 }
 .cat {
-  font-size: 1rem; color: var(--el-color-primary); margin: 0;
+  font-size: 1rem; color: var(--accent-foreground); margin: 0;
   font-family: Consolas, monospace;
 }
 .cat::before { content: '# '; opacity: 0.7; }
-.cat-count { color: var(--el-text-color-secondary); font-size: 0.8rem; font-family: Consolas, monospace; }
+.cat-count { color: var(--muted-foreground); font-size: 0.8rem; font-family: Consolas, monospace; }
 .chal-link { text-decoration: none; color: inherit; }
 .chal-card {
-  background: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color-lighter);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.95rem 1.05rem 0.85rem;
 }
-.chal-card.solved { border-color: rgba(0, 230, 118, 0.35); }
+.chal-card.solved { border-color: rgba(255, 128, 64, 0.35); }
 .chal-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; }
 .title-text {
-  color: var(--el-text-color-primary); font-size: 0.98rem; font-weight: 600;
+  color: var(--foreground); font-size: 0.98rem; font-weight: 600;
   line-height: 1.45;
 }
 .solved-check {
-  color: var(--el-color-primary); font-weight: 700;
-  border: 1px solid var(--el-color-primary-light-7);
-  background: var(--el-color-primary-light-9);
+  color: var(--accent-foreground); font-weight: 700;
+  border: 1px solid var(--border);
+  background: var(--accent);
   border-radius: 50%; width: 20px; height: 20px;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 0.78rem; flex: none;
 }
 .chal-card .spacer { flex: 1; }
-.score { color: var(--el-text-color-secondary); font-size: 0.85rem; font-family: Consolas, monospace; }
+.score { color: var(--muted-foreground); font-size: 0.85rem; font-family: Consolas, monospace; }
 </style>

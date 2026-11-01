@@ -30,7 +30,7 @@ test.describe('回归：回显模式下学员可自助完成手机号注册', ()
 
     // 修复点：验证码原文内联出现在验证码输入框下方（修复前这里只有一句
     // "见服务端日志"的 toast，页面永远不显示验证码）
-    const hint = page.locator('.code-hint')
+    const hint = page.locator('[data-testid=sms-code]')
     await expect(hint).toBeVisible()
     await expect(hint).toContainText(/验证码：\d{6}（5 分钟内有效/)
 

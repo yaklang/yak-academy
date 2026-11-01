@@ -7,7 +7,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { notify, dialogs } from '@/lib/notifications'
 import {
   trainingApi, instanceApi, downloadAttachment,
   type AdminLabInstance, type ChallengeDetail, type CodeRunView, type JudgeSample, type LabInstance,
@@ -32,7 +32,7 @@ async function download(filename: string) {
     a.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    ElMessage.error(`附件下载失败：${(e as Error).message}`)
+    notify.error(`附件下载失败：${(e as Error).message}`)
   } finally {
     downloadingFile.value = ''
   }
@@ -105,7 +105,7 @@ async function loadSamples() {
 async function runCode() {
   if (!source.value) return
   if (runTarget.value === RUN_CUSTOM && !customStdin.value.trim()) {
-    ElMessage.warning('请先填写自定义输入（作为程序的标准输入）')
+    notify.warning('请先填写自定义输入（作为程序的标准输入）')
     return
   }
   running.value = true
@@ -118,7 +118,7 @@ async function runCode() {
     runTimer = window.setInterval(() => pollRun(id), 1000)
   } catch (e) {
     running.value = false
-    ElMessage.error(friendlyRunError(e))
+    notify.error(friendlyRunError(e))
   }
 }
 
@@ -133,7 +133,7 @@ async function pollRun(id: string) {
   } catch {
     stopRunPolling()
     running.value = false
-    ElMessage.error('自测运行结果获取失败，请重试')
+    notify.error('自测运行结果获取失败，请重试')
   }
 }
 
@@ -193,7 +193,7 @@ function restartAutoSolvePolling() {
       const detail = await trainingApi.detail(slug())
       if (detail.solved) {
         challenge.value = detail
-        ElMessage.success('环境检测通过，本题通关！')
+        notify.success('环境检测通过，本题通关！')
         stopAutoSolvePolling()
       }
     } catch {
@@ -220,7 +220,7 @@ async function load() {
     if (challenge.value.has_env) loadInstance()
     if (challenge.value.judge) loadSamples()
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -247,9 +247,9 @@ async function startInstance() {
       promptInstanceConflict(err.data.current as AdminLabInstance)
     } else if (err.status === 501) {
       // 驱动未装配（noop stub）：给管理员可行动的提示，而非裸 "not implemented yet"。
-      ElMessage.error('平台未启用容器环境：服务端未装配 Docker 驱动（ACADEMY_ENV_DRIVER），请联系管理员')
+      notify.error('平台未启用容器环境：服务端未装配 Docker 驱动（ACADEMY_ENV_DRIVER），请联系管理员')
     } else {
-      ElMessage.error(`环境启动失败：${err.message}`)
+      notify.error(`环境启动失败：${err.message}`)
     }
   } finally {
     instanceLoading.value = false
@@ -262,7 +262,7 @@ async function destroyConflictingAndStart(current: AdminLabInstance) {
   try {
     await instanceApi.destroy(current.challenge_slug!)
     instance.value = await instanceApi.start(slug())
-    ElMessage.success('已关闭上一个环境，本题环境启动成功')
+    notify.success('已关闭上一个环境，本题环境启动成功')
     restartAutoSolvePolling()
   } catch (e) {
     // 接续启动仍 409（极端并发）：重新弹冲突框，让用户再处理一次。
@@ -270,7 +270,7 @@ async function destroyConflictingAndStart(current: AdminLabInstance) {
     if (err.status === 409 && err.data?.current) {
       promptInstanceConflict(err.data.current as AdminLabInstance)
     } else {
-      ElMessage.error(`环境启动失败：${err.message}`)
+      notify.error(`环境启动失败：${err.message}`)
     }
   } finally {
     instanceLoading.value = false
@@ -279,7 +279,7 @@ async function destroyConflictingAndStart(current: AdminLabInstance) {
 
 function promptInstanceConflict(current: AdminLabInstance) {
   const challengeName = current.challenge_title || current.challenge_slug || `题目 #${current.challenge_id}`
-  ElMessageBox.confirm(
+  dialogs.confirm(
     `同一时间只能启动一个容器。你在「${challengeName}」题目上还有运行中的环境，关闭后即可启动本题。`,
     '已有运行中的容器',
     {
@@ -294,7 +294,7 @@ function promptInstanceConflict(current: AdminLabInstance) {
         destroyConflictingAndStart(current)
       } else {
         // 关联题目已删（无 slug 可寻址，销毁接口也按 slug）：无法自助处理。
-        ElMessage.error('该环境关联的题目已被删除，无法定位与关闭，请联系管理员在容器管理中清理')
+        notify.error('该环境关联的题目已被删除，无法定位与关闭，请联系管理员在容器管理中清理')
       }
     })
     .catch(() => {})
@@ -307,7 +307,7 @@ async function destroyInstance() {
     instance.value = null
     stopAutoSolvePolling()
   } catch (e) {
-    ElMessage.error(`环境销毁失败：${(e as Error).message}`)
+    notify.error(`环境销毁失败：${(e as Error).message}`)
   } finally {
     instanceLoading.value = false
   }
@@ -317,9 +317,9 @@ async function extendInstance() {
   instanceLoading.value = true
   try {
     instance.value = await instanceApi.extend(slug())
-    ElMessage.success('已续期 1 小时')
+    notify.success('已续期 1 小时')
   } catch (e) {
-    ElMessage.error(`续期失败：${(e as Error).message}`)
+    notify.error(`续期失败：${(e as Error).message}`)
   } finally {
     instanceLoading.value = false
   }
@@ -361,9 +361,9 @@ async function unlockHint(hintId: number) {
       h.unlocked = true
       h.content = res.content
     }
-    ElMessage.success(res.cost > 0 ? `已解锁，扣除 ${res.cost} 分（剩余 ${res.score}）` : '已解锁')
+    notify.success(res.cost > 0 ? `已解锁，扣除 ${res.cost} 分（剩余 ${res.score}）` : '已解锁')
   } catch (e) {
-    ElMessage.error(`解锁失败：${(e as Error).message}`)
+    notify.error(`解锁失败：${(e as Error).message}`)
   } finally {
     unlockingId.value = null
   }
@@ -381,16 +381,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <el-skeleton v-if="loading" :rows="6" animated />
+  <UiSkeleton v-if="loading" :rows="6" animated />
   <div v-else-if="challenge" class="page">
     <header class="head">
       <h2 class="title">{{ challenge.title }}</h2>
       <span class="tags">
-        <el-tag :type="difficultyType(challenge.difficulty)" effect="plain">{{ challenge.difficulty }}</el-tag>
-        <el-tag type="info" effect="plain" class="score-tag">{{ challenge.score }} 分</el-tag>
-        <el-tag v-if="challenge.solved" type="success">已通关</el-tag>
-        <el-tag v-if="challenge.has_env" type="primary" effect="plain">容器环境</el-tag>
-        <el-tag v-if="challenge.judge" type="warning" effect="plain">编程题 · {{ challenge.judge.time_limit_s }}s / {{ challenge.judge.memory_limit_mb }}MB</el-tag>
+        <UiTag :type="difficultyType(challenge.difficulty)" effect="plain">{{ challenge.difficulty }}</UiTag>
+        <UiTag type="info" effect="plain" class="score-tag">{{ challenge.score }} 分</UiTag>
+        <UiTag v-if="challenge.solved" type="success">已通关</UiTag>
+        <UiTag v-if="challenge.has_env" type="primary" effect="plain">容器环境</UiTag>
+        <UiTag v-if="challenge.judge" type="warning" effect="plain">编程题 · {{ challenge.judge.time_limit_s }}s / {{ challenge.judge.memory_limit_mb }}MB</UiTag>
       </span>
     </header>
 
@@ -425,11 +425,11 @@ onUnmounted(() => {
       <div v-for="a in challenge.attachments" :key="a.filename" class="attach-row">
         <span class="attach-name">{{ a.filename }}</span>
         <span class="attach-size">{{ fileSize(a.size) }}</span>
-        <el-button
+        <UiButton
           size="small"
           :loading="downloadingFile === a.filename"
           @click="download(a.filename)"
-        >下载</el-button>
+        >下载</UiButton>
       </div>
     </div>
 
@@ -444,59 +444,59 @@ onUnmounted(() => {
       >{{ l.name }} ↗</a>
     </div>
 
-    <el-collapse v-if="challenge.hints.length" class="hints">
-      <el-collapse-item v-for="h in challenge.hints" :key="h.id" :name="h.id">
+    <UiCollapse v-if="challenge.hints.length" class="hints">
+      <UiCollapseItem v-for="h in challenge.hints" :key="h.id" :name="h.id">
         <template #title>
           <span class="hint-title">{{ h.title }}</span>
-          <el-tag v-if="h.unlocked" size="small" type="success" class="cost">已解锁</el-tag>
-          <el-tag v-else size="small" type="warning" class="cost">
+          <UiTag v-if="h.unlocked" size="small" type="success" class="cost">已解锁</UiTag>
+          <UiTag v-else size="small" type="warning" class="cost">
             {{ h.cost > 0 ? `解锁 -${h.cost} 分` : '免费解锁' }}
-          </el-tag>
+          </UiTag>
         </template>
         <template v-if="h.unlocked">
           <p class="hint-content">{{ h.content }}</p>
         </template>
         <div v-else class="hint-locked">
           <p class="hint-locked-text">提示内容已折叠，解锁后可见。</p>
-          <el-button
+          <UiButton
             type="warning"
             size="small"
             :loading="unlockingId === h.id"
             @click.stop="unlockHint(h.id)"
-          >{{ h.cost > 0 ? `花费 ${h.cost} 分解锁` : '解锁提示' }}</el-button>
+          >{{ h.cost > 0 ? `花费 ${h.cost} 分解锁` : '解锁提示' }}</UiButton>
         </div>
-      </el-collapse-item>
-    </el-collapse>
+      </UiCollapseItem>
+    </UiCollapse>
 
-    <el-card class="solve">
+    <UiCard class="solve">
       <template #header><span>解答</span></template>
       <!-- 容器环境生命周期：has_env 题目专用（启动后题目部署在容器里，TTL 自动回收） -->
       <div v-if="challenge.has_env" class="instance-row">
         <template v-if="instanceAlive">
-          <el-tag :type="instance!.status === 'running' ? 'success' : 'warning'" size="small">
+          <UiTag :type="instance!.status === 'running' ? 'success' : 'warning'" size="small">
             环境{{ instance!.status === 'running' ? '运行中' : '启动中' }}
-          </el-tag>
+          </UiTag>
           <code v-if="instance!.endpoint" class="endpoint">{{ instance!.endpoint }}</code>
           <span v-if="instance!.expire_at" class="expire">
             到期 {{ new Date(instance!.expire_at).toLocaleTimeString() }}
           </span>
-          <el-button
+          <UiButton
             v-if="instance!.status === 'running'"
             size="small"
             :disabled="remainingExtends <= 0"
             :title="remainingExtends > 0 ? `还可续期 ${remainingExtends} 次（每次 1 小时）` : '续期次数已用完，请销毁后重新启动'"
             :loading="instanceLoading"
             @click="extendInstance"
-          >续期{{ remainingExtends > 0 ? `（剩 ${remainingExtends} 次）` : '' }}</el-button>
-          <el-button size="small" :loading="instanceLoading" @click="destroyInstance">销毁环境</el-button>
+          >续期{{ remainingExtends > 0 ? `（剩 ${remainingExtends} 次）` : '' }}</UiButton>
+          <UiButton size="small" :loading="instanceLoading" @click="destroyInstance">销毁环境</UiButton>
         </template>
-        <el-button v-else type="primary" size="small" :loading="instanceLoading" @click="startInstance">
+        <UiButton v-else type="primary" size="small" :loading="instanceLoading" @click="startInstance">
           启动容器
-        </el-button>
+        </UiButton>
       </div>
 
       <!-- 结算模型：分值只结算一次，但题目可重复提交/重复完成——已通关不禁用。 -->
-      <el-alert
+      <UiAlert
         v-if="challenge.solved"
         type="success"
         :closable="false"
@@ -512,7 +512,7 @@ onUnmounted(() => {
           全部通过才算 AC；配置了组分的题目按通过组折算得分。可在下方编辑器编码，先对样例或自定义输入自测运行。
         </div>
         <!-- 引擎未装配：提交/自测入口整体禁用（服务端仍兜底拒绝） -->
-        <el-alert
+        <UiAlert
           v-if="engineMissing"
           type="warning"
           :closable="false"
@@ -525,9 +525,9 @@ onUnmounted(() => {
           <div class="lib-row">
             <span class="lib-title">本题可用库</span>
             <template v-if="libPolicy.allowed">
-              <el-tooltip v-for="lib in libPolicy.allowed" :key="lib" :content="libLabel(lib)" placement="top">
-                <el-tag size="small" effect="plain" class="lib-chip">{{ lib }}</el-tag>
-              </el-tooltip>
+              <UiTooltip v-for="lib in libPolicy.allowed" :key="lib" :content="libLabel(lib)" placement="top">
+                <UiTag size="small" effect="plain" class="lib-chip">{{ lib }}</UiTag>
+              </UiTooltip>
             </template>
             <span v-else class="lib-all">全部 yak 标准库（黑名单除外）</span>
           </div>
@@ -536,20 +536,20 @@ onUnmounted(() => {
         <CodeEditor v-model="source" class="code-input" :disabled="polling" :lib-policy="libPolicy" />
         <div class="run-panel">
           <div class="run-bar">
-            <el-radio-group v-model="runTarget" size="small" :disabled="running">
-              <el-radio-button v-for="s in samples" :key="s.name" :value="s.name">
+            <UiRadioGroup v-model="runTarget" size="small" :disabled="running">
+              <UiRadioButton v-for="s in samples" :key="s.name" :value="s.name">
                 样例 {{ s.name }}
-              </el-radio-button>
-              <el-radio-button :value="RUN_CUSTOM">自定义输入</el-radio-button>
-            </el-radio-group>
-            <el-button
+              </UiRadioButton>
+              <UiRadioButton :value="RUN_CUSTOM">自定义输入</UiRadioButton>
+            </UiRadioGroup>
+            <UiButton
               size="small"
               :loading="running"
               :disabled="!source || !runTarget || engineMissing"
               @click="runCode"
-            >运行自测</el-button>
+            >运行自测</UiButton>
           </div>
-          <el-input
+          <UiInput
             v-if="runTarget === RUN_CUSTOM"
             v-model="customStdin"
             type="textarea"
@@ -559,48 +559,48 @@ onUnmounted(() => {
           />
           <div v-if="runResult" class="run-output">
             <div class="run-meta">
-              <el-tag v-if="runResult.status !== 'done'" size="small" type="info">
+              <UiTag v-if="runResult.status !== 'done'" size="small" type="info">
                 {{ runResult.status === 'pending' ? '排队中…' : '运行中…' }}
-              </el-tag>
+              </UiTag>
               <template v-else>
-                <el-tag size="small" :type="runOutcomeTag">{{ runOutcomeLabel }}</el-tag>
+                <UiTag size="small" :type="runOutcomeTag">{{ runOutcomeLabel }}</UiTag>
                 <span class="run-time">耗时 {{ runResult.time_ms }} ms</span>
-                <el-tag
+                <UiTag
                   v-if="runResult.mode === 'sample' && runResult.matches !== null"
                   size="small"
                   :type="runResult.matches ? 'success' : 'danger'"
                   effect="plain"
-                >{{ runResult.matches ? '与样例期望一致' : '与样例期望不一致' }}</el-tag>
-                <el-tag v-if="runResult.truncated" size="small" type="info" effect="plain">输出超长已截断</el-tag>
+                >{{ runResult.matches ? '与样例期望一致' : '与样例期望不一致' }}</UiTag>
+                <UiTag v-if="runResult.truncated" size="small" type="info" effect="plain">输出超长已截断</UiTag>
               </template>
             </div>
             <pre v-if="runResult.stdout" class="run-stdout">{{ runResult.stdout }}</pre>
             <pre v-if="runResult.stderr" class="run-stderr">{{ runResult.stderr }}</pre>
           </div>
         </div>
-        <el-button
+        <UiButton
           type="primary"
           class="submit-btn"
           :loading="submitting || polling"
           :disabled="!source || engineMissing"
           @click="submit"
-        >提交代码</el-button>
+        >提交代码</UiButton>
       </template>
       <div v-else class="submit-row">
-        <el-input
+        <UiInput
           v-model="answer"
           placeholder="输入 flag"
           :disabled="polling"
           @keyup.enter="submit"
         />
-        <el-button
+        <UiButton
           type="primary"
           :loading="submitting || polling"
           :disabled="!answer"
           @click="submit"
-        >提交</el-button>
+        >提交</UiButton>
       </div>
-      <el-alert
+      <UiAlert
         v-if="result"
         :title="resultTitle"
         :type="result.status === 'correct' ? 'success' : 'error'"
@@ -618,13 +618,13 @@ onUnmounted(() => {
           <span class="group-name">
             {{ g.sample ? '样例' : '测试' }}组 {{ g.name }}
           </span>
-          <el-tag :type="g.passed ? 'success' : 'danger'" size="small" effect="plain">
+          <UiTag :type="g.passed ? 'success' : 'danger'" size="small" effect="plain">
             {{ g.passed ? '通过' : verdictLabels[g.verdict!] || '未通过' }}
-          </el-tag>
+          </UiTag>
           <span v-if="g.score > 0" class="group-score">{{ g.score }} 分</span>
         </div>
       </div>
-    </el-card>
+    </UiCard>
   </div>
 </template>
 
@@ -633,64 +633,64 @@ onUnmounted(() => {
 .head {
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.6rem;
-  border-bottom: 1px solid var(--el-border-color);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 0.9rem; margin-bottom: 0.9rem;
 }
 .title { margin: 0; font-size: 1.45rem; font-weight: 700; }
 .tags { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .score-tag { font-family: Consolas, monospace; }
-.tutorial-link { display: inline-block; margin: 0.4rem 0 0.8rem; color: var(--el-color-primary); text-decoration: none; }
+.tutorial-link { display: inline-block; margin: 0.4rem 0 0.8rem; color: var(--accent-foreground); text-decoration: none; }
 .description { line-height: 1.7; margin: 1rem 0 2rem; }
-.description :deep(pre) { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; overflow: auto; }
-.description :deep(code) { background: var(--el-fill-color-light); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.description :deep(pre) { background: var(--muted); padding: 0.8rem; border-radius: 4px; overflow: auto; }
+.description :deep(code) { background: var(--muted); padding: 0.1rem 0.3rem; border-radius: 3px; }
 .attachments { margin: 0 0 1.2rem; }
 .attachments h4, .links h4 { margin: 0 0 0.4rem; }
 .attach-row { display: flex; align-items: center; gap: 0.8rem; padding: 0.25rem 0; }
 .attach-name { font-family: Consolas, monospace; }
-.attach-size { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.attach-size { color: var(--muted-foreground); font-size: 0.85rem; }
 .links { margin: 0 0 1.2rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.links a { color: var(--el-color-primary); text-decoration: none; }
+.links a { color: var(--accent-foreground); text-decoration: none; }
 .hints { margin-bottom: 1.5rem; }
 .hint-title { margin-right: 0.6rem; }
 .cost { margin-left: 0.3rem; }
-.hint-content { margin: 0; color: var(--el-text-color-regular); }
+.hint-content { margin: 0; color: var(--foreground); }
 .hint-locked { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
-.hint-locked-text { margin: 0; color: var(--el-text-color-secondary); font-size: 0.9rem; }
+.hint-locked-text { margin: 0; color: var(--muted-foreground); font-size: 0.9rem; }
 .solve { max-width: 640px; }
 /* ACM 逐组判定结论（部分得分反馈） */
 .group-results {
   display: flex; flex-direction: column; gap: 0.35rem;
   margin-top: 0.8rem; padding-top: 0.8rem;
-  border-top: 1px dashed var(--el-border-color);
+  border-top: 1px dashed var(--border);
 }
 .group-row { display: flex; align-items: center; gap: 0.6rem; }
 .group-name {
   font-family: Consolas, monospace; font-size: 0.85rem;
-  color: var(--el-text-color-regular); min-width: 6.5rem;
+  color: var(--foreground); min-width: 6.5rem;
 }
 .group-score {
   margin-left: auto; font-size: 0.85rem;
-  color: var(--el-text-color-secondary); font-family: Consolas, monospace;
+  color: var(--muted-foreground); font-family: Consolas, monospace;
 }
-.group-fail .group-name { color: var(--el-color-danger); }
+.group-fail .group-name { color: var(--destructive); }
 .instance-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-.endpoint { background: var(--el-fill-color-light); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--el-color-primary); }
-.expire { color: var(--el-text-color-secondary); font-size: 0.8rem; }
+.endpoint { background: var(--muted); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--accent-foreground); }
+.expire { color: var(--muted-foreground); font-size: 0.8rem; }
 .submit-row { display: flex; gap: 0.5rem; }
 .samples { margin: 0 0 1.5rem; }
 .samples h4 { margin: 0 0 0.4rem; }
 .sample-group { margin-bottom: 0.6rem; }
 .sample-name {
   font-family: Consolas, monospace; font-size: 0.85rem;
-  color: var(--el-text-color-secondary);
+  color: var(--muted-foreground);
 }
 .sample-io { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .sample-block {
-  flex: 1; min-width: 200px; background: var(--el-fill-color-light);
+  flex: 1; min-width: 200px; background: var(--muted);
   border-radius: 4px; padding: 0.5rem 0.7rem;
 }
 .sample-label {
-  display: block; font-size: 0.8rem; color: var(--el-text-color-secondary);
+  display: block; font-size: 0.8rem; color: var(--muted-foreground);
   margin-bottom: 0.2rem;
 }
 .sample-block pre {
@@ -699,33 +699,33 @@ onUnmounted(() => {
 }
 .sample-note {
   margin-bottom: 0.8rem; font-size: 0.85rem;
-  color: var(--el-text-color-secondary);
+  color: var(--muted-foreground);
 }
 .engine-missing { margin-bottom: 0.8rem; }
 .lib-policy {
   margin-bottom: 0.7rem; padding: 0.55rem 0.75rem;
-  background: var(--el-fill-color-lighter); border-radius: 6px;
+  background: var(--muted); border-radius: 6px;
   font-size: 0.8rem;
 }
 .lib-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.lib-title { color: var(--el-text-color-secondary); margin-right: 0.2rem; }
+.lib-title { color: var(--muted-foreground); margin-right: 0.2rem; }
 .lib-chip { font-family: Consolas, monospace; }
-.lib-all { color: var(--el-text-color-regular); }
-.lib-blocked { margin-top: 0.35rem; color: var(--el-color-danger); opacity: 0.85; }
+.lib-all { color: var(--foreground); }
+.lib-blocked { margin-top: 0.35rem; color: var(--destructive); opacity: 0.85; }
 .run-panel { margin-top: 0.6rem; }
 .run-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .stdin-input { margin-top: 0.5rem; font-family: Consolas, monospace; }
 .run-output {
-  margin-top: 0.5rem; background: var(--el-fill-color-light);
+  margin-top: 0.5rem; background: var(--muted);
   border-radius: 4px; padding: 0.5rem 0.7rem;
 }
 .run-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.run-time { font-size: 0.8rem; color: var(--el-text-color-secondary); }
+.run-time { font-size: 0.8rem; color: var(--muted-foreground); }
 .run-output pre {
   margin: 0.4rem 0 0; font-family: Consolas, monospace; font-size: 0.85rem;
   white-space: pre-wrap; word-break: break-all;
 }
-.run-stderr { color: var(--el-color-danger); }
+.run-stderr { color: var(--destructive); }
 .submit-btn { margin-top: 0.6rem; }
 .solved-note { margin-bottom: 0.8rem; }
 .result { margin-top: 0.8rem; }

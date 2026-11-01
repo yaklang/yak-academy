@@ -22,7 +22,7 @@ test.afterEach(async ({ request }) => {
 // el-date-picker 文本输入格式：本地时区墙钟时间，与页面展示格式一致。
 function localDateTime(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 test.describe('回归：竞赛手动结束与结束后重排', () => {
@@ -33,15 +33,15 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
 
     await loginAsAdmin(page)
     await page.goto('/admin/panel/competitions')
-    const row = page.locator('.el-table tr', { hasText: COMP.manualEndName })
+    const row = page.locator('[data-slot=table] tr', { hasText: COMP.manualEndName })
     await expect(row).toContainText('进行中', { timeout: 15_000 })
     // 修复前：列表行没有「结束」按钮（只有隐蔽的改 end_time），此处超时即红
     await row.getByRole('button', { name: '结束', exact: true }).click()
-    const box = page.locator('.el-message-box')
+    const box = page.locator('[role=alertdialog]')
     await expect(box).toContainText('手动结束竞赛')
     await box.getByRole('button', { name: '结束竞赛' }).click()
     // 立即生效：成功提示 + 行状态翻转为已结束 + 结束按钮随状态消失
-    await expect(page.locator('.el-message', { hasText: '已结束' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已结束' })).toBeVisible()
     await expect(row).toContainText('已结束')
     await expect(row.getByRole('button', { name: '结束', exact: true })).toHaveCount(0)
   })
@@ -56,12 +56,12 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
     await loginAsAdmin(page)
     await page.goto(`/admin/panel/competitions/${comp.id}`)
     // 详情标题含赛制 + 状态两枚 tag（竞赛分公开/邀请两档引入），按文案锚定状态。
-    const statusTag = page.locator('h2 .el-tag', { hasText: '已结束' })
+    const statusTag = page.locator('h2 [data-slot=badge]', { hasText: '已结束' })
     await expect(statusTag).toHaveText('已结束', { timeout: 15_000 })
 
     // 修复前：已结束竞赛的开始时间输入框仍禁用（红）
-    const startInput = page.locator('.el-form-item', { hasText: '开始时间' }).locator('input')
-    const endInput = page.locator('.el-form-item', { hasText: '结束时间' }).locator('input')
+    const startInput = page.locator('.ui-form-item', { hasText: '开始时间' }).locator('input')
+    const endInput = page.locator('.ui-form-item', { hasText: '结束时间' }).locator('input')
     await expect(startInput).not.toBeDisabled()
     await expect(endInput).not.toBeDisabled()
 
@@ -71,7 +71,7 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
     await endInput.fill(localDateTime(new Date(Date.now() + 4 * 3_600_000)))
     await endInput.press('Enter')
     await page.getByRole('button', { name: '保存配置' }).click()
-    await expect(page.locator('.el-message', { hasText: '配置已保存' })).toBeVisible()
-    await expect(page.locator('h2 .el-tag', { hasText: '未开始' })).toHaveText('未开始')
+    await expect(page.locator('[data-sonner-toast]', { hasText: '配置已保存' })).toBeVisible()
+    await expect(page.locator('h2 [data-slot=badge]', { hasText: '未开始' })).toHaveText('未开始')
   })
 })

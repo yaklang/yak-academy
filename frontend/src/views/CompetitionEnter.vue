@@ -6,7 +6,7 @@
 // 入场后平台其余入口锁定，直到比赛结束。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/notifications'
 import { competitionApi, type Competition } from '../api'
 import { useCompetitionStore } from '../stores/competition'
 
@@ -47,10 +47,10 @@ async function enter() {
       return
     }
     store.lock(entry.competition.id)
-    ElMessage.success('入场成功，欢迎参赛！')
+    notify.success('入场成功，欢迎参赛！')
     router.replace(`/competitions/${entry.competition.id}`)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     entering.value = false
   }
@@ -61,21 +61,21 @@ onMounted(load)
 
 <template>
   <div class="enter-page">
-    <el-card shadow="never" class="enter-card">
+    <UiCard shadow="never" class="enter-card">
       <h2>{{ title }}</h2>
       <p class="dim">
         凭邀请码入场（邀请码在站内邮箱的竞赛邀请邮件中）；
         公开赛已报名者可留空邀请码直接进入。
       </p>
-      <el-form label-position="top" @submit.prevent="enter">
-        <el-form-item label="邀请码（公开赛已报名可留空）">
-          <el-input v-model="code" placeholder="邀请码" size="large" @keyup.enter="enter" />
-        </el-form-item>
-        <el-button type="primary" size="large" :loading="entering" class="enter-btn" @click="enter">
+      <UiForm label-position="top" @submit.prevent="enter">
+        <UiFormItem label="邀请码（公开赛已报名可留空）">
+          <UiInput v-model="code" placeholder="邀请码" size="large" @keyup.enter="enter" />
+        </UiFormItem>
+        <UiButton type="primary" size="large" :loading="entering" class="enter-btn" @click="enter">
           进入竞赛
-        </el-button>
-      </el-form>
-      <el-alert
+        </UiButton>
+      </UiForm>
+      <UiAlert
         type="warning"
         :closable="false"
         title="入场后将被锁定在竞赛页面，平台其他板块不可访问，直到比赛结束。"
@@ -89,7 +89,7 @@ onMounted(load)
         <router-link to="/competitions">竞赛广场</router-link>
         报名。
       </p>
-    </el-card>
+    </UiCard>
   </div>
 </template>
 
@@ -99,10 +99,10 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--el-fill-color-lighter);
+  background: var(--muted);
 }
 .enter-card { width: 440px; padding: 0.5rem; }
 .enter-btn { width: 100%; margin-top: 0.4rem; }
 .lock-tip { margin-top: 1rem; }
-.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.dim { color: var(--muted-foreground); font-size: 0.85rem; }
 </style>

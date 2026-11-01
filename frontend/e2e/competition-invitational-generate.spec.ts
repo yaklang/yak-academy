@@ -58,14 +58,14 @@ test.describe('邀请赛一键生成与表格导入', () => {
 
     // —— 一键生成：4 人、每 2 人一队、初始密码留空（默认 123456）——
     await page.getByRole('button', { name: '一键生成账号' }).click()
-    const genDialog = page.locator('.el-dialog', { hasText: '一键生成参赛账号' })
+    const genDialog = page.locator('[data-slot=dialog-content]', { hasText: '一键生成参赛账号' })
     await expect(genDialog).toBeVisible()
     await genDialog.getByPlaceholder('如 class26（1-16 位小写字母/数字/连字符）').fill('e2egen')
     // 数量/每队人数为 el-input-number：填值后 Tab 失焦提交（Element Plus 失焦才落值）。
-    await genDialog.locator('.el-input-number').nth(0).locator('input').fill('4')
-    await genDialog.locator('.el-input-number').nth(0).locator('input').press('Tab')
-    await genDialog.locator('.el-input-number').nth(1).locator('input').fill('2')
-    await genDialog.locator('.el-input-number').nth(1).locator('input').press('Tab')
+    await genDialog.locator('.ui-input-number').nth(0).locator('input').fill('4')
+    await genDialog.locator('.ui-input-number').nth(0).locator('input').press('Tab')
+    await genDialog.locator('.ui-input-number').nth(1).locator('input').fill('2')
+    await genDialog.locator('.ui-input-number').nth(1).locator('input').press('Tab')
     await genDialog.getByRole('button', { name: '生成并导入' }).click()
 
     await expect(genDialog.getByText('新建 4 个账号')).toBeVisible()
@@ -95,7 +95,7 @@ test.describe('邀请赛一键生成与表格导入', () => {
 
     // —— 固定格式表格导入（个人名单）：缺失条目回报 missing，不阻断 ——
     await page.getByRole('button', { name: '表格导入队伍 / 人员' }).click()
-    const importDialog = page.locator('.el-dialog', { hasText: '表格导入队伍 / 参赛人员' })
+    const importDialog = page.locator('[data-slot=dialog-content]', { hasText: '表格导入队伍 / 参赛人员' })
     await expect(importDialog).toBeVisible()
     // 个人名单默认选中；CSV 首行表头自动跳过，条目 = 账号编码或用户名。
     await importDialog.locator('input[type=file]').setInputFiles({
@@ -108,8 +108,8 @@ test.describe('邀请赛一键生成与表格导入', () => {
 
     // 以标题锚定结果对话框（导入对话框的提示文案里也含「导入结果」字样）。
     const resultDialog = page
-      .locator('.el-dialog')
-      .filter({ has: page.locator('.el-dialog__title', { hasText: '导入结果' }) })
+      .locator('[data-slot=dialog-content]')
+      .filter({ has: page.locator('[data-slot=dialog-title]', { hasText: '导入结果' }) })
     await expect(resultDialog).toBeVisible()
     // 缺失条目（编码与用户名均未命中）在警告中列出，导入不中断。
     await expect(resultDialog).toContainText('YA26-99999')
@@ -123,7 +123,7 @@ test.describe('邀请赛一键生成与表格导入', () => {
     await seedTeamUser(request, 'teamseed-2')
     await page.getByRole('button', { name: '表格导入队伍 / 人员' }).click()
     await expect(importDialog).toBeVisible()
-    await importDialog.getByText('队伍名单', { exact: true }).click()
+    await importDialog.getByRole('radio', { name: '队伍名单', exact: true }).check()
     await importDialog.locator('input[type=file]').setInputFiles({
       name: 'teams.csv',
       mimeType: 'text/csv',
@@ -136,7 +136,7 @@ test.describe('邀请赛一键生成与表格导入', () => {
     await resultDialog.getByRole('button', { name: '关闭', exact: true }).click()
 
     // 参赛人员表：生成 + 导入的参赛者都在，邀请码可见（邀请赛凭码入场）。
-    const partTab = page.locator('.el-table', { hasText: E2E.student.username }).first()
+    const partTab = page.locator('[data-slot=table]', { hasText: E2E.student.username }).first()
     await expect(partTab).toBeVisible()
     await expect(page.locator('tr', { hasText: 'e2egen-01' }).first()).toBeVisible()
   })

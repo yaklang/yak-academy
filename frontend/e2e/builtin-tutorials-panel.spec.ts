@@ -33,18 +33,22 @@ test.describe('教程管理内置训练集', () => {
     // 导入/更新：确认弹窗 → 幂等更新（全新库新增 12；已导入则更新 12——锚定教程数）
     // exact：卡片按钮「重新导入/更新」含子串"导入/更新"，非 exact 会同时命中两个。
     await importBtn.click()
-    await page.getByRole('button', { name: '导入/更新', exact: true }).click()
+    const [importResponse] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/api/v1/admin/challenges/builtin') && response.request().method() === 'POST'),
+      page.getByRole('alertdialog').getByRole('button', { name: '导入/更新', exact: true }).click(),
+    ])
+    expect(importResponse.ok()).toBeTruthy()
     await expect(
-      page.locator('.el-message', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 12 篇/ }),
+      page.locator('[data-sonner-toast]', { hasText: /内置训练 v\d+\.\d+\.\d+：新增 \d+ 题、更新 \d+ 题、教程 12 篇/ }),
     ).toBeVisible()
 
     // 导入后：区块状态「已导入」、按钮文案「重新导入/更新」、Room 行逐篇已导入
-    await expect(card.locator('.el-tag', { hasText: '已导入' }).first()).toBeVisible()
+    await expect(card.locator('[data-slot=badge]', { hasText: '已导入' }).first()).toBeVisible()
     await expect(card.getByRole('button', { name: '重新导入/更新' })).toBeVisible()
-    await expect(roomRow.locator('.el-tag')).toHaveText('已导入')
+    await expect(roomRow.locator('[data-slot=badge]')).toHaveText('已导入')
     await expect(roomRow).not.toHaveClass(/not-imported/)
 
     // 上传内容包表格不受影响：global-setup 的种子教程包仍在列表
-    await expect(page.locator('.el-table').locator('tr', { hasText: 'e2e-test' })).toBeVisible()
+    await expect(page.locator('[data-slot=table]').locator('tr', { hasText: 'e2e-test' })).toBeVisible()
   })
 })

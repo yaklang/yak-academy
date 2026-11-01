@@ -9,8 +9,8 @@
 // 附件管理也并入了该弹窗；操作列只保留 编辑 / 删除。
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { notify, dialogs } from '@/lib/notifications'
+import { Search } from '@lucide/vue'
 import {
   adminChallengeApi, DIFFICULTY_LABELS,
   type AdminChallengeQuery,
@@ -234,18 +234,18 @@ async function onImport(file: File) {
     const text = await file.text()
     parsed = parseChallengeJSON(text)
   } catch (e) {
-    ElMessage.error(`读取文件失败：${(e as Error).message}`)
+    notify.error(`读取文件失败：${(e as Error).message}`)
     return false
   }
   if (parsed.error) {
-    ElMessage.error(parsed.error)
+    notify.error(parsed.error)
     return false
   }
   const { list } = parsed
   if (list.length > 1) {
     // 数组文件：编辑弹窗只支持单题，提供直接批量导入的出路。
     try {
-      await ElMessageBox.confirm(
+      await dialogs.confirm(
         `文件包含 ${list.length} 个题目。编辑确认仅支持单题，是否跳过编辑直接批量导入（逐题校验，失败整体不入库）？`,
         '批量导入',
         { type: 'info', confirmButtonText: '直接批量导入', cancelButtonText: '取消' },
@@ -259,12 +259,12 @@ async function onImport(file: File) {
   const chal = list[0]
   if (chal.bank === 'tutorial') {
     // 文件导入不允许 tutorial：解锁题库选择并归 ctf（上传显式 tutorial 一律 422）。
-    ElMessage.warning({ message: '教程题目 tab 专属内置题集：该文件声明的 bank=tutorial 不再接受上传，将按表单所选题库（ctf/acm）入库', duration: 5000 })
+    notify.warning({ message: '教程题目 tab 专属内置题集：该文件声明的 bank=tutorial 不再接受上传，将按表单所选题库（ctf/acm）入库', duration: 5000 })
   }
   const errs = validateChallenge(chal)
   if (errs.length) {
     // 格式不合法也允许进弹窗修正（错误先展示，修正后才可上传）。
-    ElMessage.warning({ message: `题目格式有 ${errs.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
+    notify.warning({ message: `题目格式有 ${errs.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
   }
   fillForm(chal)
   if (bankLocked.value) {
@@ -285,14 +285,14 @@ async function openRowEdit(row: TrainingItem) {
     const full: ChallengeFullJSON = await adminChallengeApi.getJSON(row.slug)
     fillForm(full)
     if (full.flags.length > 1) {
-      ElMessage.warning({ message: `该题有 ${full.flags.length} 个 flag（题目包上传），保存后只保留表单中的这一个`, duration: 6000 })
+      notify.warning({ message: `该题有 ${full.flags.length} 个 flag（题目包上传），保存后只保留表单中的这一个`, duration: 6000 })
     }
     editSourceFile.value = ''
     editExistingSlug.value = row.slug
     editVisible.value = true
     await loadAttachments()
   } catch (e) {
-    ElMessage.error(`读取题目定义失败：${(e as Error).message}`)
+    notify.error(`读取题目定义失败：${(e as Error).message}`)
   } finally {
     editLoading.value = ''
   }
@@ -302,10 +302,10 @@ async function doUpload(list: ChallengeJSON[]) {
   uploading.value = true
   try {
     const resp = await adminChallengeApi.upload(list)
-    ElMessage.success(`已导入 ${resp.imported} 个题目：${resp.slugs.join(', ')}`)
+    notify.success(`已导入 ${resp.imported} 个题目：${resp.slugs.join(', ')}`)
     await load()
   } catch (e) {
-    ElMessage.error(`上传失败：${(e as Error).message}`)
+    notify.error(`上传失败：${(e as Error).message}`)
   } finally {
     uploading.value = false
   }
@@ -318,11 +318,11 @@ async function saveFromEdit() {
   try {
     const payload = buildPayload()
     const resp = await adminChallengeApi.upload([payload])
-    ElMessage.success(`已导入题目：${resp.slugs.join(', ')}`)
+    notify.success(`已导入题目：${resp.slugs.join(', ')}`)
     editVisible.value = false
     await load()
   } catch (e) {
-    ElMessage.error(`上传失败：${(e as Error).message}`)
+    notify.error(`上传失败：${(e as Error).message}`)
   } finally {
     editSaving.value = false
   }
@@ -332,10 +332,10 @@ async function onUploadPackage(file: File) {
   uploading.value = true
   try {
     const resp = await adminChallengeApi.uploadPackage(file)
-    ElMessage.success(`已导入题目包：${resp.slugs.join(', ')}`)
+    notify.success(`已导入题目包：${resp.slugs.join(', ')}`)
     await load()
   } catch (e) {
-    ElMessage.error(`题目包上传失败：${(e as Error).message}`)
+    notify.error(`题目包上传失败：${(e as Error).message}`)
   } finally {
     uploading.value = false
   }
@@ -348,7 +348,7 @@ const builtinImporting = ref(false)
 
 async function onImportBuiltin() {
   try {
-    await ElMessageBox.confirm(
+    await dialogs.confirm(
       '将导入随平台分发的内置训练集（基于 yaklang vulinbox 靶场引擎）：配套教程（一个教程对应一道题目）+ 11 道题目。已导入的同名内容会被更新；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
       '导入内置训练',
       { type: 'info', confirmButtonText: '导入/更新', cancelButtonText: '取消' },
@@ -364,13 +364,13 @@ async function onImportBuiltin() {
       summary += `、清理目录外残留 ${resp.removed} 题`
     }
     if (resp.image_built) {
-      ElMessage.success(`${summary}；靶场镜像已构建`)
+      notify.success(`${summary}；靶场镜像已构建`)
     } else {
-      ElMessage.warning({ message: `${summary}；未配置 Docker，镜像未构建（启用 Docker 后重新导入即可）`, duration: 6000 })
+      notify.warning({ message: `${summary}；未配置 Docker，镜像未构建（启用 Docker 后重新导入即可）`, duration: 6000 })
     }
     await load()
   } catch (e) {
-    ElMessage.error(`内置训练导入失败：${(e as Error).message}`)
+    notify.error(`内置训练导入失败：${(e as Error).message}`)
   } finally {
     builtinImporting.value = false
   }
@@ -392,7 +392,7 @@ async function loadImageStatus() {
 
 async function onBuildBuiltinImage() {
   try {
-    await ElMessageBox.confirm(
+    await dialogs.confirm(
       '将从官方 OSS 下载 vulinbox 二进制并构建靶场基础镜像（约 165MB，需联网，耗时约 1-3 分钟）。构建期间请勿关闭页面。是否继续？',
       '构建 vulinbox 镜像',
       { type: 'info', confirmButtonText: '开始构建', cancelButtonText: '取消' },
@@ -403,10 +403,10 @@ async function onBuildBuiltinImage() {
   imageBuilding.value = true
   try {
     const resp = await adminChallengeApi.buildBuiltinImage()
-    ElMessage.success(`镜像已构建：${resp.image_tag}`)
+    notify.success(`镜像已构建：${resp.image_tag}`)
     await loadImageStatus()
   } catch (e) {
-    ElMessage.error({ message: `镜像构建失败：${(e as Error).message}`, duration: 8000 })
+    notify.error({ message: `镜像构建失败：${(e as Error).message}`, duration: 8000 })
   } finally {
     imageBuilding.value = false
   }
@@ -419,7 +419,7 @@ async function load() {
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     loading.value = false
   }
@@ -458,9 +458,9 @@ async function pollEngineOnce() {
   if (state !== 'running') {
     stopEnginePolling()
     if (state === 'done') {
-      ElMessage.success('yak 引擎已就绪，ACM 判题与自测运行已启用')
+      notify.success('yak 引擎已就绪，ACM 判题与自测运行已启用')
     } else if (state === 'failed') {
-      ElMessage.error({ message: `引擎下载失败：${engineStatus.value?.download.error || '未知错误'}`, duration: 8000 })
+      notify.error({ message: `引擎下载失败：${engineStatus.value?.download.error || '未知错误'}`, duration: 8000 })
     }
   }
 }
@@ -481,7 +481,7 @@ const engineDownloadPercent = computed(() => {
 
 async function onDownloadYakEngine() {
   try {
-    await ElMessageBox.confirm(
+    await dialogs.confirm(
       '将从 yaklang 官方 OSS 下载 yak 引擎二进制（约 220MB，需联网，视带宽约 1-5 分钟）。下载在后台进行，完成后自动装配，无需重启服务。是否继续？',
       '下载 yak 判题引擎',
       { type: 'info', confirmButtonText: '开始下载', cancelButtonText: '取消' },
@@ -493,13 +493,13 @@ async function onDownloadYakEngine() {
     engineStatus.value = await adminChallengeApi.yakEngineDownload()
     resumeEnginePolling()
   } catch (e) {
-    ElMessage.error(`引擎下载启动失败：${(e as Error).message}`)
+    notify.error(`引擎下载启动失败：${(e as Error).message}`)
   }
 }
 
 async function remove(row: TrainingItem) {
   try {
-    await ElMessageBox.confirm(
+    await dialogs.confirm(
       `确定删除题目「${row.title}」？该题的运行中容器将被销毁，判定答案与提示一并删除。` +
         '已有用户通关的题目无法删除（提交历史不可删）。',
       '删除题目',
@@ -514,11 +514,11 @@ async function remove(row: TrainingItem) {
   }
   try {
     await adminChallengeApi.remove(row.slug)
-    ElMessage.success(`已删除 ${row.slug}`)
+    notify.success(`已删除 ${row.slug}`)
     await load()
   } catch (e) {
     // 409：题目存在通关记录，事件历史 append-only 不可删（契约语义直接透出）。
-    ElMessage.error(`删除失败：${(e as Error).message}`)
+    notify.error(`删除失败：${(e as Error).message}`)
   }
 }
 
@@ -532,9 +532,9 @@ async function toggleVisible(row: TrainingItem) {
   try {
     const updated = await adminChallengeApi.updateVisibility(row.slug, { is_visible: !row.is_visible })
     row.is_visible = updated.is_visible
-    ElMessage.success(updated.is_visible ? `「${row.title}」已对学生可见` : `「${row.title}」已隐藏`)
+    notify.success(updated.is_visible ? `「${row.title}」已对学生可见` : `「${row.title}」已隐藏`)
   } catch (e) {
-    ElMessage.error(`可见性更新失败：${(e as Error).message}`)
+    notify.error(`可见性更新失败：${(e as Error).message}`)
   } finally {
     visSaving.value = ''
   }
@@ -552,7 +552,7 @@ async function loadAttachments() {
   try {
     attachments.value = await adminChallengeApi.listAttachments(editExistingSlug.value)
   } catch (e) {
-    ElMessage.error(`附件列表加载失败：${(e as Error).message}`)
+    notify.error(`附件列表加载失败：${(e as Error).message}`)
   } finally {
     attachLoading.value = false
   }
@@ -563,10 +563,10 @@ async function onUploadAttachment(file: File) {
   attachUploading.value = true
   try {
     await adminChallengeApi.uploadAttachment(editExistingSlug.value, file)
-    ElMessage.success(`已上传附件：${file.name}`)
+    notify.success(`已上传附件：${file.name}`)
     await loadAttachments()
   } catch (e) {
-    ElMessage.error(`附件上传失败：${(e as Error).message}`)
+    notify.error(`附件上传失败：${(e as Error).message}`)
   } finally {
     attachUploading.value = false
   }
@@ -575,7 +575,7 @@ async function onUploadAttachment(file: File) {
 
 async function removeAttachment(filename: string) {
   try {
-    await ElMessageBox.confirm(`确定删除附件「${filename}」？`, '删除附件', { type: 'warning' })
+    await dialogs.confirm(`确定删除附件「${filename}」？`, '删除附件', { type: 'warning' })
   } catch {
     return
   }
@@ -583,7 +583,7 @@ async function removeAttachment(filename: string) {
     await adminChallengeApi.deleteAttachment(editExistingSlug.value, filename)
     await loadAttachments()
   } catch (e) {
-    ElMessage.error(`附件删除失败：${(e as Error).message}`)
+    notify.error(`附件删除失败：${(e as Error).message}`)
   }
 }
 
@@ -614,67 +614,67 @@ onUnmounted(stopEnginePolling)
     <span class="head-count" v-if="total">共 {{ total }} 题</span>
   </header>
 
-  <el-tabs v-model="activeTab" class="bank-tabs">
-    <el-tab-pane name="builtin">
+  <UiTabs v-model="activeTab" class="bank-tabs">
+    <UiTabPane name="builtin">
       <template #label>
         <span class="tab-label">内置训练<span class="tab-sub">只读</span></span>
       </template>
-    </el-tab-pane>
-    <el-tab-pane name="ctf">
+    </UiTabPane>
+    <UiTabPane name="ctf">
       <template #label><span class="tab-label">CTF 题目</span></template>
-    </el-tab-pane>
-    <el-tab-pane name="acm">
+    </UiTabPane>
+    <UiTabPane name="acm">
       <template #label><span class="tab-label">ACM 题目</span></template>
-    </el-tab-pane>
-  </el-tabs>
+    </UiTabPane>
+  </UiTabs>
 
   <p class="hint">{{ TAB_META[activeTab].hint }}</p>
 
   <!-- 内置 tab 只读：收起全部上传入口，仅保留一键导入与镜像状态 -->
   <template v-if="readonlyTab">
     <div class="toolbar">
-      <el-button
+      <UiButton
         :loading="builtinImporting"
         title="导入随平台分发的 vulinbox 内置训练题集（重复导入 = 更新；目录外残留自动清理）"
         @click="onImportBuiltin"
       >
         导入内置训练（vulinbox）
-      </el-button>
-      <el-button text @click="load">刷新</el-button>
+      </UiButton>
+      <UiButton text @click="load">刷新</UiButton>
     </div>
   </template>
   <template v-else>
     <div class="toolbar">
-      <el-upload
+      <UiUpload
         :show-file-list="false"
         accept=".json,application/json"
         :before-upload="onImport"
         :disabled="uploading"
       >
-        <el-button type="primary" :loading="uploading">选择 challenge.json</el-button>
-      </el-upload>
-      <el-button @click="downloadSampleChallenge">下载样例 JSON</el-button>
-      <el-upload
+        <UiButton type="primary" :loading="uploading">选择 challenge.json</UiButton>
+      </UiUpload>
+      <UiButton @click="downloadSampleChallenge">下载样例 JSON</UiButton>
+      <UiUpload
         :show-file-list="false"
         accept=".zip,application/zip"
         :before-upload="onUploadPackage"
         :disabled="uploading"
       >
-        <el-button :loading="uploading" title="image: . 的容器题需经 zip 包上传（上传时构建镜像）">
+        <UiButton :loading="uploading" title="image: . 的容器题需经 zip 包上传（上传时构建镜像）">
           上传题目包 zip
-        </el-button>
-      </el-upload>
-      <el-button
+        </UiButton>
+      </UiUpload>
+      <UiButton
         @click="specVisible = !specVisible"
       >
         {{ specVisible ? '收起格式规范' : '查看格式规范' }}
-      </el-button>
+      </UiButton>
     </div>
   </template>
 
   <!-- 搜索 / 筛选：全部 tab 可用；来源筛选仅非内置 tab（内置 tab 恒为内置来源） -->
   <div class="filter-bar">
-    <el-input
+    <UiInput
       v-model="keyword"
       class="filter-search"
       placeholder="搜索 slug / 标题 / 分类（前缀匹配）"
@@ -683,39 +683,39 @@ onUnmounted(stopEnginePolling)
       @input="onKeywordInput"
       @clear="resetAndLoad"
     />
-    <el-select v-model="categoryFilter" class="filter" placeholder="分类：全部" clearable>
-      <el-option label="分类：全部" value="" />
-      <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
-    </el-select>
-    <el-select v-model="difficultyFilter" class="filter" placeholder="难度：全部" clearable>
-      <el-option label="难度：全部" value="" />
-      <el-option v-for="(label, v) in DIFFICULTY_LABELS" :key="v" :label="`${v}（${label}）`" :value="v" />
-    </el-select>
-    <el-select v-if="!readonlyTab" v-model="builtinFilter" class="filter" placeholder="来源：全部" clearable>
-      <el-option label="来源：全部" value="" />
-      <el-option label="来源：内置题集" value="yes" />
-      <el-option label="来源：管理员上传" value="no" />
-    </el-select>
+    <UiSelect v-model="categoryFilter" class="filter" placeholder="分类：全部" clearable>
+      <UiOption label="分类：全部" value="" />
+      <UiOption v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
+    </UiSelect>
+    <UiSelect v-model="difficultyFilter" class="filter" placeholder="难度：全部" clearable>
+      <UiOption label="难度：全部" value="" />
+      <UiOption v-for="(label, v) in DIFFICULTY_LABELS" :key="v" :label="`${v}（${label}）`" :value="v" />
+    </UiSelect>
+    <UiSelect v-if="!readonlyTab" v-model="builtinFilter" class="filter" placeholder="来源：全部" clearable>
+      <UiOption label="来源：全部" value="" />
+      <UiOption label="来源：内置题集" value="yes" />
+      <UiOption label="来源：管理员上传" value="no" />
+    </UiSelect>
     <span v-if="keyword || categoryFilter || difficultyFilter || builtinFilter" class="filter-clear" @click="clearFilters">
       清除筛选
     </span>
   </div>
 
   <!-- vulinbox 靶场镜像状态：仅内置训练 tab 显示（镜像只服务内置题集的实验环境） -->
-  <el-card v-if="readonlyTab && imageStatus" class="image-card" shadow="never">
+  <UiCard v-if="readonlyTab && imageStatus" class="image-card" shadow="never">
     <div class="image-status">
       <span class="image-label">vulinbox 靶场镜像</span>
-      <el-tag :type="imageStatus.driver === 'docker' ? 'success' : 'info'" size="small">
+      <UiTag :type="imageStatus.driver === 'docker' ? 'success' : 'info'" size="small">
         驱动：{{ imageStatus.driver === 'docker' ? 'Docker' : '未启用（noop，环境启动 501）' }}
-      </el-tag>
-      <el-tag
+      </UiTag>
+      <UiTag
         :type="imageStatus.image_present ? 'success' : imageStatus.can_build ? 'warning' : 'danger'"
         size="small"
       >
         {{ imageStatus.image_present ? '镜像已就绪' : imageStatus.can_build ? '镜像缺失' : '镜像未构建（需 Docker）' }}
-      </el-tag>
+      </UiTag>
       <code class="image-tag">{{ imageStatus.image_tag }}</code>
-      <el-button
+      <UiButton
         size="small"
         type="primary"
         :loading="imageBuilding"
@@ -726,22 +726,22 @@ onUnmounted(stopEnginePolling)
         @click="onBuildBuiltinImage"
       >
         从 OSS 构建镜像
-      </el-button>
-      <el-button size="small" text @click="loadImageStatus">刷新</el-button>
+      </UiButton>
+      <UiButton size="small" text @click="loadImageStatus">刷新</UiButton>
     </div>
-  </el-card>
+  </UiCard>
 
   <!-- yak 判题引擎状态：仅 ACM tab 显示（引擎服务 code 题判定与自测运行；
        未装配时 ACM 提交判 internal_error、自测运行 422） -->
-  <el-card v-if="activeTab === 'acm' && engineStatus" class="image-card" shadow="never">
+  <UiCard v-if="activeTab === 'acm' && engineStatus" class="image-card" shadow="never">
     <div class="image-status">
       <span class="image-label">yak 判题引擎</span>
-      <el-tag :type="engineStatus.configured ? 'success' : 'warning'" size="small">
+      <UiTag :type="engineStatus.configured ? 'success' : 'warning'" size="small">
         {{ engineStatus.configured ? '已装配' : '未装配' }}
-      </el-tag>
-      <el-tag v-if="engineStatus.version" type="info" size="small">{{ engineStatus.version }}</el-tag>
+      </UiTag>
+      <UiTag v-if="engineStatus.version" type="info" size="small">{{ engineStatus.version }}</UiTag>
       <code class="image-tag">{{ engineStatus.path }}</code>
-      <el-button
+      <UiButton
         size="small"
         type="primary"
         :loading="engineStatus.download.state === 'running'"
@@ -751,11 +751,11 @@ onUnmounted(stopEnginePolling)
         @click="onDownloadYakEngine"
       >
         从 OSS 下载引擎
-      </el-button>
-      <el-button size="small" text @click="loadEngineStatus">刷新</el-button>
+      </UiButton>
+      <UiButton size="small" text @click="loadEngineStatus">刷新</UiButton>
     </div>
     <div v-if="engineStatus.download.state === 'running'" class="engine-progress">
-      <el-progress
+      <UiProgress
         :percentage="engineDownloadPercent"
         :indeterminate="engineStatus.download.total < 0"
         :show-text="false"
@@ -768,10 +768,10 @@ onUnmounted(stopEnginePolling)
     <p v-else-if="engineStatus.download.state === 'failed'" class="engine-error">
       上次下载失败：{{ engineStatus.download.error || '未知错误' }}（可重试）
     </p>
-  </el-card>
+  </UiCard>
 
-  <el-collapse-transition>
-    <el-card v-show="specVisible" class="spec">
+  <UiCollapseTransition>
+    <UiCard v-show="specVisible" class="spec">
       <h3>challenge.json 字段</h3>
       <pre class="json">{
   "slug": "sqli-login-bypass",        // 必填 [a-z0-9-]+
@@ -793,35 +793,35 @@ onUnmounted(stopEnginePolling)
       <h3>题目包 zip（image: . 容器题）</h3>
       <pre class="json">challenge.yml + Dockerfile + docker-compose.yml + src/…</pre>
       <p class="dim">接口：POST /admin/challenges/package。<code>image: .</code> 落库为 yak-academy/&lt;slug&gt;:latest。</p>
-    </el-card>
-  </el-collapse-transition>
+    </UiCard>
+  </UiCollapseTransition>
 
-  <el-table :data="items" v-loading="loading" class="chal-table">
-    <el-table-column prop="slug" label="Slug" width="180" show-overflow-tooltip />
-    <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
-    <el-table-column prop="category" label="分类" width="140" show-overflow-tooltip />
-    <el-table-column label="难度" width="110">
+  <UiTable :data="items" v-busy="loading" class="chal-table">
+    <UiTableColumn prop="slug" label="Slug" width="180" show-overflow-tooltip />
+    <UiTableColumn prop="title" label="标题" min-width="160" show-overflow-tooltip />
+    <UiTableColumn prop="category" label="分类" width="140" show-overflow-tooltip />
+    <UiTableColumn label="难度" width="110">
       <template #default="{ row }">
-        <el-tag :type="difficultyType(row.difficulty)" size="small">{{ row.difficulty }}</el-tag>
+        <UiTag :type="difficultyType(row.difficulty)" size="small">{{ row.difficulty }}</UiTag>
       </template>
-    </el-table-column>
-    <el-table-column prop="score" label="分值" width="80" />
-    <el-table-column label="容器" width="70">
+    </UiTableColumn>
+    <UiTableColumn prop="score" label="分值" width="80" />
+    <UiTableColumn label="容器" width="70">
       <template #default="{ row }">
-        <el-tag v-if="row.has_env" type="primary" size="small">有</el-tag>
+        <UiTag v-if="row.has_env" type="primary" size="small">有</UiTag>
         <span v-else>—</span>
       </template>
-    </el-table-column>
-    <el-table-column label="关联教程" min-width="140" show-overflow-tooltip>
+    </UiTableColumn>
+    <UiTableColumn label="关联教程" min-width="140" show-overflow-tooltip>
       <template #default="{ row }">
         <span v-if="row.tutorial_slug">{{ row.tutorial_title || row.tutorial_slug }}</span>
         <span v-else>—</span>
       </template>
-    </el-table-column>
+    </UiTableColumn>
     <template v-if="!readonlyTab">
-      <el-table-column label="可见性" width="90">
+      <UiTableColumn label="可见性" width="90">
         <template #default="{ row }">
-          <el-switch
+          <UiSwitch
             :model-value="row.is_visible !== false"
             :loading="visSaving === row.slug"
             inline-prompt
@@ -830,21 +830,21 @@ onUnmounted(stopEnginePolling)
             @change="toggleVisible(row)"
           />
         </template>
-      </el-table-column>
-      <el-table-column v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
+      </UiTableColumn>
+      <UiTableColumn v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
         <template #default="{ row }">
-          <el-button size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+          <UiButton size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</UiButton>
+          <UiButton size="small" type="danger" @click="remove(row)">删除</UiButton>
         </template>
-      </el-table-column>
-      <el-table-column v-else label="来源" width="90">
+      </UiTableColumn>
+      <UiTableColumn v-else label="来源" width="90">
         <template #default="{ row }">
-          <el-tag v-if="row.is_builtin" size="small" type="info">内置</el-tag>
+          <UiTag v-if="row.is_builtin" size="small" type="info">内置</UiTag>
         </template>
-      </el-table-column>
+      </UiTableColumn>
     </template>
-  </el-table>
-  <el-pagination
+  </UiTable>
+  <UiPagination
     v-if="total > 20"
     layout="prev, pager, next"
     :total="total"
@@ -854,65 +854,65 @@ onUnmounted(stopEnginePolling)
   />
 
   <!-- 题目编辑弹窗：行内「编辑」回填库内定义，或选择 challenge.json 后确认上传 -->
-  <el-dialog
+  <UiDialog
     v-model="editVisible"
     :title="editExistingSlug ? `编辑题目：${editExistingSlug}` : `编辑题目${editSourceFile ? `（${editSourceFile}）` : ''}`"
     width="680px"
     top="4vh"
   >
-    <el-alert v-if="formErrors.length" type="error" :closable="false" class="form-errors">
+    <UiAlert v-if="formErrors.length" type="error" :closable="false" class="form-errors">
       <p v-for="err in formErrors" :key="err" class="err-line">{{ err }}</p>
-    </el-alert>
-    <el-form label-width="110px">
+    </UiAlert>
+    <UiForm label-width="110px">
       <div class="form-grid">
-        <el-form-item label="slug" required>
-          <el-input v-model="form.slug" placeholder="sqli-login-bypass" />
-        </el-form-item>
-        <el-form-item label="标题" required>
-          <el-input v-model="form.title" />
-        </el-form-item>
-        <el-form-item label="分类" required>
-          <el-input v-model="form.category" placeholder="sql-injection" />
-        </el-form-item>
-        <el-form-item label="题库">
-          <el-select v-model="form.bank" :disabled="bankLocked">
-            <el-option v-if="bankLocked" value="tutorial" label="教程题目（内置，不可改）" />
-            <el-option value="ctf" label="CTF 题目（ctf，默认）" />
-            <el-option value="acm" label="ACM 题目（acm）" />
-          </el-select>
+        <UiFormItem label="slug" required>
+          <UiInput v-model="form.slug" placeholder="sqli-login-bypass" />
+        </UiFormItem>
+        <UiFormItem label="标题" required>
+          <UiInput v-model="form.title" />
+        </UiFormItem>
+        <UiFormItem label="分类" required>
+          <UiInput v-model="form.category" placeholder="sql-injection" />
+        </UiFormItem>
+        <UiFormItem label="题库">
+          <UiSelect v-model="form.bank" :disabled="bankLocked">
+            <UiOption v-if="bankLocked" value="tutorial" label="教程题目（内置，不可改）" />
+            <UiOption value="ctf" label="CTF 题目（ctf，默认）" />
+            <UiOption value="acm" label="ACM 题目（acm）" />
+          </UiSelect>
           <div class="dim form-hint">教程题目 tab 为内置题集专属，经「导入内置训练」写入</div>
-        </el-form-item>
-        <el-form-item label="难度" required>
-          <el-select v-model="form.difficulty">
-            <el-option value="apprentice" label="apprentice（入门）" />
-            <el-option value="practitioner" label="practitioner（进阶）" />
-            <el-option value="expert" label="expert（专家）" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="分值" required>
-          <el-input-number v-model="form.score" :min="0" />
-        </el-form-item>
-        <el-form-item label="关联教程">
-          <el-input v-model="form.tutorial_slug" placeholder="可选，教程 Room slug" />
-        </el-form-item>
+        </UiFormItem>
+        <UiFormItem label="难度" required>
+          <UiSelect v-model="form.difficulty">
+            <UiOption value="apprentice" label="apprentice（入门）" />
+            <UiOption value="practitioner" label="practitioner（进阶）" />
+            <UiOption value="expert" label="expert（专家）" />
+          </UiSelect>
+        </UiFormItem>
+        <UiFormItem label="分值" required>
+          <UiInputNumber v-model="form.score" :min="0" />
+        </UiFormItem>
+        <UiFormItem label="关联教程">
+          <UiInput v-model="form.tutorial_slug" placeholder="可选，教程 Room slug" />
+        </UiFormItem>
         <!-- ACM 编程题：judge 段回填（判定配置只读展示；测试数据经题目包 zip 维护，
              组分值（部分得分制）可在此调整——保存随元数据维护一并覆写） -->
         <template v-if="form.judge">
-          <el-form-item label="判定引擎">
-            <el-tag>code / yak</el-tag>
+          <UiFormItem label="判定引擎">
+            <UiTag>code / yak</UiTag>
             <div class="dim form-hint">
               ACM 编程题：学生提交 yak 源码，引擎逐组运行测试数据判定（不验 flag）。
               测试数据共 {{ form.judge.testdata.length }} 组，经题目包 zip 的 testdata/ 目录维护，此处保存仅更新元数据。
             </div>
-          </el-form-item>
-          <el-form-item label="时限（秒）">
-            <el-input-number v-model="form.judge.time_limit_s" :min="1" :max="60" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="内存上限（MB）">
-            <el-input-number v-model="form.judge.memory_limit_mb" :min="16" :max="512" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="库白名单">
-            <el-select
+          </UiFormItem>
+          <UiFormItem label="时限（秒）">
+            <UiInputNumber v-model="form.judge.time_limit_s" :min="1" :max="60" controls-position="right" />
+          </UiFormItem>
+          <UiFormItem label="内存上限（MB）">
+            <UiInputNumber v-model="form.judge.memory_limit_mb" :min="16" :max="512" controls-position="right" />
+          </UiFormItem>
+          <UiFormItem label="库白名单">
+            <UiSelect
               v-model="form.judge.allowed_libs"
               multiple
               filterable
@@ -921,19 +921,19 @@ onUnmounted(stopEnginePolling)
               placeholder="留空 = 允许全部 yak 库（黑名单除外）"
               class="lib-select"
             >
-              <el-option v-for="o in libOptions" :key="o.value" :value="o.value" :label="o.label" />
-            </el-select>
+              <UiOption v-for="o in libOptions" :key="o.value" :value="o.value" :label="o.label" />
+            </UiSelect>
             <div class="dim form-hint">
               yak 库白名单（防高危库执行）：配置后学生源码只能引用这些库，其余库提交/自测一律 422。
               黑名单库（exec / file / ssh 等命令执行与宿主文件访问类）任何题目不可启用，配置即被拒绝。
             </div>
-          </el-form-item>
-          <el-form-item label="测试组与分值">
+          </UiFormItem>
+          <UiFormItem label="测试组与分值">
             <div v-if="form.judge.testdata.length" class="testdata-list">
               <div v-for="t in form.judge.testdata" :key="t.name" class="testdata-row">
                 <span class="testdata-name">{{ t.name }}</span>
-                <el-tag v-if="t.sample" size="small" effect="plain">样例</el-tag>
-                <el-input-number
+                <UiTag v-if="t.sample" size="small" effect="plain">样例</UiTag>
+                <UiInputNumber
                   v-model="t.score"
                   :min="0"
                   size="small"
@@ -946,109 +946,109 @@ onUnmounted(stopEnginePolling)
             <div class="dim form-hint">
               组分值 0 = 未配置（全有全无：全过才得分）；&gt;0 时按权重分摊题面分值，通过组即得。
             </div>
-          </el-form-item>
+          </UiFormItem>
         </template>
         <template v-else>
-          <el-form-item label="判定类型" required>
-            <el-select v-model="form.type">
-              <el-option value="static" label="static（明文 flag）" />
-              <el-option value="regex" label="regex（正则匹配）" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="flag" required>
-            <el-input v-model="form.flag" :placeholder="form.flag_mode === 'instance' ? 'flag{lab-{token}}' : 'flag{answer}'" />
-          </el-form-item>
-          <el-form-item label="flag 作用域">
-            <el-select v-model="form.flag_mode">
-              <el-option value="shared" label="shared（题目级共享）" />
-              <el-option value="instance" label="instance（每实例唯一）" />
-            </el-select>
-          </el-form-item>
+          <UiFormItem label="判定类型" required>
+            <UiSelect v-model="form.type">
+              <UiOption value="static" label="static（明文 flag）" />
+              <UiOption value="regex" label="regex（正则匹配）" />
+            </UiSelect>
+          </UiFormItem>
+          <UiFormItem label="flag" required>
+            <UiInput v-model="form.flag" :placeholder="form.flag_mode === 'instance' ? 'flag{lab-{token}}' : 'flag{answer}'" />
+          </UiFormItem>
+          <UiFormItem label="flag 作用域">
+            <UiSelect v-model="form.flag_mode">
+              <UiOption value="shared" label="shared（题目级共享）" />
+              <UiOption value="instance" label="instance（每实例唯一）" />
+            </UiSelect>
+          </UiFormItem>
         </template>
       </div>
-      <el-form-item label="容器环境">
-        <el-switch v-model="form.has_env" />
+      <UiFormItem label="容器环境">
+        <UiSwitch v-model="form.has_env" />
         <template v-if="form.has_env">
-          <el-input v-model="form.image" placeholder="镜像（如 nginx:alpine；image: . 需走 zip 包通道）" class="env-image" />
-          <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
+          <UiInput v-model="form.image" placeholder="镜像（如 nginx:alpine；image: . 需走 zip 包通道）" class="env-image" />
+          <UiInputNumber v-model="form.port" :min="1" :max="65535" controls-position="right" />
         </template>
-      </el-form-item>
-      <el-form-item label="描述 Markdown">
-        <el-input v-model="form.description_md" type="textarea" :rows="6" class="mono" />
-      </el-form-item>
-      <el-form-item label="提示">
+      </UiFormItem>
+      <UiFormItem label="描述 Markdown">
+        <UiInput v-model="form.description_md" type="textarea" :rows="6" class="mono" />
+      </UiFormItem>
+      <UiFormItem label="提示">
         <div class="hints">
           <div v-for="(h, i) in form.hints" :key="i" class="hint-row">
-            <el-input v-model="h.title" placeholder="标题" class="hint-title" />
-            <el-input v-model="h.content" placeholder="内容" class="hint-content" />
-            <el-input-number v-model="h.cost" :min="0" controls-position="right" class="hint-cost" />
-            <el-button type="danger" link @click="removeHint(i)">删除</el-button>
+            <UiInput v-model="h.title" placeholder="标题" class="hint-title" />
+            <UiInput v-model="h.content" placeholder="内容" class="hint-content" />
+            <UiInputNumber v-model="h.cost" :min="0" controls-position="right" class="hint-cost" />
+            <UiButton type="danger" link @click="removeHint(i)">删除</UiButton>
           </div>
-          <el-button size="small" @click="addHint">添加提示</el-button>
+          <UiButton size="small" @click="addHint">添加提示</UiButton>
         </div>
-      </el-form-item>
-      <el-form-item label="外链">
+      </UiFormItem>
+      <UiFormItem label="外链">
         <div class="hints">
           <div v-for="(l, i) in form.links" :key="i" class="hint-row">
-            <el-input v-model="l.name" placeholder="名称（如 Wireshark 下载）" class="hint-title" />
-            <el-input v-model="l.url" placeholder="https://…" class="hint-content" />
-            <el-button type="danger" link @click="removeLink(i)">删除</el-button>
+            <UiInput v-model="l.name" placeholder="名称（如 Wireshark 下载）" class="hint-title" />
+            <UiInput v-model="l.url" placeholder="https://…" class="hint-content" />
+            <UiButton type="danger" link @click="removeLink(i)">删除</UiButton>
           </div>
-          <el-button size="small" @click="addLink">添加外链</el-button>
+          <UiButton size="small" @click="addLink">添加外链</UiButton>
         </div>
-      </el-form-item>
+      </UiFormItem>
       <!-- 附件区：仅行内编辑已入库题目时显示（文件导入新建流程题目尚未落库） -->
       <template v-if="editExistingSlug">
-        <el-divider content-position="left">附件（不经 JSON，学生端凭登录态下载）</el-divider>
+        <UiDivider content-position="left">附件（不经 JSON，学生端凭登录态下载）</UiDivider>
         <div class="attach-toolbar">
-          <el-upload
+          <UiUpload
             :show-file-list="false"
             :before-upload="onUploadAttachment"
             :disabled="attachUploading"
           >
-            <el-button type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</el-button>
-          </el-upload>
+            <UiButton type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</UiButton>
+          </UiUpload>
         </div>
-        <el-table :data="attachments" v-loading="attachLoading" size="small" empty-text="暂无附件">
-          <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
-          <el-table-column label="大小" width="100">
+        <UiTable :data="attachments" v-busy="attachLoading" size="small" empty-text="暂无附件">
+          <UiTableColumn prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
+          <UiTableColumn label="大小" width="100">
             <template #default="{ row }">{{ attachSize(row.size) }}</template>
-          </el-table-column>
-          <el-table-column label="上传时间" width="150">
+          </UiTableColumn>
+          <UiTableColumn label="上传时间" width="150">
             <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="70">
+          </UiTableColumn>
+          <UiTableColumn label="操作" width="70">
             <template #default="{ row }">
-              <el-button size="small" type="danger" link @click="removeAttachment(row.filename)">删除</el-button>
+              <UiButton size="small" type="danger" link @click="removeAttachment(row.filename)">删除</UiButton>
             </template>
-          </el-table-column>
-        </el-table>
+          </UiTableColumn>
+        </UiTable>
       </template>
-    </el-form>
+    </UiForm>
     <template #footer>
-      <el-button @click="editVisible = false">取消</el-button>
-      <el-button type="primary" :loading="editSaving" :disabled="formErrors.length > 0" @click="saveFromEdit">
+      <UiButton @click="editVisible = false">取消</UiButton>
+      <UiButton type="primary" :loading="editSaving" :disabled="formErrors.length > 0" @click="saveFromEdit">
         确认上传
-      </el-button>
+      </UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 </template>
 
 <style scoped>
 /* 页头 */
 .page-head { display: flex; align-items: baseline; gap: 0.8rem; margin: 0 0 0.6rem; }
 .page-title { font-size: 1.35rem; font-weight: 700; margin: 0; }
-.page-title .accent { color: var(--el-color-primary); margin-left: 2px; }
-.head-count { color: var(--el-text-color-secondary); font-size: 0.88rem; }
+.page-title .accent { color: var(--accent-foreground); margin-left: 2px; }
+.head-count { color: var(--muted-foreground); font-size: 0.88rem; }
 
 /* 题库 tab */
-.bank-tabs :deep(.el-tabs__header) { margin-bottom: 0.4rem; }
+.bank-tabs :deep([data-slot="tabs-list"]) { margin-bottom: 0.4rem; }
 .tab-label { font-size: 0.95rem; }
 .tab-sub {
-  font-size: 0.72rem; color: var(--el-color-warning); border: 1px solid var(--el-color-warning-light-5);
+  font-size: 0.72rem; color: var(--accent-foreground); border: 1px solid var(--border);
   padding: 0 5px; margin-left: 6px; border-radius: 3px; vertical-align: 1px;
 }
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin: 0 0 1rem; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin: 0 0 1rem; }
 
 /* 工具栏与筛选 */
 .toolbar { margin-bottom: 0.9rem; display: flex; gap: 0.5rem; align-items: flex-start; }
@@ -1056,27 +1056,27 @@ onUnmounted(stopEnginePolling)
 .filter-search { width: 300px; }
 .filter { width: 170px; }
 .filter-clear {
-  color: var(--el-color-primary); font-size: 0.85rem; cursor: pointer; user-select: none;
+  color: var(--accent-foreground); font-size: 0.85rem; cursor: pointer; user-select: none;
 }
 .filter-clear:hover { opacity: 0.8; }
 
 /* 镜像状态卡 / 引擎状态卡 / 规范折叠卡 / 表格 */
 .image-card { margin-bottom: 1rem; }
-.image-card :deep(.el-card__body) { padding: 0.6rem 1rem; }
+.image-card :deep([data-slot="card-content"]) { padding: 0.6rem 1rem; }
 .image-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .image-label { font-weight: 600; }
-.image-tag { color: var(--el-text-color-secondary); font-size: 0.82rem; }
+.image-tag { color: var(--muted-foreground); font-size: 0.82rem; }
 /* 引擎下载进度行 / 失败提示：与 image-tag 同一字号体系 */
 .engine-progress { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; max-width: 480px; }
-.engine-progress .el-progress { flex: 1; }
-.engine-progress-text { color: var(--el-text-color-secondary); font-size: 0.82rem; white-space: nowrap; }
-.engine-error { color: var(--el-color-danger); font-size: 0.82rem; margin: 0.5rem 0 0; }
+.engine-progress .ui-progress { flex: 1; }
+.engine-progress-text { color: var(--muted-foreground); font-size: 0.82rem; white-space: nowrap; }
+.engine-error { color: var(--destructive); font-size: 0.82rem; margin: 0.5rem 0 0; }
 .spec { margin-bottom: 1rem; }
 .spec h3 { margin-top: 0; }
-.spec pre { background: var(--el-fill-color-light); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
+.spec pre { background: var(--muted); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
 .spec .json { line-height: 1.5; font-family: Consolas, monospace; }
 .chal-table { margin-bottom: 0.8rem; }
-.dim { color: var(--el-text-color-secondary); font-size: 0.85rem; }
+.dim { color: var(--muted-foreground); font-size: 0.85rem; }
 
 /* 编辑弹窗 */
 .form-errors { margin-bottom: 1rem; }

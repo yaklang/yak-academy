@@ -4,8 +4,8 @@
 // 题目抽屉内完成开容器/提 flag（复用题库详情交互模式），异步判题后延时刷新。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import type { UploadFile } from 'element-plus'
+import { notify, dialogs } from '@/lib/notifications'
+import type { UploadFile } from '@/components/system/composite'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import {
@@ -55,7 +55,7 @@ async function loadView() {
   } catch (e) {
     // 未入场 / 竞赛不存在：回到入场页或平台。
     loadError.value = (e as Error).message
-    ElMessage.error(loadError.value)
+    notify.error(loadError.value)
     if (compStore.lockedCompetitionId === compId) compStore.unlock()
     router.replace('/')
   }
@@ -65,7 +65,7 @@ async function refreshAfterEnd() {
   // 比赛结束瞬间：解除锁定态并刷新（可访问平台 + 可交 WP）。
   compStore.unlock()
   await loadView()
-  ElMessage.info('比赛已结束，感谢参与！可提交 Writeup 或返回平台。')
+  notify.info('比赛已结束，感谢参与！可提交 Writeup 或返回平台。')
 }
 
 // ---------- 题目抽屉 ----------
@@ -93,17 +93,17 @@ async function startInstance() {
   starting.value = true
   try {
     instance.value = await competitionApi.startInstance(compId, drawer.value.slug)
-    ElMessage.success(`容器已启动：${instance.value.endpoint}`)
+    notify.success(`容器已启动：${instance.value.endpoint}`)
     await loadView()
   } catch (e) {
     const err = e as { code?: string; message?: string; data?: Record<string, unknown> | null }
     if (err.code === 'conflict') {
       const current = err.data?.current as { challenge_title?: string; expire_at?: string } | undefined
-      ElMessage.warning(
+      notify.warning(
         `已有活跃容器（${current?.challenge_title ?? '其他题目'}），请先关闭后再启动本题容器`,
       )
     } else {
-      ElMessage.error(err.message ?? '启动失败')
+      notify.error(err.message ?? '启动失败')
     }
   } finally {
     starting.value = false
@@ -113,7 +113,7 @@ async function startInstance() {
 async function destroyInstance() {
   if (!drawer.value) return
   try {
-    await ElMessageBox.confirm('销毁本题容器？题目进度（flag）不受影响，可重新启动。', '销毁确认', { type: 'warning' })
+    await dialogs.confirm('销毁本题容器？题目进度（flag）不受影响，可重新启动。', '销毁确认', { type: 'warning' })
   } catch {
     return
   }
@@ -121,9 +121,9 @@ async function destroyInstance() {
   try {
     await instanceApi.destroy(drawer.value.slug)
     instance.value = null
-    ElMessage.success('容器已销毁')
+    notify.success('容器已销毁')
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     starting.value = false
   }
@@ -131,19 +131,19 @@ async function destroyInstance() {
 
 async function submitFlag() {
   if (!drawer.value || !answer.value.trim()) {
-    ElMessage.warning('请输入 flag')
+    notify.warning('请输入 flag')
     return
   }
   submitting.value = true
   try {
     await competitionApi.submitFlag(compId, drawer.value.slug, answer.value.trim())
-    ElMessage.success('已提交，异步判定中…')
+    notify.success('已提交，异步判定中…')
     answer.value = ''
     // 异步判题：稍后刷新首页（题目通关状态 + 我的提交）。
     setTimeout(loadView, 1200)
     setTimeout(loadView, 3000)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     submitting.value = false
   }
@@ -160,7 +160,7 @@ async function loadBoard() {
     const resp = await competitionApi.leaderboard(compId, boardMode.value)
     board.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     boardLoading.value = false
   }
@@ -186,7 +186,7 @@ async function loadWps() {
       }
     }
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   }
 }
 
@@ -201,16 +201,16 @@ async function saveWp(item: CompetitionChallengeItem) {
   const content = wpDrafts.value[item.id] ?? ''
   const existing = wpOf(item.id)
   if (!content.trim() && !existing?.zip_name) {
-    ElMessage.warning('请填写 WP 文字或上传 zip（至少一项）')
+    notify.warning('请填写 WP 文字或上传 zip（至少一项）')
     return
   }
   wpSaving.value = true
   try {
     await competitionApi.saveWriteup(compId, item.id, content)
-    ElMessage.success(`「${item.title}」WP 已提交（可继续修改）`)
+    notify.success(`「${item.title}」WP 已提交（可继续修改）`)
     await loadWps()
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     wpSaving.value = false
   }
@@ -218,16 +218,16 @@ async function saveWp(item: CompetitionChallengeItem) {
 
 async function uploadWpZip(item: CompetitionChallengeItem, file: File) {
   if (!file.name.toLowerCase().endsWith('.zip')) {
-    ElMessage.warning('仅支持 zip 文件')
+    notify.warning('仅支持 zip 文件')
     return
   }
   wpUploading.value = item.id
   try {
     const resp = await competitionApi.uploadWriteupZip(compId, item.id, file)
-    ElMessage.success(`「${item.title}」zip 已上传：${resp.zip_name}（可重新上传替换）`)
+    notify.success(`「${item.title}」zip 已上传：${resp.zip_name}（可重新上传替换）`)
     await loadWps()
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     wpUploading.value = 0
   }
@@ -272,91 +272,91 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-loading="loading" class="comp-home">
+  <div v-busy="loading" class="comp-home">
     <header class="head">
       <div class="title">
         <h2>{{ comp?.name ?? '竞赛' }}</h2>
-        <el-tag v-if="comp" :type="running ? 'success' : ended ? 'info' : 'warning'" size="small">
+        <UiTag v-if="comp" :type="running ? 'success' : ended ? 'info' : 'warning'" size="small">
           {{ running ? '进行中' : ended ? '已结束' : '未开始' }}
-        </el-tag>
+        </UiTag>
         <span v-if="running" class="countdown">距结束 {{ countdown }}</span>
         <span v-if="view?.team_name" class="team">队伍：{{ view.team_name }}</span>
       </div>
       <div class="user">
         <span>{{ auth.user?.username }}</span>
-        <el-button size="small" @click="logout">登出</el-button>
+        <UiButton size="small" @click="logout">登出</UiButton>
       </div>
     </header>
 
     <main class="body">
-      <el-tabs v-model="activeTab" @tab-change="onTab">
+      <UiTabs v-model="activeTab" @tab-change="onTab">
         <!-- 题目 -->
-        <el-tab-pane label="题目" name="challenges">
-          <el-table :data="view?.challenges ?? []" empty-text="暂无题目">
-            <el-table-column prop="title" label="标题" min-width="180">
+        <UiTabPane label="题目" name="challenges">
+          <UiTable :data="view?.challenges ?? []" empty-text="暂无题目">
+            <UiTableColumn prop="title" label="标题" min-width="180">
               <template #default="{ row }">
-                <el-link type="primary" @click="openChallenge(row)">{{ row.title }}</el-link>
+                <UiLink type="primary" @click="openChallenge(row)">{{ row.title }}</UiLink>
               </template>
-            </el-table-column>
-            <el-table-column prop="category" label="分类" width="110" />
-            <el-table-column prop="difficulty" label="难度" width="100" />
-            <el-table-column prop="score" label="分值" width="80" />
-            <el-table-column label="容器" width="80">
+            </UiTableColumn>
+            <UiTableColumn prop="category" label="分类" width="110" />
+            <UiTableColumn prop="difficulty" label="难度" width="100" />
+            <UiTableColumn prop="score" label="分值" width="80" />
+            <UiTableColumn label="容器" width="80">
               <template #default="{ row }">
-                <el-tag v-if="row.has_env" size="small" type="success">有</el-tag>
-                <el-tag v-else size="small" type="info">无</el-tag>
+                <UiTag v-if="row.has_env" size="small" type="success">有</UiTag>
+                <UiTag v-else size="small" type="info">无</UiTag>
               </template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
+            </UiTableColumn>
+            <UiTableColumn label="状态" width="90">
               <template #default="{ row }">
-                <el-tag v-if="row.solved" type="success" size="small">已通关</el-tag>
-                <el-tag v-else type="info" size="small">未通关</el-tag>
+                <UiTag v-if="row.solved" type="success" size="small">已通关</UiTag>
+                <UiTag v-else type="info" size="small">未通关</UiTag>
               </template>
-            </el-table-column>
-          </el-table>
+            </UiTableColumn>
+          </UiTable>
 
           <h4>我的提交</h4>
-          <el-table :data="view?.my_submissions ?? []" empty-text="暂无提交" max-height="240">
-            <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column label="结果" width="100">
+          <UiTable :data="view?.my_submissions ?? []" empty-text="暂无提交" max-height="240">
+            <UiTableColumn prop="id" label="ID" width="70" />
+            <UiTableColumn label="结果" width="100">
               <template #default="{ row }">
-                <el-tag v-if="row.status === 'correct'" type="success" size="small">正确</el-tag>
-                <el-tag v-else-if="row.status === 'pending'" type="warning" size="small">判定中</el-tag>
-                <el-tag v-else type="danger" size="small">错误</el-tag>
+                <UiTag v-if="row.status === 'correct'" type="success" size="small">正确</UiTag>
+                <UiTag v-else-if="row.status === 'pending'" type="warning" size="small">判定中</UiTag>
+                <UiTag v-else type="danger" size="small">错误</UiTag>
               </template>
-            </el-table-column>
-            <el-table-column prop="score" label="得分" width="80" />
-            <el-table-column label="时间" min-width="160">
+            </UiTableColumn>
+            <UiTableColumn prop="score" label="得分" width="80" />
+            <UiTableColumn label="时间" min-width="160">
               <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
+            </UiTableColumn>
+          </UiTable>
+        </UiTabPane>
 
         <!-- 排行榜 -->
-        <el-tab-pane label="排行榜" name="leaderboard">
+        <UiTabPane label="排行榜" name="leaderboard">
           <div class="board-head">
-            <el-radio-group v-model="boardMode" size="small" @change="onBoardMode">
-              <el-radio-button value="team">战队榜</el-radio-button>
-              <el-radio-button value="individual">个人榜</el-radio-button>
-            </el-radio-group>
-            <el-button size="small" @click="loadBoard">刷新</el-button>
+            <UiRadioGroup v-model="boardMode" size="small" @change="onBoardMode">
+              <UiRadioButton value="team">战队榜</UiRadioButton>
+              <UiRadioButton value="individual">个人榜</UiRadioButton>
+            </UiRadioGroup>
+            <UiButton size="small" @click="loadBoard">刷新</UiButton>
           </div>
-          <el-table :data="board" v-loading="boardLoading" empty-text="暂无成绩">
-            <el-table-column prop="rank" label="名次" width="80" />
-            <el-table-column :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
+          <UiTable :data="board" v-busy="boardLoading" empty-text="暂无成绩">
+            <UiTableColumn prop="rank" label="名次" width="80" />
+            <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
               <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
-            </el-table-column>
-            <el-table-column label="成员" min-width="180">
+            </UiTableColumn>
+            <UiTableColumn label="成员" min-width="180">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
-            </el-table-column>
-            <el-table-column prop="score" label="得分" width="100" />
-            <el-table-column prop="solved_count" label="解题数" width="90" />
-          </el-table>
-        </el-tab-pane>
+            </UiTableColumn>
+            <UiTableColumn prop="score" label="得分" width="100" />
+            <UiTableColumn prop="solved_count" label="解题数" width="90" />
+          </UiTable>
+        </UiTabPane>
 
         <!-- WP（结束后；按题目一份，全队共享可互相修改） -->
-        <el-tab-pane v-if="ended" label="WP 提交" name="writeup">
-          <el-alert
+        <UiTabPane v-if="ended" label="WP 提交" name="writeup">
+          <UiAlert
             type="info"
             :closable="false"
             title="每道题提交一份 WP：文字 + 可选附带 zip（脚本/截图打包）；队伍模式下全队共享同一份，任一成员均可修改或重新上传。"
@@ -365,103 +365,103 @@ onUnmounted(() => {
           <div v-for="item in view?.challenges ?? []" :key="item.id" class="wp-card">
             <div class="wp-card-head">
               <b>{{ item.title }}</b>
-              <el-tag v-if="wpOf(item.id)" type="success" size="small">已提交</el-tag>
+              <UiTag v-if="wpOf(item.id)" type="success" size="small">已提交</UiTag>
             </div>
             <p v-if="wpOf(item.id)" class="wp-meta dim">
               最近修改：{{ wpOf(item.id)?.updated_by }} · {{ wpOf(item.id)?.updated_at?.replace('T', ' ').slice(0, 19) }}
               <template v-if="wpOf(item.id)?.zip_name"> · zip：{{ wpOf(item.id)?.zip_name }}</template>
             </p>
-            <el-input
+            <UiInput
               v-model="wpDrafts[item.id]"
               type="textarea"
               :rows="6"
               placeholder="本题解题思路（Markdown）：关键步骤、所用工具、flag 截图说明等。"
             />
             <div class="wp-actions">
-              <el-upload
+              <UiUpload
                 :show-file-list="false"
                 :auto-upload="false"
                 accept=".zip"
                 :on-change="(f: UploadFile) => uploadWpZip(item, f.raw as File)"
               >
-                <el-button size="small" :loading="wpUploading === item.id">
+                <UiButton size="small" :loading="wpUploading === item.id">
                   {{ wpOf(item.id)?.zip_name ? '重新上传 zip' : '上传 zip' }}
-                </el-button>
-              </el-upload>
-              <el-button type="primary" size="small" :loading="wpSaving" @click="saveWp(item)">
+                </UiButton>
+              </UiUpload>
+              <UiButton type="primary" size="small" :loading="wpSaving" @click="saveWp(item)">
                 {{ wpOf(item.id) ? '更新 WP' : '提交 WP' }}
-              </el-button>
+              </UiButton>
             </div>
           </div>
-          <el-empty v-if="!view?.challenges?.length" description="本竞赛没有绑定题目" />
-        </el-tab-pane>
-      </el-tabs>
+          <UiEmpty v-if="!view?.challenges?.length" description="本竞赛没有绑定题目" />
+        </UiTabPane>
+      </UiTabs>
     </main>
 
     <!-- 题目详情抽屉 -->
-    <el-drawer v-model="drawerOpen" :title="drawer?.title ?? ''" size="480px">
+    <UiDrawer v-model="drawerOpen" :title="drawer?.title ?? ''" size="480px">
       <template v-if="drawer">
         <div class="drawer-meta">
-          <el-tag size="small">{{ drawer.category }}</el-tag>
-          <el-tag size="small" type="info">{{ drawer.difficulty }}</el-tag>
-          <el-tag size="small" type="warning">{{ drawer.score }} 分</el-tag>
-          <el-tag v-if="drawer.solved" size="small" type="success">已通关</el-tag>
+          <UiTag size="small">{{ drawer.category }}</UiTag>
+          <UiTag size="small" type="info">{{ drawer.difficulty }}</UiTag>
+          <UiTag size="small" type="warning">{{ drawer.score }} 分</UiTag>
+          <UiTag v-if="drawer.solved" size="small" type="success">已通关</UiTag>
         </div>
         <div class="description" v-html="renderedDescription" />
 
         <template v-if="drawer.has_env">
-          <el-divider />
+          <UiDivider />
           <h4>题目环境</h4>
           <p v-if="instance" class="endpoint">
             <code>{{ instance.endpoint }}</code>
-            <el-tag size="small" type="success">running</el-tag>
+            <UiTag size="small" type="success">running</UiTag>
           </p>
           <p v-else class="dim">暂无运行中的容器</p>
           <div class="inst-actions">
-            <el-button type="primary" size="small" :loading="starting" :disabled="!running" @click="startInstance">
+            <UiButton type="primary" size="small" :loading="starting" :disabled="!running" @click="startInstance">
               {{ instance ? '重新检测' : '启动容器' }}
-            </el-button>
-            <el-button v-if="instance" size="small" type="danger" @click="destroyInstance">销毁容器</el-button>
+            </UiButton>
+            <UiButton v-if="instance" size="small" type="danger" @click="destroyInstance">销毁容器</UiButton>
           </div>
           <p v-if="!running" class="dim">比赛{{ ended ? '已结束' : '未开始' }}，容器不可用</p>
         </template>
 
-        <el-divider />
+        <UiDivider />
         <h4>提交 flag</h4>
-        <el-input v-model="answer" placeholder="flag{...}" :disabled="!running" @keyup.enter="submitFlag" />
-        <el-button type="primary" class="submit-btn" :loading="submitting" :disabled="!running" @click="submitFlag">
+        <UiInput v-model="answer" placeholder="flag{...}" :disabled="!running" @keyup.enter="submitFlag" />
+        <UiButton type="primary" class="submit-btn" :loading="submitting" :disabled="!running" @click="submitFlag">
           提交
-        </el-button>
+        </UiButton>
       </template>
-    </el-drawer>
+    </UiDrawer>
   </div>
 </template>
 
 <style scoped>
-.comp-home { min-height: 100vh; background: var(--el-fill-color-lighter); }
+.comp-home { min-height: 100vh; background: var(--muted); }
 .head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.8rem 1.6rem; background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 0.8rem 1.6rem; background: var(--background);
+  border-bottom: 1px solid var(--border);
 }
 .title { display: flex; align-items: center; gap: 0.8rem; }
 .title h2 { margin: 0; font-size: 1.2rem; }
-.countdown { color: var(--el-color-warning); font-size: 0.9rem; }
-.team { color: var(--el-text-color-secondary); font-size: 0.9rem; }
+.countdown { color: var(--accent-foreground); font-size: 0.9rem; }
+.team { color: var(--muted-foreground); font-size: 0.9rem; }
 .user { display: flex; align-items: center; gap: 0.8rem; }
 .body { padding: 1.2rem 1.6rem; max-width: 1100px; margin: 0 auto; }
 .board-head { display: flex; justify-content: space-between; margin-bottom: 0.8rem; }
 .block { margin-bottom: 1rem; }
-.wp-card { background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.wp-card { background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
 .wp-card-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.2rem; }
 .wp-meta { margin: 0.2rem 0 0.6rem; }
 .wp-actions { display: flex; gap: 0.6rem; margin-top: 0.6rem; }
 .drawer-meta { display: flex; gap: 0.4rem; margin-bottom: 0.8rem; }
 .description { line-height: 1.7; }
-.description :deep(pre) { background: var(--el-fill-color-darker); padding: 0.8rem; border-radius: 4px; overflow: auto; }
+.description :deep(pre) { background: var(--muted); padding: 0.8rem; border-radius: 4px; overflow: auto; }
 .endpoint { display: flex; align-items: center; gap: 0.5rem; }
 .inst-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .submit-btn { margin-top: 0.6rem; width: 100%; }
-.dim { color: var(--el-text-color-placeholder); font-size: 0.85rem; }
+.dim { color: var(--muted-foreground); font-size: 0.85rem; }
 h4 { margin: 0.8rem 0 0.4rem; }
 </style>

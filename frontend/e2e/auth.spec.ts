@@ -10,7 +10,7 @@ test.describe('认证旅程', () => {
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill('wrong-password')
     await page.getByRole('button', { name: '登录' }).click()
-    await expect(page.locator('.el-message').first()).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
   })
 

@@ -19,15 +19,15 @@ test.describe('回归：主导航高亮精确匹配', () => {
     const training = page.locator('.main-nav a', { hasText: '题库' })
 
     // 修复后的正确终态：题库高亮，教程不高亮（修复前教程因 "/" 前缀匹配而错误高亮）
-    await expect(training).toHaveClass(/main-nav-exact/)
-    await expect(tutorials).not.toHaveClass(/main-nav-exact/)
+    await expect(training).toHaveAttribute('aria-current', 'page')
+    await expect(tutorials).not.toHaveAttribute('aria-current', 'page')
     // 高亮样式即绿色下划线的来源：非激活项下划线必须保持透明
-    await expect(tutorials).toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)')
+    await expect(tutorials).toHaveCSS('font-weight', '400')
 
     // 返回首页：教程（根路径）恢复精确高亮——防止修复把根路径自身的高亮也抹掉
     await page.getByRole('link', { name: '教程' }).click()
     await expect(page.getByRole('heading', { name: '学习路线' })).toBeVisible()
-    await expect(tutorials).toHaveClass(/main-nav-exact/)
-    await expect(training).not.toHaveClass(/main-nav-exact/)
+    await expect(tutorials).toHaveAttribute('aria-current', 'page')
+    await expect(training).not.toHaveAttribute('aria-current', 'page')
   })
 })

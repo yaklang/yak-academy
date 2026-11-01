@@ -16,10 +16,10 @@ test.describe('账号生命周期', () => {
     // 改密入口在账号信息面板（账号安全区块）；弹窗：当前密码 → 新密码 → 确认
     await page.getByRole('link', { name: `${E2E.student.username}（普通人）` }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
-    const dialog = page.locator('.el-dialog', { hasText: '修改密码' })
-    await dialog.locator('.el-form-item').filter({ hasText: '当前密码' }).locator('input').fill(E2E.student.password)
+    const dialog = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
+    await dialog.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill(E2E.student.password)
     await dialog.getByPlaceholder('至少 6 位').fill('stu-e2e-pass-2')
-    await dialog.locator('.el-form-item').filter({ hasText: '确认新密码' }).locator('input').fill('stu-e2e-pass-2')
+    await dialog.locator('.ui-form-item').filter({ hasText: '确认新密码' }).locator('input').fill('stu-e2e-pass-2')
     await dialog.getByRole('button', { name: '确认修改' }).click()
 
     // 前端登出回登录页（改密吊销全部旧会话）
@@ -35,7 +35,7 @@ test.describe('账号生命周期', () => {
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
     await page.getByRole('button', { name: '登录' }).click()
-    await expect(page.locator('.el-message').first()).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
 
     // 新密码可登录
@@ -47,10 +47,10 @@ test.describe('账号生命周期', () => {
     // 恢复初始密码，保证套件内其他 spec 的账号常量可用
     await page.getByRole('link', { name: `${E2E.student.username}（普通人）` }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
-    const d2 = page.locator('.el-dialog', { hasText: '修改密码' })
-    await d2.locator('.el-form-item').filter({ hasText: '当前密码' }).locator('input').fill('stu-e2e-pass-2')
+    const d2 = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
+    await d2.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill('stu-e2e-pass-2')
     await d2.getByPlaceholder('至少 6 位').fill(E2E.student.password)
-    await d2.locator('.el-form-item').filter({ hasText: '确认新密码' }).locator('input').fill(E2E.student.password)
+    await d2.locator('.ui-form-item').filter({ hasText: '确认新密码' }).locator('input').fill(E2E.student.password)
     await d2.getByRole('button', { name: '确认修改' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
     // 恢复后验证初始密码可登录（下个用例与后续 spec 依赖它）

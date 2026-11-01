@@ -41,8 +41,8 @@ const patternIdx = (slug: string) => [...slug].reduce((a, c) => a + c.charCodeAt
     </p>
   </header>
 
-  <el-skeleton v-if="loading" :rows="3" animated />
-  <el-empty v-else-if="empty" description="暂无内容：等待管理员上传内容包" />
+  <UiSkeleton v-if="loading" :rows="3" animated />
+  <UiEmpty v-else-if="empty" description="暂无内容：等待管理员上传内容包" />
   <div v-else class="card-grid topics">
     <router-link v-for="t in topics" :key="t.slug" :to="`${base}/${t.slug}`" class="topic-link">
       <div class="topic-card tall-card" :class="`pattern-${patternIdx(t.slug)}`">
@@ -65,45 +65,45 @@ const patternIdx = (slug: string) => [...slug].reduce((a, c) => a + c.charCodeAt
 .topics { margin-top: 0; }
 .topic-link { text-decoration: none; color: inherit; }
 .topic-card {
-  background: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color-lighter);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
 }
-.topic-card:hover { border-color: var(--el-color-primary-light-5); }
+.topic-card:hover { border-color: var(--border); }
 .topic-art {
   height: 84px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--border);
   opacity: 0.9;
 }
 /* 三个稳定变体：绿系格点 / 斜纹 / 网格，纯 CSS 装饰 */
 .pattern-0 .topic-art {
   background:
-    radial-gradient(rgba(0, 230, 118, 0.16) 1.5px, transparent 1.5px),
-    linear-gradient(135deg, rgba(0, 230, 118, 0.08), transparent 60%);
+    radial-gradient(rgba(255, 128, 64, 0.16) 1.5px, transparent 1.5px),
+    linear-gradient(135deg, rgba(255, 128, 64, 0.08), transparent 60%);
   background-size: 14px 14px, 100% 100%;
 }
 .pattern-1 .topic-art {
   background:
-    repeating-linear-gradient(45deg, rgba(0, 230, 118, 0.07) 0 10px, transparent 10px 20px),
-    linear-gradient(160deg, rgba(0, 230, 118, 0.1), transparent 65%);
+    repeating-linear-gradient(45deg, rgba(255, 128, 64, 0.07) 0 10px, transparent 10px 20px),
+    linear-gradient(160deg, rgba(255, 128, 64, 0.1), transparent 65%);
 }
 .pattern-2 .topic-art {
   background:
-    linear-gradient(rgba(0, 230, 118, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 230, 118, 0.05) 1px, transparent 1px),
-    linear-gradient(200deg, rgba(0, 230, 118, 0.09), transparent 60%);
+    linear-gradient(rgba(255, 128, 64, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 128, 64, 0.05) 1px, transparent 1px),
+    linear-gradient(200deg, rgba(255, 128, 64, 0.09), transparent 60%);
   background-size: 18px 18px, 18px 18px, 100% 100%;
 }
 .topic-body { padding: 1rem 1.1rem 0.2rem; }
-.topic-body h3 { margin: 0 0 0.45rem; font-size: 1.02rem; color: var(--el-text-color-primary); }
+.topic-body h3 { margin: 0 0 0.45rem; font-size: 1.02rem; color: var(--foreground); }
 .summary {
   margin: 0; font-size: 0.87rem; line-height: 1.6;
-  color: var(--el-text-color-secondary);
+  color: var(--muted-foreground);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-meta { padding: 0.8rem 1.1rem 1rem; }
-.accent { color: var(--el-color-primary); }
-.go { margin-left: auto; color: var(--el-color-primary); font-size: 0.85rem; opacity: 0; transition: opacity 0.15s ease; }
+.accent { color: var(--accent-foreground); }
+.go { margin-left: auto; color: var(--accent-foreground); font-size: 0.85rem; opacity: 0; transition: opacity 0.15s ease; }
 .topic-card:hover .go { opacity: 1; }
 </style>

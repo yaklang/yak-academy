@@ -6,7 +6,7 @@
 // 进行中的竞赛可手动结束，已结束的竞赛可重新配置起止时间再次开赛。
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { notify, dialogs } from '@/lib/notifications'
 import {
   adminChallengeApi,
   adminCompetitionApi,
@@ -36,7 +36,7 @@ async function loadDetail() {
   try {
     detail.value = await adminCompetitionApi.detail(compId)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   }
 }
 
@@ -69,7 +69,7 @@ function syncForm() {
 
 async function saveConfig() {
   if (!form.value.name.trim() || !form.value.start || !form.value.end) {
-    ElMessage.warning('名称与起止时间必填')
+    notify.warning('名称与起止时间必填')
     return
   }
   saving.value = true
@@ -80,9 +80,9 @@ async function saveConfig() {
       start_time: form.value.start.toISOString(),
       end_time: form.value.end.toISOString(),
     })
-    ElMessage.success('配置已保存')
+    notify.success('配置已保存')
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     saving.value = false
   }
@@ -94,7 +94,7 @@ const ending = ref(false)
 
 async function endCompetition() {
   try {
-    await ElMessageBox.confirm(
+    await dialogs.confirm(
       `手动结束竞赛「${detail.value?.name}」？立即生效：参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可重新配置起止时间再次开赛。`,
       '手动结束竞赛',
       { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
@@ -106,9 +106,9 @@ async function endCompetition() {
   try {
     detail.value = await adminCompetitionApi.end(compId)
     syncForm()
-    ElMessage.success('竞赛已结束')
+    notify.success('竞赛已结束')
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     ending.value = false
   }
@@ -124,7 +124,7 @@ async function loadChallenges() {
     const resp = await adminCompetitionApi.challenges(compId)
     challenges.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     challengesLoading.value = false
   }
@@ -168,7 +168,7 @@ async function loadPickList() {
     await nextTick()
     suspending.value = false
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     pickLoading.value = false
   }
@@ -233,7 +233,7 @@ function openBind() {
 function stageChallenges(text: string, source: string): boolean {
   const { list, error } = parseChallengeJSON(text)
   if (error) {
-    ElMessage.warning(`${source}：${error}`)
+    notify.warning(`${source}：${error}`)
     return false
   }
   for (const chal of list) {
@@ -267,34 +267,34 @@ async function submitBind() {
     let body: { slugs: string[] } | ChallengeJSON[]
     if (bindMode.value === 'pick') {
       if (!pickedSlugs.value.length) {
-        ElMessage.warning('请先勾选要绑定的题目')
+        notify.warning('请先勾选要绑定的题目')
         return
       }
       body = { slugs: pickedSlugs.value }
     } else if (bindMode.value === 'slugs') {
       const slugs = bindSlugs.value.split(/[\s,，;；]+/).filter(Boolean)
       if (!slugs.length) {
-        ElMessage.warning('请填写题目 slug')
+        notify.warning('请填写题目 slug')
         return
       }
       body = { slugs }
     } else {
       if (!staged.value.length) {
-        ElMessage.warning('请先选择题目 JSON 文件或粘贴内容')
+        notify.warning('请先选择题目 JSON 文件或粘贴内容')
         return
       }
       if (stagedInvalid.value) {
-        ElMessage.warning('暂存列表中存在校验未通过的题目，请修正文件或移除对应条目')
+        notify.warning('暂存列表中存在校验未通过的题目，请修正文件或移除对应条目')
         return
       }
       body = staged.value.map((s) => s.chal)
     }
     const resp = await adminCompetitionApi.bindChallenges(compId, body)
-    ElMessage.success(`绑定完成：新增 ${resp.added} 题`)
+    notify.success(`绑定完成：新增 ${resp.added} 题`)
     showBind.value = false
     await Promise.all([loadChallenges(), loadDetail()])
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     binding.value = false
   }
@@ -302,7 +302,7 @@ async function submitBind() {
 
 async function unbind(item: TrainingItem) {
   try {
-    await ElMessageBox.confirm(`解绑题目「${item.title}」（${item.slug}）？参赛者将无法再访问该题。`, '解绑确认', {
+    await dialogs.confirm(`解绑题目「${item.title}」（${item.slug}）？参赛者将无法再访问该题。`, '解绑确认', {
       type: 'warning',
     })
   } catch {
@@ -311,10 +311,10 @@ async function unbind(item: TrainingItem) {
   unbinding.value = item.slug
   try {
     const resp = await adminCompetitionApi.unbindChallenges(compId, [item.slug])
-    ElMessage.success(`已解绑 ${resp.removed} 题`)
+    notify.success(`已解绑 ${resp.removed} 题`)
     await Promise.all([loadChallenges(), loadDetail()])
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     unbinding.value = ''
   }
@@ -335,7 +335,7 @@ async function loadParticipants() {
     teams.value = resp.teams
     partTotal.value = resp.total
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     partLoading.value = false
   }
@@ -423,7 +423,7 @@ function removeStagedTeam(row: StagedTeam) {
 async function submitImport() {
   const teamsReq = stagedTeams.value.map((t) => ({ name: t.name, members: t.members }))
   if (!teamsReq.length && !stagedIndividuals.value.length) {
-    ElMessage.warning('请先上传名单表格（每行一条：账号编码或用户名）')
+    notify.warning('请先上传名单表格（每行一条：账号编码或用户名）')
     return
   }
   importing.value = true
@@ -436,7 +436,7 @@ async function submitImport() {
     showResult.value = true
     await Promise.all([loadParticipants(), loadDetail()])
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     importing.value = false
   }
@@ -456,7 +456,7 @@ function openGenerate() {
 
 async function submitGenerate() {
   if (!genForm.value.prefix.trim()) {
-    ElMessage.warning('请填写用户名前缀（如 class26，生成 class26-01、class26-02…）')
+    notify.warning('请填写用户名前缀（如 class26，生成 class26-01、class26-02…）')
     return
   }
   generating.value = true
@@ -469,7 +469,7 @@ async function submitGenerate() {
     })
     await Promise.all([loadParticipants(), loadDetail()])
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     generating.value = false
   }
@@ -506,7 +506,7 @@ async function loadInstances() {
     instances.value = resp.items
     instTotal.value = resp.total
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     instLoading.value = false
   }
@@ -522,7 +522,7 @@ async function loadWarnings() {
     const resp = await adminCompetitionApi.warnings(compId)
     warnings.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     warningsLoading.value = false
   }
@@ -546,7 +546,7 @@ async function loadWriteups() {
     const resp = await adminCompetitionApi.writeups(compId)
     writeups.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     writeupsLoading.value = false
   }
@@ -596,7 +596,7 @@ async function downloadWriteupZip(w: WriteupItem) {
     a.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   }
 }
 
@@ -611,7 +611,7 @@ async function loadBoard() {
     const resp = await adminCompetitionApi.leaderboard(compId, boardMode.value)
     board.value = resp.items
   } catch (e) {
-    ElMessage.error((e as Error).message)
+    notify.error((e as Error).message)
   } finally {
     boardLoading.value = false
   }
@@ -639,16 +639,16 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-loading="loading">
+  <div v-busy="loading">
     <div class="head">
       <h2>
         {{ detail?.name ?? '竞赛详情' }}
-        <el-tag v-if="detail" :type="detail.kind === 'public' ? 'success' : 'warning'" size="small">
+        <UiTag v-if="detail" :type="detail.kind === 'public' ? 'success' : 'warning'" size="small">
           {{ KIND_LABELS[detail.kind] }}
-        </el-tag>
-        <el-tag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</el-tag>
+        </UiTag>
+        <UiTag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</UiTag>
       </h2>
-      <router-link to="/admin/panel/competitions"><el-button size="small">← 返回列表</el-button></router-link>
+      <router-link to="/admin/panel/competitions"><UiButton size="small">← 返回列表</UiButton></router-link>
     </div>
     <p class="hint">
       {{ fmt(detail?.start_time) }} ~ {{ fmt(detail?.end_time) }}
@@ -666,90 +666,90 @@ onMounted(async () => {
       <div class="stat"><b>{{ detail.stats.writeups }}</b><span>WP 提交</span></div>
     </div>
 
-    <el-tabs v-model="activeTab" @tab-change="onTab">
+    <UiTabs v-model="activeTab" @tab-change="onTab">
       <!-- 配置 -->
-      <el-tab-pane label="配置" name="config">
-        <el-card shadow="never">
-          <el-form label-width="90px" style="max-width: 560px">
-            <el-form-item label="竞赛名称">
-              <el-input v-model="form.name" maxlength="100" />
-            </el-form-item>
-            <el-form-item label="竞赛说明">
-              <el-input v-model="form.description" type="textarea" :rows="3" />
-            </el-form-item>
-            <el-form-item label="开始时间">
-              <el-date-picker v-model="form.start" type="datetime" :disabled="running" style="width: 100%" />
+      <UiTabPane label="配置" name="config">
+        <UiCard shadow="never">
+          <UiForm label-width="90px" style="max-width: 560px">
+            <UiFormItem label="竞赛名称">
+              <UiInput v-model="form.name" maxlength="100" />
+            </UiFormItem>
+            <UiFormItem label="竞赛说明">
+              <UiInput v-model="form.description" type="textarea" :rows="3" />
+            </UiFormItem>
+            <UiFormItem label="开始时间">
+              <UiDatePicker v-model="form.start" type="datetime" :disabled="running" style="width: 100%" />
               <div v-if="running" class="dim">进行中的竞赛不能修改开赛时间，可先手动结束</div>
               <div v-else-if="status === 'ended'" class="dim">已结束的竞赛可重新配置起止时间，再次开赛</div>
-            </el-form-item>
-            <el-form-item label="结束时间">
-              <el-date-picker v-model="form.end" type="datetime" style="width: 100%" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
-              <el-button
+            </UiFormItem>
+            <UiFormItem label="结束时间">
+              <UiDatePicker v-model="form.end" type="datetime" style="width: 100%" />
+            </UiFormItem>
+            <UiFormItem>
+              <UiButton type="primary" :loading="saving" @click="saveConfig">保存配置</UiButton>
+              <UiButton
                 v-if="running"
                 type="danger"
                 plain
                 :loading="ending"
                 @click="endCompetition"
-              >手动结束竞赛</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-tab-pane>
+              >手动结束竞赛</UiButton>
+            </UiFormItem>
+          </UiForm>
+        </UiCard>
+      </UiTabPane>
 
       <!-- 题目 -->
-      <el-tab-pane label="题目" name="challenges">
-        <el-card shadow="never">
+      <UiTabPane label="题目" name="challenges">
+        <UiCard shadow="never">
           <template #header>
             <div class="card-head">
               <span>竞赛题目（{{ challenges.length }}）</span>
-              <el-button type="primary" size="small" @click="openBind">绑定 / 导入题目</el-button>
+              <UiButton type="primary" size="small" @click="openBind">绑定 / 导入题目</UiButton>
             </div>
           </template>
-          <el-table :data="challenges" v-loading="challengesLoading" empty-text="尚未绑定题目">
-            <el-table-column prop="slug" label="Slug" width="180" />
-            <el-table-column prop="title" label="标题" min-width="160" />
-            <el-table-column prop="category" label="分类" width="110" />
-            <el-table-column prop="difficulty" label="难度" width="100" />
-            <el-table-column prop="score" label="分值" width="80" />
-            <el-table-column label="容器" width="80">
+          <UiTable :data="challenges" v-busy="challengesLoading" empty-text="尚未绑定题目">
+            <UiTableColumn prop="slug" label="Slug" width="180" />
+            <UiTableColumn prop="title" label="标题" min-width="160" />
+            <UiTableColumn prop="category" label="分类" width="110" />
+            <UiTableColumn prop="difficulty" label="难度" width="100" />
+            <UiTableColumn prop="score" label="分值" width="80" />
+            <UiTableColumn label="容器" width="80">
               <template #default="{ row }">
-                <el-tag v-if="row.has_env" size="small" type="success">有</el-tag>
-                <el-tag v-else size="small" type="info">无</el-tag>
+                <UiTag v-if="row.has_env" size="small" type="success">有</UiTag>
+                <UiTag v-else size="small" type="info">无</UiTag>
               </template>
-            </el-table-column>
-            <el-table-column label="操作" width="110">
+            </UiTableColumn>
+            <UiTableColumn label="操作" width="110">
               <template #default="{ row }">
-                <el-button
+                <UiButton
                   size="small"
                   type="danger"
                   link
                   :disabled="running"
                   :loading="unbinding === row.slug"
                   @click="unbind(row)"
-                >解绑</el-button>
+                >解绑</UiButton>
               </template>
-            </el-table-column>
-          </el-table>
+            </UiTableColumn>
+          </UiTable>
           <p v-if="running" class="dim">竞赛进行中不允许解绑题目</p>
-        </el-card>
-      </el-tab-pane>
+        </UiCard>
+      </UiTabPane>
 
       <!-- 参赛人员 -->
-      <el-tab-pane :label="`参赛人员（${partTotal}）`" name="participants">
-        <el-card shadow="never" class="block">
+      <UiTabPane :label="`参赛人员（${partTotal}）`" name="participants">
+        <UiCard shadow="never" class="block">
           <template #header>
             <div class="card-head">
               <span>参赛人员</span>
               <div v-if="invitational">
-                <el-button size="small" @click="openGenerate">一键生成账号</el-button>
-                <el-button type="primary" size="small" @click="openImport">表格导入队伍 / 人员</el-button>
+                <UiButton size="small" @click="openGenerate">一键生成账号</UiButton>
+                <UiButton type="primary" size="small" @click="openImport">表格导入队伍 / 人员</UiButton>
               </div>
             </div>
           </template>
-          <el-alert
+          <UiAlert
             v-if="!invitational"
             type="info"
             :closable="false"
@@ -757,27 +757,27 @@ onMounted(async () => {
             title="公开赛无需导入参赛者"
             description="公开赛展示在竞赛广场，用户自助报名；已报名者开赛后免邀请码直接入场。"
           />
-          <el-table :data="participants" v-loading="partLoading" empty-text="尚无参赛人员">
-            <el-table-column prop="username" label="用户" width="130" />
-            <el-table-column label="队伍" width="140">
+          <UiTable :data="participants" v-busy="partLoading" empty-text="尚无参赛人员">
+            <UiTableColumn prop="username" label="用户" width="130" />
+            <UiTableColumn label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
-            </el-table-column>
-            <el-table-column prop="invite_code" label="邀请码" width="160">
+            </UiTableColumn>
+            <UiTableColumn prop="invite_code" label="邀请码" width="160">
               <template #default="{ row }"><code>{{ row.invite_code }}</code></template>
-            </el-table-column>
-            <el-table-column label="已入场" width="90">
+            </UiTableColumn>
+            <UiTableColumn label="已入场" width="90">
               <template #default="{ row }">
-                <el-tag :type="row.entered ? 'success' : 'info'" size="small">{{ row.entered ? '是' : '否' }}</el-tag>
+                <UiTag :type="row.entered ? 'success' : 'info'" size="small">{{ row.entered ? '是' : '否' }}</UiTag>
               </template>
-            </el-table-column>
-            <el-table-column label="入场时间" width="160">
+            </UiTableColumn>
+            <UiTableColumn label="入场时间" width="160">
               <template #default="{ row }">{{ fmt(row.entered_at) }}</template>
-            </el-table-column>
-            <el-table-column label="最近 IP" width="130">
+            </UiTableColumn>
+            <UiTableColumn label="最近 IP" width="130">
               <template #default="{ row }">{{ row.last_ip || '-' }}</template>
-            </el-table-column>
-          </el-table>
-          <el-pagination
+            </UiTableColumn>
+          </UiTable>
+          <UiPagination
             background
             layout="total, prev, pager, next"
             :total="partTotal"
@@ -786,40 +786,40 @@ onMounted(async () => {
             @current-change="loadParticipants"
             class="pager"
           />
-        </el-card>
-        <el-card shadow="never">
+        </UiCard>
+        <UiCard shadow="never">
           <template #header><span>队伍总览（{{ teams.length }}）</span></template>
-          <el-table :data="teams" empty-text="暂无队伍">
-            <el-table-column prop="team_name" label="队伍" width="160" />
-            <el-table-column label="成员" min-width="200">
+          <UiTable :data="teams" empty-text="暂无队伍">
+            <UiTableColumn prop="team_name" label="队伍" width="160" />
+            <UiTableColumn label="成员" min-width="200">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
+            </UiTableColumn>
+          </UiTable>
+        </UiCard>
+      </UiTabPane>
 
       <!-- 容器 -->
-      <el-tab-pane label="容器" name="instances">
-        <el-card shadow="never">
+      <UiTabPane label="容器" name="instances">
+        <UiCard shadow="never">
           <template #header>
             <div class="card-head">
               <span>竞赛容器（{{ instTotal }}）</span>
-              <el-button size="small" @click="loadInstances">刷新</el-button>
+              <UiButton size="small" @click="loadInstances">刷新</UiButton>
             </div>
           </template>
-          <el-table :data="instances" v-loading="instLoading" empty-text="暂无竞赛容器">
-            <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="username" label="用户" width="120" />
-            <el-table-column prop="challenge_title" label="题目" min-width="160" />
-            <el-table-column prop="status" label="状态" width="100" />
-            <el-table-column label="Endpoint" min-width="150">
+          <UiTable :data="instances" v-busy="instLoading" empty-text="暂无竞赛容器">
+            <UiTableColumn prop="id" label="ID" width="70" />
+            <UiTableColumn prop="username" label="用户" width="120" />
+            <UiTableColumn prop="challenge_title" label="题目" min-width="160" />
+            <UiTableColumn prop="status" label="状态" width="100" />
+            <UiTableColumn label="Endpoint" min-width="150">
               <template #default="{ row }"><code v-if="row.endpoint">{{ row.endpoint }}</code><span v-else class="dim">-</span></template>
-            </el-table-column>
-            <el-table-column label="创建时间" width="160">
+            </UiTableColumn>
+            <UiTableColumn label="创建时间" width="160">
               <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-            </el-table-column>
-          </el-table>
-          <el-pagination
+            </UiTableColumn>
+          </UiTable>
+          <UiPagination
             background
             layout="total, prev, pager, next"
             :total="instTotal"
@@ -828,133 +828,133 @@ onMounted(async () => {
             @current-change="loadInstances"
             class="pager"
           />
-        </el-card>
-      </el-tab-pane>
+        </UiCard>
+      </UiTabPane>
 
       <!-- 反作弊 -->
-      <el-tab-pane :label="`反作弊${detail?.stats.warnings ? `（${detail.stats.warnings}）` : ''}`" name="warnings">
-        <el-card shadow="never">
+      <UiTabPane :label="`反作弊${detail?.stats.warnings ? `（${detail.stats.warnings}）` : ''}`" name="warnings">
+        <UiCard shadow="never">
           <template #header>
             <div class="card-head">
               <span>反作弊警告（提交跨队 flag / 来源 IP 异常）</span>
-              <el-button size="small" @click="loadWarnings">刷新</el-button>
+              <UiButton size="small" @click="loadWarnings">刷新</UiButton>
             </div>
           </template>
-          <el-table :data="warnings" v-loading="warningsLoading" empty-text="暂无警告">
-            <el-table-column label="时间" width="160">
+          <UiTable :data="warnings" v-busy="warningsLoading" empty-text="暂无警告">
+            <UiTableColumn label="时间" width="160">
               <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-            </el-table-column>
-            <el-table-column label="类型" width="110">
+            </UiTableColumn>
+            <UiTableColumn label="类型" width="110">
               <template #default="{ row }">
-                <el-tag :type="warningType(row.kind)" size="small">{{ warningLabel(row.kind) }}</el-tag>
+                <UiTag :type="warningType(row.kind)" size="small">{{ warningLabel(row.kind) }}</UiTag>
               </template>
-            </el-table-column>
-            <el-table-column prop="username" label="人员" width="120" />
-            <el-table-column label="队伍" width="140">
+            </UiTableColumn>
+            <UiTableColumn prop="username" label="人员" width="120" />
+            <UiTableColumn label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
-            </el-table-column>
-            <el-table-column prop="reason" label="原因" min-width="240" show-overflow-tooltip />
-          </el-table>
-        </el-card>
-      </el-tab-pane>
+            </UiTableColumn>
+            <UiTableColumn prop="reason" label="原因" min-width="240" show-overflow-tooltip />
+          </UiTable>
+        </UiCard>
+      </UiTabPane>
 
       <!-- WP（按题目分组） -->
-      <el-tab-pane label="WP 提交情况" name="writeups">
-        <el-card shadow="never">
+      <UiTabPane label="WP 提交情况" name="writeups">
+        <UiCard shadow="never">
           <template #header>
             <div class="card-head">
               <span>
                 比赛结束后按题目提交 WP（单位 = 题目 × 队伍/个人，已提交
                 {{ writeups.length }} 份）
               </span>
-              <el-button size="small" @click="loadWriteups">刷新</el-button>
+              <UiButton size="small" @click="loadWriteups">刷新</UiButton>
             </div>
           </template>
-          <div v-loading="writeupsLoading">
+          <div v-busy="writeupsLoading">
             <template v-if="writeupsByChallenge.length">
               <div v-for="group in writeupsByChallenge" :key="group.title" class="wp-group">
                 <h4>{{ group.title }}（{{ group.items.length }} 份）</h4>
-                <el-table :data="group.items" size="small" empty-text="暂无提交">
-                  <el-table-column label="队伍/选手" width="160">
+                <UiTable :data="group.items" size="small" empty-text="暂无提交">
+                  <UiTableColumn label="队伍/选手" width="160">
                     <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="username" label="最近修改人" width="120" />
-                  <el-table-column label="提交时间" width="170">
+                  </UiTableColumn>
+                  <UiTableColumn prop="username" label="最近修改人" width="120" />
+                  <UiTableColumn label="提交时间" width="170">
                     <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
-                  </el-table-column>
-                  <el-table-column label="zip" width="110">
+                  </UiTableColumn>
+                  <UiTableColumn label="zip" width="110">
                     <template #default="{ row }">
-                      <el-link
+                      <UiLink
                         v-if="row.zip_name"
                         type="primary"
                         :underline="false"
                         @click="downloadWriteupZip(row)"
                       >
                         {{ row.zip_name }}
-                      </el-link>
+                      </UiLink>
                       <span v-else class="dim">—</span>
                     </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="80">
+                  </UiTableColumn>
+                  <UiTableColumn label="操作" width="80">
                     <template #default="{ row }">
-                      <el-button size="small" type="primary" link @click="viewing = row">查看</el-button>
+                      <UiButton size="small" type="primary" link @click="viewing = row">查看</UiButton>
                     </template>
-                  </el-table-column>
-                </el-table>
+                  </UiTableColumn>
+                </UiTable>
                 <p v-if="wpMissing(group.items[0].challenge_id).length" class="dim wp-missing">
                   未提交：{{ wpMissing(group.items[0].challenge_id).join('、') }}
                 </p>
               </div>
             </template>
-            <el-empty v-else description="暂无 WP 提交" />
+            <UiEmpty v-else description="暂无 WP 提交" />
           </div>
-        </el-card>
-      </el-tab-pane>
+        </UiCard>
+      </UiTabPane>
 
       <!-- 排行榜 -->
-      <el-tab-pane label="排行榜" name="leaderboard">
-        <el-card shadow="never">
+      <UiTabPane label="排行榜" name="leaderboard">
+        <UiCard shadow="never">
           <template #header>
             <div class="card-head">
               <span>竞赛排行榜</span>
-              <el-radio-group v-model="boardMode" size="small" @change="onBoardModeChange">
-                <el-radio-button value="team">战队榜</el-radio-button>
-                <el-radio-button value="individual">个人榜</el-radio-button>
-              </el-radio-group>
+              <UiRadioGroup v-model="boardMode" size="small" @change="onBoardModeChange">
+                <UiRadioButton value="team">战队榜</UiRadioButton>
+                <UiRadioButton value="individual">个人榜</UiRadioButton>
+              </UiRadioGroup>
             </div>
           </template>
-          <el-table :data="board" v-loading="boardLoading" empty-text="暂无成绩">
-            <el-table-column prop="rank" label="名次" width="80" />
-            <el-table-column :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
+          <UiTable :data="board" v-busy="boardLoading" empty-text="暂无成绩">
+            <UiTableColumn prop="rank" label="名次" width="80" />
+            <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
               <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
-            </el-table-column>
-            <el-table-column label="成员" min-width="180">
+            </UiTableColumn>
+            <UiTableColumn label="成员" min-width="180">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
-            </el-table-column>
-            <el-table-column prop="score" label="得分" width="100" />
-            <el-table-column prop="solved_count" label="解题数" width="90" />
-            <el-table-column label="最近通关" width="160">
+            </UiTableColumn>
+            <UiTableColumn prop="score" label="得分" width="100" />
+            <UiTableColumn prop="solved_count" label="解题数" width="90" />
+            <UiTableColumn label="最近通关" width="160">
               <template #default="{ row }">{{ fmt(row.last_solve_at) }}</template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-    </el-tabs>
+            </UiTableColumn>
+          </UiTable>
+        </UiCard>
+      </UiTabPane>
+    </UiTabs>
   </div>
 
   <!-- 绑定/导入题目（从题库勾选 / slug 直填 / 文件粘贴导入 challenge.json） -->
-  <el-dialog v-model="showBind" title="绑定 / 导入题目" width="860px">
-    <el-radio-group v-model="bindMode" class="bind-mode">
-      <el-radio-button value="pick">从题库勾选</el-radio-button>
-      <el-radio-button value="slugs">填写 slug</el-radio-button>
-      <el-radio-button value="json">导入题目 JSON</el-radio-button>
-    </el-radio-group>
+  <UiDialog v-model="showBind" title="绑定 / 导入题目" width="860px">
+    <UiRadioGroup v-model="bindMode" class="bind-mode">
+      <UiRadioButton value="pick">从题库勾选</UiRadioButton>
+      <UiRadioButton value="slugs">填写 slug</UiRadioButton>
+      <UiRadioButton value="json">导入题目 JSON</UiRadioButton>
+    </UiRadioGroup>
     <template v-if="bindMode === 'pick'">
       <p class="dim">
         从题库勾选已有题目绑定进本场（跨页可累计勾选；已绑定的题不再列出可选）。
       </p>
       <div class="pick-filters">
-        <el-input
+        <UiInput
           v-model="pickQuery"
           placeholder="搜索：标题 / slug / 分类"
           clearable
@@ -962,49 +962,49 @@ onMounted(async () => {
           @keyup.enter="searchPick"
           @clear="searchPick"
         />
-        <el-select v-model="pickBank" placeholder="题库（全部）" clearable class="pick-bank" @change="searchPick">
-          <el-option label="CTF 题库" value="ctf" />
-          <el-option label="ACM 题库" value="acm" />
-          <el-option label="教程题目" value="tutorial" />
-        </el-select>
-        <el-button @click="searchPick">搜索</el-button>
+        <UiSelect v-model="pickBank" placeholder="题库（全部）" clearable class="pick-bank" @change="searchPick">
+          <UiOption label="CTF 题库" value="ctf" />
+          <UiOption label="ACM 题库" value="acm" />
+          <UiOption label="教程题目" value="tutorial" />
+        </UiSelect>
+        <UiButton @click="searchPick">搜索</UiButton>
         <span class="dim picked-sum">已勾选 {{ pickedCount }} 题</span>
       </div>
-      <el-table
+      <UiTable
         ref="pickTable"
         :data="pickItems"
-        v-loading="pickLoading"
+        v-busy="pickLoading"
         size="small"
         max-height="340"
         row-key="slug"
         empty-text="题库为空或无匹配题目"
         @selection-change="onPickSelectionChange"
       >
-        <el-table-column type="selection" width="42" :selectable="pickSelectable" />
-        <el-table-column prop="title" label="题目" min-width="200" show-overflow-tooltip>
+        <UiTableColumn type="selection" width="42" :selectable="pickSelectable" />
+        <UiTableColumn prop="title" label="题目" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.title }}
             <span class="dim">（{{ row.slug }}）</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="category" label="分类" width="110" show-overflow-tooltip />
-        <el-table-column label="题库" width="90">
+        </UiTableColumn>
+        <UiTableColumn prop="category" label="分类" width="110" show-overflow-tooltip />
+        <UiTableColumn label="题库" width="90">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.bank === 'ctf' ? 'danger' : row.bank === 'acm' ? 'warning' : 'info'">
+            <UiTag size="small" :type="row.bank === 'ctf' ? 'danger' : row.bank === 'acm' ? 'warning' : 'info'">
               {{ row.bank === 'ctf' ? 'CTF' : row.bank === 'acm' ? 'ACM' : '教程' }}
-            </el-tag>
+            </UiTag>
           </template>
-        </el-table-column>
-        <el-table-column label="难度" width="80">
+        </UiTableColumn>
+        <UiTableColumn label="难度" width="80">
           <template #default="{ row }">{{ row.difficulty }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="90">
+        </UiTableColumn>
+        <UiTableColumn label="状态" width="90">
           <template #default="{ row }">
-            <el-tag v-if="!pickSelectable(row)" type="success" size="small">已绑定</el-tag>
+            <UiTag v-if="!pickSelectable(row)" type="success" size="small">已绑定</UiTag>
           </template>
-        </el-table-column>
-      </el-table>
-      <el-pagination
+        </UiTableColumn>
+      </UiTable>
+      <UiPagination
         background
         layout="total, prev, pager, next"
         :total="pickTotal"
@@ -1016,7 +1016,7 @@ onMounted(async () => {
     </template>
     <template v-else-if="bindMode === 'slugs'">
       <p class="dim">填写题库已有题目的 slug（逗号或换行分隔）。绑定后题目进入本场竞赛，题库侧不受影响。</p>
-      <el-input v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
+      <UiInput v-model="bindSlugs" type="textarea" :rows="5" placeholder="web-lfi&#10;crypto-caesar" />
     </template>
     <template v-else>
       <p class="dim">
@@ -1024,114 +1024,114 @@ onMounted(async () => {
         所有题目先经本地校验进入下方暂存列表，全部通过后一次性导入并绑定进本场（导入的题目同时进入题库（教程题目 tab），如需修改请到题目管理编辑）。
       </p>
       <div class="stage-actions">
-        <el-upload multiple accept=".json,application/json" :show-file-list="false" :before-upload="onStageFile" :disabled="binding">
-          <el-button size="small">选择 JSON 文件（可多选）</el-button>
-        </el-upload>
-        <el-input v-model="bindPaste" type="textarea" :rows="3" placeholder='或粘贴 challenge.json（单对象或数组）' />
-        <el-button size="small" @click="stagePaste">解析并加入</el-button>
+        <UiUpload multiple accept=".json,application/json" :show-file-list="false" :before-upload="onStageFile" :disabled="binding">
+          <UiButton size="small">选择 JSON 文件（可多选）</UiButton>
+        </UiUpload>
+        <UiInput v-model="bindPaste" type="textarea" :rows="3" placeholder='或粘贴 challenge.json（单对象或数组）' />
+        <UiButton size="small" @click="stagePaste">解析并加入</UiButton>
       </div>
-      <el-table v-if="staged.length" :data="staged" size="small" class="stage-table" empty-text="暂存列表为空">
-        <el-table-column label="来源" width="140" show-overflow-tooltip>
+      <UiTable v-if="staged.length" :data="staged" size="small" class="stage-table" empty-text="暂存列表为空">
+        <UiTableColumn label="来源" width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.source }}</template>
-        </el-table-column>
-        <el-table-column label="题目" min-width="160">
+        </UiTableColumn>
+        <UiTableColumn label="题目" min-width="160">
           <template #default="{ row }">
             {{ row.chal.title || '（未命名）' }}
             <span class="dim">（{{ row.chal.slug || '无 slug' }}）</span>
           </template>
-        </el-table-column>
-        <el-table-column label="校验" min-width="220">
+        </UiTableColumn>
+        <UiTableColumn label="校验" min-width="220">
           <template #default="{ row }">
-            <el-tag v-if="!row.errors.length" type="success" size="small">通过</el-tag>
+            <UiTag v-if="!row.errors.length" type="success" size="small">通过</UiTag>
             <div v-else class="stage-errs">
-              <el-tag type="danger" size="small">未通过</el-tag>
+              <UiTag type="danger" size="small">未通过</UiTag>
               <span>{{ row.errors.join('；') }}</span>
             </div>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="80">
+        </UiTableColumn>
+        <UiTableColumn label="操作" width="80">
           <template #default="{ row }">
-            <el-button size="small" type="danger" link @click="removeStaged(row)">移除</el-button>
+            <UiButton size="small" type="danger" link @click="removeStaged(row)">移除</UiButton>
           </template>
-        </el-table-column>
-      </el-table>
+        </UiTableColumn>
+      </UiTable>
       <p v-else class="dim">尚未暂存任何题目：选择文件或粘贴 JSON 后将在此逐题列出。</p>
     </template>
     <template #footer>
-      <el-button @click="showBind = false">取消</el-button>
-      <el-button type="primary" :loading="binding" @click="submitBind">
+      <UiButton @click="showBind = false">取消</UiButton>
+      <UiButton type="primary" :loading="binding" @click="submitBind">
         {{ bindMode === 'pick' ? `绑定所选（${pickedCount} 题）` : bindMode === 'slugs' ? '绑定' : `导入并绑定（${staged.length} 题）` }}
-      </el-button>
+      </UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 
   <!-- 参赛人员表格导入（固定格式 CSV；仅邀请赛） -->
-  <el-dialog v-model="showImport" title="表格导入队伍 / 参赛人员" width="720px">
+  <UiDialog v-model="showImport" title="表格导入队伍 / 参赛人员" width="720px">
     <p class="dim">
       条目 = 账号编码（YA26-00001）或用户名，引用既有账号（不自动建号，缺失条目在导入结果中列出——
       可用「一键生成账号」补号后重导）。每人生成唯一邀请码并投递站内邀请邮件。
     </p>
-    <el-radio-group v-model="importMode" class="bind-mode">
-      <el-radio-button value="individuals">个人名单</el-radio-button>
-      <el-radio-button value="teams">队伍名单</el-radio-button>
-    </el-radio-group>
+    <UiRadioGroup v-model="importMode" class="bind-mode">
+      <UiRadioButton value="individuals">个人名单</UiRadioButton>
+      <UiRadioButton value="teams">队伍名单</UiRadioButton>
+    </UiRadioGroup>
     <div class="stage-actions">
       <div class="tpl-row">
-        <el-upload accept=".csv,text/csv" :show-file-list="false" :before-upload="onImportFile" :disabled="importing">
-          <el-button size="small">选择 CSV 文件</el-button>
-        </el-upload>
-        <el-button size="small" link type="primary" @click="downloadTemplate(importMode)">下载模板</el-button>
+        <UiUpload accept=".csv,text/csv" :show-file-list="false" :before-upload="onImportFile" :disabled="importing">
+          <UiButton size="small">选择 CSV 文件</UiButton>
+        </UiUpload>
+        <UiButton size="small" link type="primary" @click="downloadTemplate(importMode)">下载模板</UiButton>
         <span class="dim tpl-hint">
           {{ importMode === 'individuals' ? '每行一条：账号编码或用户名' : '每行：队伍名,成员1,成员2,…（成员 = 账号编码或用户名）' }}
         </span>
       </div>
     </div>
     <template v-if="importMode === 'individuals'">
-      <el-table v-if="stagedIndividuals.length" :data="stagedIndividuals.map((v, i) => ({ i, v }))" size="small" max-height="240">
-        <el-table-column label="序号" width="70">
+      <UiTable v-if="stagedIndividuals.length" :data="stagedIndividuals.map((v, i) => ({ i, v }))" size="small" max-height="240">
+        <UiTableColumn label="序号" width="70">
           <template #default="{ row }">{{ row.i + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="条目（账号编码或用户名）">
+        </UiTableColumn>
+        <UiTableColumn label="条目（账号编码或用户名）">
           <template #default="{ row }">
             <code>{{ row.v }}</code>
-            <el-button size="small" type="danger" link class="stage-del" @click="stagedIndividuals.splice(row.i, 1)">移除</el-button>
+            <UiButton size="small" type="danger" link class="stage-del" @click="stagedIndividuals.splice(row.i, 1)">移除</UiButton>
           </template>
-        </el-table-column>
-      </el-table>
+        </UiTableColumn>
+      </UiTable>
       <p v-else class="dim">尚未解析到条目：选择 CSV 文件后在此列出，可反复上传合并。</p>
     </template>
     <template v-else>
-      <el-table v-if="stagedTeams.length" :data="stagedTeams" size="small" max-height="240">
-        <el-table-column prop="name" label="队伍" width="140" />
-        <el-table-column label="成员">
+      <UiTable v-if="stagedTeams.length" :data="stagedTeams" size="small" max-height="240">
+        <UiTableColumn prop="name" label="队伍" width="140" />
+        <UiTableColumn label="成员">
           <template #default="{ row }">
             <code v-for="m in row.members" :key="m" class="member-chip">{{ m }}</code>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="80">
+        </UiTableColumn>
+        <UiTableColumn label="操作" width="80">
           <template #default="{ row }">
-            <el-button size="small" type="danger" link @click="removeStagedTeam(row)">移除</el-button>
+            <UiButton size="small" type="danger" link @click="removeStagedTeam(row)">移除</UiButton>
           </template>
-        </el-table-column>
-      </el-table>
+        </UiTableColumn>
+      </UiTable>
       <p v-else class="dim">尚未解析到队伍：选择 CSV 文件后在此列出，可反复上传合并。</p>
     </template>
     <template #footer>
-      <el-button @click="showImport = false">取消</el-button>
-      <el-button
+      <UiButton @click="showImport = false">取消</UiButton>
+      <UiButton
         type="primary"
         :loading="importing"
         :disabled="!stagedIndividuals.length && !stagedTeams.length"
         @click="submitImport"
       >
         导入{{ stagedTeams.length ? `（${stagedTeams.length} 队` : '' }}{{ stagedTeams.length && stagedIndividuals.length ? ' + ' : '' }}{{ stagedIndividuals.length ? `${stagedIndividuals.length} 人` : '' }}）
-      </el-button>
+      </UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 
   <!-- 导入结果 -->
-  <el-dialog v-model="showResult" title="导入结果" width="760px">
-    <el-alert
+  <UiDialog v-model="showResult" title="导入结果" width="760px">
+    <UiAlert
       v-if="importResult && importResult.missing.length"
       type="warning"
       :closable="false"
@@ -1139,85 +1139,85 @@ onMounted(async () => {
       :title="`以下 ${importResult.missing.length} 个条目未匹配到账号（账号编码与用户名均未命中），未导入：`"
       :description="importResult.missing.join('、') + '。可修正条目重导，或先用「一键生成账号」补号。'"
     />
-    <el-table v-if="importResult" :data="importResult.participants" empty-text="无参赛者">
-      <el-table-column prop="username" label="参赛者" width="130" />
-      <el-table-column prop="account_code" label="账号编码" width="130">
+    <UiTable v-if="importResult" :data="importResult.participants" empty-text="无参赛者">
+      <UiTableColumn prop="username" label="参赛者" width="130" />
+      <UiTableColumn prop="account_code" label="账号编码" width="130">
         <template #default="{ row }"><code>{{ row.account_code || '-' }}</code></template>
-      </el-table-column>
-      <el-table-column label="队伍" width="140">
+      </UiTableColumn>
+      <UiTableColumn label="队伍" width="140">
         <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
-      </el-table-column>
-      <el-table-column prop="invite_code" label="邀请码" width="160">
+      </UiTableColumn>
+      <UiTableColumn prop="invite_code" label="邀请码" width="160">
         <template #default="{ row }"><code>{{ row.invite_code }}</code></template>
-      </el-table-column>
-      <el-table-column label="邮件" width="90">
+      </UiTableColumn>
+      <UiTableColumn label="邮件" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.mail_delivered ? 'success' : 'danger'" size="small">{{ row.mail_delivered ? '已投递' : '失败' }}</el-tag>
+          <UiTag :type="row.mail_delivered ? 'success' : 'danger'" size="small">{{ row.mail_delivered ? '已投递' : '失败' }}</UiTag>
         </template>
-      </el-table-column>
-    </el-table>
+      </UiTableColumn>
+    </UiTable>
     <template #footer>
-      <el-button @click="showResult = false">关闭</el-button>
+      <UiButton @click="showResult = false">关闭</UiButton>
     </template>
-  </el-dialog>
+  </UiDialog>
 
   <!-- 一键生成账号（仅邀请赛） -->
-  <el-dialog v-model="showGenerate" title="一键生成参赛账号" width="680px">
+  <UiDialog v-model="showGenerate" title="一键生成参赛账号" width="680px">
     <template v-if="!genResult">
       <p class="dim">
         按前缀批量生成账号（用户名 = 前缀-零填充序号，如 class26-01…class26-10）并全部导入为本场参赛者；
         可配置自动组队（按生成顺序每 N 人一队，余数进最后一队）。初始密码默认 123456。
       </p>
-      <el-form label-width="90px">
-        <el-form-item label="用户名前缀" required>
-          <el-input v-model="genForm.prefix" placeholder="如 class26（1-16 位小写字母/数字/连字符）" />
-        </el-form-item>
-        <el-form-item label="生成数量" required>
-          <el-input-number v-model="genForm.count" :min="1" :max="500" />
-        </el-form-item>
-        <el-form-item label="每队人数">
-          <el-input-number v-model="genForm.teamSize" :min="0" :max="10" />
+      <UiForm label-width="90px">
+        <UiFormItem label="用户名前缀" required>
+          <UiInput v-model="genForm.prefix" placeholder="如 class26（1-16 位小写字母/数字/连字符）" />
+        </UiFormItem>
+        <UiFormItem label="生成数量" required>
+          <UiInputNumber v-model="genForm.count" :min="1" :max="500" />
+        </UiFormItem>
+        <UiFormItem label="每队人数">
+          <UiInputNumber v-model="genForm.teamSize" :min="0" :max="10" />
           <div class="dim">0 = 不组队（个人参赛）；&gt;0 = 自动编入「第 N 队」</div>
-        </el-form-item>
-        <el-form-item label="初始密码">
-          <el-input v-model="genForm.password" placeholder="留空 = 默认 123456" clearable />
-        </el-form-item>
-      </el-form>
+        </UiFormItem>
+        <UiFormItem label="初始密码">
+          <UiInput v-model="genForm.password" placeholder="留空 = 默认 123456" clearable />
+        </UiFormItem>
+      </UiForm>
       <p class="dim">同名既有账号复用（沿用原密码），新建账号的初始密码仅在生成结果中显示，请导出后立即分发。</p>
     </template>
     <template v-else>
-      <el-alert type="success" :closable="false" class="block"
+      <UiAlert type="success" :closable="false" class="block"
         :title="`生成完成：新建 ${genResult.accounts.filter((a) => a.created).length} 个账号、复用 ${genResult.accounts.filter((a) => !a.created).length} 个既有账号${genResult.teams.length ? `，编入 ${genResult.teams.length} 支队伍` : ''}。`" />
-      <el-table :data="genResult.accounts" size="small" max-height="320">
-        <el-table-column prop="username" label="用户名" width="140" />
-        <el-table-column prop="account_code" label="账号编码" width="130">
+      <UiTable :data="genResult.accounts" size="small" max-height="320">
+        <UiTableColumn prop="username" label="用户名" width="140" />
+        <UiTableColumn prop="account_code" label="账号编码" width="130">
           <template #default="{ row }"><code>{{ row.account_code }}</code></template>
-        </el-table-column>
-        <el-table-column label="初始密码" width="140">
+        </UiTableColumn>
+        <UiTableColumn label="初始密码" width="140">
           <template #default="{ row }"><code>{{ row.initial_password ?? '（复用既有账号，沿用原密码）' }}</code></template>
-        </el-table-column>
-        <el-table-column label="队伍" min-width="120">
+        </UiTableColumn>
+        <UiTableColumn label="队伍" min-width="120">
           <template #default="{ row }">
             {{ genResult.participants.find((p) => p.username === row.username)?.team_name ?? '（个人）' }}
           </template>
-        </el-table-column>
-      </el-table>
+        </UiTableColumn>
+      </UiTable>
     </template>
     <template #footer>
       <template v-if="!genResult">
-        <el-button @click="showGenerate = false">取消</el-button>
-        <el-button type="primary" :loading="generating" @click="submitGenerate">生成并导入</el-button>
+        <UiButton @click="showGenerate = false">取消</UiButton>
+        <UiButton type="primary" :loading="generating" @click="submitGenerate">生成并导入</UiButton>
       </template>
       <template v-else>
-        <el-button @click="showGenerate = false">关闭</el-button>
-        <el-button type="primary" @click="exportGeneratedCsv">导出账号 CSV</el-button>
-        <el-button @click="genResult = null">再生成一批</el-button>
+        <UiButton @click="showGenerate = false">关闭</UiButton>
+        <UiButton type="primary" @click="exportGeneratedCsv">导出账号 CSV</UiButton>
+        <UiButton @click="genResult = null">再生成一批</UiButton>
       </template>
     </template>
-  </el-dialog>
+  </UiDialog>
 
   <!-- WP 查看 -->
-  <el-dialog
+  <UiDialog
     :model-value="viewing !== null"
     :title="`WP：${viewing?.challenge_title ?? ''} · ${viewing?.team_name ?? viewing?.username ?? ''}`"
     width="680px"
@@ -1225,7 +1225,7 @@ onMounted(async () => {
   >
     <p v-if="viewing" class="dim wp-dialog-meta">
       最近修改：{{ viewing.username }} · {{ fmt(viewing.submitted_at) }}
-      <el-link
+      <UiLink
         v-if="viewing.zip_name"
         type="primary"
         :underline="false"
@@ -1233,27 +1233,27 @@ onMounted(async () => {
         @click="downloadWriteupZip(viewing)"
       >
         下载 zip：{{ viewing.zip_name }}
-      </el-link>
+      </UiLink>
     </p>
     <pre class="wp">{{ viewing?.content || '（仅上传了 zip，未填写文字）' }}</pre>
-  </el-dialog>
+  </UiDialog>
 </template>
 
 <style scoped>
 .head { display: flex; align-items: center; justify-content: space-between; }
-.hint { color: var(--el-text-color-secondary); font-size: 0.9rem; margin-top: 0; }
+.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .stats { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 0.8rem 0 1.2rem; }
 .stat {
   min-width: 96px; padding: 0.6rem 1rem; text-align: center;
-  border: 1px solid var(--el-border-color-lighter); border-radius: 6px;
+  border: 1px solid var(--border); border-radius: 6px;
   display: flex; flex-direction: column; gap: 0.2rem;
 }
 .stat b { font-size: 1.3rem; }
-.stat span { color: var(--el-text-color-secondary); font-size: 0.8rem; }
-.stat.warn b { color: var(--el-color-danger); }
+.stat span { color: var(--muted-foreground); font-size: 0.8rem; }
+.stat.warn b { color: var(--destructive); }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 .block { margin-bottom: 1.2rem; }
-.dim { color: var(--el-text-color-placeholder); font-size: 0.8rem; }
+.dim { color: var(--muted-foreground); font-size: 0.8rem; }
 .pager { margin-top: 1rem; }
 .bind-mode { margin-bottom: 0.8rem; }
 .pick-filters { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.6rem; flex-wrap: wrap; }
@@ -1266,13 +1266,13 @@ onMounted(async () => {
 .stage-del { margin-left: 0.8rem; }
 .member-chip {
   display: inline-block; margin: 0 0.4rem 0.3rem 0; padding: 0 0.4rem;
-  background: var(--el-fill-color-light); border-radius: 3px;
+  background: var(--muted); border-radius: 3px;
 }
 .stage-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.8rem; }
-.stage-actions .el-button { margin-left: 0; }
+.stage-actions .ui-button { margin-left: 0; }
 .stage-table { margin-bottom: 0.4rem; }
 .stage-errs { display: flex; align-items: flex-start; gap: 0.4rem; }
-.stage-errs span { color: var(--el-color-danger); font-size: 0.82rem; line-height: 1.4; }
+.stage-errs span { color: var(--destructive); font-size: 0.82rem; line-height: 1.4; }
 .wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
 .wp-group { margin-bottom: 1.4rem; }
 .wp-group h4 { margin: 0 0 0.5rem; }
