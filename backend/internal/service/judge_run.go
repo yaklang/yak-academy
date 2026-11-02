@@ -249,7 +249,7 @@ func (s *JudgeService) executeCodeRun(run *codeRun, source, input, answer string
 	default:
 		run.outcome = "re"
 		if re, ok := err.(*ErrCodeRunError); ok {
-			run.stderr = re.Stderr
+			run.stderr = truncate(sanitizeToolOutput(re.Stderr), 4096)
 		} else {
 			run.stderr = truncate(err.Error(), 4096)
 		}

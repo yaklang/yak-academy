@@ -91,7 +91,7 @@ type statsLine struct {
 func (d DockerDriver) HostStats(ctx context.Context) (*HostStats, error) {
 	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{json .}}").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker info: %v: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("docker info: %v: %s", err, sanitizeToolOutput(string(out)))
 	}
 	stats, err := hostStatsFromInfo(out)
 	if err != nil {
@@ -99,7 +99,7 @@ func (d DockerDriver) HostStats(ctx context.Context) (*HostStats, error) {
 	}
 
 	if out, err = exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{json .}}").CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("docker stats: %v: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("docker stats: %v: %s", err, sanitizeToolOutput(string(out)))
 	}
 	stats.Containers = parseStatsOutput(string(out))
 	if total, used, ok := hostMemory(); ok {
