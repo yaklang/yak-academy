@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // CodeEngine ACM 编程题判题引擎：执行一份 yak 源码，喂数据、限时、收输出。
@@ -152,7 +153,7 @@ func (y *YakEngine) Run(ctx context.Context, source, input string, limit time.Du
 	// markerWriter 只由 stdout 读 goroutine 写入；result() 在读 goroutine
 	// 结束后调用（finish 内保证），无并发写。
 	readerDone := make(chan struct{})
-	go func() {
+	safego.Go("judge.engine.stdout", func() {
 		defer close(readerDone)
 		buf := make([]byte, 32*1024)
 		for {
@@ -164,16 +165,24 @@ func (y *YakEngine) Run(ctx context.Context, source, input string, limit time.Du
 				return
 			}
 		}
-	}()
+	})
 	stderrDone := make(chan struct{})
 	var stderrBuf stderrCollector
-	go func() {
+	safego.Go("judge.engine.stderr", func() {
 		defer close(stderrDone)
 		_, _ = io.Copy(&stderrBuf, rErr)
-	}()
+	})
 
+	// waitCh 必须恰好收到一次：halt/超时分支都阻塞在 <-waitCh，
+	// panic 时补一条错误，避免收尾永久挂起。
 	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
+	safego.Go("judge.engine.wait", func() {
+		var werr error
+		if !safego.Run("judge.engine.wait", func() { werr = cmd.Wait() }) {
+			werr = fmt.Errorf("internal error: process wait failed")
+		}
+		waitCh <- werr
+	})
 
 	execTimer := time.NewTimer(0) // 初值即停：等 boot 信号才武装
 	if !execTimer.Stop() {

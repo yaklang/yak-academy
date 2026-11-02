@@ -12,6 +12,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // 动态计分（event-sourcing-rules skill：value = f(solve_count)，linear 衰减）。
@@ -211,8 +212,8 @@ func (s *JudgeService) IsSolved(ctx context.Context, userID, challengeID uint) b
 // （Submission 表为持久队列，每 2s 扫描 pending 重投——重启/队列满丢失由此兜底）。
 // judge 幂等护栏：非 pending 的 submission 直接跳过，重复投递不产生重复判定/计分。
 func (s *JudgeService) StartWorker(ctx context.Context) {
-	go s.consume(ctx)
-	go s.pollPending(ctx)
+	safego.Go("judge.consume", func() { s.consume(ctx) })
+	safego.Go("judge.pollPending", func() { s.pollPending(ctx) })
 }
 
 func (s *JudgeService) consume(ctx context.Context) {
@@ -221,14 +222,16 @@ func (s *JudgeService) consume(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id := <-s.queue:
-			s.judge(ctx, id)
+			// 单条判定 panic 只记失败、worker 继续消费：未恢复的后台 panic
+			// 会终止整个服务进程（见 safego 包注释）。
+			safego.Run(fmt.Sprintf("judge.submission#%d", id), func() { s.judge(ctx, id) })
 		}
 	}
 }
 
 // pollPending 先做一次即时扫描（覆盖重启滞留），之后按 2s 周期重投 pending。
 func (s *JudgeService) pollPending(ctx context.Context) {
-	s.requeuePending(ctx)
+	safego.Run("judge.requeuePending", func() { s.requeuePending(ctx) })
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -236,7 +239,7 @@ func (s *JudgeService) pollPending(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.requeuePending(ctx)
+			safego.Run("judge.requeuePending", func() { s.requeuePending(ctx) })
 		}
 	}
 }

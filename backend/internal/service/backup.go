@@ -20,6 +20,7 @@ import (
 
 	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // BackupService 平台数据快照：SQLite 一致性快照（VACUUM INTO）+ 数据目录
@@ -177,9 +178,12 @@ func (s *BackupService) RunScheduler(ctx context.Context, interval time.Duration
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if _, err := s.Create(ctx); err != nil {
-				log.Printf("scheduled backup: %v", err)
-			}
+			// 单次备份 panic 不影响下一周期；进程级兜底由调用方 safego.Go 提供。
+			safego.Run("backup.create", func() {
+				if _, err := s.Create(ctx); err != nil {
+					log.Printf("scheduled backup: %v", err)
+				}
+			})
 		}
 	}
 }
