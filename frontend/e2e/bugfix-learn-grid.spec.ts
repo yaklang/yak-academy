@@ -29,5 +29,9 @@ test.describe('回归：学习路线卡片网格', () => {
 
     await expect(card.getByText(/个 Room/)).toBeVisible()
     await expect(card.getByText('进入专题')).toBeVisible()
+
+    // 回归（2026-11-02）：topic.md front matter 的 summary 曾不被解析，
+    // 专题卡只剩标题 + Room 数（信息密度空缺）。修复后卡片必须渲染摘要行。
+    await expect(card.getByText('请求伪造、注入与前端信任边界', { exact: false })).toBeVisible()
   })
 })

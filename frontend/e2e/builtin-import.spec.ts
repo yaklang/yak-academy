@@ -42,7 +42,7 @@ test.describe('内置训练一键导入', () => {
 
     // 学生题库：「教程题目」tab 专属内置题集，vulinbox 分类分组可见
     await loginAsStudent(page)
-    await page.getByRole('link', { name: '题库' }).click()
+    await page.getByRole('link', { name: '题库', exact: true }).click()
     await expect(page.locator('h3.cat', { hasText: 'ssrf' })).toBeVisible()
     await expect(page.locator('h3.cat', { hasText: 'jwt' })).toBeVisible()
 

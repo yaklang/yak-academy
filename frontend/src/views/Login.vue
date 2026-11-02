@@ -14,6 +14,7 @@ import Brand from '@/components/Brand.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TerminalRain from '@/components/TerminalRain.vue'
 import CipherReveal from '@/components/CipherReveal.vue'
+import ClickSpark from '@/components/ClickSpark.vue'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '../stores/auth'
 import { authApi } from '../api'
@@ -225,6 +226,8 @@ async function submit() {
       </section>
     </main>
     <footer class="auth-footer"><span>学以致用，知行合一。</span><span>© {{ new Date().getFullYear() }} Yak Academy</span></footer>
+    <!-- 点击火花仅在公开页生效（fixed 画布随组件挂载） -->
+    <ClickSpark />
   </div>
 </template>
 

@@ -37,7 +37,7 @@ test.describe('回归：重新部署后旧页面 chunk 失效自动刷新', () =
     // 自动整页 reload。先挂 load 事件屏障再点击：page.evaluate 不跨刷新，
     // 必须用事件等待 reload 完成（修复缺失时此处超时失败，断言同样成立）。
     const reloaded = page.waitForEvent('load')
-    await page.getByRole('link', { name: '题库' }).click()
+    await page.getByRole('link', { name: '题库', exact: true }).click()
     await reloaded
     // 导航中止时 URL 未变：reload 落回当前页（按 pathname 断言，兼容 dev/docker 两种 baseURL）
     expect(new URL(page.url()).pathname).toBe('/learn')
@@ -45,13 +45,13 @@ test.describe('回归：重新部署后旧页面 chunk 失效自动刷新', () =
 
     // reload 落回当前页（导航中止时 URL 未变）：新 bundle 下应用恢复响应，
     // 同一次点击目标可以正常进入了——不再出现"点了没反应"
-    await page.getByRole('link', { name: '题库' }).click()
+    await page.getByRole('link', { name: '题库', exact: true }).click()
     await expect(page.getByRole('heading', { name: '题库' })).toBeVisible()
 
     // 不刷新循环：恢复后再导航教程/题库往返，均正常渲染且不再触发 reload
     await page.getByRole('link', { name: '教程', exact: true }).click()
     await expect(page.getByRole('heading', { name: '学习路线' })).toBeVisible()
-    await page.getByRole('link', { name: '题库' }).click()
+    await page.getByRole('link', { name: '题库', exact: true }).click()
     await expect(page.getByRole('heading', { name: '题库' })).toBeVisible()
     expect(await page.evaluate(() => sessionStorage.getItem('chunk-reloaded'))).toBe('1')
   })
