@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -99,12 +100,26 @@ func (c *collector) renderPrometheus() string {
 // statusRecorder 捕获 handler 写下的状态码（指标与访问日志用）。
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
+	r.wroteHeader = true
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Write 兜底隐式 200：handler 直接 Write 未调 WriteHeader 时，panic 恢复
+// 才能据此判断响应头是否已发出（已发出就不能再改写成 500）。
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(p)
 }
 
 // serveMetrics /metrics 响应：未配置 token = 端点关闭（404，不暴露任何信息）；
@@ -127,22 +142,34 @@ func (r *Router) serveMetrics(w http.ResponseWriter, req *http.Request) {
 // observe 包装 handler：请求完成后记指标 + slog 访问日志（用户在鉴权中间件
 // 注入 ctx 后可得，未登录路由 user_id 省略）。/metrics 与 /health 不包
 //（探针/采集高频，避免日志噪音）。
+//
+// 同时兜底 handler panic：net/http 自身会恢复（进程不崩），但连接会被直接
+// 关闭、指标与访问日志全部丢失。在这里恢复后返回统一 JSON 500，保留可观测性。
 func (r *Router) observe(method, pattern string, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		defer func() {
+			if p := recover(); p != nil {
+				r.accessLog.Error("http_panic", "method", method, "route", pattern,
+					"path", req.URL.Path, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+				if !rec.wroteHeader {
+					writeError(rec, errInternal)
+				}
+			}
+			d := time.Since(start)
+			r.metrics.record(method, pattern, rec.status, d)
+			attrs := []any{
+				"method", method, "route", pattern, "path", req.URL.Path,
+				"status", rec.status, "duration_ms", float64(d.Microseconds()) / 1000.0,
+				"remote", req.RemoteAddr,
+			}
+			if u := UserFrom(req.Context()); u != nil {
+				attrs = append(attrs, "user_id", u.ID)
+			}
+			r.accessLog.Info("http_request", attrs...)
+		}()
 		h(rec, req)
-		d := time.Since(start)
-		r.metrics.record(method, pattern, rec.status, d)
-		attrs := []any{
-			"method", method, "route", pattern, "path", req.URL.Path,
-			"status", rec.status, "duration_ms", float64(d.Microseconds()) / 1000.0,
-			"remote", req.RemoteAddr,
-		}
-		if u := UserFrom(req.Context()); u != nil {
-			attrs = append(attrs, "user_id", u.ID)
-		}
-		r.accessLog.Info("http_request", attrs...)
 	}
 }
 
