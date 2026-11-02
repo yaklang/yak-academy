@@ -26,7 +26,8 @@ test('公开首页与登录/注册/找回页面在两种主题和五种宽度下
         await expect(page.locator('#landing-title')).toBeVisible()
         await fits(page, width)
         await expect(page.getByRole('link', { name: '开始学习', exact: true })).toBeVisible()
-        const canvasSize = await page.locator('.academy-background canvas').evaluate((el: HTMLCanvasElement) => ({ width: el.width, height: el.height }))
+        // 首页雨幕画布随视口重建，宽高必须非零（画布塌陷 = 背景动效退化）。
+        const canvasSize = await page.locator('.hero-rain canvas').evaluate((el: HTMLCanvasElement) => ({ width: el.width, height: el.height }))
         expect(canvasSize.width).toBeGreaterThan(0)
         expect(canvasSize.height).toBeGreaterThan(0)
         await page.getByRole('link', { name: '开始学习', exact: true }).click()
