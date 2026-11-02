@@ -6,7 +6,7 @@ import { useRoute } from 'vue-router'
 import { notify } from '@/lib/notifications'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { topicApi, type Room } from '../api'
+import { DIFFICULTY_LABELS, topicApi, type Room } from '../api'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
@@ -34,16 +34,23 @@ onMounted(load)
 
 <template>
   <div v-if="room" class="page">
-    <h2>{{ room.title }}</h2>
-    <UiTag size="small">{{ room.difficulty }}</UiTag>
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">{{ room.title }}</h2>
+        <p class="page-sub">
+          <UiTag size="small" effect="plain">{{ DIFFICULTY_LABELS[room.difficulty] }}</UiTag>
+          <span class="lesson-kind">教程</span>
+        </p>
+      </div>
+      <div v-if="room.related_challenge_slug" class="page-actions">
+        <router-link
+          class="challenge-link"
+          :to="`${trainingBase}/training/${room.related_challenge_slug}`"
+        >前往配套题目练习 <span aria-hidden="true">→</span></router-link>
+      </div>
+    </header>
 
-    <router-link
-      v-if="room.related_challenge_slug"
-      class="challenge-link"
-      :to="`${trainingBase}/training/${room.related_challenge_slug}`"
-    >前往配套题目练习 →</router-link>
-
-    <div class="lesson" v-html="renderedLesson" />
+    <article class="lesson" v-html="renderedLesson" />
 
     <video v-if="room.video_url && isDirectVideo" :src="room.video_url" controls class="video" />
     <iframe
@@ -57,10 +64,68 @@ onMounted(load)
 
 <style scoped>
 .page { max-width: 860px; }
-.challenge-link { display: inline-block; margin: 0.8rem 0 0; color: var(--accent-foreground); text-decoration: none; font-weight: 600; }
-.lesson { line-height: 1.7; margin: 1rem 0 2rem; }
-.lesson :deep(pre) { background: var(--muted); padding: 0.8rem; border-radius: 4px; overflow: auto; }
-.lesson :deep(code) { background: var(--muted); padding: 0.1rem 0.3rem; border-radius: 3px; }
-.video { width: 100%; max-width: 720px; border-radius: 4px; background: #000; }
-.embed { aspect-ratio: 16/9; height: auto; border: 1px solid var(--border); }
+.lesson-kind { margin-left: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
+.challenge-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 36px;
+  padding-inline: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--accent-foreground);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.challenge-link:hover { background: var(--accent); }
+.lesson {
+  margin: var(--space-6) 0 var(--space-10);
+  color: var(--foreground);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+}
+.lesson :deep(h1),
+.lesson :deep(h2) {
+  margin: var(--space-8) 0 var(--space-3);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  letter-spacing: 0;
+}
+.lesson :deep(h3) {
+  margin: var(--space-6) 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--leading-normal);
+}
+.lesson :deep(p) { margin: 0 0 var(--space-4); }
+.lesson :deep(ul),
+.lesson :deep(ol) { margin: 0 0 var(--space-4); padding-left: var(--space-6); }
+.lesson :deep(li) { margin-bottom: var(--space-1); }
+.lesson :deep(a) { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 3px; }
+.lesson :deep(blockquote) {
+  margin: var(--space-4) 0;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+.lesson :deep(pre) {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+}
+.lesson :deep(code) { font-family: var(--font-mono); font-size: 0.92em; }
+.lesson :deep(p code) { padding: 2px 5px; border-radius: 4px; background: var(--muted); }
+.lesson :deep(img) { border-radius: var(--radius-control); }
+.video {
+  width: 100%;
+  max-width: 720px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: #000;
+}
+.embed { aspect-ratio: 16/9; height: auto; }
 </style>
