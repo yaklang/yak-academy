@@ -149,8 +149,9 @@ onMounted(load)
     </div>
   </header>
 
-  <!-- 页头统计：容器/附件/配套教程计数 + 难度分布条（颜色仅装饰，语义在行内文字标签） -->
-  <div v-if="!loading && total" class="stats-strip" role="status">
+  <!-- 页头统计：容器/附件/配套教程计数 + 难度分布条（颜色仅装饰，语义在行内文字标签）。
+       空题库也常驻（各项显示 0）：三个 tab 与有题状态保持同一版式对齐。 -->
+  <div v-if="!loading" class="stats-strip" role="status">
     <span class="stat">容器题 <b class="mono">{{ envCount }}</b></span>
     <span class="stat">附件题 <b class="mono">{{ fileCount }}</b></span>
     <span v-if="tutorialCount" class="stat">配套教程 <b class="mono">{{ tutorialCount }}</b></span>
