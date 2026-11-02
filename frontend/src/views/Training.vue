@@ -2,18 +2,21 @@
 // 题库：CTFd challenges 风格的高密度列表——单行紧凑题目行（难度色条 +
 // 标题 + 内联标签 + 通关态），默认平铺不分组，分类用 chip 过滤条点选
 // （带每类计数），「按分类分组」开关按需恢复分组视图；是否内置走服务端
-// 过滤（bank + builtin 查询参数）。页头统计：通关进度 + 容器/附件/教程
-// 题数 + 难度分布条（纯 CSS，颜色仅装饰、语义由文字标签承载）。
+// 过滤（bank + builtin 查询参数），标题/分类/配套教程搜索框客户端过滤
+//（与分类 chip 叠加）。页头统计：通关进度 + 容器/附件/教程题数 +
+// 难度分布条（纯 CSS，颜色仅装饰、语义由文字标签承载）。
 // 空态给引导卡片：CTF/ACM tab 无题时说明来源，管理员直接给上传入口。
 // 普通端与管理端共用；一次拉全量（page_size=100）。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { Search } from '@lucide/vue'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { BANK_LABELS, CATEGORY_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
 
 const route = useRoute()
 const auth = useAuthStore()
+const SearchIcon = Search
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
 const activeBank = ref<ChallengeBank>(banks.includes(route.query.bank as ChallengeBank) ? route.query.bank as ChallengeBank : 'tutorial')
 // 空态文案（有引导出口的空 tab 换卡片，这里只是兜底一句话）。
@@ -28,9 +31,11 @@ const loading = ref(true)
 
 // ===== 过滤器 =====
 // 分类 chip 客户端筛选（选项与计数由当前 tab 数据派生）；来源（是否内置）
-// 走服务端查询参数。分组开关只影响展示形态，默认平铺。
+// 走服务端查询参数。分组开关只影响展示形态，默认平铺。搜索框客户端
+// 关键词过滤（标题/分类/配套教程，大小写不敏感），与分类 chip 叠加。
 const categoryFilter = ref('')
 const builtinFilter = ref<'' | 'yes' | 'no'>('')
+const search = ref('')
 const grouped = ref(false)
 
 function categoryLabel(c: string) {
@@ -43,7 +48,20 @@ const categoryOptions = computed(() => {
   return [...counts.entries()].map(([category, count]) => ({ category, count })).sort((a, b) => a.category.localeCompare(b.category))
 })
 
-const visibleItems = computed(() => (categoryFilter.value ? items.value.filter((it) => it.category === categoryFilter.value) : items.value))
+const visibleItems = computed(() => {
+  let list = items.value
+  if (categoryFilter.value) list = list.filter((it) => it.category === categoryFilter.value)
+  const q = search.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter((it) =>
+      it.title.toLowerCase().includes(q)
+      || it.category.toLowerCase().includes(q)
+      || categoryLabel(it.category).toLowerCase().includes(q)
+      || (it.tutorial_title ?? '').toLowerCase().includes(q),
+    )
+  }
+  return list
+})
 
 // 分组视图（开关打开时）：按 category 聚合，保持后端顺序。
 const groups = computed(() => {
@@ -181,6 +199,13 @@ onMounted(load)
       </button>
     </div>
     <div class="filters-tools">
+      <UiInput
+        v-model="search"
+        class="search"
+        placeholder="搜索标题 / 分类 / 配套教程"
+        clearable
+        :prefix-icon="SearchIcon"
+      />
       <label v-if="categoryOptions.length > 1" class="group-toggle">
         <UiSwitch v-model="grouped" size="small" aria-label="按分类分组" />
         <span>按分类分组</span>
@@ -341,6 +366,17 @@ onMounted(load)
 }
 .chip-count { opacity: 0.75; }
 .filters-tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.search {
+  width: 220px;
+  min-width: 0;
+  flex: none;
+}
+@media (max-width: 1024px) {
+  .search { width: 160px; }
+}
+@media (max-width: 720px) {
+  .search { width: 100%; flex: 1 1 100%; order: 2; }
+}
 .group-toggle {
   display: inline-flex;
   align-items: center;
