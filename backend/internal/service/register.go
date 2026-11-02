@@ -86,7 +86,12 @@ func (s *RegisterService) SendCode(ctx context.Context, phone string) (string, i
 		return "", 0, err
 	}
 	if err := s.codes.Create(ctx, &model.SmsCode{
-		Phone: phone, Code: code, Purpose: model.SmsPurposeRegister, ExpiresAt: now.Add(smsCodeTTL),
+		Phone: phone, Code: code, Purpose: model.SmsPurposeRegister,
+		ExpiresAt: now.Add(smsCodeTTL),
+		// 显式写入注入时钟：限频按 s.now() 比较 CreatedAt，若依赖 GORM
+		// autoCreateTime（真实时钟），测试注入时钟会产生秒级漂移并把
+		// 合法发码误判为限频。
+		CreatedAt: now,
 	}); err != nil {
 		return "", 0, err
 	}
