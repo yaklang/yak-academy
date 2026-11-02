@@ -35,25 +35,27 @@ onMounted(load)
 
 <template>
   <header class="page-head">
-    <h2 class="page-title">排行<span class="accent">榜</span></h2>
-    <p class="page-sub">按总分排序，事件溯源实时派生。</p>
+    <div>
+      <h2 class="page-title">排行<span class="accent">榜</span></h2>
+      <p class="page-sub">按总分排序，事件溯源实时派生。</p>
+    </div>
   </header>
 
   <!-- 领奖台：2-1-3 经典高度（第 1 名居中最高） -->
   <div v-if="podium.length" class="podium" aria-hidden="true">
     <template v-for="p in podium" :key="p.rank">
       <div v-if="p.place === 2" class="pod d2">
-        <span class="medal">🥈</span>
+        <span class="medal mono">2</span>
         <span class="p-name">{{ p.username }}</span>
         <span class="p-score mono">{{ p.score }}</span>
       </div>
       <div v-if="p.place === 1" class="pod d1">
-        <span class="medal">🥇</span>
+        <span class="medal mono">1</span>
         <span class="p-name">{{ p.username }}</span>
         <span class="p-score mono">{{ p.score }}</span>
       </div>
       <div v-if="p.place === 3" class="pod d3">
-        <span class="medal">🥉</span>
+        <span class="medal mono">3</span>
         <span class="p-name">{{ p.username }}</span>
         <span class="p-score mono">{{ p.score }}</span>
       </div>
@@ -114,8 +116,25 @@ onMounted(load)
 }
 .pod.d2 { padding-bottom: 0.7rem; }
 .pod.d3 { padding-bottom: 0.55rem; }
-.medal { font-size: 1.5rem; }
-.pod.d1 .medal { font-size: 1.9rem; }
+.medal {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.pod.d1 .medal {
+  width: 36px;
+  height: 36px;
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: var(--text-md);
+}
 .p-name { font-weight: 700; color: var(--foreground); }
 .p-score { color: var(--accent-foreground); font-weight: 700; }
 .mono { font-family: Consolas, monospace; }
@@ -127,7 +146,7 @@ onMounted(load)
   .podium { gap: 0.5rem; }
   .pod { min-width: 0; flex: 1; max-width: 150px; padding: 0.8rem 0.5rem 0.7rem; }
   .pod.d1 { padding: 1rem 0.6rem 0.8rem; }
-  .medal { font-size: 1.2rem; }
+  .medal { width: 26px; height: 26px; }
   .pod.d1 .medal { font-size: 1.5rem; }
   .p-name { font-size: 0.85rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

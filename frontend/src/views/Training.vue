@@ -8,7 +8,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { notify } from '@/lib/notifications'
-import { BANK_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
+import { BANK_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
 
 const route = useRoute()
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
@@ -90,11 +90,13 @@ onMounted(load)
 </script>
 
 <template>
-  <header class="head">
-    <h2 class="page-title">题<span class="accent">库</span></h2>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">题<span class="accent">库</span></h2>
+    </div>
     <div v-if="total" class="solve-progress">
       <span class="label">{{ solvedCount }}/{{ total }}</span>
-      <UiProgress :percentage="solvedPercent" :stroke-width="8" class="bar" />
+      <UiProgress :percentage="solvedPercent" :stroke-width="8" :show-text="false" class="bar" />
       <span class="label">{{ solvedPercent }}%</span>
     </div>
   </header>
@@ -141,7 +143,7 @@ onMounted(load)
             </div>
             <div class="card-meta">
               <UiTag :type="difficultyType(it.difficulty)" size="small" effect="plain">
-                {{ it.difficulty }}
+                {{ DIFFICULTY_LABELS[it.difficulty] }}
               </UiTag>
               <span class="score">{{ it.score }} 分</span>
               <span class="spacer" />
@@ -157,11 +159,22 @@ onMounted(load)
 </template>
 
 <style scoped>
-.head { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
 .accent { color: var(--accent-foreground); }
-.solve-progress { flex: 1; min-width: 220px; max-width: 380px; }
+.solve-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 220px;
+  max-width: 380px;
+}
 .solve-progress .bar { flex: 1; }
-.solve-progress .bar :deep(.ui-progress-label) { display: none; }
+.solve-progress .label {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .bank-tabs { margin-bottom: 0.25rem; }
 .filters { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; }
 .filter { width: 200px; }
