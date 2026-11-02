@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,10 @@ import (
 // 完成（平台不内置，见 docs/architecture.md §11）。
 
 // collector 进程内指标聚合（Router 持有；GetMetrics 导出给测试）。
+// observe 在各请求 goroutine 并发调用 record/renderPrometheus，必须加锁：
+// 无锁 map 并发写会 fatal（concurrent map writes，进程直接崩，无法 recover）。
 type collector struct {
+	mu    sync.Mutex
 	start time.Time
 	// requests[method|route|status] 计数；duration[route] 累计 count/sum。
 	requests map[string]uint64
@@ -40,6 +44,8 @@ func newCollector() *collector {
 }
 
 func (c *collector) record(method, route string, status int, d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	key := method + "|" + route + "|" + fmt.Sprint(status)
 	c.requests[key]++
 	acc := c.duration[route]
@@ -53,6 +59,8 @@ func (c *collector) record(method, route string, status int, d time.Duration) {
 
 // renderPrometheus 输出 Prometheus 文本格式（计数器行序确定，输出可比对）。
 func (c *collector) renderPrometheus() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var b strings.Builder
 	b.WriteString("# HELP academy_http_requests_total Total HTTP requests by method, route pattern and status.\n")
 	b.WriteString("# TYPE academy_http_requests_total counter\n")
