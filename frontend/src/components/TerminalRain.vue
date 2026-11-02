@@ -10,8 +10,12 @@ const props = withDefaults(defineProps<{
   head?: string
   /** 拖尾色 */
   trailColor?: string
-  /** 明文模式：浅色主题下用墨滴（深色字符画在浅底上） */
-  ink?: boolean
+  /**
+   * auto（默认）：跟随主题——深色用发光橙雨，浅色用深橙油墨雨。
+   * 注意不要用 Boolean prop 表达三态：未传入的 Boolean prop 会被 Vue
+   * 转成 false，从而永远走不到“跟随主题”分支。
+   */
+  mode?: 'auto' | 'ink' | 'glow'
   /** 字号（px），影响列密度 */
   glyphSize?: number
   /** 0-1，列的活跃比例 */
@@ -28,6 +32,7 @@ const props = withDefaults(defineProps<{
   speed: 1,
   trailLength: .78,
   slowStrength: .75,
+  mode: 'auto',
 })
 
 const root = ref<HTMLDivElement>()
@@ -51,11 +56,13 @@ let media: MediaQueryList | undefined
 let reduced = false
 
 function palette() {
-  const dark = resolved.value === 'dark'
-  if (props.ink === undefined ? !dark : props.ink) {
-    return { head: props.head ?? 'rgba(154,72,16,.92)', trail: props.trailColor ?? 'rgba(214,91,22,.34)', wash: 'rgba(250,249,246,' }
+  // 浅色是油墨（ink），不是霓虹：头更深、尾更淡，靠对比度而不是发光。
+  // 深橙 #b7470a 对白底 5.36:1；浅桃色 255,173,117 在白底上几乎不可见。
+  const ink = props.mode === 'ink' || (props.mode === 'auto' && resolved.value !== 'dark')
+  if (ink) {
+    return { ink, head: props.head ?? 'rgba(183,71,10,.70)', trail: props.trailColor ?? 'rgba(183,71,10,.22)' }
   }
-  return { head: props.head ?? 'rgba(255,173,117,.96)', trail: props.trailColor ?? 'rgba(255,138,76,.42)', wash: 'rgba(12,12,13,' }
+  return { ink, head: props.head ?? 'rgba(255,173,117,.96)', trail: props.trailColor ?? 'rgba(255,138,76,.42)' }
 }
 
 // 预生成每列随机字符，绘制时不重新取样（矩阵雨的字符只在重生时换新）。
@@ -87,15 +94,29 @@ function paint(time: number) {
   if (!ctx || !width || !height) return
   const dt = Math.min(.05, Math.max(0, (time - last) / 1000)) || .016
   last = time
-  const { head, trail, wash } = palette()
-  // 拖尾：每帧叠一层低透明度底色冲刷上一帧（矩阵雨经典手法）。
-  // 透明度越低拖尾越长；reduced-motion 时直接整层盖掉（只留静帧）。
-  ctx.fillStyle = `${wash}${reduced ? 1 : 0.22 * (1 - props.trailLength * .5)})`
-  ctx.fillRect(0, 0, width, height)
+  const { ink, head, trail } = palette()
+  // 拖尾用 destination-out 擦除旧像素的透明度，不铺任何底色：
+  // canvas 永远透明，页面背景（浅色卡片）直接透出来。经典矩阵雨的
+  // 整屏 wash 会把画布累积成一块不透明色板，浅色下就是「黑底」。
+  if (reduced) {
+    ctx.clearRect(0, 0, width, height)
+  } else {
+    ctx.save()
+    ctx.globalCompositeOperation = 'destination-out'
+    const base = .18 - .13 * props.trailLength
+    const erase = 1 - Math.pow(1 - base, Math.min(3, dt * 60))
+    ctx.fillStyle = `rgba(0,0,0,${erase})`
+    ctx.fillRect(0, 0, width, height)
+    ctx.restore()
+  }
   ctx.font = `500 ${Math.round(cell * .92)}px ui-monospace, 'SF Mono', Consolas, Menlo, monospace`
   ctx.textAlign = 'center'
   const rows = Math.ceil(height / cell)
   const slow = props.slowStrength
+  // 浅色雨量约减半、速度更慢、尾迹更短：白底会放大每个字，宁疏勿密。
+  const active = ink ? props.density * .55 : props.density
+  const pace = ink ? .62 : 1
+  const span = Math.min(rows, ink ? 12 : 18)
   for (let c = 0; c < columns.length; c++) {
     const col = columns[c]
     if (col.wait > 0) {
@@ -112,31 +133,30 @@ function paint(time: number) {
       const field = Math.exp(-(dx * dx + dy * dy * .25) / (reach * reach))
       rate = Math.max(1 - slow * field, .06)
     }
-    col.head += col.speed * cell * rate * dt * 9
+    col.head += col.speed * cell * rate * dt * 9 * pace
     if (col.head - rows * cell > height) {
       col.head = -cell * (1 + Math.random() * 2)
       col.speed = (Math.max(.35, .6 + Math.random() * .9)) * props.speed
       col.glyphs = randomGlyphs(rows + 3)
       // 密度：按比例让部分列重生后休眠片刻，保持画面疏密有致。
       // density 是"活跃比例"，所以休眠概率 = 1 - density，休眠时长随密度反比缩短。
-      col.wait = Math.random() > props.density ? Math.random() * 2.4 * (1 - props.density) : 0
+      col.wait = Math.random() > active ? Math.random() * 2.4 * (1 - active) : 0
       continue
     }
     const headRow = Math.floor(col.head / cell)
-    const span = Math.min(rows, 18)
     for (let s = 0; s < span; s++) {
       const row = headRow - s
       if (row < 0) break
       const y = row * cell + cell * .5
       const fade = s === 0 ? 1 : Math.pow(1 - s / span, 1.6)
       if (s === 0) {
-        // 亮头：双层描一次辉光，让雨滴头部在深底上真正"亮"起来。
+        // 亮头：在深底上给足不透明度；浅色下由墨色本身承担对比度。
         ctx.fillStyle = head
         ctx.globalAlpha = .96
         ctx.fillText(col.glyphs[row % col.glyphs.length], x, y)
       } else {
         ctx.fillStyle = trail
-        ctx.globalAlpha = fade * .85
+        ctx.globalAlpha = fade * (ink ? .6 : .85)
         ctx.fillText(col.glyphs[row % col.glyphs.length], x, y)
       }
     }
@@ -155,6 +175,8 @@ function onPointerMove(event: PointerEvent) {
 
 function refresh() {
   reduced = media?.matches ?? false
+  // 先停掉正在跑的帧循环再手动重绘，避免 refresh 叠加出第二条循环。
+  cancelAnimationFrame(frame)
   const element = canvas.value
   const ctx = element?.getContext('2d')
   if (ctx && width && height) {
@@ -180,7 +202,7 @@ onMounted(() => {
   root.value?.parentElement?.addEventListener('pointermove', onPointerMove)
 })
 
-watch(() => resolved, refresh)
+watch(resolved, refresh)
 watch(() => [props.glyphSize, props.density, props.speed, props.trailLength], rebuild)
 
 onUnmounted(() => {
