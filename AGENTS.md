@@ -16,6 +16,7 @@
 | 积分 / 进度 / 排行榜 / 判题 | `event-sourcing-rules` |
 | 新增或修改 HTTP 接口 | `api-contract` |
 | 修复 bug（必须附 e2e 回归测试） | `e2e-bugfix` |
+| 前端页面 / 组件 / 样式 / 设计令牌 / 响应式 / 动效 | `frontend-style` |
 
 3. **完整设计在 `docs/`**（architecture.md / data-flow.md / openapi.yaml）。skill 是约束的执行摘要，两者冲突时以 docs 为准并提交 issue 修正 skill。
 4. 第一版的边界（不实现真实业务逻辑，仅契约 + 骨架 + stub）见 `docs/architecture.md` §演进路线。
