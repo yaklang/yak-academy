@@ -9,6 +9,10 @@ import { loginAsStudent } from './helpers'
 // 修复后行为：持续并发加载下后端存活，业务终态（教程列表可达）正常。
 // 复现路径：学生登录 → 首页/教程/题库等页面同时发起 topics、score、me
 // 等多个 API 请求，每个请求完成都会并发写 metrics map。
+// 注：fatal 是否触发取决于多个 handler 的 record 窗口是否精确重叠，e2e 层
+// 不保证稳定复现；确定性红→绿由 Go 侧
+// TestMetricsCollectorConcurrentRecord（internal/api/metrics_concurrent_test.go）
+// 覆盖，本用例守住真实页面并发加载下进程存活与页面可用。
 test.describe('回归：指标并发写崩溃', () => {
   test('并发页面加载下后端保持存活且页面可用（回归：concurrent map writes）', async ({ page }) => {
     test.setTimeout(60_000)
@@ -24,6 +28,19 @@ test.describe('回归：指标并发写崩溃', () => {
     // 断言用户看到的页面内容仍然可用）。
     await page.goto('/learn')
     await expect(page.locator('main').first()).toBeVisible()
+    // 并发完成窗口是并发写 map 的直接触发条件：页面加载的 API 间隔较大，
+    // 再补一轮并行请求，让多个 handler 同时返回 observe（旧实现无锁写
+    // 同一张 map，Go runtime 直接 fatal，且无法被 recover）。
+    const token = await page.evaluate(() => localStorage.getItem('academy_token'))
+    expect(token).toBeTruthy()
+    const burst = await Promise.all(
+      Array.from({ length: 120 }, () =>
+        page.request.get(`${E2E.apiURL}/api/v1/topics`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ),
+    )
+    for (const resp of burst) expect(resp.status()).toBe(200)
     // 后端健康检查仍应 200：进程级存活的直接证据。
     const health = await page.request.get(`${E2E.apiURL}/health`)
     expect(health.status()).toBe(200)
