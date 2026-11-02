@@ -25,9 +25,11 @@ onMounted(async () => {
 
 <template>
   <template v-if="topic">
-    <header class="head">
-      <h2 class="page-title">{{ topic.title }}</h2>
-      <p class="summary">{{ topic.summary }}</p>
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">{{ topic.title }}</h2>
+        <p v-if="topic.summary" class="page-sub">{{ topic.summary }}</p>
+      </div>
     </header>
     <UiEmpty v-if="!loading && topic.rooms.length === 0" description="该主题暂无 Room" />
     <div v-else class="rooms">
@@ -51,8 +53,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.head { margin-bottom: 1.5rem; }
-.summary { color: var(--muted-foreground); margin: 0.3rem 0 0; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
 .room-link { text-decoration: none; color: inherit; }
 .room-card {
