@@ -6,13 +6,14 @@
 // 凭码重置密码，成功回显用户名与账号编码（忘记用户名的学员凭手机号一并找回）。
 import { computed, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle, Terminal } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Brand from '@/components/Brand.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
-import AcademyBackground from '@/components/AcademyBackground.vue'
+import TerminalRain from '@/components/TerminalRain.vue'
+import CipherReveal from '@/components/CipherReveal.vue'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '../stores/auth'
 import { authApi } from '../api'
@@ -181,9 +182,9 @@ async function submit() {
     </header>
     <main class="auth-grid">
       <section class="auth-story" aria-labelledby="auth-story-title">
-        <AcademyBackground variant="horizon" />
-        <p class="eyebrow">LEARNING BY DOING</p>
-        <h1 id="auth-story-title">让每一次动手，<br>都成为<em>下一步的底气。</em></h1>
+        <TerminalRain class="auth-rain" :density=".32" :speed=".85" />
+        <p class="eyebrow"><Terminal :size="14" />LEARNING BY DOING</p>
+        <h1 id="auth-story-title"><CipherReveal text="让每一次动手，" /><br><em><CipherReveal text="都成为下一步的底气。" :duration="700" /></em></h1>
         <p>从原理到实践，从学习到挑战。<br>在 Yak Academy，积累属于你的安全能力。</p>
         <div class="auth-signature"><span class="auth-orbit-mark">Y<span>→</span></span><span>EXPLORE. PRACTICE. EVOLVE.</span></div>
       </section>
@@ -226,3 +227,11 @@ async function submit() {
     <footer class="auth-footer"><span>学以致用，知行合一。</span><span>© {{ new Date().getFullYear() }} Yak Academy</span></footer>
   </div>
 </template>
+
+<style scoped>
+/* 品牌故事区的矩阵雨：铺满左侧栏，文字层压上方。 */
+.auth-story { position: relative; }
+.auth-rain { position: absolute; inset: 0; border-radius: inherit; mask-image: radial-gradient(ellipse at 70% 40%, #000 30%, transparent 78%); }
+.auth-story > .eyebrow, .auth-story > h1, .auth-story > p:not(.eyebrow), .auth-story > .auth-signature { position: relative; z-index: 1; }
+.auth-story h1 .cipher-mask { color: var(--accent-foreground); }
+</style>
