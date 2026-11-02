@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // 自测运行（在线执行框 / custom invocation）：学生在题目页直接跑 yak 源码，
@@ -156,7 +157,11 @@ func (s *JudgeService) CreateCodeRun(ctx context.Context, userID uint, slug, sou
 	st.order = append(st.order, id)
 	// 两种模式共用题目时限（自测与判题同一约束，学生看到的耗时即真实判题尺度）；
 	// 数据组内容已拷入局部变量，题目随后被改/删不影响本次运行。
-	go s.executeCodeRun(run, source, input, answer, conf.TimeLimitS)
+	// 自测运行独立 goroutine：panic 必须在本函数收尾为 done/re，
+	// 否则既会拖垮进程，也会让该用户的自测入口永久卡在 pending。
+	safego.Go("judge.executeCodeRun", func() {
+		s.executeCodeRun(run, source, input, answer, conf.TimeLimitS)
+	})
 	return id, nil
 }
 
@@ -189,7 +194,16 @@ func (s *JudgeService) GetCodeRun(ctx context.Context, userID uint, slug, id str
 }
 
 // executeCodeRun 引擎执行（goroutine）：并发闸 → running → 限时运行 → 终态写回。
+// panic 由 safego 恢复，但必须把票据收尾为 done（re），否则用户后续自测会被
+// 「a previous self-test run is still executing」永久拒绝。
 func (s *JudgeService) executeCodeRun(run *codeRun, source, input, answer string, timeLimitS int) {
+	defer safego.Guard("judge.executeCodeRun", func() {
+		st := s.runs
+		st.mu.Lock()
+		run.status, run.outcome, run.stderr = runDone, "re", "internal error"
+		run.finishedAt = s.now()
+		st.mu.Unlock()
+	})
 	st := s.runs
 	st.sem <- struct{}{}
 	defer func() { <-st.sem }()

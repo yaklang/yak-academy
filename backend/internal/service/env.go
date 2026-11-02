@@ -14,6 +14,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // InstanceSpec 驱动创建实例所需的全部信息（驱动实现不感知 DB）。
@@ -373,7 +374,7 @@ func (s *EnvService) AdminDestroyInstance(ctx context.Context, instanceID uint) 
 // StartReaper 后台回收循环：定时清理过期 running 实例。
 // 单实例部署（第一版约束），进程内循环即可，无需分布式锁。
 func (s *EnvService) StartReaper(ctx context.Context, interval time.Duration) {
-	go func() {
+	safego.Go("env.reaper", func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -381,10 +382,11 @@ func (s *EnvService) StartReaper(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.reapExpired(ctx)
+				// 单轮 panic 不终止回收循环：过期实例留给下一轮重试。
+				safego.Run("env.reapExpired", func() { s.reapExpired(ctx) })
 			}
 		}
-	}()
+	})
 }
 
 // reapExpired 回收 ExpireAt 过期的 running 实例：先销毁驱动资源，成功才改 destroyed；

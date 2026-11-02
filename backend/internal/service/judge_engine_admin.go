@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/pathutil"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 const (
@@ -133,7 +134,7 @@ func (s *JudgeService) DownloadYakEngine() error {
 	if target == "" { // ConfigureYakEngine 未被调用（装配线缺配置）
 		return fmt.Errorf("%w: yak download dir not configured", ErrValidation)
 	}
-	go s.runYakDownload(base, target)
+	safego.Go("judge.yakDownload", func() { s.runYakDownload(base, target) })
 	return nil
 }
 
@@ -147,6 +148,10 @@ func (s *JudgeService) runYakDownload(base, target string) {
 		s.yakMu.Unlock()
 		log.Printf("yak engine download failed: %v", err)
 	}
+	// panic 也要把任务置 failed：否则状态卡永远停在 running，无法重试。
+	defer safego.Guard("judge.yakDownload", func() {
+		fail(fmt.Errorf("internal error"))
+	})
 	asset := fmt.Sprintf("yak_%s_%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		asset += ".exe"

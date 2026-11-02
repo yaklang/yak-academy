@@ -301,3 +301,29 @@ func TestCodeRunStdoutTruncation(t *testing.T) {
 		t.Fatalf("truncated = %v len = %d, want true/%d", view.Truncated, len(view.Stdout), runResultTruncate)
 	}
 }
+
+// 回归：引擎执行 goroutine panic 曾直接终止整个进程（未恢复的后台 panic），
+// 且票据永远停在 running 会让该用户的自测入口被永久拒绝。修复后 panic 被
+// 隔离，票据收尾为 done/re，服务继续可用。
+func TestExecuteCodeRunPanicMarksRunFailed(t *testing.T) {
+	svc, gdb := newJudgeRunTestService(t)
+	seedACMChallenge(t, gdb, "run-panic", 5)
+	svc.SetCodeEngine(&scriptedRunEngine{fn: func(string) (string, error) {
+		panic("engine exploded")
+	}})
+	id, err := svc.CreateCodeRun(context.Background(), 7, "run-panic", "s", "", "1")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	view := waitForRunDone(t, svc, 7, "run-panic", id)
+	if view.Outcome != "re" {
+		t.Fatalf("outcome = %q, want re", view.Outcome)
+	}
+	if view.Stderr != "internal error" {
+		t.Fatalf("stderr = %q, want internal error", view.Stderr)
+	}
+	// 票据已收尾：同一用户可再次发起自测（不再被「仍在执行」拦截）。
+	if _, err := svc.CreateCodeRun(context.Background(), 7, "run-panic", "s", "", "1"); err != nil {
+		t.Fatalf("second run after panic: %v", err)
+	}
+}

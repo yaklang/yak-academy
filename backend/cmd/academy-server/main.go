@@ -16,6 +16,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/db"
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
@@ -162,7 +163,7 @@ func main() {
 		if db.IsPostgresDSN(dbTarget) {
 			log.Printf("backup scheduler disabled: PostgreSQL mode requires external pg_dump backups")
 		} else {
-			go backupSvc.RunScheduler(ctx, cfg.BackupInterval)
+			safego.Go("backup.scheduler", func() { backupSvc.RunScheduler(ctx, cfg.BackupInterval) })
 			log.Printf("backup scheduler: every %s (keep %d, dir %s)", cfg.BackupInterval, cfg.BackupKeep, cfg.BackupDir)
 		}
 	}
