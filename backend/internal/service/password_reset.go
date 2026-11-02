@@ -58,7 +58,10 @@ func (s *PasswordResetService) SendResetCode(ctx context.Context, phone string) 
 		return "", 0, err
 	}
 	if err := s.codes.Create(ctx, &model.SmsCode{
-		Phone: phone, Code: code, Purpose: model.SmsPurposePasswordReset, ExpiresAt: now.Add(smsCodeTTL),
+		Phone: phone, Code: code, Purpose: model.SmsPurposePasswordReset,
+		ExpiresAt: now.Add(smsCodeTTL),
+		// 与注册发码同理：CreatedAt 走注入时钟，限频窗口与业务时钟同源。
+		CreatedAt: now,
 	}); err != nil {
 		return "", 0, err
 	}
