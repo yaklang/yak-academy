@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -623,14 +624,14 @@ func (d DockerDriver) Create(ctx context.Context, spec InstanceSpec) (string, er
 	}
 	args = append(args, spec.Image)
 	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("docker run %s: %v: %s", spec.Image, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("docker run %s: %v: %s", spec.Image, err, sanitizeToolOutput(string(out)))
 	}
 	// docker port 读回映射（格式 <hostPort> -> <containerPort>）。
 	out, err := exec.CommandContext(ctx, "docker", "port", name, fmt.Sprint(spec.Port)).CombinedOutput()
 	if err != nil {
 		// 映射查询失败则清理刚起的容器，不留半成品。
 		_, _ = exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
-		return "", fmt.Errorf("docker port: %v: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("docker port: %v: %s", err, sanitizeToolOutput(string(out)))
 	}
 	hostPort := parseHostPort(string(out))
 	if hostPort == "" {
@@ -668,7 +669,7 @@ func (DockerDriver) Destroy(ctx context.Context, instanceID uint) error {
 		if strings.Contains(strings.ToLower(string(out)), "no such container") {
 			return nil
 		}
-		return fmt.Errorf("docker rm: %v: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("docker rm: %v: %s", err, sanitizeToolOutput(string(out)))
 	}
 	return nil
 }
@@ -677,9 +678,39 @@ func (DockerDriver) Destroy(ctx context.Context, instanceID uint) error {
 func (DockerDriver) Build(ctx context.Context, tag, contextDir string) error {
 	out, err := exec.CommandContext(ctx, "docker", "build", "-t", tag, contextDir).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("docker build %s: %v: %s", tag, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("docker build %s: %v: %s", tag, err, sanitizeToolOutput(string(out)))
 	}
 	return nil
+}
+
+// sanitizeToolOutput 清洗透传给用户的外部工具（docker/yak 引擎）输出：
+// 去 emoji/表情符号区段（docker registry 代理常带 🚫👀🔗 等字符）、去控制
+// 字符，并折叠空白。真实报错文本保持原样，只是剥离装饰符号。
+func sanitizeToolOutput(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false
+	for _, r := range s {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			if r == '\n' || r == '\t' {
+				space = true // 换行/制表折叠为单个空格，错误信息保持单行可读
+			}
+			continue
+		case r >= 0x80 && unicode.Is(unicode.S, r) && !unicode.Is(unicode.Latin, r) && !unicode.Is(unicode.Han, r):
+			space = true // 非 ASCII 的 Symbol 系区段（So/Sk/Sm/Sc，emoji 所在）；ASCII 符号（-> + = | 等）是报错原文的一部分，保留
+			continue
+		case r == ' ':
+			space = true
+			continue
+		}
+		if space && b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		space = false
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // DockerAvailable 探测 docker CLI 与守护进程是否可用（EnvDriver=auto 的选择依据）。

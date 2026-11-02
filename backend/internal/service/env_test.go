@@ -427,6 +427,34 @@ func TestDockerParseHostPort(t *testing.T) {
 	}
 }
 
+// TestSanitizeToolOutput 外部工具输出透传清洗（纯函数表驱动）：
+// docker registry 代理报错带 emoji（如 DaoCloud 镜像 🚫👀🔗 白名单拒绝），
+// 剥离符号区段后真实报错文本与 URL 保持原样；中文/拉丁正文不受影响。
+func TestSanitizeToolOutput(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{
+			"Unable to find image 'vulnapp:1.0' locally\ndocker: Error response from daemon: error from registry: 🚫 👀-> https://github.com/DaoCloud/public-image-mirror/issues/2328 🔗 这镜像不在白名单. this image is not in the allowlist.\n",
+			"Unable to find image 'vulnapp:1.0' locally docker: Error response from daemon: error from registry: -> https://github.com/DaoCloud/public-image-mirror/issues/2328 这镜像不在白名单. this image is not in the allowlist.",
+		},
+		{
+			// emoji 与前后文本隔开时也剥离干净；ASCII 箭头/标点保留原样
+			//（回归：曾把 ASCII 的 > 一并剥掉，-> 变 -，报错原文被改写）。
+			"error from registry: 🚫 👀 -> https://example.com/issue 🔗\n",
+			"error from registry: -> https://example.com/issue",
+		},
+		{"plain error output", "plain error output"},
+		{"带中文与 CJK 标点的报错：镜像不存在。", "带中文与 CJK 标点的报错：镜像不存在。"},
+		{"  multiple   spaces\tand\ttabs\n\nnewlines  ", "multiple spaces and tabs newlines"},
+		{"", ""},
+		{"🚫🚫🚫", ""},
+	}
+	for _, c := range cases {
+		if got := sanitizeToolOutput(c.in); got != c.want {
+			t.Fatalf("sanitizeToolOutput(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestInstanceHostAndPublishBind 对外主机名归一与端口绑定范围（纯函数表驱动）：
 // 回环族保持仅本地暴露；对外主机名（部署的内网 IP 等）绑全网卡；显式配置的
 // localhost 原样展示（回归：曾折成 127.0.0.1，配置主机名在 endpoint 上不可见）。
