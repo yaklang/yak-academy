@@ -75,6 +75,25 @@ export const DIFFICULTY_LABELS: Record<ChallengeDifficulty, string> = {
   expert: '专家',
 }
 
+// 题目类型中文映射（分类是上传方自由填写的 slug 形态字符串；内置训练集与
+// 常见 CTF 分类给出中文名，未知值原样回退，不做截断或臆造）。
+export const CATEGORY_LABELS: Record<string, string> = {
+  'web-security': 'Web 安全',
+  'sql-injection': 'SQL 注入',
+  'xss': 'XSS',
+  'ssrf': 'SSRF',
+  'file-upload': '文件上传',
+  'access-control': '访问控制',
+  'jwt': 'JWT',
+  'logic': '逻辑漏洞',
+  'cryptography': '密码学',
+  'crypto': '密码学',
+  'forensics': '取证',
+  'reverse': '逆向',
+  'pwn': 'Pwn',
+  'misc': '杂项',
+}
+
 // 题目管理列表查询参数（GET /admin/challenges）：全部可选，零值 = 不过滤。
 export interface AdminChallengeQuery {
   page?: number
