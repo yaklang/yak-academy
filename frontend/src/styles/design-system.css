@@ -27,6 +27,8 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -134,6 +136,8 @@
   --popover: #fff; --popover-foreground: #20201e; --primary: #f57b42; --primary-foreground: #241207;
   --secondary: #efeee9; --secondary-foreground: #20201e; --muted: #efeee9; --muted-foreground: #696963;
   --accent: #fff0e7; --accent-foreground: #ad400e; --destructive: #ba3030; --border: #deddd6;
+  /* 状态色：success/warning 仅作装饰性区分（难度色条/分布条），语义始终由文字承载 */
+  --success: #2e9e5b; --warning: #d18f2c;
   --input: #deddd6; --ring: #b84916; --radius: .5rem;
 }
 .dark {
@@ -141,6 +145,7 @@
   --popover: #1c1c1a; --popover-foreground: #f5f4ee; --primary: #ff8c54; --primary-foreground: #241207;
   --secondary: #252523; --secondary-foreground: #f5f4ee; --muted: #252523; --muted-foreground: #a4a49c;
   --accent: #32251f; --accent-foreground: #ffac81; --destructive: #ff9292; --border: #363632;
+  --success: #5dbd87; --warning: #e0a84f;
   --input: #363632; --ring: #ffac81;
 }
 @layer base {

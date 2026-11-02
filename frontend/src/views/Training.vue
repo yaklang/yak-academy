@@ -1,41 +1,54 @@
 <script setup lang="ts">
-// 题库：页顶按题库 tab 切换（教程题目/CTF 题目/ACM 题目），
-// tab 内过滤器支持按题目类型（category，客户端）与是否内置（服务端）筛选，
-// 按 category 分组的卡片网格（CTFd challenges 风格），卡片展示
-// 标题/难度/分值/容器/通关状态；点题目进详情页（启动容器、提交 flag
-// 都在详情完成，列表保持纯浏览）。一次拉全量（page_size=100）。
-// 普通端与管理端共用。
+// 题库：CTFd challenges 风格的高密度列表——单行紧凑题目行（难度色条 +
+// 标题 + 内联标签 + 通关态），默认平铺不分组，分类用 chip 过滤条点选
+// （带每类计数），「按分类分组」开关按需恢复分组视图；是否内置走服务端
+// 过滤（bank + builtin 查询参数）。页头统计：通关进度 + 容器/附件/教程
+// 题数 + 难度分布条（纯 CSS，颜色仅装饰、语义由文字标签承载）。
+// 空态给引导卡片：CTF/ACM tab 无题时说明来源，管理员直接给上传入口。
+// 普通端与管理端共用；一次拉全量（page_size=100）。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { notify } from '@/lib/notifications'
-import { BANK_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
+import { useAuthStore } from '@/stores/auth'
+import { BANK_LABELS, CATEGORY_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
 
 const route = useRoute()
+const auth = useAuthStore()
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
 const activeBank = ref<ChallengeBank>(banks.includes(route.query.bank as ChallengeBank) ? route.query.bank as ChallengeBank : 'tutorial')
-// 教程题目 tab 专属内置题集，空态文案与上传型 tab 区分。
+// 空态文案（有引导出口的空 tab 换卡片，这里只是兜底一句话）。
 const emptyHint: Record<ChallengeBank, string> = {
   tutorial: '暂无教程题目：内置题集尚未导入，请联系管理员在管理端一键导入内置训练（vulinbox）',
-  ctf: '暂无CTF题目：等待管理员上传',
-  acm: '暂无ACM题目：等待管理员上传',
+  ctf: '暂无 CTF 题目：等待管理员上传题目包',
+  acm: '暂无 ACM 题目：等待管理员上传题目包',
 }
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
 const loading = ref(true)
 
 // ===== 过滤器 =====
-// 是否内置走服务端过滤（bank + builtin 查询参数）；题目类型为动态值，
-// 由当前 tab 数据派生选项、客户端筛选。
+// 分类 chip 客户端筛选（选项与计数由当前 tab 数据派生）；来源（是否内置）
+// 走服务端查询参数。分组开关只影响展示形态，默认平铺。
 const categoryFilter = ref('')
 const builtinFilter = ref<'' | 'yes' | 'no'>('')
+const grouped = ref(false)
 
-const categoryOptions = computed(() => [...new Set(items.value.map((it) => it.category))].sort())
+function categoryLabel(c: string) {
+  return CATEGORY_LABELS[c] ?? c
+}
 
-// 分类过滤后按 category 分组（保持后端顺序）。
+const categoryOptions = computed(() => {
+  const counts = new Map<string, number>()
+  for (const it of items.value) counts.set(it.category, (counts.get(it.category) ?? 0) + 1)
+  return [...counts.entries()].map(([category, count]) => ({ category, count })).sort((a, b) => a.category.localeCompare(b.category))
+})
+
+const visibleItems = computed(() => (categoryFilter.value ? items.value.filter((it) => it.category === categoryFilter.value) : items.value))
+
+// 分组视图（开关打开时）：按 category 聚合，保持后端顺序。
 const groups = computed(() => {
   const byCat = new Map<string, TrainingItem[]>()
-  for (const it of items.value) {
-    if (categoryFilter.value && it.category !== categoryFilter.value) continue
+  for (const it of visibleItems.value) {
     const key = it.category || 'uncategorized'
     if (!byCat.has(key)) byCat.set(key, [])
     byCat.get(key)!.push(it)
@@ -43,10 +56,26 @@ const groups = computed(() => {
   return [...byCat.entries()].map(([category, list]) => ({ category, items: list }))
 })
 
+// ===== 页头统计（全部由已拉取的 items 派生，不发额外请求） =====
 const solvedCount = computed(() => items.value.filter((it) => it.solved).length)
 const solvedPercent = computed(() => (total.value > 0 ? Math.round((solvedCount.value / total.value) * 100) : 0))
+const envCount = computed(() => items.value.filter((it) => it.has_env).length)
+const fileCount = computed(() => total.value - envCount.value)
+const tutorialCount = computed(() => items.value.filter((it) => it.tutorial_title).length)
+const difficultyDist = computed(() => {
+  const counts = { apprentice: 0, practitioner: 0, expert: 0 } as Record<TrainingItem['difficulty'], number>
+  for (const it of items.value) counts[it.difficulty] += 1
+  const sum = total.value || 1
+  return (['apprentice', 'practitioner', 'expert'] as const).map((d) => ({
+    key: d,
+    label: DIFFICULTY_LABELS[d],
+    count: counts[d],
+    percent: Math.round((counts[d] / sum) * 100),
+  }))
+})
 
 const base = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
+const isAdmin = computed(() => auth.user?.global_role === 'admin')
 
 async function load() {
   loading.value = true
@@ -93,13 +122,35 @@ onMounted(load)
   <header class="page-head">
     <div>
       <h2 class="page-title">题<span class="accent">库</span></h2>
+      <p class="page-sub">边学边练：题目可启动容器实战或下载附件离线作答，通关即计分。</p>
     </div>
     <div v-if="total" class="solve-progress">
-      <span class="label">{{ solvedCount }}/{{ total }}</span>
+      <span class="label">已通关 {{ solvedCount }}/{{ total }}</span>
       <UiProgress :percentage="solvedPercent" :stroke-width="8" :show-text="false" class="bar" />
       <span class="label">{{ solvedPercent }}%</span>
     </div>
   </header>
+
+  <!-- 页头统计：容器/附件/配套教程计数 + 难度分布条（颜色仅装饰，语义在行内文字标签） -->
+  <div v-if="!loading && total" class="stats-strip" role="status">
+    <span class="stat">容器题 <b class="mono">{{ envCount }}</b></span>
+    <span class="stat">附件题 <b class="mono">{{ fileCount }}</b></span>
+    <span v-if="tutorialCount" class="stat">配套教程 <b class="mono">{{ tutorialCount }}</b></span>
+    <div class="diff-bar" aria-hidden="true">
+      <span
+        v-for="seg in difficultyDist"
+        :key="seg.key"
+        class="seg"
+        :class="`seg-${seg.key}`"
+        :style="{ width: `${seg.percent}%` }"
+      />
+    </div>
+    <span class="stat diff-legend">
+      <template v-for="(seg, i) in difficultyDist" :key="seg.key">
+        <i class="dot" :class="`seg-${seg.key}`" aria-hidden="true" /><b class="mono">{{ seg.count }}</b> {{ seg.label }}{{ i < difficultyDist.length - 1 ? ' · ' : '' }}
+      </template>
+    </span>
+  </div>
 
   <UiTabs v-model="activeBank" class="bank-tabs">
     <UiTabPane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
@@ -107,55 +158,111 @@ onMounted(load)
 
   <!-- 过滤条在结果为空时也要保留，否则选了过滤条件后无法切回「来源：全部」。 -->
   <div v-if="!loading" class="filters">
-    <UiSelect v-model="categoryFilter" class="filter" placeholder="题目类型：全部">
-      <UiOption label="题目类型：全部" value="" />
-      <UiOption v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
-    </UiSelect>
-    <UiSelect v-model="builtinFilter" class="filter">
-      <UiOption label="来源：全部" value="" />
-      <UiOption label="来源：内置题集" value="yes" />
-      <UiOption label="来源：管理员上传" value="no" />
-    </UiSelect>
+    <div v-if="categoryOptions.length" class="chip-bar" role="group" aria-label="按分类筛选">
+      <button
+        type="button"
+        class="cat-chip"
+        :class="{ active: categoryFilter === '' }"
+        :aria-pressed="categoryFilter === ''"
+        @click="categoryFilter = ''"
+      >
+        全部 <span class="chip-count mono">{{ total }}</span>
+      </button>
+      <button
+        v-for="opt in categoryOptions"
+        :key="opt.category"
+        type="button"
+        class="cat-chip"
+        :class="{ active: categoryFilter === opt.category }"
+        :aria-pressed="categoryFilter === opt.category"
+        @click="categoryFilter = categoryFilter === opt.category ? '' : opt.category"
+      >
+        {{ categoryLabel(opt.category) }} <span class="chip-count mono">{{ opt.count }}</span>
+      </button>
+    </div>
+    <div class="filters-tools">
+      <label v-if="categoryOptions.length > 1" class="group-toggle">
+        <UiSwitch v-model="grouped" size="small" aria-label="按分类分组" />
+        <span>按分类分组</span>
+      </label>
+      <UiSelect v-model="builtinFilter" class="filter">
+        <UiOption label="来源：全部" value="" />
+        <UiOption label="来源：内置题集" value="yes" />
+        <UiOption label="来源：管理员上传" value="no" />
+      </UiSelect>
+    </div>
   </div>
 
-  <UiSkeleton v-if="loading" :rows="6" animated />
-  <UiEmpty
-    v-else-if="groups.length === 0"
-    :description="emptyHint[activeBank]"
-  />
-  <template v-else>
+  <UiSkeleton v-if="loading" :rows="8" animated />
+  <template v-else-if="visibleItems.length === 0">
+    <!-- 有引导出口的空态用卡片：说明来源 + 管理员直达上传入口 -->
+    <div v-if="items.length === 0 && activeBank !== 'tutorial'" class="empty-guide" role="status">
+      <p class="empty-title">{{ emptyHint[activeBank] }}</p>
+      <p class="empty-sub">题目包由管理员在「题目管理」上传（challenge.json 打包 zip），上传后自动出现在本页。</p>
+      <UiButton v-if="isAdmin" type="primary" @click="$router.push('/admin/panel/challenges')">前往题目管理上传</UiButton>
+    </div>
+    <UiEmpty v-else :description="emptyHint[activeBank]" />
+  </template>
+  <template v-else-if="grouped">
     <section v-for="g in groups" :key="g.category" class="group">
       <header class="cat-head">
-        <h3 class="cat">{{ g.category }}</h3>
+        <h3 class="cat">{{ categoryLabel(g.category) }}</h3>
         <span class="cat-count">{{ g.items.length }} 题</span>
       </header>
-      <div class="card-grid">
+      <div class="chal-list">
         <router-link
           v-for="it in g.items"
           :key="it.id"
           class="row chal-link"
           :to="`${base}/training/${it.slug}`"
         >
-          <div class="chal-card tall-card" :class="{ solved: it.solved }">
+          <span class="diff-dot" :class="`diff-${it.difficulty}`" aria-hidden="true" />
+          <div class="chal-main">
             <div class="chal-title">
               <span class="title-text">{{ it.title }}</span>
-              <span v-if="it.solved" class="solved-check" title="已通关">✓</span>
-            </div>
-            <div class="card-meta">
               <UiTag :type="difficultyType(it.difficulty)" size="small" effect="plain">
                 {{ DIFFICULTY_LABELS[it.difficulty] }}
               </UiTag>
-              <span class="score">{{ it.score }} 分</span>
-              <span class="spacer" />
-              <UiTag v-if="it.solved" type="success" size="small">已通关</UiTag>
-              <UiTag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器环境</UiTag>
-              <UiTag v-if="it.is_builtin" size="small" effect="plain">内置</UiTag>
             </div>
+            <span v-if="it.tutorial_title" class="tutorial-line">配套教程：{{ it.tutorial_title }}</span>
           </div>
+          <span class="score mono">{{ it.score }} 分</span>
+          <span class="row-tags">
+            <UiTag v-if="it.solved" type="success" size="small">已通关</UiTag>
+            <UiTag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器</UiTag>
+            <UiTag v-if="it.is_builtin" size="small" effect="plain">内置</UiTag>
+          </span>
+          <span v-if="it.solved" class="solved-check" title="已通关">✓</span>
         </router-link>
       </div>
     </section>
   </template>
+  <div v-else class="chal-list">
+    <router-link
+      v-for="it in visibleItems"
+      :key="it.id"
+      class="row chal-link"
+      :to="`${base}/training/${it.slug}`"
+    >
+      <span class="diff-dot" :class="`diff-${it.difficulty}`" aria-hidden="true" />
+      <div class="chal-main">
+        <div class="chal-title">
+          <span class="title-text">{{ it.title }}</span>
+          <UiTag :type="difficultyType(it.difficulty)" size="small" effect="plain">
+            {{ DIFFICULTY_LABELS[it.difficulty] }}
+          </UiTag>
+        </div>
+        <span v-if="it.tutorial_title" class="tutorial-line">配套教程：{{ it.tutorial_title }}</span>
+      </div>
+      <span class="score mono">{{ it.score }} 分</span>
+      <span class="row-tags">
+        <UiTag v-if="it.solved" type="success" size="small">已通关</UiTag>
+        <UiTag v-else-if="it.has_env" type="primary" size="small" effect="plain">容器</UiTag>
+        <UiTag v-if="it.is_builtin" size="small" effect="plain">内置</UiTag>
+      </span>
+      <span v-if="it.solved" class="solved-check" title="已通关">✓</span>
+    </router-link>
+  </div>
 </template>
 
 <style scoped>
@@ -175,35 +282,126 @@ onMounted(load)
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+.stats-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.stat b { font-weight: 600; color: var(--foreground); }
+.diff-bar {
+  display: flex;
+  height: 6px;
+  min-width: 140px;
+  flex: 1;
+  max-width: 260px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--muted);
+}
+.diff-bar .seg { height: 100%; }
+.seg-apprentice { background: var(--success); }
+.seg-practitioner { background: var(--warning); }
+.seg-expert { background: var(--destructive); }
+.diff-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
+
 .bank-tabs { margin-bottom: 0.25rem; }
-.filters { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; }
-.filter { width: 200px; }
-.group { margin-bottom: 2.25rem; }
+.filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.chip-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+.cat-chip:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); color: var(--foreground); }
+.cat-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.cat-chip.active {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.chip-count { opacity: 0.75; }
+.filters-tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filter { width: 180px; }
+
+.group { margin-bottom: var(--space-6); }
 .cat-head {
   display: flex; align-items: baseline; gap: 0.7rem;
-  margin-bottom: 0.9rem;
+  margin-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.45rem;
 }
 .cat {
-  font-size: 1rem; color: var(--accent-foreground); margin: 0;
-  font-family: Consolas, monospace;
+  font-size: var(--text-sm); color: var(--accent-foreground); margin: 0;
+  font-weight: 600;
 }
 .cat::before { content: '# '; opacity: 0.7; }
-.cat-count { color: var(--muted-foreground); font-size: 0.8rem; font-family: Consolas, monospace; }
-.chal-link { text-decoration: none; color: inherit; }
-.chal-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.95rem 1.05rem 0.85rem;
+.cat-count { color: var(--muted-foreground); font-size: var(--text-xs); font-family: var(--font-mono); }
+
+.chal-list { display: flex; flex-direction: column; }
+.chal-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 14px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 150ms ease;
 }
-.chal-card.solved { border-color: rgba(255, 128, 64, 0.35); }
-.chal-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; }
+.chal-list .chal-link:first-child { border-top: 1px solid var(--border); }
+.chal-link:hover { background: var(--accent); }
+.chal-link:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.diff-dot { width: 4px; align-self: stretch; border-radius: 2px; flex: none; }
+.diff-apprentice { background: var(--success); }
+.diff-practitioner { background: var(--warning); }
+.diff-expert { background: var(--destructive); }
+.chal-main { min-width: 0; flex: 1; }
+.chal-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .title-text {
-  color: var(--foreground); font-size: 0.98rem; font-weight: 600;
-  line-height: 1.45;
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
+.tutorial-line {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.score { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
+.row-tags { display: flex; align-items: center; gap: 6px; flex: none; }
 .solved-check {
   color: var(--accent-foreground); font-weight: 700;
   border: 1px solid var(--border);
@@ -212,6 +410,24 @@ onMounted(load)
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 0.78rem; flex: none;
 }
-.chal-card .spacer { flex: 1; }
-.score { color: var(--muted-foreground); font-size: 0.85rem; font-family: Consolas, monospace; }
+
+.empty-guide {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+.empty-title { margin: 0; font-size: var(--text-base); font-weight: 600; color: var(--foreground); }
+.empty-sub { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--muted-foreground); }
+
+@media (max-width: 720px) {
+  .score { display: none; }
+  .row-tags .ui-tag[data-tone='default'] { display: none; }
+  .chal-link { min-height: 44px; }
+}
 </style>

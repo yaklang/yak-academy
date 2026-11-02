@@ -19,10 +19,11 @@ test.describe('题目全链路', () => {
     await loginAsStudent(page)
 
     // 题库列表：上传的种子题归「CTF 题目」tab（教程题目 tab 专属内置题集），
-    // 按 category 分组出现
+    // 平铺行 + 分类 chip（中文映射）可见
     await page.getByRole('link', { name: '题库', exact: true }).click()
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.locator('h3.cat', { hasText: C.category })).toBeVisible()
+    await expect(page.locator('.row', { hasText: C.title })).toBeVisible()
+    await expect(page.locator('.cat-chip', { hasText: '密码学' })).toBeVisible()
     await page.getByRole('link', { name: C.title }).click()
     await expect(page).toHaveURL(new RegExp(`/training/${C.slug}`))
 
