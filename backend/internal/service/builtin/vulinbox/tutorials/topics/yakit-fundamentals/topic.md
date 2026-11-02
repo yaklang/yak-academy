@@ -1,5 +1,6 @@
 ---
 title: Yakit 上手与流量操控
+summary: Yakit 实战第一站：Web Fuzzer 手工重放、MITM 劫持真实流量、Codec 编解码，掌握安全测试最常用的三个交互面。
 ---
 
 # Yakit 上手与流量操控

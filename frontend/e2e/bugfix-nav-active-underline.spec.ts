@@ -11,8 +11,10 @@ test.describe('回归：主导航高亮精确匹配', () => {
   test('进题库后只有「题库」高亮，「教程」下划线消失；回首页「教程」恢复高亮（回归：根路径前缀误亮）', async ({ page }) => {
     await loginAsStudent(page)
 
-    // 从顶栏导航真实点击进入题库（用户视角路径，不直接 goto）
-    await page.getByRole('link', { name: '题库' }).click()
+    // 从顶栏导航真实点击进入题库（用户视角路径，不直接 goto）；
+    // 首页还有「浏览题库/查看全部题库/训练入口速达卡」等多处指向题库的
+    // 链接，这里必须精确匹配顶栏导航项。
+    await page.getByRole('link', { name: '题库', exact: true }).click()
     await expect(page.getByRole('heading', { name: '题库' })).toBeVisible()
 
     const tutorials = page.locator('.main-nav a', { hasText: '教程' })
@@ -25,7 +27,7 @@ test.describe('回归：主导航高亮精确匹配', () => {
     await expect(tutorials).toHaveCSS('font-weight', '400')
 
     // 返回首页：教程（根路径）恢复精确高亮——防止修复把根路径自身的高亮也抹掉
-    await page.getByRole('link', { name: '教程' }).click()
+    await page.getByRole('link', { name: '教程', exact: true }).click()
     await expect(page.getByRole('heading', { name: '学习路线' })).toBeVisible()
     await expect(tutorials).toHaveAttribute('aria-current', 'page')
     await expect(training).not.toHaveAttribute('aria-current', 'page')

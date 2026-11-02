@@ -90,9 +90,11 @@ type manifest struct {
 	Topics   []string `yaml:"topics"`
 }
 
-// topicFront topic.md 的 front matter。
+// topicFront topic.md 的 front matter。summary 可选：专题列表卡片摘要
+// （openapi Topic.summary 契约字段；缺省空串，前端摘要行随之隐藏）。
 type topicFront struct {
-	Title string `yaml:"title"`
+	Title   string `yaml:"title"`
+	Summary string `yaml:"summary"`
 }
 
 // lessonFront lesson.md 的 front matter（difficulty 三级枚举，teaching-integration skill）。
@@ -237,7 +239,7 @@ func (s *ContentService) parseTopic(topicSlug string, files map[string][]byte) (
 	if err := yaml.Unmarshal(front, &tf); err != nil {
 		return nil, fmt.Errorf("topic %s: %w", topicSlug, err)
 	}
-	return &model.Topic{Slug: topicSlug, Title: tf.Title}, nil
+	return &model.Topic{Slug: topicSlug, Title: tf.Title, Summary: tf.Summary}, nil
 }
 
 // parseRooms 解析 topics/<slug>/rooms/<room>/lesson.md 与可选 lab.yaml。

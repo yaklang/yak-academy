@@ -6,6 +6,7 @@ import ThemeToggle from '@/components/ThemeToggle.vue'
 import Reveal from '@/components/Reveal.vue'
 import TerminalRain from '@/components/TerminalRain.vue'
 import CipherReveal from '@/components/CipherReveal.vue'
+import ClickSpark from '@/components/ClickSpark.vue'
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
@@ -60,6 +61,8 @@ function scrollTo(id: string) {
       <section class="closing"><div><h2>下一次突破，从动手开始。</h2><p>带着好奇心来，把解决问题的能力带走。</p></div><Button as-child><RouterLink :to="enter">进入学院<ArrowRight class="size-4" /></RouterLink></Button></section>
     </main>
     <footer class="public-footer"><Brand /><span>学以致用，知行合一。</span><div class="footer-links"><a href="https://github.com/yaklang" target="_blank" rel="noopener noreferrer">GitHub ↗</a><span>© {{ new Date().getFullYear() }} Yak Academy</span></div></footer>
+    <!-- 点击火花仅在公开页生效（fixed 画布随组件挂载） -->
+    <ClickSpark />
   </div>
 </template>
 
