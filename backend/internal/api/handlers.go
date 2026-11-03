@@ -118,18 +118,18 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/lab-instances/logs", "admin", h.listInstanceLogs)
 	r.Handle(http.MethodDelete, "/api/v1/admin/lab-instances/{id}", "admin", h.adminDestroyInstance)
 	r.Handle(http.MethodGet, "/api/v1/admin/performance", "admin", h.performance)
-		r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
-		r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
-		r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
-		r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
+	r.Handle(http.MethodGet, "/api/v1/admin/users", "admin", h.listUsers)
+	r.Handle(http.MethodPost, "/api/v1/admin/users", "admin", h.createUser)
+	r.Handle(http.MethodPatch, "/api/v1/admin/users/{id}/roles", "admin", h.updateRoles)
+	r.Handle(http.MethodPost, "/api/v1/admin/users/{id}/reset-password", "admin", h.resetPasswordByAdmin)
 
-		// 备份（ops 硬化）：SQLite 快照 + 数据目录归档；下载离机保存。
-		r.Handle(http.MethodPost, "/api/v1/admin/backups", "admin", h.createBackup)
-		r.Handle(http.MethodGet, "/api/v1/admin/backups", "admin", h.listBackups)
-		r.Handle(http.MethodGet, "/api/v1/admin/backups/{name}", "admin", h.downloadBackup)
+	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档；下载离机保存。
+	r.Handle(http.MethodPost, "/api/v1/admin/backups", "admin", h.createBackup)
+	r.Handle(http.MethodGet, "/api/v1/admin/backups", "admin", h.listBackups)
+	r.Handle(http.MethodGet, "/api/v1/admin/backups/{name}", "admin", h.downloadBackup)
 
-		// 管理操作审计（ops 硬化）：全部 admin 写操作的 append-only 审计视图。
-		r.Handle(http.MethodGet, "/api/v1/admin/audit-logs", "admin", h.listAuditLogs)
+	// 管理操作审计（ops 硬化）：全部 admin 写操作的 append-only 审计视图。
+	r.Handle(http.MethodGet, "/api/v1/admin/audit-logs", "admin", h.listAuditLogs)
 
 	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)
@@ -484,6 +484,17 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		slug := detail.Challenge.Slug
 		related = &slug
 	}
+	// flow：Room 表内是 JSON 数组文本，接口始终下发数组（无流程 = []）。
+	flow := []string{}
+	if detail.Room.FlowJSON != "" {
+		if err := json.Unmarshal([]byte(detail.Room.FlowJSON), &flow); err != nil {
+			mapError(w, err)
+			return
+		}
+		if flow == nil {
+			flow = []string{}
+		}
+	}
 	type roomResp struct {
 		Slug       string           `json:"slug"`
 		TopicSlug  string           `json:"topic_slug"`
@@ -491,6 +502,7 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		Difficulty model.Difficulty `json:"difficulty"`
 		LessonMD   string           `json:"lesson_md"`
 		VideoURL   string           `json:"video_url"`
+		Flow       []string         `json:"flow"`
 		// 可空：无关联题目时为 null（前端显示"前往题目"用）。
 		RelatedChallengeSlug *string `json:"related_challenge_slug"`
 	}
@@ -498,6 +510,7 @@ func (h *Handlers) getRoom(w http.ResponseWriter, req *http.Request) {
 		Slug: detail.Room.Slug, TopicSlug: detail.Room.TopicSlug,
 		Title: detail.Room.Title, Difficulty: detail.Room.Difficulty,
 		LessonMD: detail.Room.LessonMD, VideoURL: detail.Room.VideoURL,
+		Flow:                 flow,
 		RelatedChallengeSlug: related,
 	}
 	writeJSON(w, http.StatusOK, resp)

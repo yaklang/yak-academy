@@ -1,6 +1,11 @@
 ---
 title: 万能密码：登录框里的 SQL 注入
 difficulty: apprentice
+flow:
+  - 定位登录参数
+  - 构造万能密码
+  - 绕过登录
+  - 验证管理员权限
 ---
 
 # 万能密码：登录框里的 SQL 注入
@@ -112,3 +117,8 @@ Host: 127.0.0.1:36870
 如果目标没有注入点，登录框还可以拼字典：Web Fuzzer 的 fuzztag（如 `{{file(用户名字典)}}` 配合 `{{file(密码字典)}}`）可以批量生成组合请求；Yakit 工具集里的 **弱口令爆破** 模块对常见服务（SSH/数据库/HTTP 表单）有现成模板。注入与爆破，是登录框攻防的两条基本线。
 
 下一课：登录进去只是开始——用 UNION 把整个数据库拖出来。
+
+## 知识链接
+
+- [SQL 注入](#knowledge:sql-injection)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)

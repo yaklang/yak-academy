@@ -71,6 +71,7 @@ type roomPayload struct {
 	Difficulty model.Difficulty `json:"difficulty"`
 	LessonMD   string           `json:"lesson_md"`
 	VideoURL   string           `json:"video_url,omitempty"` // 视频教程地址（可选）
+	Flow       []string         `json:"flow,omitempty"`      // 教程流程节点（可选）
 }
 
 type labDef struct {
@@ -99,11 +100,12 @@ type topicFront struct {
 }
 
 // lessonFront lesson.md 的 front matter（difficulty 三级枚举，teaching-integration skill）。
-// video 可选：视频教程地址（文字+视频教程）。
+// video 可选：视频教程地址（文字+视频教程）；flow 可选：教程流程节点。
 type lessonFront struct {
 	Title      string           `yaml:"title"`
 	Difficulty model.Difficulty `yaml:"difficulty"`
 	Video      string           `yaml:"video"`
+	Flow       []string         `yaml:"flow"`
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -275,6 +277,7 @@ func (s *ContentService) parseRooms(topicSlug string, files map[string][]byte, p
 			TopicSlug: topicSlug, Slug: slug,
 			Title: lf.Title, Difficulty: lf.Difficulty, LessonMD: string(body),
 			VideoURL: strings.TrimSpace(lf.Video),
+			Flow:     normalizeFlow(lf.Flow),
 		})
 	}
 	return rooms, nil
@@ -396,8 +399,65 @@ func validateParsed(p *parsedPackage) error {
 		if err := validateVideoURL(r.VideoURL); err != nil {
 			return fmt.Errorf("room %s: %w", r.Slug, err)
 		}
+		if err := validateFlow(r.Flow); err != nil {
+			return fmt.Errorf("room %s: %w", r.Slug, err)
+		}
 	}
 	return nil
+}
+
+const (
+	maxFlowSteps   = 12
+	maxFlowStepLen = 120
+)
+
+// normalizeFlow 去掉空节点并 trim；front matter 中的空列表等价于未配置。
+func normalizeFlow(steps []string) []string {
+	if len(steps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(steps))
+	for _, step := range steps {
+		if step = strings.TrimSpace(step); step != "" {
+			out = append(out, step)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// validateFlow 流程图至少 2 个节点才有意义；限制节点数量与单节点长度，
+// 避免内容包把任意长文本塞进 Room 详情。
+func validateFlow(steps []string) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	if len(steps) < 2 {
+		return errors.New("flow requires at least 2 steps")
+	}
+	if len(steps) > maxFlowSteps {
+		return fmt.Errorf("flow exceeds %d steps", maxFlowSteps)
+	}
+	for i, step := range steps {
+		if len(step) > maxFlowStepLen {
+			return fmt.Errorf("flow step %d exceeds %d characters", i+1, maxFlowStepLen)
+		}
+	}
+	return nil
+}
+
+// encodeFlow Payload/DB 之间的 JSON 转换；空流程存空串，避免落库 "[]"。
+func encodeFlow(steps []string) (string, error) {
+	if len(steps) == 0 {
+		return "", nil
+	}
+	raw, err := json.Marshal(steps)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // maxVideoURLLen 与 model.Room.VideoURL 的列宽一致（size:512）。
@@ -633,9 +693,14 @@ func (s *ContentService) applyPayload(ctx context.Context, payload string) error
 	}
 	for i := range parsed.Rooms {
 		rp := parsed.Rooms[i]
+		flow, err := encodeFlow(rp.Flow)
+		if err != nil {
+			return fmt.Errorf("room %s flow: %w", rp.Slug, err)
+		}
 		if err := s.rooms.Upsert(ctx, &model.Room{
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
 			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
+			FlowJSON: flow,
 		}); err != nil {
 			return err
 		}

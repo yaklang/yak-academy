@@ -29,6 +29,21 @@ test.describe('教程旅程', () => {
     // Room 正文渲染出 markdown 内容（非空标题 + 正文容器）
     await expect(page.getByRole('heading', { name: E2E.tutorial.roomTitle })).toBeVisible()
     await expect(page.locator('.lesson')).not.toBeEmpty()
+
+    // 教程流程节点（lesson.md front matter flow）与阅读目录
+    const flow = page.locator('.lesson-flow')
+    await expect(flow).toBeVisible()
+    await expect(flow.locator('.flow-pill')).toHaveCount(3)
+    await expect(page.getByRole('complementary', { name: '本页目录' })).toBeVisible()
+
+    // 知识链接：点击不跳转，打开知识弹窗并可关闭
+    await page.getByRole('link', { name: /SQL 注入/ }).first().click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('SQL 注入')
+    await expect(dialog.getByRole('link', { name: /官网原文/ })).toHaveAttribute('target', '_blank')
+    await dialog.getByRole('button', { name: '知道了' }).click()
+    await expect(dialog).toBeHidden()
   })
 
   test('Room 关联题目入口可达题目详情（教题双向入口）', async ({ page }) => {

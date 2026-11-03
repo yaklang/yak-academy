@@ -7,17 +7,17 @@ import "time"
 type Difficulty string
 
 const (
-	DifficultyApprentice  Difficulty = "apprentice"
+	DifficultyApprentice   Difficulty = "apprentice"
 	DifficultyPractitioner Difficulty = "practitioner"
-	DifficultyExpert      Difficulty = "expert"
+	DifficultyExpert       Difficulty = "expert"
 )
 
 // Topic 主题（如 SQLi/XSS），内容层级：Topic → Room（教题一体，teaching-integration skill）。
 type Topic struct {
-	ID        uint      `gorm:"primaryKey"`
-	Slug      string    `gorm:"uniqueIndex;size:128" json:"slug"`
-	Title     string    `gorm:"size:256" json:"title"`
-	Summary   string    `json:"summary"`
+	ID      uint   `gorm:"primaryKey"`
+	Slug    string `gorm:"uniqueIndex;size:128" json:"slug"`
+	Title   string `gorm:"size:256" json:"title"`
+	Summary string `json:"summary"`
 	// IsBuiltin 来自官方内置训练集（一键导入标记；内容包上传/删除不触碰，
 	// 内置教程禁删禁编辑按它判定）。default 无 not null 的理由同
 	// Challenge.IsBuiltin：旧行 NULL 会让等值过滤三值逻辑漏行
@@ -38,10 +38,12 @@ type Room struct {
 	LessonMD   string     `json:"-"` // 教程正文（Markdown），由 Room 详情接口单独返回
 	// VideoURL 视频教程地址（可选，lesson.md front matter video 字段）。
 	VideoURL string `gorm:"size:512" json:"video_url"`
+	// FlowJSON 教程流程图（可选，lesson.md front matter flow 字段，JSON 数组）。
+	FlowJSON string `gorm:"column:flow;type:text" json:"-"`
 	// Requirements 前置依赖（Room 级解锁图，JSON 数组存 room slug 列表）。
 	Requirements string `gorm:"type:text" json:"requirements,omitempty"`
 	// IsBuiltin 同 Topic.IsBuiltin（内置训练集来源标记；管理端禁删禁编辑依据）。
 	IsBuiltin bool      `gorm:"default:false" json:"is_builtin"`
-	CreatedAt    time.Time `gorm:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedAt time.Time `gorm:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

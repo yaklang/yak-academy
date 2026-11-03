@@ -1,6 +1,11 @@
 ---
 title: 业务链攻击：1 分钱买下商城商品
 difficulty: practitioner
+flow:
+  - 登录商城并观察
+  - 热加载脚本改价
+  - Fuzzer 重放订单
+  - Codec 验证口令
 ---
 
 # 业务链攻击：1 分钱买下商城商品
@@ -153,3 +158,9 @@ codec 端点的响应文案有两态，是唯一的进度反馈，注意区分�
 四步链里热加载是承上启下的枢纽：**观察**（MITM 历史）产出样本，**改写**（热加载脚本）把样本变成攻击载荷，**执行**（Fuzzer/批量重放）拿到结果。 Yakit 里还能把改写脚本、fuzztag 字典、批量重放组合起来，让整条流水线全自动跑——人工只负责判断哪条结果值得深挖。练熟这套组合，你就从"会用工具"进阶到了"指挥工具"。
 
 模块专精专题完。回到攻击面专题，用流水线打法重新审视那些单点漏洞。
+
+## 知识链接
+
+- [Yakit MITM](#knowledge:yakit-mitm)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)
+- [Yakit Codec](#knowledge:yakit-codec)

@@ -70,6 +70,7 @@ watch(
 
 <style scoped>
 .video-card {
+  max-width: 860px;
   margin-bottom: var(--space-8);
   overflow: hidden;
   border: 1px solid var(--border);

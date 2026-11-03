@@ -1,6 +1,11 @@
 ---
 title: SSRF 进阶：藏在 JSON 里的跳板与批量验证
 difficulty: practitioner
+flow:
+  - 定位 JSON 参数
+  - 注入内网 URL
+  - 批量发送验证
+  - 判断盲 SSRF
 ---
 
 # SSRF 进阶：藏在 JSON 里的跳板与批量验证
@@ -110,3 +115,8 @@ Host: 127.0.0.1:36870
 防御 SSRF 的清单：目标地址白名单（域名+网段）、禁用危险协议（`file://`、`gopher://`）、DNS 解析后二次校验 IP（防 DNS rebinding）、绝不跟随重定向。审计代码时搜"用户输入 → HTTP 客户端 URL"的数据流，是找到这类问题的最短路径。
 
 下一课：文件上传——骗过魔数校验。
+
+## 知识链接
+
+- [SSRF 服务端请求伪造](#knowledge:ssrf)
+- [Yakit Fuzztag](#knowledge:yakit-fuzztag)

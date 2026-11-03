@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -103,6 +104,11 @@ SQL 注入是……`,
 title: XSS 简介
 difficulty: apprentice
 video: https://cdn.example.com/xss-intro.mp4
+flow:
+  - 观察正常响应
+  - 探测列数
+  - 构造 UNION 查询
+  - 拖出目标数据
 ---
 XSS 是……`,
 	}
@@ -373,6 +379,13 @@ func TestPublishWritesContentTables(t *testing.T) {
 	if xssRoom.VideoURL != "https://cdn.example.com/xss-intro.mp4" {
 		t.Fatalf("video_url = %q", xssRoom.VideoURL)
 	}
+	var flow []string
+	if err := json.Unmarshal([]byte(xssRoom.FlowJSON), &flow); err != nil {
+		t.Fatalf("flow_json = %q: %v", xssRoom.FlowJSON, err)
+	}
+	if len(flow) != 4 || flow[0] != "观察正常响应" || flow[3] != "拖出目标数据" {
+		t.Fatalf("flow = %v", flow)
+	}
 }
 
 func TestValidateVideoURL(t *testing.T) {
@@ -403,6 +416,59 @@ func TestValidateVideoURL(t *testing.T) {
 				t.Fatalf("validateVideoURL(%q) err = %v, wantErr %v", tc.raw, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestNormalizeFlow(t *testing.T) {
+	got := normalizeFlow([]string{"  观察正常响应 ", "", "  ", "探测列数"})
+	if len(got) != 2 || got[0] != "观察正常响应" || got[1] != "探测列数" {
+		t.Fatalf("normalizeFlow = %v", got)
+	}
+	if got := normalizeFlow([]string{" ", ""}); got != nil {
+		t.Fatalf("normalizeFlow(empty) = %v, want nil", got)
+	}
+}
+
+func TestValidateFlow(t *testing.T) {
+	tooLong := strings.Repeat("a", maxFlowStepLen+1)
+	cases := []struct {
+		name    string
+		steps   []string
+		wantErr bool
+	}{
+		{name: "empty", steps: nil},
+		{name: "two steps", steps: []string{"观察响应", "探测列数"}},
+		{name: "single step", steps: []string{"观察响应"}, wantErr: true},
+		{name: "too many steps", steps: make([]string, maxFlowSteps+1), wantErr: true},
+		{name: "step too long", steps: []string{"观察响应", tooLong}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateFlow(tc.steps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateFlow(%v) err = %v, wantErr %v", tc.steps, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestUploadRejectsSingleStepFlow(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	files := validPackage()
+	files["topics/web-security/rooms/xss-intro/lesson.md"] = `---
+title: XSS 简介
+difficulty: apprentice
+flow:
+  - 只有一个节点
+---
+XSS 是……`
+	if _, err := svc.Upload(context.Background(), buildZip(t, files)); err == nil {
+		t.Fatal("expected reject for single-step flow")
+	}
+	var packages int64
+	gdb.Model(&model.ContentPackage{}).Count(&packages)
+	if packages != 0 {
+		t.Fatalf("packages = %d, want 0（校验失败整体不入库）", packages)
 	}
 }
 

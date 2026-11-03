@@ -240,8 +240,13 @@ topics:
 title: SQL 注入基础
 difficulty: apprentice   # apprentice / practitioner / expert 三级
 video: https://cdn.example.com/sqli.mp4   # 可选：http/https 绝对地址（≤512 字符），mp4/webm 直链或可 embed 的页面
+flow:                                    # 可选：教程流程（2-12 步，每步 ≤120 字符）
+  - 观察正常响应
+  - 探测列数
+  - 构造 UNION 查询
+  - 拖出目标数据
 ---
-正文为 Markdown……</pre>
+正文为 Markdown，知识链接示例：[SQL 注入](#knowledge:sql-injection)……</pre>
       <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。题目（flag、容器环境、提示）不经教程包——用"题目管理"的 challenge.json 定义。</p>
     </UiCard>
   </UiCollapseTransition>

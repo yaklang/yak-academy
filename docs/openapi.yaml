@@ -195,6 +195,10 @@ components:
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         lesson_md: { type: string, description: 教程正文 Markdown }
         video_url: { type: string, description: "视频教程地址（可选，lesson.md front matter video 字段；仅 http/https 绝对地址，mp4/webm 直链或可嵌入页面）" }
+        flow:
+          type: array
+          items: { type: string }
+          description: "教程流程节点（可选，lesson.md front matter flow 字段；2-12 步，每步 ≤120 字符）"
         related_challenge_slug:
           type: string
           nullable: true

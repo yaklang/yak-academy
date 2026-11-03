@@ -1,6 +1,11 @@
 ---
 title: 闭合技巧：模糊查询点上的精确统计
 difficulty: practitioner
+flow:
+  - 定位模糊查询点
+  - 闭合引号
+  - 构造统计注入
+  - 验证统计结果
 ---
 
 # 闭合技巧：模糊查询点上的精确统计
@@ -99,3 +104,8 @@ Host: 127.0.0.1:36870
 Web Fuzzer 的 fuzztag 家族还有 `{{int(1,20)}}`（数字区间）、`{{base64(...)}}`（边发边编码）、`{{randstr(8)}}`（随机串）等。把"探测列数"做成 `ORDER BY {{int(1,10)}}` 的一次执行，就是最典型的用法——这种"参数化一切"的思维，是从手工测试走向自动化测试的第一步。
 
 下一专题：会话与越权——拿到凭证，冒充他人。
+
+## 知识链接
+
+- [SQL 注入](#knowledge:sql-injection)
+- [Yakit Fuzztag](#knowledge:yakit-fuzztag)

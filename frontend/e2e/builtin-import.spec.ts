@@ -94,6 +94,6 @@ test.describe('内置训练一键导入', () => {
     await expect(page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
     await expect(page.locator('.topic-link', { hasText: 'SQL 注入实战' })).toBeVisible()
     await page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' }).click()
-    await expect(page.locator('.room-link', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
+    await expect(page.locator('.tree-item', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
   })
 })
