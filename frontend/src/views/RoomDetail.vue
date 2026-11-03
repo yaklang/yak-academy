@@ -101,7 +101,13 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { max-width: 1040px; margin-inline: auto; }
+.page {
+  --lesson-reading-width: 780px;
+  --lesson-toc-width: 220px;
+  --lesson-gutter: var(--space-10);
+  max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter));
+  margin-inline: auto;
+}
 .load-error {
   display: grid;
   justify-items: start;

@@ -70,7 +70,10 @@ watch(
 
 <style scoped>
 .video-card {
-  max-width: 860px;
+  max-width: min(
+    var(--lesson-reading-width, 780px),
+    calc(100% - var(--lesson-toc-width, 220px) - var(--lesson-gutter, var(--space-10)))
+  );
   margin-bottom: var(--space-8);
   overflow: hidden;
   border: 1px solid var(--border);
@@ -141,6 +144,9 @@ watch(
 .video-fallback a { color: var(--accent-foreground); font-weight: 500; }
 .video-fallback a:hover { text-decoration: underline; text-underline-offset: 3px; }
 
+@media (max-width: 1024px) {
+  .video-card { max-width: 100%; }
+}
 @media (max-width: 720px) {
   .video-head {
     flex-direction: column;

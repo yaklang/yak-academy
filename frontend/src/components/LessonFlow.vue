@@ -31,7 +31,10 @@ const pad = (n: number) => String(n).padStart(2, '0')
 
 <style scoped>
 .lesson-flow {
-  max-width: 860px;
+  max-width: min(
+    var(--lesson-reading-width, 780px),
+    calc(100% - var(--lesson-toc-width, 220px) - var(--lesson-gutter, var(--space-10)))
+  );
   margin-bottom: var(--space-6);
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--border);
@@ -81,6 +84,9 @@ const pad = (n: number) => String(n).padStart(2, '0')
 .flow-index { color: var(--accent-foreground); font-size: var(--text-xs); font-weight: 600; }
 .flow-arrow { color: var(--muted-foreground); font-size: var(--text-xs); }
 
+@media (max-width: 1024px) {
+  .lesson-flow { max-width: 100%; }
+}
 @media (max-width: 640px) {
   .flow-track { flex-direction: column; align-items: stretch; }
   .flow-pill { justify-content: flex-start; border-radius: var(--radius-control); }
