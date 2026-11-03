@@ -3,6 +3,7 @@
 // 备份等），与 Event 学生行为流分工；可按动作与管理员过滤，新→旧分页。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { auditApi, type AdminAuditLog } from '../../api'
 
 const items = ref<AdminAuditLog[]>([])
@@ -49,18 +50,22 @@ function applyFilter() {
 }
 
 function fmt(ts: string) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <h2>操作审计</h2>
-  <p class="hint">
-    管理端写操作（内容上传/发布/回滚/删除、题目与附件、竞赛、用户与角色、备份等）的
-    append-only 审计轨迹；与学员行为事件流（Event 表）分工，不参与积分重放。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">操作<span class="accent">审计</span></h2>
+      <p class="page-sub">
+        管理端写操作（内容上传/发布/回滚/删除、题目与附件、竞赛、用户与角色、备份等）的
+        append-only 审计轨迹；与学员行为事件流（Event 表）分工，不参与积分重放。
+      </p>
+    </div>
+  </header>
 
   <UiCard class="block" shadow="never">
     <template #header>
@@ -107,7 +112,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .block { margin-bottom: 1.2rem; }
 .toolbar { display: flex; gap: 0.6rem; align-items: center; }
 .dim { color: var(--muted-foreground); }

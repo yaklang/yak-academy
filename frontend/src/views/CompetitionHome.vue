@@ -5,6 +5,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import type { UploadFile } from '@/components/system/composite'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
@@ -327,7 +328,7 @@ onUnmounted(() => {
             </UiTableColumn>
             <UiTableColumn prop="score" label="得分" width="80" />
             <UiTableColumn label="时间" min-width="160">
-              <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+              <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
             </UiTableColumn>
           </UiTable>
         </UiTabPane>

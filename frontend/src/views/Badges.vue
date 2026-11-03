@@ -24,8 +24,12 @@ onMounted(load)
 </script>
 
 <template>
-  <h2 class="page-title">徽<span class="accent">章</span></h2>
-  <p class="hint">已获得 {{ earnedCount }} / {{ badges.length }} 枚 —— 完成题目、学习教程与积分里程碑自动解锁。</p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">徽<span class="accent">章</span></h2>
+      <p class="page-sub">已获得 {{ earnedCount }} / {{ badges.length }} 枚 —— 完成题目、学习教程与积分里程碑自动解锁。</p>
+    </div>
+  </header>
   <UiSkeleton v-if="loading" :rows="4" animated />
   <div v-else class="grid">
     <div v-for="b in badges" :key="b.code" class="badge" :class="{ earned: b.earned }">
@@ -39,28 +43,31 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 0.8rem;
+  gap: var(--space-3);
 }
 .badge {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  opacity: 0.55;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
 }
+.badge .medal { opacity: 0.55; }
+.badge .title { color: var(--muted-foreground); }
 .badge.earned {
-  opacity: 1;
-  border-color: var(--border);
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   background: var(--accent);
 }
-.medal { font-size: 1.6rem; }
-.meta { display: flex; flex-direction: column; gap: 0.2rem; }
-.title { font-weight: 600; }
-.desc { font-size: 0.85rem; color: var(--muted-foreground); }
+.badge.earned .medal { opacity: 1; }
+.badge.earned .title { color: var(--foreground); }
+.medal { font-size: var(--text-2xl); line-height: 1; }
+.meta { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
+.title { color: var(--foreground); font-size: var(--text-sm); font-weight: 600; }
+.desc { color: var(--muted-foreground); font-size: var(--text-xs); line-height: var(--leading-normal); }
 </style>

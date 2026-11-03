@@ -7,6 +7,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import {
   adminChallengeApi,
   adminCompetitionApi,
@@ -50,7 +51,7 @@ function statusLabel(s: Competition['status']) {
   return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
 }
 function fmt(ts: string | null | undefined) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 // ---------- 配置 ----------

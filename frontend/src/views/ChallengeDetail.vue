@@ -8,10 +8,11 @@ import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatTime } from '@/lib/format'
 import {
   trainingApi, instanceApi, downloadAttachment,
   type AdminLabInstance, type ChallengeDetail, type CodeRunView, type JudgeSample, type LabInstance,
-  verdictLabels,
+  CATEGORY_LABELS, DIFFICULTY_LABELS, verdictLabels,
 } from '../api'
 import type { ApiError } from '../api/client'
 import CodeEditor from '../components/CodeEditor.vue'
@@ -386,7 +387,8 @@ onUnmounted(() => {
     <header class="head">
       <h2 class="title">{{ challenge.title }}</h2>
       <span class="tags">
-        <UiTag :type="difficultyType(challenge.difficulty)" effect="plain">{{ challenge.difficulty }}</UiTag>
+        <UiTag effect="plain">{{ CATEGORY_LABELS[challenge.category] ?? challenge.category }}</UiTag>
+        <UiTag :type="difficultyType(challenge.difficulty)" effect="plain">{{ DIFFICULTY_LABELS[challenge.difficulty] }}</UiTag>
         <UiTag type="info" effect="plain" class="score-tag">{{ challenge.score }} 分</UiTag>
         <UiTag v-if="challenge.solved" type="success">已通关</UiTag>
         <UiTag v-if="challenge.has_env" type="primary" effect="plain">容器环境</UiTag>
@@ -478,7 +480,7 @@ onUnmounted(() => {
           </UiTag>
           <code v-if="instance!.endpoint" class="endpoint">{{ instance!.endpoint }}</code>
           <span v-if="instance!.expire_at" class="expire">
-            到期 {{ new Date(instance!.expire_at).toLocaleTimeString() }}
+            到期 {{ formatTime(instance!.expire_at) }}
           </span>
           <UiButton
             v-if="instance!.status === 'running'"
@@ -629,20 +631,44 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.page { max-width: 860px; }
+.page { max-width: 900px; }
 .head {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 0.6rem;
+  display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: var(--space-3);
   border-bottom: 1px solid var(--border);
-  padding-bottom: 0.9rem; margin-bottom: 0.9rem;
+  padding-bottom: var(--space-3); margin-bottom: var(--space-3);
 }
-.title { margin: 0; font-size: 1.45rem; font-weight: 700; }
-.tags { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.score-tag { font-family: Consolas, monospace; }
-.tutorial-link { display: inline-block; margin: 0.4rem 0 0.8rem; color: var(--accent-foreground); text-decoration: none; }
-.description { line-height: 1.7; margin: 1rem 0 2rem; }
-.description :deep(pre) { background: var(--muted); padding: 0.8rem; border-radius: 4px; overflow: auto; }
-.description :deep(code) { background: var(--muted); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.title { margin: 0; font-size: var(--text-2xl); font-weight: 600; line-height: var(--leading-tight); letter-spacing: 0; overflow-wrap: anywhere; }
+.tags { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.score-tag { font-family: var(--font-mono); }
+.tutorial-link { display: inline-flex; align-items: center; margin: var(--space-3) 0 var(--space-2); color: var(--accent-foreground); text-decoration: none; }
+.tutorial-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.description { max-width: 72ch; line-height: var(--leading-relaxed); margin: var(--space-4) 0 var(--space-8); }
+.description :deep(p) { margin: 0 0 var(--space-4); }
+.description :deep(h1), .description :deep(h2), .description :deep(h3) {
+  margin: var(--space-6) 0 var(--space-3);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.description :deep(h1) { font-size: var(--text-lg); }
+.description :deep(h2) { font-size: var(--text-md); }
+.description :deep(h3) { font-size: var(--text-base); }
+.description :deep(ul), .description :deep(ol) { margin: 0 0 var(--space-4); padding-left: var(--space-5); }
+.description :deep(li) { margin-bottom: var(--space-1); }
+.description :deep(blockquote) {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+.description :deep(a) { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 3px; }
+.description :deep(pre) { background: var(--muted); padding: var(--space-4); border-radius: var(--radius-control); overflow: auto; }
+.description :deep(code) { background: var(--muted); padding: 1px 5px; border-radius: var(--radius-control); font-size: .95em; }
+.description :deep(pre code) { background: none; padding: 0; border-radius: 0; }
+.description :deep(table) { width: 100%; border-collapse: collapse; margin: 0 0 var(--space-4); font-size: var(--text-sm); }
+.description :deep(th), .description :deep(td) { border-bottom: 1px solid var(--border); padding: var(--space-2) var(--space-3); text-align: left; }
+.description :deep(th) { font-weight: 600; }
 .attachments { margin: 0 0 1.2rem; }
 .attachments h4, .links h4 { margin: 0 0 0.4rem; }
 .attach-row { display: flex; align-items: center; gap: 0.8rem; padding: 0.25rem 0; }

@@ -5,6 +5,7 @@
 // （end_time 置为当前时刻），已结束的竞赛可在详情页重新配置再次开赛。
 import { onMounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { adminCompetitionApi, KIND_LABELS, type Competition, type CompetitionKind } from '../../api'
 
 const items = ref<Competition[]>([])
@@ -140,17 +141,21 @@ async function remove(row: Competition) {
 }
 
 function fmt(ts: string) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <h2>竞赛管理</h2>
-  <p class="hint">
-    创建与配置竞赛（起止时间决定状态与参赛锁定）；详情页内管理题目、参赛人员、容器、反作弊警告、WP 与排行榜。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">竞赛<span class="accent">管理</span></h2>
+      <p class="page-sub">
+        创建与配置竞赛（起止时间决定状态与参赛锁定）；详情页内管理题目、参赛人员、容器、反作弊警告、WP 与排行榜。
+      </p>
+    </div>
+  </header>
 
   <UiCard shadow="never" class="block">
     <template #header>
@@ -204,6 +209,7 @@ onMounted(load)
       </UiTableColumn>
     </UiTable>
     <UiPagination
+      v-if="total > 0"
       background
       layout="total, prev, pager, next"
       :total="total"
@@ -247,7 +253,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .dim { color: var(--muted-foreground); font-size: 0.8rem; margin-top: 4px; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
