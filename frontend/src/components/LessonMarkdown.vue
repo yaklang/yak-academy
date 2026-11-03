@@ -106,9 +106,9 @@ async function onClick(event: MouseEvent) {
 <style scoped>
 .lesson-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
+  grid-template-columns: minmax(0, 1fr) var(--lesson-toc-width, 220px);
   align-items: start;
-  gap: var(--space-10);
+  gap: var(--lesson-gutter, var(--space-10));
 }
 .lesson-md {
   min-width: 0;
@@ -148,7 +148,12 @@ async function onClick(event: MouseEvent) {
   margin: 0 0 var(--space-5);
   padding-left: var(--space-6);
 }
+.lesson-md :deep(ul) { list-style: disc; }
+.lesson-md :deep(ul ul) { list-style: circle; }
+.lesson-md :deep(ol) { list-style: decimal; }
+.lesson-md :deep(ol ol) { list-style: lower-alpha; }
 .lesson-md :deep(li) { margin-bottom: var(--space-2); }
+.lesson-md :deep(li::marker) { color: var(--muted-foreground); }
 .lesson-md :deep(li > ul),
 .lesson-md :deep(li > ol) { margin-top: var(--space-2); margin-bottom: 0; }
 .lesson-md :deep(strong) { color: var(--foreground); font-weight: 650; }
