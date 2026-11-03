@@ -108,6 +108,7 @@ onMounted(load)
   max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter));
   margin-inline: auto;
 }
+.page-head { max-width: var(--lesson-reading-width); }
 .load-error {
   display: grid;
   justify-items: start;
