@@ -103,15 +103,15 @@ onMounted(load)
 }
 .pod {
   display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
-  background: var(--card);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.4rem 0.9rem;
   min-width: 150px;
 }
 .pod.d1 {
-  border-color: rgba(255, 128, 64, 0.45);
-  background: linear-gradient(180deg, rgba(255, 128, 64, 0.09), var(--card) 55%);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 10%, var(--panel)), var(--panel) 55%);
   padding: 1.5rem 1.8rem 1.1rem;
 }
 .pod.d2 { padding-bottom: 0.7rem; }

@@ -78,7 +78,7 @@ function scrollTo(id: string) {
 .hero-terminal .hero-copy, .hero-terminal .hero-figure { z-index: 2; }
 /* 数据条：hero 与方法区之间的能力统计。 */
 .hero-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-block: 20px; }
-.stat-item { display: grid; gap: 6px; padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); }
+.stat-item { display: grid; gap: 6px; padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
 .stat-item strong { font-size: 32px; font-weight: 600; letter-spacing: -.04em; font-variant-numeric: tabular-nums; color: var(--accent-foreground); }
 .stat-item span { font-size: 12px; color: var(--muted-foreground); }
 @media (max-width: 767px) {

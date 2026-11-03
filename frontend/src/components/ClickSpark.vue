@@ -4,12 +4,13 @@
 // and credentials are not part of this public repository.
 import { onMounted, onUnmounted, ref } from 'vue'
 
-// 挂在 App 根部：捕获全局点击，在点击位置炸出几粒橙色火花。
+// 挂在 App 根部：捕获全局点击，在点击位置炸出几粒强调色火花。
 const canvas = ref<HTMLCanvasElement>()
 let frame = 0
 let width = 0
 let height = 0
 let ctx: CanvasRenderingContext2D | null = null
+let sparkColor = '#7a4526'
 let sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = []
 let media: MediaQueryList | undefined
 let reduced = false
@@ -23,6 +24,7 @@ function resize() {
 
 function burst(x: number, y: number) {
   if (reduced) return
+  sparkColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-foreground').trim() || sparkColor
   for (let i = 0; i < 7; i++) {
     const angle = Math.random() * Math.PI * 2
     const speed = 1.6 + Math.random() * 3.4
@@ -41,9 +43,11 @@ function paint() {
     s.y += s.vy
     s.vy += .12 // 重力
     s.life -= .03
-    ctx.fillStyle = `rgba(255,138,76,${Math.max(0, s.life) * .9})`
+    ctx.fillStyle = sparkColor
+    ctx.globalAlpha = Math.max(0, s.life) * .9
     ctx.fillRect(s.x, s.y, 2.2, 2.2)
   }
+  ctx.globalAlpha = 1
   if (sparks.length) frame = requestAnimationFrame(paint)
 }
 

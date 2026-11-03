@@ -232,9 +232,21 @@ async function submit() {
 </template>
 
 <style scoped>
-/* 品牌故事区的矩阵雨：铺满左侧栏，文字层压上方。 */
+/* 品牌故事区的矩阵雨：铺满左侧栏，文字层压上方。
+   ::before 用面板色向左渐隐雨幕，避免正文压在字符上影响可读性。 */
 .auth-story { position: relative; }
-.auth-rain { position: absolute; inset: 0; border-radius: inherit; mask-image: radial-gradient(ellipse at 70% 40%, #000 30%, transparent 78%); }
-.auth-story > .eyebrow, .auth-story > h1, .auth-story > p:not(.eyebrow), .auth-story > .auth-signature { position: relative; z-index: 1; }
+.auth-story::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--panel) 90%, transparent) 0%, color-mix(in srgb, var(--panel) 76%, transparent) 52%, transparent 82%);
+}
+.auth-rain { position: absolute; inset: 0; z-index: 0; border-radius: inherit; mask-image: radial-gradient(ellipse at 70% 40%, #000 30%, transparent 78%); }
+.auth-story > .eyebrow, .auth-story > h1, .auth-story > p:not(.eyebrow), .auth-story > .auth-signature { position: relative; z-index: 2; }
 .auth-story h1 .cipher-mask { color: var(--accent-foreground); }
+@media (max-width: 767px) {
+  .auth-rain { opacity: .6; }
+}
 </style>

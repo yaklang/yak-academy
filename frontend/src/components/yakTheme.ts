@@ -8,7 +8,7 @@ const yakChrome = EditorView.theme(
   {
     '&': {
       color: 'var(--foreground)',
-      backgroundColor: 'var(--card)',
+      backgroundColor: 'var(--background)',
       fontSize: '13px',
     },
     '.cm-scroller': {
@@ -32,7 +32,7 @@ const yakChrome = EditorView.theme(
       backgroundColor: 'var(--muted)',
       color: 'var(--muted-foreground)',
       border: 'none',
-      borderRight: '1px solid #2c313a',
+      borderRight: '1px solid var(--border)',
     },
     '.cm-lineNumbers .cm-gutterElement': {
       padding: '0 10px 0 14px',
@@ -45,17 +45,17 @@ const yakChrome = EditorView.theme(
     '.cm-activeLine': { backgroundColor: 'var(--muted)' },
     '.cm-matchingBracket': {
       backgroundColor: 'var(--muted)',
-      outline: '1px solid #6a7280',
+      outline: '1px solid var(--ring)',
       color: 'inherit !important',
     },
-    '.cm-nonmatchingBracket': { outline: '1px solid #e06c75' },
+    '.cm-nonmatchingBracket': { outline: '1px solid var(--destructive)' },
     '.cm-placeholder': {
       color: 'var(--muted-foreground)',
       fontStyle: 'italic',
     },
     '.cm-tooltip': {
       backgroundColor: 'var(--popover)',
-      border: '1px solid #3c4149',
+      border: '1px solid var(--border)',
       color: 'var(--code-bracket)',
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {

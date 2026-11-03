@@ -240,7 +240,7 @@ onMounted(load)
   position: relative;
   display: grid;
   grid-template-columns: var(--space-10) minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: var(--space-4);
   scroll-margin-top: calc(var(--space-16) + var(--space-6));
 }
@@ -273,23 +273,25 @@ onMounted(load)
   background: var(--border);
 }
 .room-card {
-  display: flex;
-  min-height: 96px;
-  flex-direction: column;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 72px;
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 .tree-item:hover .room-card { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
 .room-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   gap: var(--space-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
 .room-head h4 {
   margin: 0;
@@ -302,10 +304,11 @@ onMounted(load)
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  margin-top: auto;
+  margin-top: 0;
   color: var(--accent-foreground);
   font-size: var(--text-sm);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
@@ -321,5 +324,12 @@ onMounted(load)
   }
   .tree-node::after { width: var(--space-3); }
   .room-card { padding: var(--space-4); }
+}
+@media (max-width: 560px) {
+  .room-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .enter { justify-self: start; }
 }
 </style>

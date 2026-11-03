@@ -78,7 +78,7 @@ watch(
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
 }
 .video-card.invalid { padding: var(--space-4); }
 .video-invalid {
