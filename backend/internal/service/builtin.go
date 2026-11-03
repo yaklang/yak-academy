@@ -122,23 +122,23 @@ func (s *ContentService) ImportBuiltinChallenges(ctx context.Context) (*BuiltinI
 // BuiltinTutorialCatalog 内置训练集教程目录（契约见 docs/openapi.yaml
 // /admin/challenges/builtin/tutorials；教程管理页「内置训练集」区块数据源）。
 type BuiltinTutorialCatalog struct {
-	Version        string                    `json:"version"`
-	Topics         []BuiltinTutorialTopic    `json:"topics"`
-	ImportedTopics int                       `json:"imported_topics"`
-	ImportedRooms  int                       `json:"imported_rooms"`
+	Version        string                 `json:"version"`
+	Topics         []BuiltinTutorialTopic `json:"topics"`
+	ImportedTopics int                    `json:"imported_topics"`
+	ImportedRooms  int                    `json:"imported_rooms"`
 }
 
 // BuiltinTutorialTopic 目录中的一个专题（教程 → 题目 1:1，Room 数与题数一致）。
 type BuiltinTutorialTopic struct {
-	Slug  string                   `json:"slug"`
-	Title string                   `json:"title"`
-	Rooms []BuiltinTutorialRoom   `json:"rooms"`
+	Slug  string                `json:"slug"`
+	Title string                `json:"title"`
+	Rooms []BuiltinTutorialRoom `json:"rooms"`
 }
 
 // BuiltinTutorialRoom 目录中的一篇教程。
 type BuiltinTutorialRoom struct {
-	Slug       string          `json:"slug"`
-	Title      string          `json:"title"`
+	Slug       string           `json:"slug"`
+	Title      string           `json:"title"`
 	Difficulty model.Difficulty `json:"difficulty"`
 	// Imported 该 Room 是否已导入（内容表存在同名内置行）。
 	Imported bool `json:"imported"`
@@ -281,7 +281,7 @@ func (s *ContentService) BuildBuiltinImageOnly(ctx context.Context) (*BuiltinIma
 // Room slug 统一 yakit- 前缀命名空间；challenges.json 每题 tutorial_slug
 // 指向配套 Room（1:1），详见 docs/architecture.md 决策 2 例外。
 // 写入后置 is_builtin 来源标记：内置教程不可经内容包路径改动/删除
-//（validate/DeletePackage 按标记拦截），仅本入口可更新。
+// （validate/DeletePackage 按标记拦截），仅本入口可更新。
 func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, rooms int, err error) {
 	files, err := builtinTutorialFiles()
 	if err != nil {
@@ -304,9 +304,14 @@ func (s *ContentService) importBuiltinTutorials(ctx context.Context) (topics, ro
 	}
 	roomSlugs := make([]string, 0, len(parsed.Rooms))
 	for _, rp := range parsed.Rooms {
+		flow, err := encodeFlow(rp.Flow)
+		if err != nil {
+			return 0, 0, fmt.Errorf("room %s flow: %w", rp.Slug, err)
+		}
 		if err := s.rooms.Upsert(ctx, &model.Room{
 			Slug: rp.Slug, TopicSlug: rp.TopicSlug, Title: rp.Title,
 			Difficulty: rp.Difficulty, LessonMD: rp.LessonMD, VideoURL: rp.VideoURL,
+			FlowJSON:  flow,
 			IsBuiltin: true,
 		}); err != nil {
 			return 0, 0, err

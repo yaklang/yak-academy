@@ -101,7 +101,7 @@ func (r *roomRepo) Upsert(ctx context.Context, room *model.Room) error {
 	//（同 topicRepo.Upsert）。
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "slug"}},
-		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "video_url", "requirements", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"topic_slug", "title", "difficulty", "lesson_md", "video_url", "flow", "requirements", "updated_at"}),
 	}).Create(room).Error
 }
 

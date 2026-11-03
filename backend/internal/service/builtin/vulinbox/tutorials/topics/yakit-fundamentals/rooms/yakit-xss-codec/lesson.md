@@ -1,6 +1,11 @@
 ---
 title: XSS 与转义：用 Codec 看懂编码的边界
 difficulty: apprentice
+flow:
+  - 定位输出点
+  - 用 Codec 编码 payload
+  - 注入并观察渲染
+  - 验证转义边界
 ---
 
 # XSS 与转义：用 Codec 看懂编码的边界
@@ -89,3 +94,8 @@ Host: 127.0.0.1:36870
 Yakit 的**漏洞检测**（主动扫描）里包含 XSS 检测规则，对靶机跑一次扫描，观察它能否自动发现 `/xss/echo` 的问题——自动化找到漏洞边界，人工确认利用方式，这是实战的标准分工。Codec 还有 base64、URL、hex、哈希等几十种变换，后面教程会反复用到。
 
 本专题完。下一专题：SQL 注入——从万能密码到拖库。
+
+## 知识链接
+
+- [XSS 跨站脚本](#knowledge:xss)
+- [Yakit Codec](#knowledge:yakit-codec)

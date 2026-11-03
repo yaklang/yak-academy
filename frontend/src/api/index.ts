@@ -23,6 +23,7 @@ export interface Room {
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   lesson_md?: string
   video_url?: string
+  flow?: string[]
   related_challenge_slug?: string | null
 }
 // verdict：ACM 编程题判定结果（flag 判定题为 null，学生端按 status 展示）。

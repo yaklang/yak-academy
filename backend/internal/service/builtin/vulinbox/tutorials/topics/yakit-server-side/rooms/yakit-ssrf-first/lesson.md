@@ -1,6 +1,11 @@
 ---
 title: SSRF 初探：让服务器替你访问内网
 difficulty: apprentice
+flow:
+  - 定位 URL 参数
+  - 替换为内网地址
+  - 观察回显
+  - 验证内网可达
 ---
 
 # SSRF 初探：让服务器替你访问内网
@@ -95,3 +100,8 @@ Host: 127.0.0.1:36870
 很多 SSRF **没有回显**（请求发出去了，响应看不到），这时要靠 **综合反连 OOB**：把 URL 指向 Yakit 反连平台分配给你的回调域名，目标服务器一旦发起请求，平台立刻记录下来——"它确实访问了"本身就是漏洞证据。反连是验证无回显 RCE、盲 SSRF、盲 XXE 的通用手段，值得单独深入。
 
 下一课：SSRF 藏进 JSON 参数里，如何一击命中？
+
+## 知识链接
+
+- [SSRF 服务端请求伪造](#knowledge:ssrf)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)

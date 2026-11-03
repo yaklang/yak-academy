@@ -1,25 +1,33 @@
 <script setup lang="ts">
-// Room 详情页：纯教程页（文字 Markdown + 视频）。题目是独立资源，
-// 本页不再内嵌 Lab——有关联题目时给"前往题目"入口跳题目详情页。
+// Room 详情页：纯教程页（文字 Markdown + 视频 + 流程 + 知识链接）。
+// 题目是独立资源；有关联题目时给"前往题目"入口跳题目详情页。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { DIFFICULTY_LABELS, topicApi, type Room } from '../api'
 import RoomVideoPlayer from '../components/RoomVideoPlayer.vue'
+import LessonFlow from '../components/LessonFlow.vue'
+import LessonMarkdown from '../components/LessonMarkdown.vue'
+import KnowledgeDialog from '../components/KnowledgeDialog.vue'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
 const loading = ref(true)
 const loadError = ref('')
-
-const renderedLesson = computed(() =>
-  DOMPurify.sanitize(marked.parse(room.value?.lesson_md ?? '') as string),
-)
+const knowledgeOpen = ref(false)
+const knowledgeId = ref('')
 
 const videoSrc = computed(() => room.value?.video_url?.trim() ?? '')
+const flowSteps = computed(() => room.value?.flow ?? [])
+const readingMinutes = computed(() =>
+  Math.max(1, Math.round((room.value?.lesson_md?.length ?? 0) / 500)),
+)
 
 const trainingBase = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
+
+function openKnowledge(id: string) {
+  knowledgeId.value = id
+  knowledgeOpen.value = true
+}
 
 async function load() {
   loading.value = true
@@ -50,7 +58,7 @@ onMounted(load)
         <h2 class="page-title">{{ room.title }}</h2>
         <p class="page-sub">
           <UiTag size="small" effect="plain">{{ DIFFICULTY_LABELS[room.difficulty] }}</UiTag>
-          <span class="lesson-kind">教程</span>
+          <span class="lesson-kind">教程 · 约 {{ readingMinutes }} 分钟</span>
         </p>
       </div>
       <div v-if="room.related_challenge_slug" class="page-actions">
@@ -63,12 +71,20 @@ onMounted(load)
 
     <RoomVideoPlayer v-if="videoSrc" :src="videoSrc" />
 
-    <article class="lesson" v-html="renderedLesson" />
+    <LessonFlow v-if="flowSteps.length" :steps="flowSteps" />
+
+    <LessonMarkdown
+      :markdown="room.lesson_md ?? ''"
+      :title="room.title"
+      @knowledge="openKnowledge"
+    />
+
+    <KnowledgeDialog v-model="knowledgeOpen" :id="knowledgeId" />
   </div>
 </template>
 
 <style scoped>
-.page { max-width: 860px; }
+.page { max-width: 1040px; margin-inline: auto; }
 .load-error {
   display: grid;
   justify-items: start;
@@ -96,46 +112,4 @@ onMounted(load)
   font-weight: 500;
 }
 .challenge-link:hover { background: var(--accent); }
-.lesson {
-  margin: var(--space-6) 0 var(--space-10);
-  color: var(--foreground);
-  font-size: var(--text-base);
-  line-height: var(--leading-relaxed);
-}
-.lesson :deep(h1),
-.lesson :deep(h2) {
-  margin: var(--space-8) 0 var(--space-3);
-  font-size: var(--text-xl);
-  font-weight: 600;
-  line-height: var(--leading-tight);
-  letter-spacing: 0;
-}
-.lesson :deep(h3) {
-  margin: var(--space-6) 0 var(--space-2);
-  font-size: var(--text-lg);
-  font-weight: 600;
-  line-height: var(--leading-normal);
-}
-.lesson :deep(p) { margin: 0 0 var(--space-4); }
-.lesson :deep(ul),
-.lesson :deep(ol) { margin: 0 0 var(--space-4); padding-left: var(--space-6); }
-.lesson :deep(li) { margin-bottom: var(--space-1); }
-.lesson :deep(a) { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 3px; }
-.lesson :deep(blockquote) {
-  margin: var(--space-4) 0;
-  padding-left: var(--space-4);
-  border-left: 2px solid var(--border);
-  color: var(--muted-foreground);
-}
-.lesson :deep(pre) {
-  margin: var(--space-4) 0;
-  padding: var(--space-4);
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--muted);
-}
-.lesson :deep(code) { font-family: var(--font-mono); font-size: 0.92em; }
-.lesson :deep(p code) { padding: 2px 5px; border-radius: 4px; background: var(--muted); }
-.lesson :deep(img) { border-radius: var(--radius-control); }
 </style>

@@ -1,19 +1,24 @@
 ---
 title: UNION 注入：把数据库拖出来
 difficulty: apprentice
+flow:
+  - 观察正常响应
+  - 探测列数
+  - 构造 UNION 查询
+  - 拖出管理员密码
 ---
 
 # UNION 注入：把数据库拖出来
 
 ## 原理背景
 
-数字型注入是 SQL 注入里最"干净"的形态：参数被直接拼进语句，连引号都不用闭合。
+数字型注入是 [SQL 注入](#knowledge:sql-injection) 里最"干净"的形态：参数被直接拼进语句，连引号都不用闭合。
 
 ```sql
 select * from vulin_users where id = 1
 ```
 
-把 `id` 换成 `1 UNION SELECT ...`，就能把**任意查询的结果**追加到原结果集里——查管理员密码、查表结构、查别的表，全凭一条 UNION。约束只有两条：
+把 `id` 换成 `1 UNION SELECT ...`，就能把**任意查询的结果**追加到原结果集里——查管理员密码、查表结构、查别的表，全凭一条 [UNION](#knowledge:sql-union)。约束只有两条：
 
 1. UNION 两侧**列数**必须一致——先用 `ORDER BY n` 或 `UNION SELECT 1,2,...` 探测；
 2. 让原查询返回空（如 `id=-1`），页面才会显示 UNION 的结果。
@@ -22,7 +27,7 @@ select * from vulin_users where id = 1
 
 ## Yakit 操作步骤
 
-全程 Web Fuzzer（请求是简单 GET，MITM 抓首页请求后"发送到 Web Fuzzer"亦可；`Host` 头只写 `主机:端口`）：
+全程 [Web Fuzzer](#knowledge:yakit-web-fuzzer)（请求是简单 GET，MITM 抓首页请求后"发送到 Web Fuzzer"亦可；`Host` 头只写 `主机:端口`）：
 
 1. 构造 `GET /user/id?id=1` 观察正常响应——页面把查询结果按 JSON 渲染（`username`、`password`、`age`、`role` 等字段），这就是 UNION 结果将出现的位置；
 2. 逐个发探测请求：`?id=1 ORDER BY 9`（正常）、`?id=1 ORDER BY 10`（报错）——报错与正常的交界处就是列数；也可以直接用 `?id=-1 UNION SELECT 1,2,3,4,5,6,7,8,9` 对齐试探；
@@ -109,3 +114,10 @@ Host: 127.0.0.1:36870
 - URL 编码遇到麻烦时随时开 **Codec**。
 
 下一课：真实注入点往往裹着引号和括号——学会拆"包装纸"。
+
+## 知识链接
+
+- [SQL 注入](#knowledge:sql-injection)
+- [UNION 注入](#knowledge:sql-union)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)
+- [Yakit Codec](#knowledge:yakit-codec)

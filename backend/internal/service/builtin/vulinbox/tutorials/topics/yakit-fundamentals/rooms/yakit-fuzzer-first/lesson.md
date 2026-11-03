@@ -1,6 +1,11 @@
 ---
 title: Web Fuzzer 第一个请求：手搓一个未授权 API 调用
 difficulty: apprentice
+flow:
+  - 定位目标接口
+  - 发送到 Web Fuzzer
+  - 修改参数并重放
+  - 观察响应与越权结果
 ---
 
 # Web Fuzzer 第一个请求：手搓一个未授权 API 调用
@@ -109,3 +114,8 @@ Content-Type: application/json
 实战中"未授权接口"要先被发现。Yakit 工具集里的 **端口扫描** 可以先摸清目标开放的服务，**目录扫描** 可以枚举隐藏路径。对已抓到流量的站点，MITM 的爬虫会把接口自动整理成站点树——这些能力在本专题后续教程会陆续上手。
 
 下一课：用 MITM 劫持真实浏览器流量，在半路改掉一个请求。
+
+## 知识链接
+
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)
+- [Yakit Fuzztag](#knowledge:yakit-fuzztag)

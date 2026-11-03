@@ -1,6 +1,11 @@
 ---
 title: MITM 劫持：一分钱买走购物车
 difficulty: practitioner
+flow:
+  - 配置 MITM 代理
+  - 劫持结算请求
+  - 篡改价格参数
+  - 重放验证订单
 ---
 
 # MITM 劫持：一分钱买走购物车
@@ -102,3 +107,8 @@ Host: 127.0.0.1:36870
 登录 → 下单是有先后依赖的两步（第二步要带第一步的 Cookie）。Web Fuzzer 的**多包联动序列**可以把多个请求编成一组按序执行、自动传递变量，适合把"登录拿会话 → 篡改下单"固化成一键复测脚本。此外，MITM 的**热加载**还支持用 Yak 脚本对流量做自动改写，感兴趣的可以读 Yak 语言文档入门。
 
 下一课：不拦截，只观察——用 Fuzzer 与 Codec 看清 XSS 与转义。
+
+## 知识链接
+
+- [Yakit MITM](#knowledge:yakit-mitm)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)

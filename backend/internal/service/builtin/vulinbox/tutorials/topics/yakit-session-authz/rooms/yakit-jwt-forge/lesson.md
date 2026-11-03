@@ -1,6 +1,11 @@
 ---
 title: JWT 伪造：alg=none 的免签冒充
 difficulty: practitioner
+flow:
+  - 抓取 JWT
+  - 解析 header/payload
+  - 尝试 alg=none 伪造
+  - 冒充管理员验证
 ---
 
 # JWT 伪造：alg=none 的免签冒充
@@ -127,3 +132,8 @@ Host: 127.0.0.1:36870
 插件市场里有大量 nuclei 兼容的 JWT 检测规则（弱密钥、alg 混淆、none 接受等）。从 **插件市场** 检索 JWT 相关插件，对靶机执行一次，观察它能否自动发现本课的缺陷——单点手工利用 vs 规模化检测，两者结合才是完整能力。修复视角：服务端必须硬编码允许的算法白名单，绝不信 token 自述的 `alg`。
 
 下一专题：服务端攻击面——SSRF 与文件上传。
+
+## 知识链接
+
+- [JWT 与 alg=none](#knowledge:jwt)
+- [Yakit Web Fuzzer](#knowledge:yakit-web-fuzzer)
