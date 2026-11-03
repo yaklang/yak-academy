@@ -139,6 +139,7 @@
   /* 状态色：success/warning 仅作装饰性区分（难度色条/分布条），语义始终由文字承载 */
   --success: #2e9e5b; --warning: #d18f2c;
   --input: #deddd6; --ring: #b84916; --radius: .5rem;
+  --shadow-popover: 0 16px 40px -12px rgb(32 32 30 / .18), 0 2px 8px rgb(32 32 30 / .06);
 }
 .dark {
   --background: #151515; --foreground: #f5f4ee; --card: #1c1c1a; --card-foreground: #f5f4ee;
@@ -147,6 +148,7 @@
   --accent: #32251f; --accent-foreground: #ffac81; --destructive: #ff9292; --border: #363632;
   --success: #5dbd87; --warning: #e0a84f;
   --input: #363632; --ring: #ffac81;
+  --shadow-popover: 0 18px 48px -16px rgb(0 0 0 / .72), 0 2px 8px rgb(0 0 0 / .36);
 }
 @layer base {
   * { box-sizing: border-box; }

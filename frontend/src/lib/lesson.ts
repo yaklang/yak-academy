@@ -78,7 +78,6 @@ export function buildLesson(rawMarkdown: string, title?: string): LessonRender {
       a.classList.add('knowledge-link')
       a.dataset.knowledge = id
       a.setAttribute('aria-haspopup', 'dialog')
-      a.setAttribute('title', '点击查看知识说明')
       const mark = document.createElement('span')
       mark.className = 'knowledge-mark'
       mark.setAttribute('aria-hidden', 'true')
