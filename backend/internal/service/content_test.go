@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -374,6 +375,82 @@ func TestPublishWritesContentTables(t *testing.T) {
 	}
 }
 
+func TestValidateVideoURL(t *testing.T) {
+	tooLong := "https://cdn.example.com/" + strings.Repeat("a", maxVideoURLLen)
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{name: "empty", raw: ""},
+		{name: "https", raw: "https://cdn.example.com/intro.mp4"},
+		{name: "http", raw: "http://cdn.example.com/intro.webm"},
+		{name: "uppercase scheme", raw: "HTTPS://cdn.example.com/intro.mp4"},
+		{name: "query and fragment", raw: "https://cdn.example.com/intro.mp4?token=a#t=10"},
+		{name: "embed page", raw: "https://player.bilibili.com/player.html?bvid=BV1xx"},
+		{name: "relative", raw: "/videos/intro.mp4", wantErr: true},
+		{name: "protocol relative", raw: "//cdn.example.com/intro.mp4", wantErr: true},
+		{name: "javascript", raw: "javascript:alert(1)", wantErr: true},
+		{name: "data", raw: "data:text/html,<script>alert(1)</script>", wantErr: true},
+		{name: "ftp", raw: "ftp://cdn.example.com/intro.mp4", wantErr: true},
+		{name: "missing host", raw: "https:///intro.mp4", wantErr: true},
+		{name: "too long", raw: tooLong, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateVideoURL(tc.raw)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateVideoURL(%q) err = %v, wantErr %v", tc.raw, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestUploadRejectsUnsafeVideoURL(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	files := validPackage()
+	files["topics/web-security/rooms/xss-intro/lesson.md"] = `---
+title: XSS 简介
+difficulty: apprentice
+video: javascript:alert(1)
+---
+XSS 是……`
+	if _, err := svc.Upload(context.Background(), buildZip(t, files)); err == nil {
+		t.Fatal("expected reject for javascript: video URL")
+	}
+	var packages int64
+	gdb.Model(&model.ContentPackage{}).Count(&packages)
+	if packages != 0 {
+		t.Fatalf("packages = %d, want 0（校验失败整体不入库）", packages)
+	}
+}
+
+func TestUploadTrimsVideoURL(t *testing.T) {
+	svc, gdb := newContentTestService(t)
+	ctx := context.Background()
+	files := validPackage()
+	files["topics/web-security/rooms/xss-intro/lesson.md"] = `---
+title: XSS 简介
+difficulty: apprentice
+video: "  https://cdn.example.com/xss-intro.mp4  "
+---
+XSS 是……`
+	pkg, err := svc.Upload(ctx, buildZip(t, files))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if _, err := svc.Publish(ctx, pkg.ID); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	var room model.Room
+	if err := gdb.Where("slug = ?", "xss-intro").First(&room).Error; err != nil {
+		t.Fatal(err)
+	}
+	if room.VideoURL != "https://cdn.example.com/xss-intro.mp4" {
+		t.Fatalf("video_url = %q, want trimmed URL", room.VideoURL)
+	}
+}
+
 func TestPublishRejectsNonDraft(t *testing.T) {
 	svc, _ := newContentTestService(t)
 	ctx := context.Background()
@@ -682,7 +759,7 @@ func TestUploadChallengePackageRequiresYMLAndContainerFiles(t *testing.T) {
 	}
 	// 有 image 但缺 Dockerfile
 	if _, _, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
-		"challenge.yml": "slug: a\nname: A\ncategory: web\ndifficulty: apprentice\nvalue: 10\ntype: static\nflags: [flag{a}]\nimage: nginx:alpine\nport: 80\n",
+		"challenge.yml":      "slug: a\nname: A\ncategory: web\ndifficulty: apprentice\nvalue: 10\ntype: static\nflags: [flag{a}]\nimage: nginx:alpine\nport: 80\n",
 		"docker-compose.yml": "services: {a: {image: nginx:alpine}}\n",
 	})); err == nil {
 		t.Fatal("expected reject without Dockerfile")
@@ -690,7 +767,7 @@ func TestUploadChallengePackageRequiresYMLAndContainerFiles(t *testing.T) {
 	// 有 image 但缺 compose
 	if _, _, err := svc.UploadChallengePackage(ctx, buildZip(t, map[string]string{
 		"challenge.yml": "slug: b\nname: B\ncategory: web\ndifficulty: apprentice\nvalue: 10\ntype: static\nflags: [flag{b}]\nimage: nginx:alpine\nport: 80\n",
-		"Dockerfile":     "FROM nginx:alpine\n",
+		"Dockerfile":    "FROM nginx:alpine\n",
 	})); err == nil {
 		t.Fatal("expected reject without docker-compose.yml")
 	}

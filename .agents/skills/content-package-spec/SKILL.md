@@ -33,7 +33,7 @@ package.zip
 ## lesson.md front matter
 
 - 必填：`title`、`difficulty`（apprentice/practitioner/expert 三级，禁止其他值）。
-- 可选：`video`（视频 URL：mp4/webm 直链前端用 video 标签播放，其余 URL 用 iframe embed）。
+- 可选：`video`（视频 URL，必须是 http/https 绝对地址且 ≤512 字符：mp4/webm 直链前端用 video 标签播放，其余 URL 用 iframe embed；非法协议/相对路径上传即 422）。
 
 ## 题目定义
 

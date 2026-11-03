@@ -3,29 +3,35 @@
 // 本页不再内嵌 Lab——有关联题目时给"前往题目"入口跳题目详情页。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { notify } from '@/lib/notifications'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { DIFFICULTY_LABELS, topicApi, type Room } from '../api'
+import RoomVideoPlayer from '../components/RoomVideoPlayer.vue'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
+const loading = ref(true)
+const loadError = ref('')
 
 const renderedLesson = computed(() =>
   DOMPurify.sanitize(marked.parse(room.value?.lesson_md ?? '') as string),
 )
 
-// 视频直链（mp4/webm）用 video 标签，其余 URL（B 站 embed 等）用 iframe。
-const isDirectVideo = computed(() => /\.(mp4|webm)(\?|$)/i.test(room.value?.video_url ?? ''))
+const videoSrc = computed(() => room.value?.video_url?.trim() ?? '')
 
 const trainingBase = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
 
 async function load() {
-  const { topicSlug, roomSlug } = route.params as { topicSlug: string; roomSlug: string }
+  loading.value = true
+  loadError.value = ''
   try {
+    const { topicSlug, roomSlug } = route.params as { topicSlug: string; roomSlug: string }
     room.value = await topicApi.room(topicSlug, roomSlug)
   } catch (e) {
-    notify.error((e as Error).message)
+    room.value = null
+    loadError.value = e instanceof Error ? e.message : '教程加载失败，请稍后重试'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -33,7 +39,12 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-if="room" class="page">
+  <UiSkeleton v-if="loading" :rows="8" animated />
+  <div v-else-if="loadError" class="load-error" role="alert">
+    <p>{{ loadError }}</p>
+    <UiButton size="small" @click="load">重试</UiButton>
+  </div>
+  <div v-else-if="room" class="page">
     <header class="page-head">
       <div>
         <h2 class="page-title">{{ room.title }}</h2>
@@ -50,20 +61,27 @@ onMounted(load)
       </div>
     </header>
 
-    <article class="lesson" v-html="renderedLesson" />
+    <RoomVideoPlayer v-if="videoSrc" :src="videoSrc" />
 
-    <video v-if="room.video_url && isDirectVideo" :src="room.video_url" controls class="video" />
-    <iframe
-      v-else-if="room.video_url"
-      :src="room.video_url"
-      class="video embed"
-      allowfullscreen
-    />
+    <article class="lesson" v-html="renderedLesson" />
   </div>
 </template>
 
 <style scoped>
 .page { max-width: 860px; }
+.load-error {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  max-width: 860px;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
 .lesson-kind { margin-left: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
 .challenge-link {
   display: inline-flex;
@@ -120,12 +138,4 @@ onMounted(load)
 .lesson :deep(code) { font-family: var(--font-mono); font-size: 0.92em; }
 .lesson :deep(p code) { padding: 2px 5px; border-radius: 4px; background: var(--muted); }
 .lesson :deep(img) { border-radius: var(--radius-control); }
-.video {
-  width: 100%;
-  max-width: 720px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: #000;
-}
-.embed { aspect-ratio: 16/9; height: auto; }
 </style>
