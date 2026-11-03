@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,19 +17,27 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
-// ProfileService 账号信息面板 + 站内邮箱。
+// ProfileService 账号信息面板 + 能力画像 + 站内邮箱。
 //   - 面板：内置账号 ID、账号名称、简介、总得分（事件派生只读）、头像。
+//   - 能力画像：按当前可见题目的分类聚合通关覆盖（只读派生视图）。
 //   - 邮箱：只收不发——投递入口 DeliverInvite 仅供竞赛域调用（横向依赖白名单：
 //     competition → profile），用户侧仅读 + 标记已读。
 type ProfileService struct {
-	users   repo.UserRepo
-	scores  repo.ScoreRepo
-	mails   repo.MailRepo
-	avatars string // 头像落盘根目录（<dir>/<userID>/<file>）
+	users       repo.UserRepo
+	scores      repo.ScoreRepo
+	mails       repo.MailRepo
+	challenges  repo.ChallengeRepo
+	submissions repo.SubmissionRepo
+	avatars     string // 头像落盘根目录（<dir>/<userID>/<file>）
+	now         func() time.Time
 }
 
-func NewProfileService(users repo.UserRepo, scores repo.ScoreRepo, mails repo.MailRepo, avatarDir string) *ProfileService {
-	return &ProfileService{users: users, scores: scores, mails: mails, avatars: avatarDir}
+func NewProfileService(users repo.UserRepo, scores repo.ScoreRepo, mails repo.MailRepo, challenges repo.ChallengeRepo, submissions repo.SubmissionRepo, avatarDir string) *ProfileService {
+	return &ProfileService{
+		users: users, scores: scores, mails: mails,
+		challenges: challenges, submissions: submissions,
+		avatars: avatarDir, now: time.Now,
+	}
 }
 
 // UserProfile 账号信息面板读模型（契约 UserProfile schema）。
@@ -65,6 +74,67 @@ func (s *ProfileService) Profile(ctx context.Context, userID uint) (*UserProfile
 		p.Avatar = &avatar
 	}
 	return p, nil
+}
+
+// CapabilityDimension 能力画像的单个分类维度（只统计当前可见题目）。
+type CapabilityDimension struct {
+	Category string `json:"category"`
+	Solved   int    `json:"solved"`
+	Total    int    `json:"total"`
+}
+
+// CapabilityProfile 能力画像读模型：按题目分类聚合的通关覆盖。
+type CapabilityProfile struct {
+	Dimensions []CapabilityDimension `json:"dimensions"`
+	Solved     int                   `json:"solved"`
+	Total      int                   `json:"total"`
+}
+
+// Capabilities 按当前可见题目的分类聚合当前用户的通关覆盖。
+// 只读取 submission 运营记录与 challenge 元数据，不写任何派生表。
+func (s *ProfileService) Capabilities(ctx context.Context, userID uint) (*CapabilityProfile, error) {
+	challenges, err := s.challenges.ListVisibleAll(ctx, s.now())
+	if err != nil {
+		return nil, err
+	}
+	solvedIDs, err := s.submissions.CorrectChallengeIDs(ctx, userID, 0)
+	if err != nil {
+		return nil, err
+	}
+	solved := make(map[uint]bool, len(solvedIDs))
+	for _, id := range solvedIDs {
+		solved[id] = true
+	}
+	totals := make(map[string]int)
+	counts := make(map[string]int)
+	for _, c := range challenges {
+		if c.Category == "" {
+			continue
+		}
+		totals[c.Category]++
+		if solved[c.ID] {
+			counts[c.Category]++
+		}
+	}
+	dimensions := make([]CapabilityDimension, 0, len(totals))
+	for category, total := range totals {
+		dimensions = append(dimensions, CapabilityDimension{
+			Category: category, Solved: counts[category], Total: total,
+		})
+	}
+	// 稳定顺序：题目多的分类在前，同量按 slug 排序，前端雷达轴不会随机跳动。
+	sort.Slice(dimensions, func(i, j int) bool {
+		if dimensions[i].Total != dimensions[j].Total {
+			return dimensions[i].Total > dimensions[j].Total
+		}
+		return dimensions[i].Category < dimensions[j].Category
+	})
+	out := &CapabilityProfile{Dimensions: dimensions}
+	for _, d := range dimensions {
+		out.Solved += d.Solved
+		out.Total += d.Total
+	}
+	return out, nil
 }
 
 func (s *ProfileService) UpdateBio(ctx context.Context, userID uint, bio string) (*UserProfile, error) {
