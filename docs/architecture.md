@@ -71,7 +71,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 教程包只含教程（文字 + 视频），题目定义不经此管线。五步管线 `Upload → Parse → Validate → Persist → Publish`，整体拒绝（禁止部分入库）：
 
 1. Upload：接收 zip，校验大小与 MIME；
-2. Parse：解析 manifest.yaml / topic.md / lesson.md（front matter 可选 `video` 字段）；
+2. Parse：解析 manifest.yaml / topic.md / lesson.md（front matter 可选 `video` 字段，仅 http/https 绝对地址）；
 3. Validate：front matter 必填、难度枚举、slug 冲突；
 4. Persist：写 ContentPackage/ContentVersion，状态 draft；
 5. Publish：管理员显式发布；新版本 = 新 ContentVersion，旧版本可回滚。

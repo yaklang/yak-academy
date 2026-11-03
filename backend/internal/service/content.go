@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -52,8 +53,8 @@ func NewContentService(p repo.ContentPackageRepo, t repo.TopicRepo, r repo.RoomR
 
 // parsedPackage 管线 Parse 步骤的内存中间产物，序列化后存 ContentVersion.Payload。
 type parsedPackage struct {
-	Name    string   `json:"name"`
-	Version string   `json:"version"`
+	Name    string        `json:"name"`
+	Version string        `json:"version"`
 	Topics  []model.Topic `json:"topics"`
 	// Rooms 用 DTO 而非 model.Room：model.Room.LessonMD 是 json:"-"（详情接口单独返回），
 	// 直接序列化会丢正文。
@@ -73,13 +74,13 @@ type roomPayload struct {
 }
 
 type labDef struct {
-	Title string          `json:"title"`
+	Title string              `json:"title"`
 	Type  model.ChallengeType `json:"type"`
-	Flag  string          `json:"flag"`
-	Score int             `json:"score"`
-	Image string          `json:"image,omitempty"` // lab.yaml env 段（可选）：容器镜像
-	Port  int             `json:"port,omitempty"`  // 容器端口
-	Hints []model.Hint    `json:"hints"`
+	Flag  string              `json:"flag"`
+	Score int                 `json:"score"`
+	Image string              `json:"image,omitempty"` // lab.yaml env 段（可选）：容器镜像
+	Port  int                 `json:"port,omitempty"`  // 容器端口
+	Hints []model.Hint        `json:"hints"`
 }
 
 // manifest 内容包元数据（manifest.yaml）。
@@ -100,9 +101,9 @@ type topicFront struct {
 // lessonFront lesson.md 的 front matter（difficulty 三级枚举，teaching-integration skill）。
 // video 可选：视频教程地址（文字+视频教程）。
 type lessonFront struct {
-	Title     string           `yaml:"title"`
+	Title      string           `yaml:"title"`
 	Difficulty model.Difficulty `yaml:"difficulty"`
-	Video     string           `yaml:"video"`
+	Video      string           `yaml:"video"`
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -273,7 +274,7 @@ func (s *ContentService) parseRooms(topicSlug string, files map[string][]byte, p
 		rooms = append(rooms, roomPayload{
 			TopicSlug: topicSlug, Slug: slug,
 			Title: lf.Title, Difficulty: lf.Difficulty, LessonMD: string(body),
-			VideoURL: lf.Video,
+			VideoURL: strings.TrimSpace(lf.Video),
 		})
 	}
 	return rooms, nil
@@ -392,6 +393,34 @@ func validateParsed(p *parsedPackage) error {
 		if err := validateDifficulty(r.Difficulty); err != nil {
 			return fmt.Errorf("room %s: %w", r.Slug, err)
 		}
+		if err := validateVideoURL(r.VideoURL); err != nil {
+			return fmt.Errorf("room %s: %w", r.Slug, err)
+		}
+	}
+	return nil
+}
+
+// maxVideoURLLen 与 model.Room.VideoURL 的列宽一致（size:512）。
+const maxVideoURLLen = 512
+
+// validateVideoURL 视频地址只接受可被浏览器直接播放/嵌入的绝对 http(s) URL：
+// video 标签与 iframe 的 src 会原样使用该值，协议白名单是必要的注入边界。
+func validateVideoURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if len(raw) > maxVideoURLLen {
+		return fmt.Errorf("video URL exceeds %d characters", maxVideoURLLen)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("video URL is invalid")
+	}
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return errors.New("video URL must use http or https")
+	}
+	if u.Host == "" {
+		return errors.New("video URL must be absolute")
 	}
 	return nil
 }
@@ -625,14 +654,14 @@ func readZipFile(f *zip.File) ([]byte, error) {
 
 // challengeJSON 管理员上传的题目定义固定格式（单对象或对象数组）。
 type challengeJSON struct {
-	Slug          string             `json:"slug"`
-	Title         string             `json:"title"`
-	Category      string             `json:"category"`
+	Slug          string              `json:"slug"`
+	Title         string              `json:"title"`
+	Category      string              `json:"category"`
 	Bank          model.ChallengeBank `json:"bank"`
-	Difficulty    model.Difficulty   `json:"difficulty"`
-	DescriptionMD string             `json:"description_md"`
-	Score         int                `json:"score"`
-	FlagMode      model.FlagMode     `json:"flag_mode"`
+	Difficulty    model.Difficulty    `json:"difficulty"`
+	DescriptionMD string              `json:"description_md"`
+	Score         int                 `json:"score"`
+	FlagMode      model.FlagMode      `json:"flag_mode"`
 	Challenge     struct {
 		Type model.ChallengeType `json:"type"`
 		Flag string              `json:"flag"`
@@ -641,7 +670,7 @@ type challengeJSON struct {
 	// nil = flag 判定题（static/regex）。数据组可经包 zip 的 testdata/ 目录
 	// 装配（challenge.json 直传无 zip 时必须内联携带全部数据）。
 	Judge *judgeJSON `json:"judge"`
-	Env struct {
+	Env   struct {
 		Image string `json:"image"`
 		Port  int    `json:"port"`
 	} `json:"env"`
@@ -651,8 +680,8 @@ type challengeJSON struct {
 		Cost    int    `json:"cost"`
 	} `json:"hints"`
 	// Links 题目外链（配套工具/参考资料），存 JSON 列。
-	Links []model.ChallengeLink `json:"links"`
-	TutorialSlug string `json:"tutorial_slug"`
+	Links        []model.ChallengeLink `json:"links"`
+	TutorialSlug string                `json:"tutorial_slug"`
 }
 
 // judgeJSON ACM 判定定义（challenge.yml judge 段 / challenge.json judge 段同构）。
@@ -718,7 +747,7 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 		}
 		chal := &model.Challenge{
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
-			Bank: s.resolveUploadBank(ctx, c.Slug, c.Bank),
+			Bank:        s.resolveUploadBank(ctx, c.Slug, c.Bank),
 			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
 			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
@@ -1074,23 +1103,23 @@ func (s *ChallengeService) PruneBuiltinChallenges(ctx context.Context, keepSlugs
 // 的 <组名>.in/.answer 文件装配（challenge.yml 里不重复声明数据内容），
 // judge.testdata 列表只声明组名与 sample 标记。
 type challengeYML struct {
-	Slug          string             `yaml:"slug"`
-	Name          string             `yaml:"name"`
-	Title         string             `yaml:"title"` // 兼容 name/title
-	Category      string             `yaml:"category"`
-	Bank          model.ChallengeBank `yaml:"bank"`
-	Difficulty    model.Difficulty   `yaml:"difficulty"`
-	Description   string             `yaml:"description"`
-	DescriptionMD string             `yaml:"description_md"`
-	Value         int                `yaml:"value"`
-	Score         int                `yaml:"score"`
-	Type          string             `yaml:"type"` // static | regex（flag 类型）
-	FlagMode      model.FlagMode     `yaml:"flag_mode"`
-	Image         string             `yaml:"image"`
-	Port          int                `yaml:"port"`
-	Protocol      string             `yaml:"protocol"`
+	Slug          string                `yaml:"slug"`
+	Name          string                `yaml:"name"`
+	Title         string                `yaml:"title"` // 兼容 name/title
+	Category      string                `yaml:"category"`
+	Bank          model.ChallengeBank   `yaml:"bank"`
+	Difficulty    model.Difficulty      `yaml:"difficulty"`
+	Description   string                `yaml:"description"`
+	DescriptionMD string                `yaml:"description_md"`
+	Value         int                   `yaml:"value"`
+	Score         int                   `yaml:"score"`
+	Type          string                `yaml:"type"` // static | regex（flag 类型）
+	FlagMode      model.FlagMode        `yaml:"flag_mode"`
+	Image         string                `yaml:"image"`
+	Port          int                   `yaml:"port"`
+	Protocol      string                `yaml:"protocol"`
 	Links         []model.ChallengeLink `yaml:"links"`
-	Flags         []challengeYMLFlag `yaml:"flags"`
+	Flags         []challengeYMLFlag    `yaml:"flags"`
 	// Judge ACM 编程题判定段（engine/time_limit_s/memory_limit_mb +
 	// testdata 组名与 sample 标记；数据内容由包内 testdata/ 文件装配）。
 	// allowed_libs 为 yak 库白名单（防高危库执行；空 = 允许全部非黑名单库）。
@@ -1099,7 +1128,7 @@ type challengeYML struct {
 		TimeLimitS    int      `yaml:"time_limit_s"`
 		MemoryLimitMB int      `yaml:"memory_limit_mb"`
 		AllowedLibs   []string `yaml:"allowed_libs"`
-		Testdata []struct {
+		Testdata      []struct {
 			Name   string `yaml:"name"`
 			Sample bool   `yaml:"sample"`
 		} `yaml:"testdata"`
@@ -1212,7 +1241,7 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	}
 	chal := &model.Challenge{
 		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
-		Bank: s.resolveUploadBank(ctx, cj.Slug, cj.Bank),
+		Bank:        s.resolveUploadBank(ctx, cj.Slug, cj.Bank),
 		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
 		FlagMode: resolveFlagMode(cj.FlagMode), Image: cj.Env.Image, Port: cj.Env.Port,
 		Links: linksJSON(cj.Links), TutorialSlug: cj.TutorialSlug,
