@@ -63,6 +63,7 @@ func (h *Handlers) Register(r *Router) {
 	// 账号信息面板 + 头像 + 站内邮箱（本人视角）
 	r.Handle(http.MethodGet, "/api/v1/me/profile", "", h.myProfile)
 	r.Handle(http.MethodPatch, "/api/v1/me/profile", "", h.updateMyProfile)
+	r.Handle(http.MethodGet, "/api/v1/me/capabilities", "", h.myCapabilities)
 	r.Handle(http.MethodGet, "/api/v1/me/avatar", "", h.downloadAvatar)
 	r.Handle(http.MethodPost, "/api/v1/me/avatar", "", h.uploadAvatar)
 	r.Handle(http.MethodGet, "/api/v1/me/mails", "", h.listMyMails)
@@ -348,6 +349,17 @@ func (h *Handlers) updateMyProfile(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// myCapabilities 账号信息页能力画像：按可见题目分类聚合当前用户通关覆盖。
+func (h *Handlers) myCapabilities(w http.ResponseWriter, req *http.Request) {
+	user := UserFrom(req.Context())
+	cap, err := h.Profile.Capabilities(req.Context(), user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cap)
 }
 
 // maxAvatarUpload 头像 multipart 读取上限（与 service 2MB 一致，多 1KB 头部余量）。

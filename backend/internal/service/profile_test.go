@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -40,7 +41,7 @@ func newProfileTestService(t *testing.T) (*ProfileService, *gorm.DB, uint) {
 		t.Fatalf("create score: %v", err)
 	}
 	dir := t.TempDir()
-	svc := NewProfileService(userRepo, repo.NewScoreRepo(gdb), repo.NewMailRepo(gdb), dir)
+	svc := NewProfileService(userRepo, repo.NewScoreRepo(gdb), repo.NewMailRepo(gdb), repo.NewChallengeRepo(gdb), repo.NewSubmissionRepo(gdb), dir)
 	return svc, gdb, u.ID
 }
 
@@ -190,5 +191,66 @@ func TestMailboxDeliverListUnreadMarkRead(t *testing.T) {
 	n, _ = svc.UnreadCount(ctx, uid)
 	if n != 1 {
 		t.Fatalf("unread after invite: %d, want 1", n)
+	}
+}
+
+// TestCapabilitiesAggregatesVisibleChallenges 能力画像只统计可见题目，
+// 按分类聚合去重通关；隐藏题与未到发布时间的题不计入分子分母。
+func TestCapabilitiesAggregatesVisibleChallenges(t *testing.T) {
+	svc, gdb, uid := newProfileTestService(t)
+	ctx := context.Background()
+	now := time.Now()
+	svc.now = func() time.Time { return now }
+
+	chals := []model.Challenge{
+		{Slug: "cap-web-1", Title: "Web 1", Category: "web", Difficulty: model.DifficultyApprentice, IsVisible: true},
+		{Slug: "cap-web-2", Title: "Web 2", Category: "web", Difficulty: model.DifficultyApprentice, IsVisible: true},
+		{Slug: "cap-ssrf-1", Title: "SSRF 1", Category: "ssrf", Difficulty: model.DifficultyApprentice, IsVisible: true},
+		{Slug: "cap-hidden", Title: "隐藏题", Category: "web", Difficulty: model.DifficultyApprentice, IsVisible: true},
+	}
+	if err := gdb.Create(&chals).Error; err != nil {
+		t.Fatalf("create challenges: %v", err)
+	}
+	// IsVisible 带 default tag：零值 false 会在 INSERT 时被 DB 默认值覆盖，
+	// 隐藏态必须用显式 UPDATE 落库（与生产 Visibility 接口同路径）。
+	if err := gdb.Model(&model.Challenge{}).Where("id = ?", chals[3].ID).
+		Update("is_visible", false).Error; err != nil {
+		t.Fatalf("hide challenge: %v", err)
+	}
+	future := now.Add(time.Hour)
+	scheduled := model.Challenge{
+		Slug: "cap-scheduled", Title: "定时题", Category: "web",
+		Difficulty: model.DifficultyApprentice, IsVisible: true, ReleaseAt: &future,
+	}
+	if err := gdb.Create(&scheduled).Error; err != nil {
+		t.Fatalf("create scheduled: %v", err)
+	}
+	// 通关两条 web（其中一条重复提交、一条竞赛域），ssrf 未通关。
+	subs := []model.Submission{
+		{UserID: uid, ChallengeID: chals[0].ID, Status: model.SubmissionCorrect},
+		{UserID: uid, ChallengeID: chals[0].ID, Status: model.SubmissionCorrect},
+		{UserID: uid, ChallengeID: chals[1].ID, Status: model.SubmissionCorrect, CompetitionID: 3},
+		{UserID: uid, ChallengeID: chals[2].ID, Status: model.SubmissionIncorrect},
+	}
+	if err := gdb.Create(&subs).Error; err != nil {
+		t.Fatalf("create submissions: %v", err)
+	}
+
+	cap, err := svc.Capabilities(ctx, uid)
+	if err != nil {
+		t.Fatalf("capabilities: %v", err)
+	}
+	if cap.Total != 3 || cap.Solved != 1 {
+		t.Fatalf("totals: solved=%d total=%d, want 1/3 (仅训练场可见题)", cap.Solved, cap.Total)
+	}
+	if len(cap.Dimensions) != 2 {
+		t.Fatalf("dimensions: %+v", cap.Dimensions)
+	}
+	// 题量多的分类在前；同量按 slug。
+	if cap.Dimensions[0].Category != "web" || cap.Dimensions[0].Solved != 1 || cap.Dimensions[0].Total != 2 {
+		t.Fatalf("web dimension: %+v", cap.Dimensions[0])
+	}
+	if cap.Dimensions[1].Category != "ssrf" || cap.Dimensions[1].Solved != 0 || cap.Dimensions[1].Total != 1 {
+		t.Fatalf("ssrf dimension: %+v", cap.Dimensions[1])
 	}
 }

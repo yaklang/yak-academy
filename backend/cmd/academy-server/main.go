@@ -141,7 +141,7 @@ func main() {
 	challengeSvc.SetEnvService(envSvc)
 	envSvc.StartReaper(ctx, time.Minute)
 	badgeSvc := service.NewBadgeService(scoreRepo, progressRepo)
-	profileSvc := service.NewProfileService(userRepo, scoreRepo, mailRepo, cfg.AvatarsDir)
+	profileSvc := service.NewProfileService(userRepo, scoreRepo, mailRepo, challengeRepo, submissionRepo, cfg.AvatarsDir)
 	competitionSvc := service.NewCompetitionService(competitionRepo, challengeRepo, userRepo, instanceRepo, submissionRepo)
 	competitionSvc.SetDelivery(profileSvc.DeliverInvite, authSvc.CreateUser)
 	// WP zip 附件存储：fs（默认本地目录）/ s3（S3 兼容对象存储）按配置装配。

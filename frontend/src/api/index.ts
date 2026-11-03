@@ -93,6 +93,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'reverse': '逆向',
   'pwn': 'Pwn',
   'misc': '杂项',
+  'warmup': '热身',
 }
 
 // 题目管理列表查询参数（GET /admin/challenges）：全部可选，零值 = 不过滤。
@@ -358,9 +359,21 @@ export interface MailItem {
 export interface MailPage extends Paged<MailItem> {
   unread: number
 }
+// 能力画像：按题目分类聚合的通关覆盖（只统计当前可见题目）。
+export interface CapabilityDimension {
+  category: string
+  solved: number
+  total: number
+}
+export interface CapabilityProfile {
+  dimensions: CapabilityDimension[]
+  solved: number
+  total: number
+}
 
 export const profileApi = {
   profile: () => http.get<UserProfile>('/me/profile'),
+  capabilities: () => http.get<CapabilityProfile>('/me/capabilities'),
   updateBio: (bio: string) => http.patch<UserProfile>('/me/profile', { bio }),
   uploadAvatar: (file: File) => {
     const form = new FormData()

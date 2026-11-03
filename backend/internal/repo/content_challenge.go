@@ -281,6 +281,16 @@ func (r *challengeRepo) ListVisible(ctx context.Context, now time.Time, filter C
 	return list, total, err
 }
 
+// ListVisibleAll 全量可见题目（能力画像分类聚合用；不参与分页）。
+func (r *challengeRepo) ListVisibleAll(ctx context.Context, now time.Time) ([]model.Challenge, error) {
+	var list []model.Challenge
+	err := r.db.WithContext(ctx).
+		Select("id", "category").
+		Where("is_visible = ? AND (release_at IS NULL OR release_at <= ?)", true, now.UTC()).
+		Order("category").Order("id").Find(&list).Error
+	return list, err
+}
+
 // challengeFilterScope 题库过滤条件（零值字段不参与 WHERE）。
 // Search 对 slug/title/category 做前缀 LIKE（管理端表格搜索）；值经 gorm
 // 占位符绑定，搜索串里的 %/_ 只影响自身命中范围，无注入面。
@@ -532,6 +542,16 @@ func (r *submissionRepo) HasCorrect(ctx context.Context, userID, challengeID, co
 			userID, challengeID, competitionID, model.SubmissionCorrect).
 		Count(&n).Error
 	return n > 0, err
+}
+
+// CorrectChallengeIDs 该用户在指定作用域内判定通过的题目 ID（去重）。
+func (r *submissionRepo) CorrectChallengeIDs(ctx context.Context, userID, competitionID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Where("user_id = ? AND competition_id = ? AND status = ?",
+			userID, competitionID, model.SubmissionCorrect).
+		Distinct().Pluck("challenge_id", &ids).Error
+	return ids, err
 }
 
 // CountCorrectSolves 指定作用域内该题的通过人数（动态计分 solve_count）。

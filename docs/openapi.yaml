@@ -167,6 +167,24 @@ components:
         solve_count: { type: integer, description: 解题数（事件派生数据，只读） }
         avatar: { type: string, nullable: true, description: 头像 URL（未上传为 null） }
         created_at: { type: string, description: 注册时间（RFC3339） }
+    CapabilityDimension:
+      type: object
+      description: 能力画像的一个题目分类维度（仅统计当前可见且已发布的题目）。
+      required: [category, solved, total]
+      properties:
+        category: { type: string, description: 题目分类 slug }
+        solved: { type: integer, description: 已通关去重题数 }
+        total: { type: integer, description: 该分类可见题目总数 }
+    CapabilityProfile:
+      type: object
+      description: 当前用户能力画像：按题目分类聚合的通关覆盖（只读派生视图）。
+      required: [dimensions, solved, total]
+      properties:
+        dimensions:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityDimension' }
+        solved: { type: integer, description: 可见题目中已通关的去重题数 }
+        total: { type: integer, description: 可见题目总数 }
     MailItem:
       type: object
       description: 站内邮件（只收不发）：竞赛邀请等系统通知。
@@ -1030,6 +1048,18 @@ paths:
               schema: { $ref: '#/components/schemas/UserProfile' }
         '401': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /me/capabilities:
+    get:
+      tags: [auth]
+      summary: 当前用户能力画像（按可见题目分类统计通关覆盖）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityProfile' }
+        '401': { $ref: '#/components/responses/ErrorResp' }
 
   /me/avatar:
     get:

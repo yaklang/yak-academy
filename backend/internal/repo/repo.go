@@ -128,6 +128,8 @@ type ChallengeRepo interface {
 	List(ctx context.Context, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error)
 	// ListVisible 学生端题库分页：仅 is_visible 且已到发布时间的题目（filter 零值 = 不过滤）。
 	ListVisible(ctx context.Context, now time.Time, filter ChallengeListFilter, offset, limit int) ([]model.Challenge, int64, error)
+	// ListVisibleAll 全量可见题目（能力画像按分类聚合用，不参与分页）。
+	ListVisibleAll(ctx context.Context, now time.Time) ([]model.Challenge, error)
 	// UpdateVisibility 管理端更新可见性开关/定时发布时间；返回受影响行数（0 = slug 不存在）。
 	UpdateVisibility(ctx context.Context, slug string, isVisible *bool, releaseAt *time.Time) (int64, error)
 	// MarkBuiltin 批量改写题目来源标记（内置题集导入置 true；普通上传不经此路径）。
@@ -184,6 +186,8 @@ type SubmissionRepo interface {
 	// HasCorrect 判定"该用户该题（指定作用域）是否已通过"（防重复计分）。
 	// competitionID=0 表示训练场作用域；竞赛内首通与训练场首通相互独立。
 	HasCorrect(ctx context.Context, userID, challengeID, competitionID uint) (bool, error)
+	// CorrectChallengeIDs 该用户在指定作用域内判定通过的题目 ID（去重，能力画像聚合用）。
+	CorrectChallengeIDs(ctx context.Context, userID, competitionID uint) ([]uint, error)
 	// CountCorrectSolves 该题在指定作用域的通过人数（动态计分 solve_count）。
 	CountCorrectSolves(ctx context.Context, challengeID, competitionID uint) (int64, error)
 	// ListByCompetitionUser 参赛者本人在该竞赛的提交（竞赛首页我的提交）。
