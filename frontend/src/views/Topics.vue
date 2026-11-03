@@ -161,7 +161,7 @@ onMounted(async () => {
   padding: var(--space-10) var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--card);
+  background: var(--panel);
 }
 .hero-copy { position: relative; min-width: 0; }
 .hero-eyebrow {
@@ -180,13 +180,15 @@ onMounted(async () => {
   /* 中文标题字距为 0（frontend-style skill：仅大号拉丁标题允许负字距） */
   letter-spacing: 0;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 .hero-sub {
-  max-width: 520px;
+  max-width: 560px;
   margin: 0 0 var(--space-6);
   color: var(--muted-foreground);
   font-size: var(--text-md);
   line-height: var(--leading-relaxed);
+  text-wrap: pretty;
 }
 .hero-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .hero-cta {
@@ -277,7 +279,7 @@ onMounted(async () => {
 .topic-link { display: block; min-width: 0; text-decoration: none; color: inherit; }
 .topic-card {
   padding: var(--space-5);
-  background: var(--card);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
@@ -315,7 +317,7 @@ onMounted(async () => {
   margin: 0;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

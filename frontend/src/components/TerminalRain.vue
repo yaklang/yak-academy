@@ -57,12 +57,12 @@ let reduced = false
 
 function palette() {
   // 浅色是油墨（ink），不是霓虹：头更深、尾更淡，靠对比度而不是发光。
-  // 深橙 #b7470a 对白底 5.36:1；浅桃色 255,173,117 在白底上几乎不可见。
+  // 深咖 #6f452b 对白底 7.02:1；深色用低饱和铜色，避免荧光橙。
   const ink = props.mode === 'ink' || (props.mode === 'auto' && resolved.value !== 'dark')
   if (ink) {
-    return { ink, head: props.head ?? 'rgba(183,71,10,.70)', trail: props.trailColor ?? 'rgba(183,71,10,.22)' }
+    return { ink, head: props.head ?? 'rgba(111,69,43,.78)', trail: props.trailColor ?? 'rgba(111,69,43,.22)' }
   }
-  return { ink, head: props.head ?? 'rgba(255,173,117,.96)', trail: props.trailColor ?? 'rgba(255,138,76,.42)' }
+  return { ink, head: props.head ?? 'rgba(214,164,126,.96)', trail: props.trailColor ?? 'rgba(209,154,114,.42)' }
 }
 
 // 预生成每列随机字符，绘制时不重新取样（矩阵雨的字符只在重生时换新）。

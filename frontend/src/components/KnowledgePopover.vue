@@ -337,7 +337,7 @@ onBeforeUnmount(deactivate)
 }
 .knowledge-summary {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
 }
 .knowledge-points {
@@ -346,7 +346,7 @@ onBeforeUnmount(deactivate)
   margin: 0;
   padding-left: var(--space-5);
   color: var(--muted-foreground);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
 }
 .knowledge-points li::marker { color: var(--accent-foreground); }

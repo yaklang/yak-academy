@@ -39,7 +39,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
 }
 .flow-head {
   display: flex;
@@ -76,7 +76,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--muted);
+  background: var(--background);
   color: var(--foreground);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);

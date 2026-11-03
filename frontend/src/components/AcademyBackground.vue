@@ -28,9 +28,9 @@ function paint(time: number) {
   const centerX = width * (props.variant === 'horizon' ? .48 : .66)
   const centerY = height * .69
   const halo = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, width * .46)
-  halo.addColorStop(0, dark ? 'rgba(255,111,45,.19)' : 'rgba(255,130,65,.12)')
-  halo.addColorStop(.5, dark ? 'rgba(255,91,20,.06)' : 'rgba(255,130,65,.04)')
-  halo.addColorStop(1, 'rgba(255,111,45,0)')
+  halo.addColorStop(0, dark ? 'rgba(209,154,114,.15)' : 'rgba(111,69,43,.08)')
+  halo.addColorStop(.5, dark ? 'rgba(209,154,114,.05)' : 'rgba(111,69,43,.03)')
+  halo.addColorStop(1, 'rgba(111,69,43,0)')
   ctx.fillStyle = halo
   ctx.fillRect(0, 0, width, height)
 
@@ -49,12 +49,12 @@ function paint(time: number) {
       }
       const luminance = .35 + .35 * Math.sin(time * .3 + phase * Math.PI * 3) ** 2
       const stroke = ctx.createLinearGradient(0, 0, width * .5, height)
-      stroke.addColorStop(0, `rgba(255,200,151,${luminance})`)
-      stroke.addColorStop(.35, `rgba(255,126,53,${dark ? .68 : .42})`)
-      stroke.addColorStop(1, 'rgba(255,106,35,0)')
+      stroke.addColorStop(0, dark ? `rgba(242,218,192,${luminance * .9})` : `rgba(140,100,70,${luminance * .75})`)
+      stroke.addColorStop(.35, dark ? `rgba(209,154,114,${.55})` : `rgba(111,69,43,${.34})`)
+      stroke.addColorStop(1, 'rgba(111,69,43,0)')
       ctx.strokeStyle = stroke
       ctx.lineWidth = i % 7 === 0 ? 1.5 : .65
-      ctx.shadowColor = '#ff7e3f'
+      ctx.shadowColor = dark ? '#d19a72' : '#6f452b'
       ctx.shadowBlur = dark && i % 4 === 0 ? 10 : 0
       ctx.stroke()
     }
@@ -67,19 +67,21 @@ function paint(time: number) {
         const y = crest + ((x - width * .5) / width) ** 2 * height * .72 - i * .6
         if (!step) ctx.moveTo(x, y); else ctx.lineTo(x, y)
       }
-      ctx.strokeStyle = `rgba(255,${150 + i * 3},${80 + i * 3},${i === 0 ? .85 : .018 + .025 * (1 - i / 22)})`
+      ctx.strokeStyle = dark
+        ? `rgba(${196 + i * 2},${146 + i * 2},${110 + i * 2},${i === 0 ? .75 : .015 + .02 * (1 - i / 22)})`
+        : `rgba(${111 + i},${69 + i},${43 + i},${i === 0 ? .72 : .012 + .018 * (1 - i / 22)})`
       ctx.lineWidth = i === 0 ? 1.3 : 3
-      ctx.shadowColor = '#ff8b4b'
+      ctx.shadowColor = dark ? '#d19a72' : '#6f452b'
       ctx.shadowBlur = i === 0 ? 14 : 0
       ctx.stroke()
     }
     const sunX = width * (.54 + Math.sin(time * .12) * .035)
     const sunY = crest + ((sunX - width * .5) / width) ** 2 * height * .72
     const sun = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, height * .24)
-    sun.addColorStop(0, dark ? 'rgba(255,231,195,.85)' : 'rgba(255,164,87,.6)')
-    sun.addColorStop(.05, 'rgba(255,160,90,.5)')
-    sun.addColorStop(.3, 'rgba(255,100,20,.11)')
-    sun.addColorStop(1, 'rgba(255,100,20,0)')
+    sun.addColorStop(0, dark ? 'rgba(244,224,202,.8)' : 'rgba(255,250,243,.9)')
+    sun.addColorStop(.05, dark ? 'rgba(214,164,126,.45)' : 'rgba(190,145,108,.42)')
+    sun.addColorStop(.3, dark ? 'rgba(209,154,114,.1)' : 'rgba(111,69,43,.08)')
+    sun.addColorStop(1, 'rgba(111,69,43,0)')
     ctx.fillStyle = sun
     ctx.fillRect(0, 0, width, height)
   }
@@ -87,7 +89,7 @@ function paint(time: number) {
   for (let i = 0; i < 42; i++) {
     const x = ((i * 157.73) % 991) / 991 * width
     const y = ((i * 71.91) % 601) / 601 * height * .72
-    ctx.fillStyle = `rgba(${dark ? '255,232,210' : '153,87,45'},${.08 + .18 * (Math.sin(time * .24 + i) * .5 + .5)})`
+    ctx.fillStyle = `rgba(${dark ? '214,164,126' : '111,69,43'},${.08 + .18 * (Math.sin(time * .24 + i) * .5 + .5)})`
     ctx.fillRect(x, y, i % 5 === 0 ? 2 : 1, i % 5 === 0 ? 2 : 1)
   }
 }
@@ -143,6 +145,6 @@ onUnmounted(() => {
 <template><div class="academy-background" :data-variant="variant" aria-hidden="true"><canvas ref="canvas" /></div></template>
 
 <style scoped>
-.academy-background { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; background: radial-gradient(ellipse at 65% 60%, rgb(255 123 48 / .08), transparent 65%); }
+.academy-background { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; background: radial-gradient(ellipse at 65% 60%, rgb(111 69 43 / .06), transparent 65%); }
 canvas { width: 100%; height: 100%; display: block; }
 </style>
