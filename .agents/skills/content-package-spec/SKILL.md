@@ -35,7 +35,7 @@ package.zip
 - 必填：`title`、`difficulty`（apprentice/practitioner/expert 三级，禁止其他值）。
 - 可选：`video`（视频 URL，必须是 http/https 绝对地址且 ≤512 字符：mp4/webm 直链前端用 video 标签播放，其余 URL 用 iframe embed；非法协议/相对路径上传即 422）。
 - 可选：`flow`（教程流程节点数组，2–12 步、每步 ≤120 字符；前端渲染为「教程流程」节点条）。
-- 正文知识链接：`[SQL 注入](#knowledge:sql-injection)` 点击打开知识弹窗；条目 ID 见 `frontend/src/lib/knowledge.ts`，未知 ID 弹窗会给出兜底提示。
+- 正文知识链接：`[SQL 注入](#knowledge:sql-injection)` 点击在鼠标旁打开知识浮层；条目 ID 见 `frontend/src/lib/knowledge.ts`，未知 ID 浮层会给出兜底提示。
 
 ## 题目定义
 

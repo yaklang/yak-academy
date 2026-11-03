@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // 教程正文渲染：Markdown → sanitize → 结构增强（目录 / 代码复制 / 知识链接）。
-// 点击 #knowledge:<id> 链接不跳转，向上抛事件由页面打开知识弹窗。
+// 点击 #knowledge:<id> 链接不跳转，向上抛事件由页面在鼠标旁打开知识浮层。
 import { computed } from 'vue'
 import { buildLesson } from '@/lib/lesson'
 
 const props = defineProps<{ markdown: string; title?: string }>()
-const emit = defineEmits<{ knowledge: [id: string] }>()
+const emit = defineEmits<{
+  knowledge: [payload: { id: string; x: number; y: number; linkLeft: number; linkRight: number }]
+}>()
 
 const rendered = computed(() => buildLesson(props.markdown, props.title))
 
@@ -56,7 +58,17 @@ async function onClick(event: MouseEvent) {
   if (link) {
     event.preventDefault()
     const id = link.dataset.knowledge
-    if (id) emit('knowledge', id)
+    if (!id) return
+    // 键盘触发时 clientX/Y 为 0，改用链接位置，避免浮层落到视口左上角。
+    const rect = link.getBoundingClientRect()
+    const keyboard = event.detail === 0
+    emit('knowledge', {
+      id,
+      x: keyboard ? rect.right : event.clientX,
+      y: keyboard ? rect.top + rect.height / 2 : event.clientY,
+      linkLeft: rect.left,
+      linkRight: rect.right,
+    })
   }
 }
 </script>

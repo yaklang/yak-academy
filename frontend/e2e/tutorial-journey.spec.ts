@@ -36,14 +36,38 @@ test.describe('教程旅程', () => {
     await expect(flow.locator('.flow-pill')).toHaveCount(3)
     await expect(page.getByRole('complementary', { name: '本页目录' })).toBeVisible()
 
-    // 知识链接：点击不跳转，打开知识弹窗并可关闭
-    await page.getByRole('link', { name: /SQL 注入/ }).first().click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('SQL 注入')
-    await expect(dialog.getByRole('link', { name: /官网原文/ })).toHaveAttribute('target', '_blank')
-    await dialog.getByRole('button', { name: '知道了' }).click()
-    await expect(dialog).toBeHidden()
+    // 知识链接：点击不跳转，在鼠标右侧弹出轻量浮层，Esc 关闭
+    const knowledgeLink = page.getByRole('link', { name: /SQL 注入/ }).first()
+    const linkBox = await knowledgeLink.boundingBox()
+    if (!linkBox) throw new Error('knowledge link is not visible')
+    await knowledgeLink.click({ position: { x: 8, y: 8 } })
+    const popover = page.getByRole('dialog', { name: 'SQL 注入' })
+    await expect(popover).toBeVisible()
+    await expect(popover).toContainText('SQL 注入')
+    await expect(popover.getByRole('link', { name: /官网原文/ })).toHaveAttribute('target', '_blank')
+    const popoverBox = await popover.boundingBox()
+    if (!popoverBox) throw new Error('knowledge popover is not visible')
+    expect(popoverBox.x).toBeGreaterThan(linkBox.x + 8)
+
+    // 点击浮层外部关闭，不弹全屏遮罩
+    const viewport = page.viewportSize()
+    if (!viewport) throw new Error('viewport is not set')
+    await page.mouse.click(viewport.width - 40, 300)
+    await expect(popover).toBeHidden()
+
+    // 重新打开后 Esc 关闭
+    await knowledgeLink.click()
+    await expect(popover).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(popover).toBeHidden()
+
+    // 键盘打开时浮层锚定链接位置，Esc 关闭后焦点回到链接
+    await knowledgeLink.focus()
+    await page.keyboard.press('Enter')
+    await expect(popover).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(popover).toBeHidden()
+    await expect(knowledgeLink).toBeFocused()
   })
 
   test('Room 关联题目入口可达题目详情（教题双向入口）', async ({ page }) => {

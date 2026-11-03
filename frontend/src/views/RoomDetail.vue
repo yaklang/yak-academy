@@ -7,7 +7,7 @@ import { DIFFICULTY_LABELS, topicApi, type Room } from '../api'
 import RoomVideoPlayer from '../components/RoomVideoPlayer.vue'
 import LessonFlow from '../components/LessonFlow.vue'
 import LessonMarkdown from '../components/LessonMarkdown.vue'
-import KnowledgeDialog from '../components/KnowledgeDialog.vue'
+import KnowledgePopover from '../components/KnowledgePopover.vue'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
@@ -15,6 +15,7 @@ const loading = ref(true)
 const loadError = ref('')
 const knowledgeOpen = ref(false)
 const knowledgeId = ref('')
+const knowledgeAnchor = ref({ x: 0, y: 0, linkLeft: 0, linkRight: 0 })
 
 const videoSrc = computed(() => room.value?.video_url?.trim() ?? '')
 const flowSteps = computed(() => room.value?.flow ?? [])
@@ -24,8 +25,20 @@ const readingMinutes = computed(() =>
 
 const trainingBase = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
 
-function openKnowledge(id: string) {
-  knowledgeId.value = id
+function openKnowledge(payload: {
+  id: string
+  x: number
+  y: number
+  linkLeft: number
+  linkRight: number
+}) {
+  knowledgeId.value = payload.id
+  knowledgeAnchor.value = {
+    x: payload.x,
+    y: payload.y,
+    linkLeft: payload.linkLeft,
+    linkRight: payload.linkRight,
+  }
   knowledgeOpen.value = true
 }
 
@@ -79,7 +92,11 @@ onMounted(load)
       @knowledge="openKnowledge"
     />
 
-    <KnowledgeDialog v-model="knowledgeOpen" :id="knowledgeId" />
+    <KnowledgePopover
+      v-model:open="knowledgeOpen"
+      :id="knowledgeId"
+      :anchor="knowledgeAnchor"
+    />
   </div>
 </template>
 

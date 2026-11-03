@@ -1,5 +1,5 @@
-// 教程知识链接的内容目录。条目基于官方文档整理，弹窗内提供官网原文入口；
-// lesson.md 用 `[显示文本](#knowledge:<id>)` 引用，前端拦截点击打开弹窗。
+// 教程知识链接的内容目录。条目基于官方文档整理，知识浮层内提供官网原文入口；
+// lesson.md 用 `[显示文本](#knowledge:<id>)` 引用，前端拦截点击打开浮层。
 export type KnowledgeKind = 'security' | 'yakit'
 
 export interface KnowledgeEntry {
