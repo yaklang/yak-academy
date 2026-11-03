@@ -9,7 +9,7 @@
 // 普通端与管理端共用；一次拉全量（page_size=100）。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Search } from '@lucide/vue'
+import { Inbox, Search, SearchX } from '@lucide/vue'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { BANK_LABELS, CATEGORY_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
@@ -19,11 +19,11 @@ const auth = useAuthStore()
 const SearchIcon = Search
 const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
 const activeBank = ref<ChallengeBank>(banks.includes(route.query.bank as ChallengeBank) ? route.query.bank as ChallengeBank : 'tutorial')
-// 空态文案（有引导出口的空 tab 换卡片，这里只是兜底一句话）。
+// 空态标题（说明与动作按题库状态在模板中区分）。
 const emptyHint: Record<ChallengeBank, string> = {
-  tutorial: '暂无教程题目：内置题集尚未导入，请联系管理员在管理端一键导入内置训练（vulinbox）',
-  ctf: '暂无 CTF 题目：等待管理员上传题目包',
-  acm: '暂无 ACM 题目：等待管理员上传题目包',
+  tutorial: '暂无教程题目',
+  ctf: '暂无 CTF 题目',
+  acm: '暂无 ACM 题目',
 }
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
@@ -94,6 +94,16 @@ const difficultyDist = computed(() => {
 
 const base = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
 const isAdmin = computed(() => auth.user?.global_role === 'admin')
+const emptyDescription = computed(() => {
+  if (isAdmin.value) {
+    return activeBank.value === 'tutorial'
+      ? '在「题目管理」一键导入内置训练（vulinbox）后即可查看。'
+      : '在「题目管理」上传题目包后，会自动出现在这里。'
+  }
+  return activeBank.value === 'tutorial'
+    ? '内置题集尚未导入，请联系管理员在管理端一键导入内置训练（vulinbox）。'
+    : '题目包由管理员上传后会自动出现在这里。'
+})
 
 async function load() {
   loading.value = true
@@ -129,6 +139,13 @@ function difficultyType(d: TrainingItem['difficulty']) {
   return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
 }
 
+// 过滤结果为空时保留筛选栏，用户可以直接清空条件；题库本身为空时筛选栏不渲染。
+function clearFilters() {
+  categoryFilter.value = ''
+  search.value = ''
+  builtinFilter.value = ''
+}
+
 watch([activeBank, builtinFilter], load)
 watch(() => route.query.bank, value => {
   if (banks.includes(value as ChallengeBank)) activeBank.value = value as ChallengeBank
@@ -149,9 +166,8 @@ onMounted(load)
     </div>
   </header>
 
-  <!-- 页头统计：容器/附件/配套教程计数 + 难度分布条（颜色仅装饰，语义在行内文字标签）。
-       空题库也常驻（各项显示 0）：三个 tab 与有题状态保持同一版式对齐。 -->
-  <div v-if="!loading" class="stats-strip" role="status">
+  <!-- 页头统计：有题时展示容器/附件/配套教程计数 + 难度分布；空题库不渲染零值统计。 -->
+  <div v-if="!loading && total > 0" class="stats-strip" role="status">
     <span class="stat">容器题 <b class="mono">{{ envCount }}</b></span>
     <span class="stat">附件题 <b class="mono">{{ fileCount }}</b></span>
     <span v-if="tutorialCount" class="stat">配套教程 <b class="mono">{{ tutorialCount }}</b></span>
@@ -175,8 +191,8 @@ onMounted(load)
     <UiTabPane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
   </UiTabs>
 
-  <!-- 过滤条在结果为空时也要保留，否则选了过滤条件后无法切回「来源：全部」。 -->
-  <div v-if="!loading" class="filters">
+  <!-- 过滤条只在题库有内容时保留；过滤后结果为空也要能直接清除条件。 -->
+  <div v-if="!loading && items.length > 0" class="filters">
     <div v-if="categoryOptions.length" class="chip-bar" role="group" aria-label="按分类筛选">
       <button
         type="button"
@@ -221,13 +237,19 @@ onMounted(load)
 
   <UiSkeleton v-if="loading" :rows="8" animated />
   <template v-else-if="visibleItems.length === 0">
-    <!-- 有引导出口的空态用卡片：说明来源 + 管理员直达上传入口 -->
-    <div v-if="items.length === 0 && activeBank !== 'tutorial'" class="empty-guide" role="status">
-      <p class="empty-title">{{ emptyHint[activeBank] }}</p>
-      <p class="empty-sub">题目包由管理员在「题目管理」上传（challenge.json 打包 zip），上传后自动出现在本页。</p>
-      <UiButton v-if="isAdmin" type="primary" @click="$router.push('/admin/panel/challenges')">前往题目管理上传</UiButton>
+    <div class="empty-guide" data-testid="training-empty" role="status">
+      <span class="empty-icon" aria-hidden="true">
+        <component :is="items.length === 0 ? Inbox : SearchX" :size="20" />
+      </span>
+      <p class="empty-title">{{ items.length === 0 ? emptyHint[activeBank] : '没有匹配的题目' }}</p>
+      <p class="empty-sub">
+        {{ items.length === 0 ? emptyDescription : '试试清除关键词或分类筛选，或切换到其它题库。' }}
+      </p>
+      <UiButton v-if="items.length === 0 && isAdmin" type="primary" @click="$router.push('/admin/panel/challenges')">
+        前往题目管理上传
+      </UiButton>
+      <UiButton v-else-if="items.length > 0" size="small" @click="clearFilters">清除筛选</UiButton>
     </div>
-    <UiEmpty v-else :description="emptyHint[activeBank]" />
   </template>
   <template v-else-if="grouped">
     <section v-for="g in groups" :key="g.category" class="group">
@@ -335,7 +357,7 @@ onMounted(load)
 .seg-expert { background: var(--destructive); }
 .diff-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
 
-.bank-tabs { margin-bottom: 0.25rem; }
+.bank-tabs { margin-bottom: var(--space-1); }
 .filters {
   display: flex;
   align-items: center;
@@ -391,10 +413,10 @@ onMounted(load)
 
 .group { margin-bottom: var(--space-6); }
 .cat-head {
-  display: flex; align-items: baseline; gap: 0.7rem;
+  display: flex; align-items: baseline; gap: var(--space-3);
   margin-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
-  padding-bottom: 0.45rem;
+  padding-bottom: var(--space-2);
 }
 .cat {
   font-size: var(--text-sm); color: var(--accent-foreground); margin: 0;
@@ -449,22 +471,40 @@ onMounted(load)
 }
 
 .empty-guide {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--card);
-  padding: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: grid;
+  justify-items: center;
   gap: var(--space-2);
-  max-width: 560px;
+  width: min(100%, 620px);
+  margin: var(--space-6) auto 0;
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  text-align: center;
 }
-.empty-title { margin: 0; font-size: var(--text-base); font-weight: 600; color: var(--foreground); }
-.empty-sub { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--muted-foreground); }
+.empty-icon {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.empty-title { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--foreground); }
+.empty-sub { max-width: 56ch; margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--muted-foreground); line-height: var(--leading-relaxed); }
 
 @media (max-width: 720px) {
   .score { display: none; }
   .row-tags .ui-tag[data-tone='default'] { display: none; }
   .chal-link { min-height: 44px; }
+  .stats-strip { gap: var(--space-2) var(--space-3); }
+  .diff-bar { display: none; }
+  .filters { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+  .filters-tools { width: 100%; }
+  .search { width: 100%; order: 0; flex: 1 1 100%; }
+  .filter { width: auto; flex: 1 1 180px; }
+  .empty-guide { margin-top: var(--space-4); padding: var(--space-6) var(--space-5); }
 }
 </style>

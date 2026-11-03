@@ -4,6 +4,7 @@
 // （入场页 /competitions/enter/:id 支持免码提交）。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { competitionApi, type PublicCompetitionItem } from '../api'
 
 const items = ref<PublicCompetitionItem[]>([])
@@ -49,17 +50,21 @@ function statusLabel(s: PublicCompetitionItem['status']) {
 }
 
 function fmt(ts: string) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <h2>竞赛广场</h2>
-  <p class="hint">
-    公开赛在此开放报名：报名后开赛即可免邀请码入场；邀请赛凭站内邀请邮件中的邀请码入场，不在此展示。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">竞赛<span class="accent">广场</span></h2>
+      <p class="page-sub">
+        公开赛在此开放报名：报名后开赛即可免邀请码入场；邀请赛凭站内邀请邮件中的邀请码入场，不在此展示。
+      </p>
+    </div>
+  </header>
 
   <UiCard shadow="never">
     <UiTable :data="items" v-busy="loading" empty-text="暂无公开竞赛">
@@ -97,6 +102,7 @@ onMounted(load)
       </UiTableColumn>
     </UiTable>
     <UiPagination
+      v-if="total > 0"
       background
       layout="total, prev, pager, next"
       :total="total"
@@ -109,8 +115,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
-.dim { color: var(--muted-foreground); font-size: 0.8rem; }
-.reg-tag { margin-right: 0.6rem; }
-.pager { margin-top: 1rem; }
+.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
+.reg-tag { margin-right: var(--space-2); }
+.pager { margin-top: var(--space-4); }
 </style>

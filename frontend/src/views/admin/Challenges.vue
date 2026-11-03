@@ -10,6 +10,7 @@
 // zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { Search } from '@lucide/vue'
 import {
   adminChallengeApi, DIFFICULTY_LABELS,
@@ -610,7 +611,10 @@ onUnmounted(stopEnginePolling)
 
 <template>
   <header class="page-head">
-    <h2 class="page-title">题目<span class="accent">管理</span></h2>
+    <div>
+      <h2 class="page-title">题目<span class="accent">管理</span></h2>
+      <p class="page-sub">维护内置题集、CTF 题目与 ACM 题目；上传、可见性、附件与配套教程均在此管理。</p>
+    </div>
     <span class="head-count" v-if="total">共 {{ total }} 题</span>
   </header>
 
@@ -1015,7 +1019,7 @@ onUnmounted(stopEnginePolling)
             <template #default="{ row }">{{ attachSize(row.size) }}</template>
           </UiTableColumn>
           <UiTableColumn label="上传时间" width="150">
-            <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </UiTableColumn>
           <UiTableColumn label="操作" width="70">
             <template #default="{ row }">
@@ -1036,19 +1040,17 @@ onUnmounted(stopEnginePolling)
 
 <style scoped>
 /* 页头 */
-.page-head { display: flex; align-items: baseline; gap: 0.8rem; margin: 0 0 0.6rem; }
-.page-title { font-size: 1.35rem; font-weight: 700; margin: 0; }
 .page-title .accent { color: var(--accent-foreground); margin-left: 2px; }
-.head-count { color: var(--muted-foreground); font-size: 0.88rem; }
+.head-count { color: var(--muted-foreground); font-size: var(--text-sm); }
 
 /* 题库 tab */
-.bank-tabs :deep([data-slot="tabs-list"]) { margin-bottom: 0.4rem; }
-.tab-label { font-size: 0.95rem; }
+.bank-tabs :deep([data-slot="tabs-list"]) { margin-bottom: var(--space-1); }
+.tab-label { font-size: var(--text-sm); }
 .tab-sub {
-  font-size: 0.72rem; color: var(--accent-foreground); border: 1px solid var(--border);
-  padding: 0 5px; margin-left: 6px; border-radius: 3px; vertical-align: 1px;
+  font-size: var(--text-xs); color: var(--accent-foreground); border: 1px solid var(--border);
+  padding: 0 var(--space-1); margin-left: var(--space-1); border-radius: var(--radius-control); vertical-align: 1px;
 }
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin: 0 0 1rem; }
+.hint { color: var(--muted-foreground); font-size: var(--text-sm); margin: 0 0 var(--space-4); }
 
 /* 工具栏与筛选 */
 .toolbar { margin-bottom: 0.9rem; display: flex; gap: 0.5rem; align-items: flex-start; }

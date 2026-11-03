@@ -4,6 +4,7 @@
 // PostgreSQL 模式应用内备份不支持（创建返回 422，数据库走外部 pg_dump）。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { adminBackupApi, type BackupInfo } from '../../api'
 
 const items = ref<BackupInfo[]>([])
@@ -61,18 +62,22 @@ function fmtSize(bytes: number) {
 }
 
 function fmt(ts: string) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <h2>备份管理</h2>
-  <p class="hint">
-    每份备份 = SQLite 一致性快照 + 附件/头像/WP 数据目录的单文件 tar.gz 归档，超出保留份数自动清理。
-    归档落在数据卷的 backups/ 目录——数据卷损坏时备份同样丢失，请定期下载离机保存（异地容灾）。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">备份<span class="accent">管理</span></h2>
+      <p class="page-sub">
+        每份备份 = SQLite 一致性快照 + 附件/头像/WP 数据目录的单文件 tar.gz 归档，超出保留份数自动清理。
+        归档落在数据卷的 backups/ 目录——数据卷损坏时备份同样丢失，请定期下载离机保存（异地容灾）。
+      </p>
+    </div>
+  </header>
 
   <UiCard class="block" shadow="never">
     <template #header>
@@ -113,7 +118,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 </style>

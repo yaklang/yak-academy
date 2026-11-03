@@ -199,8 +199,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <h2>教程管理</h2>
-  <p class="hint">教程以内容包（zip）上传：文字教程 + 配套视频，走版本化管线（draft → 发布 → 归档/回滚）。题目是独立资源，请到"题目管理"用 JSON 上传。</p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">教程<span class="accent">管理</span></h2>
+      <p class="page-sub">教程以内容包（zip）上传：文字教程 + 配套视频，走版本化管线（draft → 发布 → 归档/回滚）。题目是独立资源，请到「题目管理」用 JSON 上传。</p>
+    </div>
+  </header>
   <div class="toolbar">
     <UiUpload
       :show-file-list="false"
@@ -362,7 +366,6 @@ flow:                                    # 可选：教程流程（2-12 步，�
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
 .spec h3 { margin-top: 0; }
 .spec pre { background: var(--muted); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }

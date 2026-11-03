@@ -3,6 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { notify } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { profileApi, type MailItem } from '../api'
 
 const router = useRouter()
@@ -62,17 +63,21 @@ function goEnter() {
 }
 
 function fmt(ts: string) {
-  return new Date(ts).toLocaleString()
+  return formatDateTime(ts)
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <h2 class="page-title">站内<span class="accent">邮箱</span></h2>
-  <p class="hint">
-    只收不发：竞赛邀请等系统通知投递到这里；当前未读 {{ unread }} 封。点开邮件即标记已读。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">站内<span class="accent">邮箱</span></h2>
+      <p class="page-sub">
+        只收不发：竞赛邀请等系统通知投递到这里；当前未读 {{ unread }} 封。点开邮件即标记已读。
+      </p>
+    </div>
+  </header>
 
   <UiTable
     :data="mails"
@@ -105,6 +110,7 @@ onMounted(load)
   </UiTable>
 
   <UiPagination
+    v-if="total > 0"
     background
     layout="total, prev, pager, next"
     :total="total"
@@ -141,12 +147,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
-.pager { margin-top: 1rem; }
+.pager { margin-top: var(--space-4); }
 :deep(.unread) { font-weight: 600; }
-.mail-body { display: flex; flex-direction: column; gap: 0.8rem; }
-.mail-meta { display: flex; align-items: center; gap: 0.8rem; color: var(--muted-foreground); font-size: 0.85rem; }
+.mail-body { display: flex; flex-direction: column; gap: var(--space-3); }
+.mail-meta { display: flex; align-items: center; gap: var(--space-3); color: var(--muted-foreground); font-size: var(--text-sm); }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
-.invite { margin-top: 0.5rem; }
-.enter-btn { margin-top: 0.8rem; }
+.invite { margin-top: var(--space-2); }
+.enter-btn { margin-top: var(--space-3); }
 </style>

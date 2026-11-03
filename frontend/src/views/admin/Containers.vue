@@ -5,6 +5,7 @@
 // 后两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
 import { onMounted, onUnmounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
+import { formatDateTime, formatTime } from '@/lib/format'
 import {
   adminInstanceApi, performanceApi,
   type AdminLabInstance, type InstanceLog, type PerformanceReport,
@@ -128,11 +129,11 @@ function sourceLabel(source: string) {
 }
 
 function fmt(ts: string) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 function fmtTime(ts: string) {
-  return ts ? new Date(ts).toLocaleTimeString() : '-'
+  return formatTime(ts)
 }
 
 function fmtBytes(bytes: number | null | undefined) {
@@ -170,10 +171,14 @@ onUnmounted(stopPerf)
 </script>
 
 <template>
-  <h2>容器管理</h2>
-  <p class="hint">
-    主机性能、当前打开的容器与操作日志。强制销毁会回收真实容器资源；每次启动/停止均记录日志（含来源与失败原因）。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">容器<span class="accent">管理</span></h2>
+      <p class="page-sub">
+        主机性能、当前打开的容器与操作日志。强制销毁会回收真实容器资源；每次启动/停止均记录日志（含来源与失败原因）。
+      </p>
+    </div>
+  </header>
 
   <!-- 主机性能面板 -->
   <UiCard class="block" shadow="never" v-busy="perfLoading">
@@ -383,7 +388,6 @@ onUnmounted(stopPerf)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .block { margin-bottom: 1.2rem; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 .head-actions { display: flex; align-items: center; gap: 0.6rem; }

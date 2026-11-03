@@ -8,6 +8,7 @@
 // 已登录会话立即失效——未绑定手机号的竞赛批量账号走此入口找回。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
+import { formatDateTime } from '@/lib/format'
 import { adminApi, type AdminUserItem } from '../../api'
 
 const items = ref<AdminUserItem[]>([])
@@ -60,7 +61,7 @@ function filterStaleNoSolves() {
 }
 
 function fmt(ts: string | null | undefined) {
-  return ts ? new Date(ts).toLocaleString() : '-'
+  return formatDateTime(ts)
 }
 
 function openReset(row: AdminUserItem) {
@@ -91,11 +92,15 @@ onMounted(load)
 </script>
 
 <template>
-  <h2>用户管理</h2>
-  <p class="hint">
-    账号编码（YA{YY}-{NNNNN}）在建号时按年自动分配；6 个月未登录的账号标记为「不活跃」
-    （从未登录的账号按注册时间起算）。
-  </p>
+  <header class="page-head">
+    <div>
+      <h2 class="page-title">用户<span class="accent">管理</span></h2>
+      <p class="page-sub">
+        账号编码（YA{YY}-{NNNNN}）在建号时按年自动分配；6 个月未登录的账号标记为「不活跃」
+        （从未登录的账号按注册时间起算）。
+      </p>
+    </div>
+  </header>
 
   <UiCard shadow="never">
     <div class="filters">
@@ -179,7 +184,7 @@ onMounted(load)
         <UiFormItem label="新密码">
           <UiInput v-model="resetPassword" type="password" show-password placeholder="至少 6 位" />
         </UiFormItem>
-        <p class="hint">重置后该用户的全部登录状态立即失效，需用新密码重新登录。</p>
+        <p class="dialog-hint">重置后该用户的全部登录状态立即失效，需用新密码重新登录。</p>
       </UiForm>
     </template>
     <template #footer>
@@ -190,11 +195,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
 .filters { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
 .q-input { width: 260px; }
 .sel { width: 200px; }
 .pager { margin-top: 1rem; }
+.dialog-hint { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); line-height: var(--leading-normal); }
 .reset-who { font-size: 0.92rem; }
 .reset-who code { margin-left: 0.5rem; color: var(--muted-foreground); }
 </style>
