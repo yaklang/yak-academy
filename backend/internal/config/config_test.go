@@ -25,6 +25,34 @@ func TestStrictViolations(t *testing.T) {
 	}
 }
 
+// TestSmsShowCodeDefault 回显默认值：非严格模式默认开（学员直接看到验证码），
+// 生产严格模式默认关（避免找回验证码被任意请求方读取）；显式 0/1 恒优先。
+func TestSmsShowCodeDefault(t *testing.T) {
+	cases := []struct {
+		name   string
+		strict string
+		show   string
+		want   bool
+	}{
+		{"default non-strict", "", "", true},
+		{"default strict", "1", "", false},
+		{"explicit off non-strict", "", "0", false},
+		{"explicit off strict", "1", "0", false},
+		{"explicit on strict", "1", "1", true},
+		{"legacy true", "", "true", true},
+		{"legacy false", "1", "false", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("ACADEMY_STRICT", c.strict)
+			t.Setenv("ACADEMY_SMS_SHOW_CODE", c.show)
+			if got := Load().SmsShowCode; got != c.want {
+				t.Fatalf("SmsShowCode = %v, want %v (strict=%q show=%q)", got, c.want, c.strict, c.show)
+			}
+		})
+	}
+}
+
 func TestLoadWriteupStoreEnvs(t *testing.T) {
 	t.Setenv("ACADEMY_WRITEUPS_STORE", "s3")
 	t.Setenv("ACADEMY_WRITEUPS_S3_ENDPOINT", "https://minio.example.com:9000")

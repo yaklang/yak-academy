@@ -900,6 +900,8 @@ paths:
         同手机号 60 秒内仅允许发送一次、10 分钟内最多 3 次。
         手机号已注册时优先于限频返回 422（发码即拒，不发无谓的验证码）。
         第一版为开发投递器：验证码写入服务日志（不接第三方短信通道）。
+        回显模式默认开启（非严格模式）：响应携带验证码原文，注册页内联显示；
+        生产严格模式（ACADEMY_STRICT=1）默认关闭，可用 ACADEMY_SMS_SHOW_CODE 显式覆盖。
       requestBody:
         required: true
         content:
@@ -919,7 +921,7 @@ paths:
                 properties:
                   ok: { type: boolean }
                   retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
-                  code: { type: string, description: 验证码原文；仅在服务端开启回显模式（ACADEMY_SMS_SHOW_CODE=1，内网/演示部署）时返回，正式部署不回显 }
+                  code: { type: string, description: 验证码原文；回显模式默认开启（非严格模式），生产严格模式（ACADEMY_STRICT=1）默认关闭；可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖 }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
   /auth/register:
@@ -979,7 +981,7 @@ paths:
                 properties:
                   ok: { type: boolean }
                   retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
-                  code: { type: string, description: 验证码原文；仅在回显模式（ACADEMY_SMS_SHOW_CODE=1）下返回 }
+                  code: { type: string, description: 验证码原文；回显模式默认开启（非严格模式），生产严格模式（ACADEMY_STRICT=1）默认关闭；可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖 }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
   /auth/password-reset:

@@ -263,7 +263,7 @@ func TestGenCodeShape(t *testing.T) {
 }
 
 // TestSendCodeReturnsDeliveredCode 回显模式的取值正确性：SendCode 返回的
-// code 必须与投递器收到的一致（handler 在 SmsShowCode 开启时原样带给前端）。
+// code 必须与投递器收到的一致（handler 在回显模式（默认开启）下原样带给前端）。
 func TestSendCodeReturnsDeliveredCode(t *testing.T) {
 	env := newRegEnv(t)
 	code, _, err := env.reg.SendCode(context.Background(), "13800000009")

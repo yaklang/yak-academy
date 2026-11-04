@@ -10,7 +10,7 @@ import { loginAsAdmin } from './helpers'
 //     竞赛批量账号走此入口），旧密码同样失效。
 // 建号走 API 播种（发码回显模式取码），重置全程走真实 UI。
 
-// 经回显模式发码注册一个绑定手机号的新账号（e2e 后端 ACADEMY_SMS_SHOW_CODE=1）。
+// 经回显模式发码注册一个绑定手机号的新账号（e2e 后端未设开关，回显默认开启）。
 async function registerViaApi(
   request: APIRequestContext,
   username: string,

@@ -208,8 +208,8 @@ func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	resp := map[string]any{"ok": true}
-	// 回显模式（内网/演示部署）：验证码直接带回响应，注册页内联显示，
-	// 学员无需访问服务端日志即可完成注册。默认关闭。
+	// 回显模式（非严格模式默认开启）：验证码直接带回响应，注册页内联显示，
+	// 学员无需访问服务端日志即可完成注册。
 	if h.smsShowCode {
 		resp["code"] = code
 	}
@@ -238,7 +238,7 @@ func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
 }
 
 // sendPasswordResetCode 找回密码发码（公开）。限频不报错（同注册发码）：
-// 200 + retry_after，回显模式附带验证码原文。
+// 200 + retry_after，回显模式（非严格模式默认开启）附带验证码原文。
 func (h *Handlers) sendPasswordResetCode(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Phone string `json:"phone"`

@@ -311,13 +311,13 @@ export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),
   // 注册发码：限频时后端不报错，返回 200 + retry_after（秒），前端据此倒计时。
-  // code 仅在服务端开启回显模式（ACADEMY_SMS_SHOW_CODE=1，内网/演示部署）时返回。
+  // code 回显默认开启（生产严格模式默认关闭，可用 ACADEMY_SMS_SHOW_CODE 覆盖）。
   sendSmsCode: (phone: string) =>
     http.post<{ ok: boolean; retry_after?: number; code?: string }>('/auth/sms/code', { phone }),
   // 凭验证码建号（角色固定 student），成功直接返回登录 token。
   register: (phone: string, code: string, username: string, password: string) =>
     http.post<TokenResponse>('/auth/register', { phone, code, username, password }),
-  // 找回密码发码：限频语义同注册发码（200 + retry_after；code 仅回显模式返回）。
+  // 找回密码发码：限频语义同注册发码（200 + retry_after；code 回显默认开启）。
   sendResetCode: (phone: string) =>
     http.post<{ ok: boolean; retry_after?: number; code?: string }>('/auth/password-reset/code', { phone }),
   // 凭找回验证码重置密码；返回用户名与账号编码（忘记用户名的学员凭手机号找回账号）。

@@ -6,16 +6,17 @@ import { expect, test } from '@playwright/test'
 //   途径访问容器日志（表单与后端注册链路本身均正常）。
 // 修复前行为：/auth/sms/code 响应只有 {ok, retry_after?}，登录页对验证码
 //   唯一的展示是一句"见服务端日志"的 toast，页面上不出现验证码，无法自助注册。
-// 修复后行为：服务端开启回显模式（ACADEMY_SMS_SHOW_CODE=1，playwright 后端
-//   已开启；内网/演示部署同样开启）时，发码响应携带验证码原文，注册页在验证码
-//   输入框下方内联显示，学员自助复制完成注册；默认部署不回显、行为不变。
+// 修复后行为：服务端回显模式默认开启（非严格模式；e2e 未设置开关，走产品默认），
+//   发码响应携带验证码原文，注册页在验证码输入框下方内联显示，学员自助复制完成
+//   注册；生产严格模式（ACADEMY_STRICT=1）默认关闭，也可用 ACADEMY_SMS_SHOW_CODE=0
+//   显式关闭。
 // 复现路径：登录页 → 「手机验证码注册」→ 填手机号 → 「获取验证码」→
 //   页面上找不到验证码 → 注册无法进行。
 // 说明：回显开关的后端取值正确性由 service 单测覆盖
 //   （TestSendCodeReturnsDeliveredCode：返回码=投递码、限频不回显）；
 //   本 spec 锚定学员真实路径——UI 显示验证码并全程自助注册成功。
 
-test.describe('回归：回显模式下学员可自助完成手机号注册', () => {
+test.describe('回归：默认回显下学员可自助完成手机号注册', () => {
   test('发码后页面内联显示验证码，无需服务端日志即可注册成功', async ({ page }) => {
     const phone = '13955660086'
     const username = `e2e-showcode-${Date.now().toString().slice(-6)}`
