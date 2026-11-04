@@ -95,6 +95,8 @@
     --sidebar-border: #e6ddd2;
     --sidebar-ring: #8b5e3c;
     --shadow-popover: 0 16px 40px -12px rgb(36 31 26 / .16), 0 2px 8px rgb(36 31 26 / .05);
+    /* 卡片头带强度：浅色靠压暗（咖啡底上 5% 深前景），深色只需一点点提亮。 */
+    --card-header-tint: 5%;
     --code-keyword: #8a4a2f;
     --code-type: #6f4f7a;
     --code-namespace: #3f6a63;
@@ -106,43 +108,46 @@
 
 .dark {
     /* 中性石墨阶梯（Material 3 surface container / Carbon Gray 100 的通行做法）：
-       background → card → panel → popover 逐级提亮，相邻层亮度比 ≥ 1.15。
-       大面积表面保持中性（RGB 极差 ≤ 4），品牌色只用于强调，不做表面底色。 */
+       background → card → panel → popover 逐级提亮。阶差按主流深色体系的中低区间
+       控制（单级 ΔL* ≈ 4–5），因为容器在本项目里能占到近半屏面积，阶差过大
+       会让亮块反客为主。大面积表面保持中性（RGB 极差 ≤ 4），品牌色只做强调。 */
     --background: #0a0a0a;
     --foreground: #fafafa;
-    --card: #1c1c1c;
+    --card: #171717;
     --card-foreground: #fafafa;
-    --panel: #292929;
-    --popover: #373737;
+    --panel: #1f1f1f;
+    --popover: #282828;
     --popover-foreground: #fafafa;
     --primary: #d9a173;
     --primary-foreground: #1a120d;
-    --secondary: #212121;
+    --secondary: #1b1b1b;
     --secondary-foreground: #fafafa;
-    --muted: #1f1f1f;
+    --muted: #161616;
     --muted-foreground: #a8a8a8;
-    --accent: #363636;
+    --accent: #2a2a2a;
     --accent-foreground: #e7b88e;
     --destructive: #f0928a;
     --success: #7cc496;
     --warning: #e3b971;
-    --border: #3f3f3f;
-    --input: #4a4a4a;
+    --border: #333333;
+    --input: #3d3d3d;
     --ring: #d9a173;
     --chart-1: #d9a173;
     --chart-2: #b98d68;
     --chart-3: #927257;
     --chart-4: #87817a;
     --chart-5: #b3ada4;
-    --sidebar: #131313;
+    --sidebar: #111111;
     --sidebar-foreground: #fafafa;
     --sidebar-primary: #d9a173;
     --sidebar-primary-foreground: #1a120d;
-    --sidebar-accent: #262626;
+    --sidebar-accent: #212121;
     --sidebar-accent-foreground: #e7b88e;
-    --sidebar-border: #3f3f3f;
+    --sidebar-border: #333333;
     --sidebar-ring: #d9a173;
     --shadow-popover: 0 18px 48px -16px rgb(0 0 0 / .78), 0 2px 8px rgb(0 0 0 / .42);
+    /* 深色下 5% 会把头带提亮近一整个 elevation 阶梯，压到 3% 只做轻微区分。 */
+    --card-header-tint: 3%;
     --code-keyword: #e6a377;
     --code-type: #cfa9ec;
     --code-namespace: #93d4cb;
@@ -418,8 +423,10 @@ html, * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted
    --card 留给输入框、表格、内嵌块等次级表面，避免同页卡片一深一浅。 */
 .ui-card { background: var(--panel); }
 /* Card header carries a faint tone shift instead of being another flat slab:
-   5% foreground over the card surface reads as a header band in both themes. */
-.ui-card > [data-slot="card-header"] { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+   a few percent of foreground over the card surface reads as a header band in
+   both themes. Strength comes from --card-header-tint because the same
+   percentage is much louder on a dark surface than on a light one. */
+.ui-card > [data-slot="card-header"] { background: color-mix(in srgb, var(--foreground) var(--card-header-tint), transparent); }
 .table-empty { display: grid; justify-items: center; gap: 12px; color: var(--muted-foreground); }
 .ui-data-table { width: 100%; }
 .ui-data-table [data-slot=table-container] { max-width: 100%; }
