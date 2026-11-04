@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -200,9 +201,9 @@ func TestMigrateReclassifiesUploadedTutorialBank(t *testing.T) {
 			t.Fatalf("seed %s: %v", slug, err)
 		}
 	}
-	seed("vulinbox-keep", 1)   // 内置行：保留 tutorial
-	seed("uploaded-move", 0)   // 上传行：改判 ctf
-	seed("legacy-null", nil)   // 历史裸列 NULL：兜底按上传处理
+	seed("vulinbox-keep", 1) // 内置行：保留 tutorial
+	seed("uploaded-move", 0) // 上传行：改判 ctf
+	seed("legacy-null", nil) // 历史裸列 NULL：兜底按上传处理
 
 	if err := migrateChallengeBankOwnership(gdb); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -227,6 +228,57 @@ func TestMigrateReclassifiesUploadedTutorialBank(t *testing.T) {
 	}
 	assertBank("vulinbox-keep", "tutorial")
 }
+
+// TestMigrateCompetitionScoreIndexAllowsMultipleChallenges 回归：旧唯一索引
+// 只含 (competition_id, user_id)，同一用户通关第二题会撞键；迁移后允许
+// 同用户多题、但同题仍不可重复。
+func TestMigrateCompetitionScoreIndexAllowsMultipleChallenges(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:compscoremigrate?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		dbg, _ := gdb.DB()
+		dbg.Close()
+	})
+	if err := Migrate(gdb); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	// 还原旧索引，复现历史约束。
+	if err := gdb.Migrator().DropIndex("competition_scores", "idx_compscore"); err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+	if err := gdb.Exec(`CREATE UNIQUE INDEX idx_compscore ON competition_scores (competition_id, user_id)`).Error; err != nil {
+		t.Fatalf("create legacy index: %v", err)
+	}
+	now := time.Now().UTC()
+	first := model.CompetitionScore{CompetitionID: 1, UserID: 2, ChallengeID: 10, Score: 100, SolvedAt: now}
+	if err := gdb.Create(&first).Error; err != nil {
+		t.Fatalf("insert first score: %v", err)
+	}
+	second := model.CompetitionScore{CompetitionID: 1, UserID: 2, ChallengeID: 11, Score: 50, SolvedAt: now}
+	if err := gdb.Create(&second).Error; err == nil {
+		t.Fatalf("legacy index should reject a second challenge for the same user")
+	}
+	if err := migrateCompetitionScoreIndex(gdb); err != nil {
+		t.Fatalf("migrate index: %v", err)
+	}
+	if !competitionScoreIndexHasChallenge(gdb, "idx_compscore") {
+		t.Fatalf("index should include challenge_id after migration")
+	}
+	if err := gdb.Create(&second).Error; err != nil {
+		t.Fatalf("insert second score after migration: %v", err)
+	}
+	// 幂等：重复迁移不报错；同一题仍不可重复计分。
+	if err := migrateCompetitionScoreIndex(gdb); err != nil {
+		t.Fatalf("idempotent migrate: %v", err)
+	}
+	dup := model.CompetitionScore{CompetitionID: 1, UserID: 2, ChallengeID: 10, Score: 100, SolvedAt: now}
+	if err := gdb.Create(&dup).Error; err == nil {
+		t.Fatalf("same challenge should still be unique per user")
+	}
+}
+
 func TestIsPostgresDSN(t *testing.T) {
 	cases := []struct {
 		in   string
