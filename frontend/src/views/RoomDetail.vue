@@ -117,7 +117,7 @@ onMounted(load)
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
   color: var(--muted-foreground);
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);

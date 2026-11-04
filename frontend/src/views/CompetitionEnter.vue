@@ -99,7 +99,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--muted);
+  background: var(--background);
 }
 .enter-card { width: 440px; padding: 0.5rem; }
 .enter-btn { width: 100%; margin-top: 0.4rem; }

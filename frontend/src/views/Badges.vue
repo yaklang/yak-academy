@@ -55,7 +55,7 @@ onMounted(load)
   padding: var(--space-3) var(--space-4);
   border: 1px dashed var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
 }
 .badge .medal { opacity: 0.55; }
 .badge .title { color: var(--muted-foreground); }

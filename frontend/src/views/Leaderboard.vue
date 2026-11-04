@@ -110,8 +110,9 @@ onMounted(load)
   min-width: 150px;
 }
 .pod.d1 {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 10%, var(--panel)), var(--panel) 55%);
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  /* 冠军用边框与奖牌强调，不铺品牌色渐变：深色下大面积暖色会发浑。 */
+  background: var(--panel);
   padding: 1.5rem 1.8rem 1.1rem;
 }
 .pod.d2 { padding-bottom: 0.7rem; }
