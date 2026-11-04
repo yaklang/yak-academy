@@ -10,8 +10,8 @@ import (
 )
 
 type Config struct {
-	Addr      string // HTTP 监听地址
-	Database  string // SQLite 文件路径（本地开发默认）
+	Addr     string // HTTP 监听地址
+	Database string // SQLite 文件路径（本地开发默认）
 	// DatabaseDSN PostgreSQL 连接串（postgres:// / postgresql:// 前缀）：
 	// 设置即切 PostgreSQL（Phase 4 多人规模路线），此时 Database 被忽略。
 	DatabaseDSN string
@@ -57,8 +57,10 @@ type Config struct {
 	YakDownloadDir string
 
 	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
-	// 注册页内联显示，学员可自助完成注册。仅供内网/演示部署——默认投递器只写
-	// 服务日志，学员拿不到码会卡死在注册第一步；正式部署保持关闭。
+	// 注册页内联显示，学员可自助完成注册。默认投递器只写服务日志，学员拿不到
+	// 码会卡死在注册第一步，因此非严格模式默认开启；生产严格模式
+	// （ACADEMY_STRICT=1）默认关闭，避免账号找回验证码被任意请求方读取。
+	// 两种模式均可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖。
 	SmsShowCode bool
 
 	// Strict 生产严格模式（ACADEMY_STRICT=1）：启动时拒绝开发默认/弱凭据
@@ -126,7 +128,7 @@ func Load() *Config {
 		InstancePublicHost: getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
 		YakBin:             getenv("ACADEMY_YAK_BIN", ""),
 		YakDownloadDir:     getenv("ACADEMY_YAK_DIR", filepath.Dir(getenv("ACADEMY_DB", "academy.db"))),
-		SmsShowCode:        getenvBool("ACADEMY_SMS_SHOW_CODE"),
+		SmsShowCode:        getenvBoolDefault("ACADEMY_SMS_SHOW_CODE", !getenvBool("ACADEMY_STRICT")),
 		Strict:             getenvBool("ACADEMY_STRICT"),
 		WriteupsStoreKind:  getenv("ACADEMY_WRITEUPS_STORE", "fs"),
 		WriteupsS3: S3Options{
@@ -177,6 +179,19 @@ func getenvBool(key string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// getenvBoolDefault 带默认值的开关型环境变量：未设置/空串回退 def；
+// 0/false 显式关闭，1/true 显式开启（非法值按未设置处理）。
+func getenvBoolDefault(key string, def bool) bool {
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(key))); v {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	default:
+		return def
 	}
 }
 

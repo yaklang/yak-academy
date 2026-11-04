@@ -32,7 +32,7 @@ const password = ref('')
 const phone = ref('')
 const code = ref('')
 const loading = ref(false)
-// 回显模式的验证码（服务端 ACADEMY_SMS_SHOW_CODE=1 时发码响应携带原文）：
+// 回显模式的验证码（默认开启；生产严格模式默认关闭，可用 ACADEMY_SMS_SHOW_CODE 覆盖）：
 // 内联展示在验证码输入框下方，学员无需访问服务端日志即可自助注册/重置。
 const sentCode = ref('')
 // 找回成功回显的账号标识（重置成功后表单切换为结果面板；不自动登录，回登录页用新密码登录）。
@@ -88,10 +88,10 @@ async function sendCode() {
       : await authApi.sendSmsCode(phone.value)
     startCountdown(resp.retry_after ?? 60)
     if (resp.code) {
-      // 回显模式（内网/演示部署）：验证码原文随响应返回，页面内联显示。
+      // 回显模式（默认开启）：验证码原文随响应返回，页面内联显示。
       sentCode.value = resp.code
     } else {
-      // 默认开发投递通道（SmsSender 抽象已留好），验证码写服务端日志。
+      // 回显关闭（生产严格模式 / ACADEMY_SMS_SHOW_CODE=0）：验证码只写服务端日志。
       notify.success(`验证码已发送${resp.retry_after ? '（发送过于频繁，显示的是剩余等待时间）' : '；当前为开发通道，验证码见服务端日志'}`)
     }
   } catch (e) {
