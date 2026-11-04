@@ -79,6 +79,7 @@ export const DIFFICULTY_LABELS: Record<ChallengeDifficulty, string> = {
 // 题目类型中文映射（分类是上传方自由填写的 slug 形态字符串；内置训练集与
 // 常见 CTF 分类给出中文名，未知值原样回退，不做截断或臆造）。
 export const CATEGORY_LABELS: Record<string, string> = {
+  'web': 'Web',
   'web-security': 'Web 安全',
   'sql-injection': 'SQL 注入',
   'xss': 'XSS',

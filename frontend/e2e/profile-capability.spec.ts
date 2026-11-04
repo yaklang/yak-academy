@@ -33,6 +33,9 @@ test.describe('账号信息能力画像', () => {
     const first = capability.dimensions[0]
     await expect(legend.first()).toContainText(`${first.solved}/${first.total}`)
 
+    // 卡片统计与雷达图同口径：可见题通关数取自接口，不是历史累计 solve_count。
+    await expect(card.locator('.score-strip')).toContainText(`${capability.solved}/${capability.total}`)
+
     // 移动端：能力画像与账号资料纵向堆叠，页面不产生横向滚动。
     await page.setViewportSize({ width: 390, height: 844 })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
