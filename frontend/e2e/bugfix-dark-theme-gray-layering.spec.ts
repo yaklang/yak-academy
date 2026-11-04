@@ -51,6 +51,9 @@ test.describe('回归：深色主题灰色层次', () => {
     expect(contrast(colors.foreground, colors.panel)).toBeGreaterThan(7)
     expect(contrast(colors.mutedForeground, colors.panel)).toBeGreaterThan(4.5)
 
+    // 主文字必须接近纯白：暖灰底不应把正文一起染成奶油色（回归：正文变暗/发黄）。
+    expect(luminance(colors.foreground)).toBeGreaterThanOrEqual(0.94)
+
     // 卡片实际渲染使用面板色，不是页面底色。
     const cardBg = await page.getByTestId('capability-card').evaluate((el) => getComputedStyle(el).backgroundColor)
     expect(cardBg).not.toBe('rgba(0, 0, 0, 0)')
