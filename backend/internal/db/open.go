@@ -49,6 +49,9 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := migrateCompetitionScoreIndex(db); err != nil {
+		return err
+	}
 	if err := migrateChallengeSlug(db); err != nil {
 		return err
 	}
@@ -135,6 +138,53 @@ func migrateWriteupScope(db *gorm.DB) error {
 		log.Printf("migrate writeups: removed %d legacy per-user rows", res.RowsAffected)
 	}
 	return nil
+}
+
+// migrateCompetitionScoreIndex 一次性修正竞赛积分唯一约束：旧索引只含
+// (competition_id, user_id)，会让同一用户在同一竞赛通关第二道题时撞唯一键
+// （看板/多题进度因此永远只有一行）。正确约束是
+// (competition_id, user_id, challenge_id)。幂等：索引已含 challenge_id 时为空操作。
+func migrateCompetitionScoreIndex(db *gorm.DB) error {
+	const indexName = "idx_compscore"
+	if !db.Migrator().HasIndex("competition_scores", indexName) {
+		// AutoMigrate 已按新模型 tag 创建，无需修正。
+		return nil
+	}
+	if competitionScoreIndexHasChallenge(db, indexName) {
+		return nil
+	}
+	if err := db.Migrator().DropIndex("competition_scores", indexName); err != nil {
+		return err
+	}
+	if err := db.Migrator().CreateIndex(&model.CompetitionScore{}, indexName); err != nil {
+		return err
+	}
+	log.Printf("migrate competition scores: rebuilt %s with challenge_id", indexName)
+	return nil
+}
+
+// competitionScoreIndexHasChallenge 读取索引列（SQLite pragma / PostgreSQL
+// pg_indexes），判断是否已包含 challenge_id。
+func competitionScoreIndexHasChallenge(db *gorm.DB, indexName string) bool {
+	switch db.Dialector.Name() {
+	case "sqlite":
+		var rows []struct{ Name string }
+		if err := db.Raw(`SELECT name FROM pragma_index_info('` + indexName + `')`).Scan(&rows).Error; err != nil {
+			return false
+		}
+		for _, row := range rows {
+			if row.Name == "challenge_id" {
+				return true
+			}
+		}
+	case "postgres":
+		var def string
+		if err := db.Raw(`SELECT indexdef FROM pg_indexes WHERE indexname = ?`, indexName).Scan(&def).Error; err != nil {
+			return false
+		}
+		return strings.Contains(def, "challenge_id")
+	}
+	return false
 }
 
 // migrateTwoRoleModel 收敛为普通人(student)/管理员(admin)：

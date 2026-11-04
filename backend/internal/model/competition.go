@@ -30,9 +30,9 @@ func (k CompetitionKind) Valid() bool {
 // Competition 竞赛实体：管理员创建并配置起止时间。
 // 状态全程由时间派生；结束前已入场参赛者被锁定在竞赛入口（见 Participant）。
 type Competition struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;size:128" json:"name"`
-	Description string    `gorm:"size:2000" json:"description"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"uniqueIndex;size:128" json:"name"`
+	Description string `gorm:"size:2000" json:"description"`
 	// Kind 公开/邀请两档（见 CompetitionKind）；旧库行为 AutoMigrate 默认
 	// 补 invitational（改动前创建的竞赛全部走定向导入语义）。
 	Kind      CompetitionKind `gorm:"size:16;index;default:invitational" json:"kind"`
@@ -66,11 +66,11 @@ type Team struct {
 // 站内邀请邮件投递给本人；凭码入场（EnteredAt 置位）后，
 // 竞赛结束前该用户被锁定在竞赛入口（登出重进不可退出）。
 type Participant struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	CompetitionID uint       `gorm:"uniqueIndex:idx_part_comp_user;index"`
-	UserID        uint       `gorm:"uniqueIndex:idx_part_comp_user;index"`
-	TeamID        uint       `gorm:"index"` // 0 = 个人参赛
-	InviteCode    string     `gorm:"uniqueIndex;size:32" json:"-"`
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	CompetitionID uint   `gorm:"uniqueIndex:idx_part_comp_user;index"`
+	UserID        uint   `gorm:"uniqueIndex:idx_part_comp_user;index"`
+	TeamID        uint   `gorm:"index"` // 0 = 个人参赛
+	InviteCode    string `gorm:"uniqueIndex;size:32" json:"-"`
 	// EnteredAt 入场时刻（nil = 尚未入场，仍可从邮箱邀请进入）。
 	EnteredAt *time.Time `json:"-"`
 	// LastIP 最近一次竞赛提交来源 IP（IP 异常检测基线；空 = 尚无提交）。
@@ -130,7 +130,9 @@ type CompetitionScore struct {
 	CompetitionID uint `gorm:"uniqueIndex:idx_compscore;index"`
 	UserID        uint `gorm:"uniqueIndex:idx_compscore"`
 	TeamID        uint `gorm:"index"` // 冗余队伍快照（排行榜聚合免 join）
-	ChallengeID   uint
-	Score         int
-	SolvedAt      time.Time
+	// 唯一约束必须包含 ChallengeID：同一用户在竞赛内可通关多题，
+	// 只是同一题不重复计分。
+	ChallengeID uint `gorm:"uniqueIndex:idx_compscore"`
+	Score       int
+	SolvedAt    time.Time
 }
