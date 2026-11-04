@@ -479,7 +479,7 @@ onMounted(load)
   padding: var(--space-6);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  background: var(--panel);
   text-align: center;
 }
 .empty-icon {

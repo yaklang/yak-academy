@@ -20,6 +20,7 @@ import {
 } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { useCompetitionStore } from '../stores/competition'
+import { ApiError } from '../api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,6 +55,9 @@ async function loadView() {
   try {
     view.value = await competitionApi.view(compId)
   } catch (e) {
+    // 登出时在途的轮询请求会以 401 返回：此时导航已由 auth.logout() 接管，
+    // 这里再跳转会把刚打开的 /login 覆盖成首页（登出后停在 landing）。
+    if (e instanceof ApiError && e.status === 401) return
     // 未入场 / 竞赛不存在：回到入场页或平台。
     loadError.value = (e as Error).message
     notify.error(loadError.value)
@@ -439,7 +443,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.comp-home { min-height: 100vh; background: var(--muted); }
+.comp-home { min-height: 100vh; background: var(--background); }
 .head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.8rem 1.6rem; background: var(--background);
@@ -453,7 +457,7 @@ onUnmounted(() => {
 .body { padding: 1.2rem 1.6rem; max-width: 1100px; margin: 0 auto; }
 .board-head { display: flex; justify-content: space-between; margin-bottom: 0.8rem; }
 .block { margin-bottom: 1rem; }
-.wp-card { background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.wp-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
 .wp-card-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.2rem; }
 .wp-meta { margin: 0.2rem 0 0.6rem; }
 .wp-actions { display: flex; gap: 0.6rem; margin-top: 0.6rem; }

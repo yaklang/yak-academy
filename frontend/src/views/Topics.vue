@@ -1,8 +1,7 @@
 <script setup lang="ts">
-// 教程板块首页（学生端为仪表盘式）：欢迎 hero（ReactBits AuroraBlur 风格极光
-// 背景 + 学习进度）→ 学习路线专题网格 → 训练入口速达卡。
-// 管理端共用本视图（/admin/tutorials）：只渲染专题列表，不加 hero，
-// 内容管理入口在管理端外壳的导航里。
+// 教程板块首页（学生端为仪表盘式）：欢迎区（身份 + 进度 + 主行动）→ 学习路线
+// 专题网格 → 训练入口速达卡。管理端共用本视图（/admin/tutorials）：只渲染专题列表，
+// 不加欢迎区，内容管理入口在管理端外壳的导航里。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowRight } from '@lucide/vue'
@@ -10,7 +9,6 @@ import { topicApi, progressApi, BANK_LABELS, type Topic, type ChallengeBank } fr
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { Button } from '@/components/ui/button'
-import AuroraBlur from '@/components/AuroraBlur.vue'
 
 const route = useRoute()
 // 普通端 /topics/:slug；管理端 /admin/tutorials/:slug。
@@ -68,9 +66,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <!-- 学生端欢迎 hero：参考 CloudCTF 仪表盘的引导式首页，管理端不渲染 -->
-  <section v-if="!isAdmin" class="learn-hero">
-    <AuroraBlur />
+  <!-- 学生端欢迎区：身份、进度与主行动；不放装饰光斑/旋转徽记，
+       业务页保持信息优先（frontend-style 深色模式约定）。 -->
+  <section v-if="!isAdmin" class="learn-hero" :class="{ 'has-stats': progress }">
     <div class="hero-copy">
       <p class="hero-eyebrow">YAK ACADEMY · 学习路线</p>
       <h1 class="hero-title">欢迎回来<span v-if="auth.user?.username">，{{ auth.user.username }}</span></h1>
@@ -79,18 +77,12 @@ onMounted(async () => {
         <a class="hero-cta primary" href="#topics">进入学习路线 <ArrowRight :size="15" aria-hidden="true" /></a>
         <router-link class="hero-cta" to="/training">浏览题库</router-link>
       </div>
-      <ul v-if="progress" class="hero-stats">
-        <li><b class="mono">{{ progress.xp }}</b><span>XP</span></li>
-        <li><b class="mono">{{ progress.completed_rooms }}</b><span>已完成 Room</span></li>
-        <li v-if="progress.in_progress_rooms"><b class="mono">{{ progress.in_progress_rooms }}</b><span>进行中</span></li>
-      </ul>
     </div>
-    <div class="hero-orbit" aria-hidden="true">
-      <span class="ring r1"></span>
-      <span class="ring r2"></span>
-      <span class="ring r3"></span>
-      <span class="core mono">YAK</span>
-    </div>
+    <ul v-if="progress" class="hero-stats">
+      <li><b class="mono">{{ progress.xp }}</b><span>XP</span></li>
+      <li><b class="mono">{{ progress.completed_rooms }}</b><span>已完成 Room</span></li>
+      <li v-if="progress.in_progress_rooms"><b class="mono">{{ progress.in_progress_rooms }}</b><span>进行中</span></li>
+    </ul>
   </section>
 
   <header id="topics" class="page-head section-head">
@@ -149,13 +141,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ===== 欢迎 hero ===== */
+/* ===== 欢迎区 ===== */
 .learn-hero {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  align-items: center;
-  gap: var(--space-6);
   overflow: hidden;
   margin-bottom: var(--space-10);
   padding: var(--space-10) var(--space-8);
@@ -163,7 +151,15 @@ onMounted(async () => {
   border-radius: var(--radius-panel);
   background: var(--panel);
 }
-.hero-copy { position: relative; min-width: 0; }
+.hero-copy { position: relative; min-width: 0; max-width: 720px; }
+/* 有进度数据时把统计放到右侧独立一列：用真实信息平衡版面，
+   而不是用光斑/徽记填充空白。 */
+.learn-hero.has-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-8);
+}
 .hero-eyebrow {
   margin: 0 0 var(--space-3);
   color: var(--accent-foreground);
@@ -214,11 +210,12 @@ onMounted(async () => {
 .hero-cta.primary:hover { background: color-mix(in srgb, var(--primary) 88%, black); }
 .hero-cta:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .hero-stats {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
   gap: var(--space-6);
-  margin: var(--space-6) 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 0 0 0 var(--space-8);
+  border-left: 1px solid var(--border);
   list-style: none;
 }
 .hero-stats li { display: grid; gap: 2px; }
@@ -228,37 +225,7 @@ onMounted(async () => {
   font-weight: 650;
   line-height: var(--leading-tight);
 }
-.hero-stats span { color: var(--muted-foreground); font-size: var(--text-xs); }
-
-/* 右侧轨道徽记：同心环 + YAK 核心，慢速旋转的装饰 */
-.hero-orbit {
-  position: relative;
-  justify-self: center;
-  width: min(220px, 100%);
-  aspect-ratio: 1;
-}
-.hero-orbit .ring {
-  position: absolute;
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: 50%;
-}
-.hero-orbit .r1 { inset: 0; border-style: dashed; animation: orbit-spin 60s linear infinite; }
-.hero-orbit .r2 { inset: 14%; border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
-.hero-orbit .r3 { inset: 30%; border-style: dashed; animation: orbit-spin 40s linear infinite reverse; }
-.hero-orbit .core {
-  position: absolute;
-  inset: 38%;
-  display: grid;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--primary) 10%, var(--card));
-  color: var(--accent-foreground);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-@keyframes orbit-spin { to { transform: rotate(360deg); } }
+.hero-stats span { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
 
 .section-head { scroll-margin-top: 96px; }
 .topics { margin-top: 0; }
@@ -392,7 +359,8 @@ onMounted(async () => {
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--card);
+  /* 与专题卡同一层表面：同页卡片层级必须一致，否则会一块亮一块暗。 */
+  background: var(--panel);
   color: inherit;
   text-decoration: none;
   transition: border-color 150ms ease;
@@ -419,15 +387,17 @@ onMounted(async () => {
 .quick-card .go { margin-top: var(--space-3); font-size: var(--text-xs); }
 
 @media (max-width: 900px) {
-  .learn-hero { grid-template-columns: minmax(0, 1fr); padding: var(--space-8) var(--space-6); }
-  .hero-orbit { display: none; }
+  .learn-hero { padding: var(--space-8) var(--space-6); }
+  .learn-hero.has-stats { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
+  .hero-stats {
+    padding: var(--space-4) 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 @media (max-width: 720px) {
   .topic-stats { width: 100%; }
   .quick-grid { grid-template-columns: minmax(0, 1fr); }
   .hero-title { font-size: var(--text-2xl); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-orbit .ring { animation: none; }
 }
 </style>

@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
 import { loginAsStudent } from './helpers'
 
-// 回归：深色主题大面积面板使用中性冷灰、卡片与页面几乎同亮度，
-// 观感“灰扑扑”且层次失效（2026-11-04 修复）。
-// 修复前行为：--panel #1f2124（冷灰）、--background #050506，卡片与页面明度差 < 1.1。
-// 修复后行为：石墨暖灰面板、卡片/面板/页面三级明度递增，正文与弱化文字保持 AA。
+// 回归：深色主题大面积面板与页面几乎同亮度，观感“灰扑扑”且层次失效
+// （2026-11-04 首次修复）；后续进一步收敛为中性石墨，禁止棕色染色。
+// 修复前行为：--panel #1f2124 与页面明度差 < 1.1；
+// 修复后行为：中性石墨表面、背景/卡片/面板逐级提亮，正文与弱化文字保持 AA。
 test.describe('回归：深色主题灰色层次', () => {
   test('深色卡片与页面明度分层，正文对比度达到 AA（回归：整页灰扑扑）', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('academy_theme', 'dark'))
@@ -43,9 +43,13 @@ test.describe('回归：深色主题灰色层次', () => {
     expect(luminance(colors.card)).toBeLessThan(luminance(colors.panel))
     expect(contrast(colors.card, colors.background)).toBeGreaterThan(1.06)
 
-    // 深色面板不再是冷调中性灰：红通道应高于蓝通道。
-    const [r, , b] = parse(colors.panel)
-    expect(r).toBeGreaterThan(b)
+    // 深色表面保持中性石墨，不能染成棕色。
+    const spread = (hex: string) => {
+      const [r, g, b] = parse(hex)
+      return Math.max(r, g, b) - Math.min(r, g, b)
+    }
+    expect(spread(colors.panel)).toBeLessThanOrEqual(4)
+    expect(spread(colors.background)).toBeLessThanOrEqual(4)
 
     // 正文与弱化文字在面板上达到 AA。
     expect(contrast(colors.foreground, colors.panel)).toBeGreaterThan(7)

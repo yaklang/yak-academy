@@ -355,7 +355,6 @@ onMounted(() => {
   gap: var(--space-5);
 }
 .column { display: grid; gap: var(--space-5); min-width: 0; }
-.card { background: var(--panel); }
 
 .card-head {
   display: flex;

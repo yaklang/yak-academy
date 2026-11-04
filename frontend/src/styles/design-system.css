@@ -54,9 +54,9 @@
 }
 
 /* Academy theme tokens: light = white paper with coffee-toned panels,
-   dark = warm graphite canvas with lifted gray panels. Keep every semantic
-   surface here. Dark neutrals carry a slight warm tint (not blue-gray) so
-   large surfaces read as intentional graphite instead of dead gray. */
+   dark = neutral graphite with lifted surfaces. Keep every semantic surface
+   here. Dark surfaces stay near-neutral (no brown cast); the copper accent is
+   reserved for small emphasis, never for large fills. */
 :root {
     --background: #ffffff;
     --foreground: #241f1a;
@@ -105,39 +105,42 @@
 }
 
 .dark {
-    --background: #080706;
-    --foreground: #fafaf8;
-    --card: #171614;
-    --card-foreground: #fafaf8;
-    --panel: #23211d;
-    --popover: #2e2a25;
-    --popover-foreground: #fafaf8;
+    /* 中性石墨阶梯（Material 3 surface container / Carbon Gray 100 的通行做法）：
+       background → card → panel → popover 逐级提亮，相邻层亮度比 ≥ 1.15。
+       大面积表面保持中性（RGB 极差 ≤ 4），品牌色只用于强调，不做表面底色。 */
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --card: #1c1c1c;
+    --card-foreground: #fafafa;
+    --panel: #292929;
+    --popover: #373737;
+    --popover-foreground: #fafafa;
     --primary: #d9a173;
     --primary-foreground: #1a120d;
-    --secondary: #26231f;
-    --secondary-foreground: #fafaf8;
-    --muted: #1a1917;
-    --muted-foreground: #b3ada4;
-    --accent: #2e2a25;
+    --secondary: #212121;
+    --secondary-foreground: #fafafa;
+    --muted: #1f1f1f;
+    --muted-foreground: #a8a8a8;
+    --accent: #363636;
     --accent-foreground: #e7b88e;
     --destructive: #f0928a;
     --success: #7cc496;
     --warning: #e3b971;
-    --border: #383430;
-    --input: #3d3934;
+    --border: #3f3f3f;
+    --input: #4a4a4a;
     --ring: #d9a173;
     --chart-1: #d9a173;
     --chart-2: #b98d68;
     --chart-3: #927257;
     --chart-4: #87817a;
     --chart-5: #b3ada4;
-    --sidebar: #141210;
-    --sidebar-foreground: #fafaf8;
+    --sidebar: #131313;
+    --sidebar-foreground: #fafafa;
     --sidebar-primary: #d9a173;
     --sidebar-primary-foreground: #1a120d;
-    --sidebar-accent: #26231f;
+    --sidebar-accent: #262626;
     --sidebar-accent-foreground: #e7b88e;
-    --sidebar-border: #383430;
+    --sidebar-border: #3f3f3f;
     --sidebar-ring: #d9a173;
     --shadow-popover: 0 18px 48px -16px rgb(0 0 0 / .78), 0 2px 8px rgb(0 0 0 / .42);
     --code-keyword: #e6a377;
@@ -411,6 +414,9 @@ html, * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted
 .input-append { display: flex; gap: 8px; margin-top: 8px; }
 .ui-date-range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .ui-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 160px; padding: 32px 20px; }
+/* 内容卡片统一使用 --panel（浅色咖啡框 / 深色提亮框），
+   --card 留给输入框、表格、内嵌块等次级表面，避免同页卡片一深一浅。 */
+.ui-card { background: var(--panel); }
 /* Card header carries a faint tone shift instead of being another flat slab:
    5% foreground over the card surface reads as a header band in both themes. */
 .ui-card > [data-slot="card-header"] { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
