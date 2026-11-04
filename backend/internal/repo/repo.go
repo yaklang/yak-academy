@@ -192,6 +192,8 @@ type SubmissionRepo interface {
 	CountCorrectSolves(ctx context.Context, challengeID, competitionID uint) (int64, error)
 	// ListByCompetitionUser 参赛者本人在该竞赛的提交（竞赛首页我的提交）。
 	ListByCompetitionUser(ctx context.Context, competitionID, userID uint, limit int) ([]model.Submission, error)
+	// CountByCompetitionUserStatus 该用户在该竞赛各判定状态的提交数（竞赛看板）。
+	CountByCompetitionUserStatus(ctx context.Context, competitionID, userID uint) (map[model.SubmissionStatus]int64, error)
 	// DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
 	DeleteByCompetition(ctx context.Context, competitionID uint) error
 	UpdateStatus(ctx context.Context, id uint, status model.SubmissionStatus, score int) error
@@ -348,4 +350,3 @@ type CompetitionRepo interface {
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
 }
-

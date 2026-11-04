@@ -44,6 +44,8 @@ test.describe('回归：重登后仍锁在竞赛页', () => {
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`, { timeout: 10_000 })
     await expect(page.getByRole('heading', { name: E2E.competition.reloginName })).toBeVisible()
     await expect(page.getByText('进行中', { exact: true })).toBeVisible()
+    // 竞赛首页默认落在概览看板；题目表在「题目」tab 下。
+    await page.getByRole('tab', { name: '题目' }).click()
     await expect(page.locator('tr', { hasText: C.title })).toBeVisible()
   })
 })
