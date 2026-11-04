@@ -107,47 +107,47 @@
 }
 
 .dark {
-    /* 中性石墨阶梯（Material 3 surface container / Carbon Gray 100 的通行做法）：
-       background → card → panel → popover 逐级提亮。阶差按主流深色体系的中低区间
-       控制（单级 ΔL* ≈ 4–5），因为容器在本项目里能占到近半屏面积，阶差过大
-       会让亮块反客为主。大面积表面保持中性（RGB 极差 ≤ 4），品牌色只做强调。 */
-    --background: #0a0a0a;
+    /* 近黑画布 + 极窄阶差（参考 Flux dashboard 的深色：整屏先读作黑色，
+       卡片靠一线边框浮现，而不是靠明显更亮的灰底）。画布压到近黑，
+       panel 只比画布高 ΔL* ≈ 5，边框亮度压到刚好收边；大面积表面保持中性
+       （RGB 极差 ≤ 4），橙色只用于强调，不改品牌色。 */
+    --background: #050505;
     --foreground: #fafafa;
-    --card: #171717;
+    --card: #101010;
     --card-foreground: #fafafa;
-    --panel: #1f1f1f;
-    --popover: #282828;
+    --panel: #141414;
+    --popover: #1c1c1c;
     --popover-foreground: #fafafa;
     --primary: #d9a173;
     --primary-foreground: #1a120d;
-    --secondary: #1b1b1b;
+    --secondary: #1a1a1a;
     --secondary-foreground: #fafafa;
-    --muted: #161616;
+    --muted: #191919;
     --muted-foreground: #a8a8a8;
-    --accent: #2a2a2a;
+    --accent: #202020;
     --accent-foreground: #e7b88e;
     --destructive: #f0928a;
     --success: #7cc496;
     --warning: #e3b971;
-    --border: #333333;
-    --input: #3d3d3d;
+    --border: #262626;
+    --input: #303030;
     --ring: #d9a173;
     --chart-1: #d9a173;
     --chart-2: #b98d68;
     --chart-3: #927257;
     --chart-4: #87817a;
     --chart-5: #b3ada4;
-    --sidebar: #111111;
+    --sidebar: #080808;
     --sidebar-foreground: #fafafa;
     --sidebar-primary: #d9a173;
     --sidebar-primary-foreground: #1a120d;
-    --sidebar-accent: #212121;
+    --sidebar-accent: #161616;
     --sidebar-accent-foreground: #e7b88e;
-    --sidebar-border: #333333;
+    --sidebar-border: #262626;
     --sidebar-ring: #d9a173;
     --shadow-popover: 0 18px 48px -16px rgb(0 0 0 / .78), 0 2px 8px rgb(0 0 0 / .42);
-    /* 深色下 5% 会把头带提亮近一整个 elevation 阶梯，压到 3% 只做轻微区分。 */
-    --card-header-tint: 3%;
+    /* 近黑面板上 5% 头带会突出一整级，压到 2% 只留一丝区分。 */
+    --card-header-tint: 2%;
     --code-keyword: #e6a377;
     --code-type: #cfa9ec;
     --code-namespace: #93d4cb;
