@@ -51,7 +51,7 @@ description: yak-academy 前端视觉与交互规范。任何 frontend/ 下的�
 深色模式是独立主题，不是把浅色反相。依据 Material 3 color roles、Apple HIG Dark Mode、IBM Carbon Gray 100、NN/g 与 WCAG 2.2 的共同做法：
 
 - **表面中性**：大面积表面用中性石墨，不做棕色/橙色染色；RGB 通道极差 ≤ 4（`--panel` 允许 ±3 的暖度）。页面最暗、卡片与面板逐级提亮。
-- **阶差要克制**：单级 `ΔL*` 控制在 4–5（`--background → card → panel → popover`），页面到内容层合计约 9。主流体系（Material 3 surface container、Carbon Gray 100 layer、GitHub Dark）都在这个量级；阶差再大，占屏近半的容器会反客为主，页面看起来是"黑底上摞灰板"。
+- **阶差要克制**：画布压到近黑（`--background: #050505` 一带，不用纯黑），页面到内容层 `ΔL*` 约 5–6；`card` / `panel` / `popover` 之间再各留 2–4。参考近黑仪表盘（Flux dashboard）的做法：整屏先读作黑色，卡片只靠一线边框浮现，而不是靠明显更亮的灰底。阶差再大，占屏近半的容器会反客为主，页面看起来是"黑底上摞灰板"。
 - **边框只收边，不发光**：深色下边框亮度最多比卡体高一点点（`--border` 对 `--panel` ≈ 1.3:1）；边框一旦比卡片头带还亮，就成了卡内最显眼的元素，抢走标题的位置。浅色反之（边框比卡体略暗）。
 - **层级靠明度 + 1px 边框**：卡片/面板用 `--border` 分隔，只有 popover/dialog 用 `--shadow-popover`；不要给卡片加彩色外发光、玻璃拟态或彩色阴影。
 - **正文近白**：`--foreground` 取近中性白（如 `#fafaf9`，亮度 ≥ 0.94），次要文字用中性灰 `--muted-foreground`，对面板 ≥ 4.5:1。不要用 `opacity` 压暗正文，也不要在正文上加 `text-shadow`。
