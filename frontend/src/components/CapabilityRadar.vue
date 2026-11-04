@@ -34,6 +34,9 @@ const rows = computed(() =>
     percent: d.total > 0 ? Math.round((d.solved / d.total) * 100) : 0,
   })),
 )
+// 全 0% 时雷达图只剩网格，视觉上等同“空面板”——显式给零进度说明，
+// 让“还没开始”与“加载失败”区分开。
+const allZero = computed(() => rows.value.length > 0 && rows.value.every((r) => r.solved === 0))
 
 function token(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -46,7 +49,9 @@ function buildChart() {
   const accent = token('--accent-foreground') || '#6f452b'
   const border = token('--border') || '#e6ddd2'
   const muted = token('--muted-foreground') || '#6b6158'
-  const surface = token('--card') || '#fbf7f1'
+  const surface = token('--panel') || '#f4eadf'
+  // 网格线比边框略重一档：深色下 --border 贴近面板色，雷达会糊成一片灰。
+  const gridLine = `${muted}4d`
 
   const config: ChartConfiguration<'radar'> = {
     type: 'radar',
@@ -92,8 +97,8 @@ function buildChart() {
           min: 0,
           max: 100,
           beginAtZero: true,
-          angleLines: { color: border },
-          grid: { color: border },
+          angleLines: { color: gridLine },
+          grid: { color: gridLine },
           ticks: {
             stepSize: 50,
             color: muted,
@@ -131,7 +136,10 @@ onBeforeUnmount(() => chart?.destroy())
       class="capability-empty"
     />
     <template v-else>
-      <div class="radar-stage">
+      <p v-if="allZero" class="zero-note" role="status">
+        还没有通关记录。完成任意题目后，这里会按分类点亮对应维度。
+      </p>
+      <div class="radar-stage" :class="{ 'is-zero': allZero }">
         <canvas
           ref="canvas"
           role="img"
@@ -155,7 +163,18 @@ onBeforeUnmount(() => chart?.destroy())
 <style scoped>
 .capability-body { display: grid; gap: var(--space-5); }
 .capability-empty { min-height: 220px; }
+.zero-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--foreground);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
 .radar-stage { position: relative; height: 260px; min-width: 0; }
+.radar-stage.is-zero canvas { opacity: .72; }
 .legend { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .legend-row {
   display: grid;
@@ -168,7 +187,7 @@ onBeforeUnmount(() => chart?.destroy())
 .legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-value { color: var(--accent-foreground); font-size: var(--text-sm); }
 .legend-total { color: var(--muted-foreground); }
-.legend-track { display: block; height: 6px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+.legend-track { display: block; height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted-foreground) 24%, transparent); overflow: hidden; }
 .legend-fill { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
 .legend-percent { color: var(--muted-foreground); font-size: var(--text-xs); text-align: right; }
 @media (max-width: 560px) {

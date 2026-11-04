@@ -2,7 +2,7 @@
 // 账号信息面板：身份卡（头像/资料/简介）+ 能力画像（按题目分类的通关覆盖）
 // + 账号安全。总得分来自事件派生读模型，本页只读展示。
 // 简介可编辑（≤500 字）；头像 png/jpg/gif/webp ≤2MB，重复上传覆盖。
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { CalendarDays, Copy, KeyRound, Mail, ShieldCheck, UserRound } from '@lucide/vue'
 import { notify } from '@/lib/notifications'
@@ -30,6 +30,10 @@ const pwdLoading = ref(false)
 
 const roleLabel = (role: UserProfile['global_role']) => (role === 'admin' ? '管理员' : '学员')
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+// 总数与雷达图同一口径（当前可见题目），避免卡片内部出现
+// “累计通关 167 题”与各分类 0% 并存的自相矛盾。
+const visibleSolved = computed(() => capabilities.value?.solved ?? 0)
+const visibleTotal = computed(() => capabilities.value?.total ?? 0)
 // 覆盖率按「已有通关的分类 / 已发布分类」呈现：题目总数为 0 时同样成立。
 const masteredCategories = () => capabilities.value?.dimensions.filter((d) => d.solved > 0).length ?? 0
 const categoryCount = () => capabilities.value?.dimensions.length ?? 0
@@ -289,8 +293,8 @@ onMounted(() => {
             <span class="score-label">总得分</span>
           </div>
           <div class="score-cell">
-            <span class="score-value mono">{{ profile.solve_count }}</span>
-            <span class="score-label">通过题目</span>
+            <span class="score-value mono">{{ visibleSolved }}<span class="score-total">/{{ visibleTotal }}</span></span>
+            <span class="score-label">可见题通关</span>
           </div>
           <div class="score-cell">
             <span class="score-value mono">{{ masteredCategories() }}<span class="score-total">/{{ categoryCount() }}</span></span>
@@ -308,7 +312,7 @@ onMounted(() => {
         <CapabilityRadar v-else-if="capabilities" :dimensions="capabilities.dimensions" />
 
         <p v-if="capabilities && capabilities.dimensions.length" class="capability-note">
-          覆盖率 = 该分类已通关题数 / 该类可见题数；题库更新后自动重算。
+          总得分为历史累计；覆盖率 = 该分类已通关题数 / 该类可见题数，题库更新后自动重算。
         </p>
       </UiCard>
     </div>
@@ -372,13 +376,13 @@ onMounted(() => {
   padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--background);
+  background: var(--card);
   color: var(--foreground);
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: border-color 150ms ease;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
-.upload:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.upload:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); background: var(--accent); }
 .upload.disabled { opacity: .55; cursor: wait; }
 .upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
@@ -415,7 +419,7 @@ onMounted(() => {
   place-items: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--background);
+  background: var(--card);
   color: var(--accent-foreground);
 }
 .security-copy { flex: 1; min-width: 0; }
@@ -431,7 +435,7 @@ onMounted(() => {
   border-bottom: 1px solid var(--border);
 }
 .score-cell { display: grid; gap: 2px; min-width: 0; }
-.score-value { color: var(--accent-foreground); font-size: var(--text-xl); font-weight: 650; line-height: var(--leading-tight); }
+.score-value { color: var(--primary); font-size: var(--text-xl); font-weight: 650; line-height: var(--leading-tight); }
 .score-total { color: var(--muted-foreground); font-size: var(--text-sm); }
 .score-label { color: var(--muted-foreground); font-size: var(--text-xs); }
 
