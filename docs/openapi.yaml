@@ -596,6 +596,57 @@ components:
         has_env: { type: boolean, description: 是否定义容器环境 }
         description_md: { type: string, description: 题目描述 Markdown（参赛者视角返回） }
         solved: { type: boolean, description: 当前用户（队内）是否已通关 }
+        solve_count: { type: integer, description: 本题在竞赛内的通过人数（按积分派生行去重统计） }
+    CompetitionScorePoint:
+      type: object
+      description: 得分曲线点（按通关时间升序，score 为累计得分）
+      properties:
+        at: { type: string, description: 通关时间（RFC3339） }
+        challenge_id: { type: integer }
+        delta: { type: integer, description: 本题得分 }
+        score: { type: integer, description: 累计得分 }
+    CompetitionCategoryStat:
+      type: object
+      description: 分类进度（分母为该分类绑定的题目数）
+      properties:
+        category: { type: string }
+        total: { type: integer }
+        solved: { type: integer }
+        score_total: { type: integer, description: 该分类满分 }
+        score_earned: { type: integer, description: 本人该分类已得分 }
+    CompetitionDifficultyStat:
+      type: object
+      description: 难度进度（只返回该竞赛实际存在的难度，按入门/进阶/专家排序）
+      properties:
+        difficulty: { type: string, enum: [apprentice, practitioner, expert] }
+        total: { type: integer }
+        solved: { type: integer }
+    CompetitionSubmissionStats:
+      type: object
+      description: 本人提交结果计数（全量，不只最近 20 条）
+      properties:
+        correct: { type: integer }
+        incorrect: { type: integer }
+        pending: { type: integer }
+    CompetitionAnalytics:
+      type: object
+      description: 竞赛首页看板聚合（只读派生数据，与排行榜同源）
+      properties:
+        score: { type: integer, description: 本人当前总分 }
+        solved_count: { type: integer, description: 本人已通关题数 }
+        total_challenges: { type: integer, description: 竞赛绑定题目数 }
+        total_score: { type: integer, description: 全部题目初始分之和 }
+        participant_count: { type: integer, description: 已入场参赛人数（通过率分母） }
+        score_timeline:
+          type: array
+          items: { $ref: '#/components/schemas/CompetitionScorePoint' }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/CompetitionCategoryStat' }
+        difficulties:
+          type: array
+          items: { $ref: '#/components/schemas/CompetitionDifficultyStat' }
+        submission_stats: { $ref: '#/components/schemas/CompetitionSubmissionStats' }
     CompetitionParticipantItem:
       type: object
       description: 参赛人员条目（管理端；含队伍与入场状态）
@@ -2906,7 +2957,7 @@ paths:
   /competitions/{id}/view:
     get:
       tags: [competitions]
-      summary: 竞赛首页（参赛者视角：题目列表、我的队伍、我的提交、倒计时）
+      summary: 竞赛首页（参赛者视角：题目列表、我的队伍、我的提交、倒计时、看板聚合）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -2930,6 +2981,7 @@ paths:
                         status: { type: string, enum: [pending, correct, incorrect] }
                         score: { type: integer }
                         created_at: { type: string }
+                  analytics: { $ref: '#/components/schemas/CompetitionAnalytics' }
                   writeup_submitted: { type: boolean, description: 是否已提交任一题 WP（结束后；队伍模式任一队员提交即为 true） }
         '404': { $ref: '#/components/responses/ErrorResp' }
 

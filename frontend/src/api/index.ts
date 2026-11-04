@@ -715,6 +715,8 @@ export interface CompetitionChallengeItem {
   has_env: boolean
   description_md: string
   solved: boolean
+  // 本题在竞赛内的通过人数（按积分派生行去重统计）。
+  solve_count: number
 }
 export interface CompetitionParticipantItem {
   id: number
@@ -825,12 +827,42 @@ export interface MyCompetitionEntry {
   entered: boolean
   team_name: string | null
 }
+export interface CompetitionScorePoint {
+  at: string
+  challenge_id: number
+  delta: number
+  score: number
+}
+export interface CompetitionCategoryStat {
+  category: string
+  total: number
+  solved: number
+  score_total: number
+  score_earned: number
+}
+export interface CompetitionDifficultyStat {
+  difficulty: 'apprentice' | 'practitioner' | 'expert'
+  total: number
+  solved: number
+}
+export interface CompetitionAnalytics {
+  score: number
+  solved_count: number
+  total_challenges: number
+  total_score: number
+  participant_count: number
+  score_timeline: CompetitionScorePoint[]
+  categories: CompetitionCategoryStat[]
+  difficulties: CompetitionDifficultyStat[]
+  submission_stats: { correct: number; incorrect: number; pending: number }
+}
 export interface CompetitionHomeView {
   competition: Competition
   team_name: string | null
   teammates: string[]
   challenges: CompetitionChallengeItem[]
   my_submissions: { id: number; status: 'pending' | 'correct' | 'incorrect'; score: number; created_at: string }[]
+  analytics: CompetitionAnalytics
   writeup_submitted: boolean
 }
 

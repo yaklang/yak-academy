@@ -40,7 +40,7 @@ type compEnv struct {
 	inviteMails []string
 	// createdAccounts 建号探针记录（username:password）。
 	createdAccounts []string
-	now time.Time
+	now             time.Time
 }
 
 func newCompEnv(t *testing.T) *compEnv {
@@ -1076,5 +1076,102 @@ func TestCompetitionDeleteDestroysInstancesAndWriteups(t *testing.T) {
 	}
 	if _, err := compRepo.FindByID(ctx, comp2.ID); err != nil {
 		t.Fatalf("competition should remain after failed delete: %v", err)
+	}
+}
+
+// TestCompetitionViewAnalytics 竞赛首页看板聚合：分数/通关/得分曲线、
+// 分类与难度覆盖、提交结果计数、题目通过人数，全部来自真实判定管线。
+func TestCompetitionViewAnalytics(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	comp := e.createRunningComp(t, "看板赛")
+
+	seed := func(slug, category string, difficulty model.Difficulty, score int) *model.Challenge {
+		t.Helper()
+		chal := &model.Challenge{
+			Slug: slug, Title: slug, Category: category, Difficulty: difficulty,
+			Description: "test", Type: model.ChallengeStatic, Score: score,
+			FlagMode: model.FlagMode("shared"),
+		}
+		if err := repo.NewChallengeRepo(e.gdb).Upsert(ctx, chal,
+			[]model.Flag{{Type: model.ChallengeStatic, Value: "flag{" + slug + "}"}}, nil); err != nil {
+			t.Fatalf("seed %s: %v", slug, err)
+		}
+		fresh, err := repo.NewChallengeRepo(e.gdb).FindBySlug(ctx, slug)
+		if err != nil {
+			t.Fatalf("reload %s: %v", slug, err)
+		}
+		return fresh
+	}
+	webEasy := seed("ana-web-easy", "web", model.DifficultyApprentice, 100)
+	webHard := seed("ana-web-hard", "web", model.DifficultyPractitioner, 200)
+	pwnEasy := seed("ana-pwn-easy", "pwn", model.DifficultyApprentice, 150)
+	body, _ := json.Marshal(map[string]any{"slugs": []string{webEasy.Slug, webHard.Slug, pwnEasy.Slug}})
+	if _, err := e.comps.BindChallenges(ctx, comp.ID, body, nil); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	bob := e.ensureUser(t, "analytics-bob")
+	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"analytics-bob"}})
+	part, _ := repo.NewCompetitionRepo(e.gdb).FindParticipant(ctx, comp.ID, bob.ID)
+	if _, err := e.comps.Enter(ctx, bob.ID, comp.ID, part.InviteCode); err != nil {
+		t.Fatalf("enter: %v", err)
+	}
+
+	// 错误一次 + 通关两题：web-easy 100、pwn-easy 150。
+	for _, sub := range []struct{ slug, answer string }{
+		{webEasy.Slug, "wrong"},
+		{webEasy.Slug, "flag{ana-web-easy}"},
+		{pwnEasy.Slug, "flag{ana-pwn-easy}"},
+	} {
+		if _, err := e.comps.SubmitFlag(ctx, e.judge, bob.ID, comp.ID, sub.slug, sub.answer, "1.1.1.1"); err != nil {
+			t.Fatalf("submit %s: %v", sub.slug, err)
+		}
+		e.drainJudge()
+	}
+
+	view, err := e.comps.View(ctx, bob.ID, comp.ID)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	a := view.Analytics
+	if a.Score != 250 || a.SolvedCount != 2 || a.TotalChallenges != 3 || a.TotalScore != 450 {
+		t.Fatalf("analytics totals: %+v", a)
+	}
+	if a.ParticipantCount != 1 {
+		t.Fatalf("participant count: %d", a.ParticipantCount)
+	}
+	if len(a.ScoreTimeline) != 2 || a.ScoreTimeline[1].Score != 250 ||
+		a.ScoreTimeline[0].Delta != a.ScoreTimeline[0].Score {
+		t.Fatalf("score timeline: %+v", a.ScoreTimeline)
+	}
+	cats := map[string]CompetitionCategoryStat{}
+	for _, c := range a.Categories {
+		cats[c.Category] = c
+	}
+	if web := cats["web"]; web.Total != 2 || web.Solved != 1 || web.ScoreTotal != 300 || web.ScoreEarned != 100 {
+		t.Fatalf("web category: %+v", web)
+	}
+	if pwn := cats["pwn"]; pwn.Total != 1 || pwn.Solved != 1 || pwn.ScoreTotal != 150 || pwn.ScoreEarned != 150 {
+		t.Fatalf("pwn category: %+v", pwn)
+	}
+	if len(a.Difficulties) != 2 || a.Difficulties[0].Difficulty != "apprentice" ||
+		a.Difficulties[0].Total != 2 || a.Difficulties[0].Solved != 2 ||
+		a.Difficulties[1].Difficulty != "practitioner" || a.Difficulties[1].Solved != 0 {
+		t.Fatalf("difficulties: %+v", a.Difficulties)
+	}
+	if a.SubmissionStats.Correct != 2 || a.SubmissionStats.Incorrect != 1 || a.SubmissionStats.Pending != 0 {
+		t.Fatalf("submission stats: %+v", a.SubmissionStats)
+	}
+	solveCounts := map[string]int{}
+	solvedBySlug := map[string]bool{}
+	for _, c := range view.Challenges {
+		solveCounts[c.Slug] = c.SolveCount
+		solvedBySlug[c.Slug] = c.Solved
+	}
+	if solveCounts[webEasy.Slug] != 1 || solveCounts[pwnEasy.Slug] != 1 || solveCounts[webHard.Slug] != 0 {
+		t.Fatalf("solve counts: %+v", solveCounts)
+	}
+	if !solvedBySlug[webEasy.Slug] || !solvedBySlug[pwnEasy.Slug] || solvedBySlug[webHard.Slug] {
+		t.Fatalf("solved flags: %+v", solvedBySlug)
 	}
 }

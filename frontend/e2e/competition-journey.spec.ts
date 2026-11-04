@@ -61,7 +61,8 @@ test.describe('竞赛隔离旅程', () => {
     await expect(page.locator('[data-sonner-toast]', { hasText: '入场成功' })).toBeVisible()
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`)
     await expect(page.getByRole('heading', { name: E2E.competition.lockName })).toBeVisible()
-    // 绑定的种子题出现在题目表
+    // 竞赛首页默认落在概览看板；绑定的种子题在「题目」tab 下。
+    await page.getByRole('tab', { name: '题目' }).click()
     await expect(page.locator('tr', { hasText: C.title })).toBeVisible()
 
     // —— ② 入场后：平台其余路径全部被引导回竞赛首页 ——
@@ -89,13 +90,16 @@ test.describe('竞赛隔离旅程', () => {
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`)
 
     // —— 竞赛域内可用：题目抽屉提交 flag，异步判对转「已通关」 ——
-    // 题目标题是 el-link（a 无 href，无 link role），按类名定位点击
+    // 重登后默认回到概览，先切到题目 tab；题目标题是 el-link
+    //（a 无 href，无 link role），按类名定位点击。
+    await page.getByRole('tab', { name: '题目' }).click()
     await page.locator('tr', { hasText: C.title }).locator('.ui-link').click()
     await expect(page.locator('[data-slot=sheet-content]')).toBeVisible()
     await page.getByPlaceholder('flag{...}').fill(C.flag)
     await page.getByRole('button', { name: '提交', exact: true }).click()
     await expect(page.locator('[data-sonner-toast]', { hasText: '已提交，异步判定中' })).toBeVisible()
     await page.reload()
+    await page.getByRole('tab', { name: '题目' }).click()
     await expect(page.locator('tr', { hasText: C.title })).toContainText('已通关', {
       timeout: 15_000,
     })
@@ -113,7 +117,9 @@ test.describe('竞赛隔离旅程', () => {
 
     // 竞赛首页 5s 节拍自检：感知结束 → 解锁并放出 WP 提交（结束态业务标识）
     await expect(page.getByRole('tab', { name: 'WP 提交' })).toBeVisible({ timeout: 12_000 })
-    await expect(page.getByText('已结束', { exact: true })).toBeVisible()
+    // 结束态在概览 KPI 里有明确文案（标题旁的状态 tag、头部时钟也含"已结束"，
+    // 用文案定位避免 strict mode 多元素冲突）。
+    await expect(page.getByText('比赛已结束，可提交 Writeup')).toBeVisible()
 
     // 平台访问恢复：不再被引导回竞赛页；服务端同步解除（topics 200）
     await page.goto('/training')

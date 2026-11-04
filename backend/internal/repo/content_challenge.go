@@ -573,6 +573,23 @@ func (r *submissionRepo) ListByCompetitionUser(ctx context.Context, competitionI
 	return list, err
 }
 
+// CountByCompetitionUserStatus 该用户在该竞赛各判定状态的提交数（竞赛看板聚合）。
+func (r *submissionRepo) CountByCompetitionUserStatus(ctx context.Context, competitionID, userID uint) (map[model.SubmissionStatus]int64, error) {
+	var rows []struct {
+		Status string
+		Count  int64
+	}
+	err := r.db.WithContext(ctx).Model(&model.Submission{}).
+		Select("status, count(*) AS count").
+		Where("competition_id = ? AND user_id = ?", competitionID, userID).
+		Group("status").Scan(&rows).Error
+	out := make(map[model.SubmissionStatus]int64, len(rows))
+	for _, row := range rows {
+		out[model.SubmissionStatus(row.Status)] = row.Count
+	}
+	return out, err
+}
+
 // DeleteByCompetition 删除该竞赛全部提交行（竞赛删除级联，事务由调用方管理）。
 func (r *submissionRepo) DeleteByCompetition(ctx context.Context, competitionID uint) error {
 	return r.db.WithContext(ctx).

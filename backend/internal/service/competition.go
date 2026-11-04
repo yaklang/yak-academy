@@ -1120,6 +1120,53 @@ type CompetitionChallengeView struct {
 	HasEnv      bool   `json:"has_env"`
 	Description string `json:"description_md"`
 	Solved      bool   `json:"solved"`
+	// SolveCount 该题在竞赛内的通过人数（按 CompetitionScore 去重统计），
+	// 前端用于展示通过率；无通过记录时为 0。
+	SolveCount int `json:"solve_count"`
+}
+
+// CompetitionScorePoint 得分曲线点：按通关时间累计得分。
+type CompetitionScorePoint struct {
+	At          string `json:"at"`
+	ChallengeID uint   `json:"challenge_id"`
+	Delta       int    `json:"delta"`
+	Score       int    `json:"score"`
+}
+
+// CompetitionCategoryStat 分类进度：题目数、已通关数、满分与已得分。
+type CompetitionCategoryStat struct {
+	Category    string `json:"category"`
+	Total       int    `json:"total"`
+	Solved      int    `json:"solved"`
+	ScoreTotal  int    `json:"score_total"`
+	ScoreEarned int    `json:"score_earned"`
+}
+
+// CompetitionDifficultyStat 难度分布：该难度题目数与已通关数。
+type CompetitionDifficultyStat struct {
+	Difficulty string `json:"difficulty"`
+	Total      int    `json:"total"`
+	Solved     int    `json:"solved"`
+}
+
+// CompetitionSubmissionStats 本人提交结果计数（全量，不只最近 20 条）。
+type CompetitionSubmissionStats struct {
+	Correct   int64 `json:"correct"`
+	Incorrect int64 `json:"incorrect"`
+	Pending   int64 `json:"pending"`
+}
+
+// CompetitionAnalytics 竞赛首页看板聚合（只读派生数据，与排行榜同源）。
+type CompetitionAnalytics struct {
+	Score            int                         `json:"score"`
+	SolvedCount      int                         `json:"solved_count"`
+	TotalChallenges  int                         `json:"total_challenges"`
+	TotalScore       int                         `json:"total_score"`
+	ParticipantCount int64                       `json:"participant_count"`
+	ScoreTimeline    []CompetitionScorePoint     `json:"score_timeline"`
+	Categories       []CompetitionCategoryStat   `json:"categories"`
+	Difficulties     []CompetitionDifficultyStat `json:"difficulties"`
+	SubmissionStats  CompetitionSubmissionStats  `json:"submission_stats"`
 }
 
 // MySubmissionView 参赛者本人的提交条目（竞赛首页"我的提交"）。
@@ -1137,6 +1184,7 @@ type CompetitionHome struct {
 	Teammates        []string                   `json:"teammates"`
 	Challenges       []CompetitionChallengeView `json:"challenges"`
 	MySubmissions    []MySubmissionView         `json:"my_submissions"`
+	Analytics        CompetitionAnalytics       `json:"analytics"`
 	WriteupSubmitted bool                       `json:"writeup_submitted"`
 }
 
@@ -1153,16 +1201,37 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 	if err != nil {
 		return nil, err
 	}
+	// 通关状态与通过人数统一从 CompetitionScore 派生表读取：与排行榜同源，
+	// 同时避免逐题 HasCorrect 的 N+1 查询。
+	scores, err := s.comps.ListScores(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	solveUsers := make(map[uint]map[uint]struct{}, len(bound))
+	myScores := make([]model.CompetitionScore, 0, len(bound))
+	for _, sc := range scores {
+		set := solveUsers[sc.ChallengeID]
+		if set == nil {
+			set = make(map[uint]struct{})
+			solveUsers[sc.ChallengeID] = set
+		}
+		set[sc.UserID] = struct{}{}
+		if sc.UserID == userID {
+			myScores = append(myScores, sc)
+		}
+	}
+	myScoreByChallenge := make(map[uint]int, len(myScores))
+	for _, sc := range myScores {
+		myScoreByChallenge[sc.ChallengeID] = sc.Score
+	}
 	challenges := make([]CompetitionChallengeView, 0, len(chals))
 	for _, chal := range chals {
-		solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID, id)
-		if err != nil {
-			return nil, err
-		}
+		_, solved := myScoreByChallenge[chal.ID]
 		challenges = append(challenges, CompetitionChallengeView{
 			ID: chal.ID, Slug: chal.Slug, Title: chal.Title, Category: chal.Category,
 			Difficulty: string(chal.Difficulty), Score: chal.Score,
 			HasEnv: chal.Image != "", Description: chal.Description, Solved: solved,
+			SolveCount: len(solveUsers[chal.ID]),
 		})
 	}
 	subs, err := s.submissions.ListByCompetitionUser(ctx, id, userID, 20)
@@ -1180,6 +1249,15 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 	if err != nil {
 		return nil, err
 	}
+	participantCount, err := s.comps.CountEntered(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	submissionCounts, err := s.submissions.CountByCompetitionUserStatus(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	analytics := buildCompetitionAnalytics(chals, myScores, participantCount, submissionCounts)
 	// 队伍模式任一队员提交过任一题即视为已提交。
 	writeupSubmitted := false
 	if c.Status(s.now()) == model.CompetitionEnded {
@@ -1200,8 +1278,92 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 		Teammates:        teammates,
 		Challenges:       challenges,
 		MySubmissions:    mySubs,
+		Analytics:        analytics,
 		WriteupSubmitted: writeupSubmitted,
 	}, nil
+}
+
+// buildCompetitionAnalytics 从绑定题目与本人积分派生行聚合看板数据：
+// 分数/通关数/得分曲线取本人，分类与难度覆盖率按绑定题目为分母，
+// 提交计数取全量状态分布。所有输入都是只读派生数据，不写事件流。
+func buildCompetitionAnalytics(
+	chals []model.Challenge,
+	myScores []model.CompetitionScore,
+	participantCount int64,
+	submissionCounts map[model.SubmissionStatus]int64,
+) CompetitionAnalytics {
+	out := CompetitionAnalytics{
+		TotalChallenges:  len(chals),
+		ParticipantCount: participantCount,
+		ScoreTimeline:    make([]CompetitionScorePoint, 0, len(myScores)),
+		Categories:       make([]CompetitionCategoryStat, 0),
+		Difficulties:     make([]CompetitionDifficultyStat, 0),
+		SubmissionStats: CompetitionSubmissionStats{
+			Correct:   submissionCounts[model.SubmissionCorrect],
+			Incorrect: submissionCounts[model.SubmissionIncorrect],
+			Pending:   submissionCounts[model.SubmissionPending],
+		},
+	}
+	scoreByChallenge := make(map[uint]int, len(myScores))
+	for _, sc := range myScores {
+		scoreByChallenge[sc.ChallengeID] = sc.Score
+		out.Score += sc.Score
+		out.SolvedCount++
+	}
+	categoryIndex := make(map[string]int)
+	difficultyTotal := make(map[string][2]int)
+	for _, chal := range chals {
+		out.TotalScore += chal.Score
+		earned, solved := scoreByChallenge[chal.ID]
+		idx, ok := categoryIndex[chal.Category]
+		if !ok {
+			idx = len(out.Categories)
+			categoryIndex[chal.Category] = idx
+			out.Categories = append(out.Categories, CompetitionCategoryStat{Category: chal.Category})
+		}
+		cat := &out.Categories[idx]
+		cat.Total++
+		cat.ScoreTotal += chal.Score
+		cat.ScoreEarned += earned
+		if solved {
+			cat.Solved++
+		}
+		diff := string(chal.Difficulty)
+		agg := difficultyTotal[diff]
+		agg[0]++
+		if solved {
+			agg[1]++
+		}
+		difficultyTotal[diff] = agg
+	}
+	for _, d := range []model.Difficulty{
+		model.DifficultyApprentice, model.DifficultyPractitioner, model.DifficultyExpert,
+	} {
+		agg, ok := difficultyTotal[string(d)]
+		if !ok {
+			continue
+		}
+		out.Difficulties = append(out.Difficulties, CompetitionDifficultyStat{
+			Difficulty: string(d), Total: agg[0], Solved: agg[1],
+		})
+	}
+	sort.SliceStable(myScores, func(i, j int) bool {
+		if myScores[i].SolvedAt.Equal(myScores[j].SolvedAt) {
+			return myScores[i].ID < myScores[j].ID
+		}
+		return myScores[i].SolvedAt.Before(myScores[j].SolvedAt)
+	})
+	cumulative := 0
+	for _, sc := range myScores {
+		cumulative += sc.Score
+		out.ScoreTimeline = append(out.ScoreTimeline, CompetitionScorePoint{
+			At:          sc.SolvedAt.UTC().Format(time.RFC3339),
+			ChallengeID: sc.ChallengeID,
+			Delta:       sc.Score,
+			Score:       cumulative,
+		})
+	}
+	return out
 }
 
 func (s *CompetitionService) teamInfo(ctx context.Context, part *model.Participant) (*string, []string, error) {
