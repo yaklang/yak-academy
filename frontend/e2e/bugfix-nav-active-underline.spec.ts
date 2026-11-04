@@ -23,8 +23,6 @@ test.describe('回归：主导航高亮精确匹配', () => {
     // 修复后的正确终态：题库高亮，教程不高亮（修复前教程因 "/" 前缀匹配而错误高亮）
     await expect(training).toHaveAttribute('aria-current', 'page')
     await expect(tutorials).not.toHaveAttribute('aria-current', 'page')
-    // 高亮样式即绿色下划线的来源：非激活项下划线必须保持透明
-    await expect(tutorials).toHaveCSS('font-weight', '400')
 
     // 返回首页：教程（根路径）恢复精确高亮——防止修复把根路径自身的高亮也抹掉
     await page.getByRole('link', { name: '教程', exact: true }).click()

@@ -52,6 +52,7 @@ test.describe('回归：<bug 短名>', () => {
 ### 3. 断言要求（写"绿"的标准）
 
 - **断言业务终态，不断言实现细节**：页面渲染出预期内容（heading/正文非空）、URL 落在预期路由、判定结果文案正确。黑页类 bug 的终态断言 = 关键内容可见，而非 `body` 非空。
+- **不断言样式与配色**：禁止在 e2e 里断言十六进制/rgb 色值、设计令牌取值、明度阶梯、对比度、字体粗细等外观实现。配色会随设计调整，这类断言只会把样式改动变成"测试失败"，且无法说明用户功能是否正常。需要保证视觉规范时写在 skill 的约定里，用截图人工检查，不写进测试。
 - **从用户路径进，不从 API 进**：经真实导航/点击触发（`page.goto` 到入口页再操作 UI），这正是 bug 溜过单测的原因。
 - **数据从 global-setup 的种子来**（`fixtures/consts.ts` 的 `E2E` 常量 + global-setup 经管理 API 播种）。种子不足时在 consts 加常量并在 global-setup 补播种——禁止在 spec 里直连 DB 或硬编码运行期 ID。
 - 依赖 Docker 的容器行为：放 `e2e/docker/`（`E2E_DOCKER=1` 独立 project），默认套件保持零 Docker；纯前端行为（路由/链接/弹窗渲染）留在默认套件。
@@ -69,3 +70,4 @@ test.describe('回归：<bug 短名>', () => {
 ❌ spec 里 `page.goto('/admin/topics/...')` 直接访问坏 URL 断言 404——用户是点链接撞上的，要测链接生成与点击路径。
 ❌ spec 里造数走 `sqlite` 直写或硬编码 seed 后自增 ID——换库重跑即挂；用 E2E 常量 + global-setup。
 ❌ 断言 `await expect(page.locator('body')).not.toBeEmpty()` 就算修好黑页——空壳布局也会通过；断言目标内容可见。
+❌ 写 `toHaveCSS('background-color', 'rgb(35, 33, 29)')` 或 `getComputedStyle` 取色值来"验证深色主题"——改一次配色就红，且用户功能没变；这类视觉要求属于 skill 约定 + 人工截图检查。

@@ -25,7 +25,8 @@ test.describe('回归：空题库页面的无效工具栏与滚动条', () => {
     await expect(empty.getByText('暂无教程题目')).toBeVisible()
     await expect(page.locator('.stats-strip')).toHaveCount(0)
     await expect(page.locator('.filters')).toHaveCount(0)
-    await expect(page.locator('.tabs-scroll')).toHaveCSS('scrollbar-width', 'none')
+    // tab 条不产生横向滚动（用户可见结果），不断言具体滚动条样式。
+    expect(await page.locator('.tabs-scroll').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true)
   })
 })
