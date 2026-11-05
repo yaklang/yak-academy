@@ -3,7 +3,7 @@
 // 邀请赛参赛者从站内邀请邮件跳转至此（带 competition_id + invite_code 预填），
 // 显式输入邀请码入场；公开赛已报名者可留空邀请码直接入场
 // （报名入口在竞赛广场 /competitions）。
-// 入场后平台其余入口锁定，直到比赛结束。
+// 邀请赛入场后平台其余入口锁定直到比赛结束；公开赛入场后可自由进出。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { notify } from '@/lib/notifications'
@@ -25,9 +25,9 @@ const title = computed(() => comp.value?.name ?? `竞赛 #${compId}`)
 async function load() {
   try {
     const entry = await competitionApi.myEntry()
-    // 已入场且仍是该竞赛 → 直接进首页（邮件链接重复点击）。
-    if (entry.locked && entry.competition && entry.competition.id === compId) {
-      store.lock(compId)
+    // 已入场且仍是该竞赛 → 直接进首页（邮件链接重复点击/公开赛重进）。
+    if (entry.entered && entry.competition && entry.competition.id === compId) {
+      await store.refresh()
       router.replace(`/competitions/${compId}`)
       return
     }
@@ -42,11 +42,13 @@ async function enter() {
   entering.value = true
   try {
     const entry = await competitionApi.enter(compId, code.value.trim() || undefined)
-    if (!entry.locked || !entry.competition) {
+    // 入场成功以 entered 判定：公开赛不锁定（locked=false），仍是成功入场。
+    if (!entry.entered || !entry.competition) {
       loadFailed.value = '入场失败：竞赛可能已结束'
       return
     }
-    store.lock(entry.competition.id)
+    // 锁定态以服务端为准（邀请赛锁定、公开赛/管理员不锁）。
+    await store.refresh()
     notify.success('入场成功，欢迎参赛！')
     router.replace(`/competitions/${entry.competition.id}`)
   } catch (e) {
@@ -78,7 +80,7 @@ onMounted(load)
       <UiAlert
         type="warning"
         :closable="false"
-        title="入场后将被锁定在竞赛页面，平台其他板块不可访问，直到比赛结束。"
+        title="邀请赛入场后将被锁定在竞赛页面，平台其他板块不可访问，直到比赛结束；公开赛入场后可自由进出，随时返回平台。"
         class="lock-tip"
       />
       <p v-if="loadFailed" class="dim">{{ loadFailed }}</p>

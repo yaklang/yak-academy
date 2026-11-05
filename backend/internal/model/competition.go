@@ -28,7 +28,8 @@ func (k CompetitionKind) Valid() bool {
 }
 
 // Competition 竞赛实体：管理员创建并配置起止时间。
-// 状态全程由时间派生；结束前已入场参赛者被锁定在竞赛入口（见 Participant）。
+// 状态全程由时间派生；结束前已入场的邀请赛参赛者被锁定在竞赛入口
+// （公开赛报名入场不锁定，可自由进出，见 Participant）。
 type Competition struct {
 	ID          uint   `gorm:"primaryKey" json:"id"`
 	Name        string `gorm:"uniqueIndex;size:128" json:"name"`
@@ -64,7 +65,8 @@ type Team struct {
 
 // Participant 参赛人员：管理员批量导入时生成，携带唯一邀请码，
 // 站内邀请邮件投递给本人；凭码入场（EnteredAt 置位）后，
-// 竞赛结束前该用户被锁定在竞赛入口（登出重进不可退出）。
+// 邀请赛结束前该用户被锁定在竞赛入口（登出重进不可退出）；
+// 公开赛报名入场不锁定，可随时返回平台。
 type Participant struct {
 	ID            uint   `gorm:"primaryKey" json:"id"`
 	CompetitionID uint   `gorm:"uniqueIndex:idx_part_comp_user;index"`

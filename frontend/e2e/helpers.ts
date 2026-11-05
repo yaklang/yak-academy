@@ -51,17 +51,17 @@ export async function adminToken(request: APIRequestContext): Promise<string> {
   return token
 }
 
-// 建一个进行中的竞赛（now-1min 起、+30min 止），绑给定种子题并把学生导入为
-// 个人参赛者（自动投递站内邀请邮件），返回 (竞赛ID, 邀请码)。
+// 建一个进行中的邀请赛（now-1min 起、+30min 止），绑给定种子题并把指定账号
+// 导入为个人参赛者（自动投递站内邀请邮件），返回竞赛 ID 与各账号邀请码。
 // 竞赛起止时间相对“现在”，只能用例内即时创建（global-setup 预播种会过期/提前结束）；
 // 创建走管理 API，与 global-setup 播种同一机制，不直写 DB、不硬编码运行期 ID。
-export async function seedRunningCompetition(
+export async function seedRunningCompetitionFor(
   request: APIRequestContext,
   name: string,
   slugs: string[],
-): Promise<{ id: number; code: string }> {
-  const login = await request.post(`${E2E.apiURL}/api/v1/auth/login`, { data: E2E.admin })
-  const { token } = (await login.json()) as { token: string }
+  usernames: string[],
+): Promise<{ id: number; codes: Record<string, string> }> {
+  const token = await adminToken(request)
   const auth = { Authorization: `Bearer ${token}` }
   const now = Date.now()
   const created = await request.post(`${E2E.apiURL}/api/v1/admin/competitions`, {
@@ -82,15 +82,49 @@ export async function seedRunningCompetition(
   expect(bound.ok()).toBeTruthy()
   const imported = await request.post(
     `${E2E.apiURL}/api/v1/admin/competitions/${comp.id}/participants`,
-    { headers: auth, data: { individuals: [E2E.student.username] } },
+    { headers: auth, data: { individuals: usernames } },
   )
   expect(imported.ok()).toBeTruthy()
   const result = (await imported.json()) as {
     participants: Array<{ username: string; invite_code: string }>
   }
-  const me = result.participants.find((p) => p.username === E2E.student.username)
-  expect(me).toBeTruthy()
-  return { id: comp.id, code: me!.invite_code }
+  const codes: Record<string, string> = {}
+  for (const p of result.participants) codes[p.username] = p.invite_code
+  for (const username of usernames) expect(codes[username]).toBeTruthy()
+  return { id: comp.id, codes }
+}
+
+// 建一个进行中的邀请赛并把学生导入为参赛者，返回 (竞赛ID, 学生邀请码)。
+export async function seedRunningCompetition(
+  request: APIRequestContext,
+  name: string,
+  slugs: string[],
+): Promise<{ id: number; code: string }> {
+  const { id, codes } = await seedRunningCompetitionFor(request, name, slugs, [E2E.student.username])
+  return { id, code: codes[E2E.student.username] }
+}
+
+// 建一个进行中的公开赛（无题目绑定：广场报名 + 免码入场旅程用）。
+export async function seedPublicCompetition(
+  request: APIRequestContext,
+  name: string,
+): Promise<number> {
+  const token = await adminToken(request)
+  const now = Date.now()
+  const created = await request.post(`${E2E.apiURL}/api/v1/admin/competitions`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      name,
+      description: '公开赛广场旅程',
+      start_time: new Date(now - 60_000).toISOString(),
+      end_time: new Date(now + 30 * 60_000).toISOString(),
+      kind: 'public',
+    },
+  })
+  expect(created.ok()).toBeTruthy()
+  const comp = (await created.json()) as { id: number; kind: string }
+  expect(comp.kind).toBe('public')
+  return comp.id
 }
 
 // 把竞赛 end_time 改到过去（running 期间允许缩短）：比赛立即结束、入场锁解除。

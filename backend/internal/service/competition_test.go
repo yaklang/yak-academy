@@ -497,16 +497,100 @@ func TestPublicCompetitionPlazaAndRegister(t *testing.T) {
 		t.Fatal("plaza should reflect registration")
 	}
 
-	// 已报名者免码入场；未报名者免码拒绝；邀请赛免码拒绝。
-	entry, err := e.comps.Enter(ctx, runner.ID, pub.ID, "")
-	if err != nil || !entry.Entered || !entry.Locked {
-		t.Fatalf("enter without code: %+v err=%v", entry, err)
+	// 已报名者免码入场；公开赛入场不锁定平台；未报名者免码拒绝；邀请赛免码拒绝。
+	entry, err := e.comps.Enter(ctx, runner.ID, pub.ID, "", model.GlobalRoleStudent)
+	if err != nil || !entry.Entered || entry.Locked {
+		t.Fatalf("enter public without code: %+v err=%v", entry, err)
 	}
-	if _, err := e.comps.Enter(ctx, another.ID, pub.ID, ""); !errors.Is(err, ErrValidation) {
+	if _, locked := e.comps.LockedCompetition(ctx, runner.ID); locked {
+		t.Fatal("public competition must not lock the platform")
+	}
+	me, err := e.comps.MyEntry(ctx, runner.ID, model.GlobalRoleStudent)
+	if err != nil || !me.Entered || me.Locked || me.Competition == nil || me.Competition.ID != pub.ID {
+		t.Fatalf("my entry after public enter: %+v err=%v", me, err)
+	}
+	if _, err := e.comps.Enter(ctx, another.ID, pub.ID, "", model.GlobalRoleStudent); !errors.Is(err, ErrValidation) {
 		t.Fatalf("unregistered enter: want ErrValidation, got %v", err)
 	}
-	if _, err := e.comps.Enter(ctx, another.ID, inv.ID, ""); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Enter(ctx, another.ID, inv.ID, "", model.GlobalRoleStudent); !errors.Is(err, ErrValidation) {
 		t.Fatalf("invitational codeless enter: want ErrValidation, got %v", err)
+	}
+}
+
+// TestLockOnlyInvitational 公开赛入场不锁平台；邀请赛入场才锁；两者同时入场
+// 时以邀请赛为准；邀请赛结束后回到「已入场公开赛」状态（entered=true/locked=false）。
+func TestLockOnlyInvitational(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	start := e.now.Add(-time.Hour)
+	pubView, err := e.comps.Create(ctx, "公开自由进出赛", "", start, e.now.Add(4*time.Hour), "public")
+	if err != nil {
+		t.Fatalf("create public competition: %v", err)
+	}
+	inv := e.createRunningComp(t, "邀请锁定赛")
+	user := e.ensureUser(t, "dual-runner")
+
+	// 公开赛：报名 + 入场，不锁。
+	if _, err := e.comps.Register(ctx, user.ID, pubView.ID); err != nil {
+		t.Fatalf("register public: %v", err)
+	}
+	pubEntry, err := e.comps.Enter(ctx, user.ID, pubView.ID, "", model.GlobalRoleStudent)
+	if err != nil || !pubEntry.Entered || pubEntry.Locked {
+		t.Fatalf("enter public: %+v err=%v", pubEntry, err)
+	}
+	if id, locked := e.comps.LockedCompetition(ctx, user.ID); locked {
+		t.Fatalf("public competition locked platform (competition %d)", id)
+	}
+	me, err := e.comps.MyEntry(ctx, user.ID, model.GlobalRoleStudent)
+	if err != nil || !me.Entered || me.Locked || me.Competition == nil || me.Competition.ID != pubView.ID {
+		t.Fatalf("my entry public: %+v err=%v", me, err)
+	}
+
+	// 邀请赛：导入 + 入场后锁平台；MyEntry 优先返回邀请赛。
+	e.comps.ImportParticipants(ctx, inv.ID, ParticipantImportRequest{Individuals: []string{"dual-runner"}})
+	part, err := repo.NewCompetitionRepo(e.gdb).FindParticipant(ctx, inv.ID, user.ID)
+	if err != nil || part == nil {
+		t.Fatalf("find invite participant: %+v err=%v", part, err)
+	}
+	invEntry, err := e.comps.Enter(ctx, user.ID, inv.ID, part.InviteCode, model.GlobalRoleStudent)
+	if err != nil || !invEntry.Locked {
+		t.Fatalf("enter invitational: %+v err=%v", invEntry, err)
+	}
+	if id, locked := e.comps.LockedCompetition(ctx, user.ID); !locked || id != inv.ID {
+		t.Fatalf("locked check: id=%d locked=%v", id, locked)
+	}
+	me, err = e.comps.MyEntry(ctx, user.ID, model.GlobalRoleStudent)
+	if err != nil || !me.Locked || me.Competition == nil || me.Competition.ID != inv.ID {
+		t.Fatalf("my entry should prefer invitational: %+v err=%v", me, err)
+	}
+
+	// 管理员进入邀请赛：参赛记录照常写入，但不产生锁定。
+	admin := &model.User{Username: "inv-admin", PasswordHash: "x", GlobalRole: model.GlobalRoleAdmin}
+	if err := e.users.Create(ctx, admin); err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	e.comps.ImportParticipants(ctx, inv.ID, ParticipantImportRequest{Individuals: []string{"inv-admin"}})
+	adminPart, err := repo.NewCompetitionRepo(e.gdb).FindParticipant(ctx, inv.ID, admin.ID)
+	if err != nil || adminPart == nil {
+		t.Fatalf("find admin participant: %+v err=%v", adminPart, err)
+	}
+	adminEntry, err := e.comps.Enter(ctx, admin.ID, inv.ID, adminPart.InviteCode, model.GlobalRoleAdmin)
+	if err != nil || !adminEntry.Entered || adminEntry.Locked {
+		t.Fatalf("admin enter invitational: %+v err=%v", adminEntry, err)
+	}
+	adminMe, err := e.comps.MyEntry(ctx, admin.ID, model.GlobalRoleAdmin)
+	if err != nil || !adminMe.Entered || adminMe.Locked {
+		t.Fatalf("admin my entry: %+v err=%v", adminMe, err)
+	}
+
+	// 邀请赛结束：解锁；公开赛仍在进行，MyEntry 回到公开赛且不锁。
+	e.now = inv.EndTime.Add(time.Minute)
+	if id, locked := e.comps.LockedCompetition(ctx, user.ID); locked {
+		t.Fatalf("should unlock after invitational ends (competition %d)", id)
+	}
+	me, err = e.comps.MyEntry(ctx, user.ID, model.GlobalRoleStudent)
+	if err != nil || !me.Entered || me.Locked || me.Competition == nil || me.Competition.ID != pubView.ID {
+		t.Fatalf("my entry after invitational ended: %+v err=%v", me, err)
 	}
 }
 
@@ -518,7 +602,7 @@ func TestEnterLocksUntilEnd(t *testing.T) {
 	comp := e.createRunningComp(t, "锁定赛")
 	user := e.ensureUser(t, "runner")
 	// 未导入：无码可入。
-	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, "nosuchcode"); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, "nosuchcode", model.GlobalRoleStudent); !errors.Is(err, ErrValidation) {
 		t.Fatalf("invalid code: want ErrValidation, got %v", err)
 	}
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"runner"}})
@@ -527,12 +611,12 @@ func TestEnterLocksUntilEnd(t *testing.T) {
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
 	// 1. scheduled 阶段拒绝入场。
 	e.now = comp.StartTime.Add(-time.Minute)
-	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent); !errors.Is(err, ErrValidation) {
 		t.Fatalf("enter before start: want ErrValidation, got %v", err)
 	}
 	// 2. running 入场成功 → 锁定。
 	e.now = comp.StartTime.Add(time.Minute)
-	entry, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	entry, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent)
 	if err != nil || !entry.Locked {
 		t.Fatalf("enter: err=%v locked=%v", err, entry.Locked)
 	}
@@ -545,7 +629,7 @@ func TestEnterLocksUntilEnd(t *testing.T) {
 		t.Fatalf("should unlock after end, got competition %d", id)
 	}
 	// 4. ended 后入场拒绝（新入场不可能）。
-	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent); !errors.Is(err, ErrValidation) {
 		t.Fatalf("enter after end: want ErrValidation, got %v", err)
 	}
 }
@@ -573,8 +657,8 @@ func TestCompetitionScopedScoringAndLeaderboard(t *testing.T) {
 	bobPart, _ := compRepo.FindParticipant(ctx, comp.ID, bob.ID)
 	catPart, _ := compRepo.FindParticipant(ctx, comp.ID, cat.ID)
 	// 入场。
-	e.comps.Enter(ctx, bob.ID, comp.ID, bobPart.InviteCode)
-	e.comps.Enter(ctx, cat.ID, comp.ID, catPart.InviteCode)
+	e.comps.Enter(ctx, bob.ID, comp.ID, bobPart.InviteCode, model.GlobalRoleStudent)
+	e.comps.Enter(ctx, cat.ID, comp.ID, catPart.InviteCode, model.GlobalRoleStudent)
 	// bob 首通 100 分；cat 错误提交后同 flag 也通（动态分 90）。
 	if _, err := e.comps.SubmitFlag(ctx, e.judge, bob.ID, comp.ID, chal.Slug, "flag{score-a}", "1.1.1.1"); err != nil {
 		t.Fatalf("bob submit: %v", err)
@@ -651,7 +735,7 @@ func TestWriteupSubmissionWindow(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"writer"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
-	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent)
 	if _, err := e.comps.BindChallenges(ctx, comp.ID, []byte(`{"slugs":["`+chal.Slug+`"]}`), nil); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
@@ -713,7 +797,7 @@ func TestWriteupTeamSharedAndZip(t *testing.T) {
 		codes[p.UserID] = p.InviteCode
 	}
 	for _, u := range []*model.User{alice, bob, rival} {
-		if _, err := e.comps.Enter(ctx, u.ID, comp.ID, codes[u.ID]); err != nil {
+		if _, err := e.comps.Enter(ctx, u.ID, comp.ID, codes[u.ID], model.GlobalRoleStudent); err != nil {
 			t.Fatalf("enter %s: %v", u.Username, err)
 		}
 	}
@@ -850,8 +934,8 @@ func TestCrossTeamFlagWarning(t *testing.T) {
 	instRepo := repo.NewLabInstanceRepo(e.gdb)
 	aaPart, _ := compRepo.FindParticipant(ctx, comp.ID, aa.ID)
 	bbPart, _ := compRepo.FindParticipant(ctx, comp.ID, bb.ID)
-	e.comps.Enter(ctx, aa.ID, comp.ID, aaPart.InviteCode)
-	e.comps.Enter(ctx, bb.ID, comp.ID, bbPart.InviteCode)
+	e.comps.Enter(ctx, aa.ID, comp.ID, aaPart.InviteCode, model.GlobalRoleStudent)
+	e.comps.Enter(ctx, bb.ID, comp.ID, bbPart.InviteCode, model.GlobalRoleStudent)
 	// aa 的 running 实例持有唯一 flag。
 	inst := &model.LabInstance{
 		UserID: aa.ID, ChallengeID: chal.ID, CompetitionID: comp.ID,
@@ -913,13 +997,13 @@ func TestActiveCompetitionNonUTCZone(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"zoner"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
-	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode); err != nil {
+	if _, err := e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent); err != nil {
 		t.Fatalf("enter: %v", err)
 	}
 	if id, locked := e.comps.LockedCompetition(ctx, user.ID); !locked || id != comp.ID {
 		t.Fatalf("locked in non-UTC zone: id=%d locked=%v", id, locked)
 	}
-	entry, err := e.comps.MyEntry(ctx, user.ID)
+	entry, err := e.comps.MyEntry(ctx, user.ID, model.GlobalRoleStudent)
 	if err != nil || !entry.Locked {
 		t.Fatalf("my entry in non-UTC zone: err=%v locked=%v", err, entry.Locked)
 	}
@@ -943,7 +1027,7 @@ func TestCompetitionInstanceScope(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"diver"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
-	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent)
 	// fakeDriver 不够用：这里直接走 repo 层断言（EnsureInstanceScoped 的
 	// scope 传递在 env_test 已由行为覆盖，此处验证绑定关系约束）。
 	// 未绑定的题目 → ErrNotFound。
@@ -977,7 +1061,7 @@ func TestCompetitionDeleteLifecycle(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"delver"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
-	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent)
 	if id, locked := e.comps.LockedCompetition(ctx, user.ID); !locked || id != comp.ID {
 		t.Fatalf("locked before delete: id=%d locked=%v", id, locked)
 	}
@@ -1038,7 +1122,7 @@ func TestCompetitionDeleteDestroysInstancesAndWriteups(t *testing.T) {
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"wper"}})
 	compRepo := repo.NewCompetitionRepo(e.gdb)
 	part, _ := compRepo.FindParticipant(ctx, comp.ID, user.ID)
-	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode)
+	e.comps.Enter(ctx, user.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent)
 	e.comps.now = func() time.Time { return comp.EndTime.Add(time.Minute) }
 	if err := e.comps.SaveWriteup(ctx, user.ID, comp.ID, chal.ID, "# wp"); err != nil {
 		t.Fatalf("save writeup: %v", err)
@@ -1113,7 +1197,7 @@ func TestCompetitionViewAnalytics(t *testing.T) {
 	bob := e.ensureUser(t, "analytics-bob")
 	e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{"analytics-bob"}})
 	part, _ := repo.NewCompetitionRepo(e.gdb).FindParticipant(ctx, comp.ID, bob.ID)
-	if _, err := e.comps.Enter(ctx, bob.ID, comp.ID, part.InviteCode); err != nil {
+	if _, err := e.comps.Enter(ctx, bob.ID, comp.ID, part.InviteCode, model.GlobalRoleStudent); err != nil {
 		t.Fatalf("enter: %v", err)
 	}
 

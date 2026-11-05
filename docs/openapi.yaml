@@ -822,8 +822,8 @@ components:
           allOf:
             - $ref: '#/components/schemas/Competition'
           nullable: true
-          description: 已入场的进行中竞赛（null = 未锁定）
-        locked: { type: boolean, description: true = 已入场且竞赛未结束，平台其余入口锁定 }
+          description: 已入场的进行中竞赛（null = 未入场）
+        locked: { type: boolean, description: true = 已入场且邀请赛未结束，平台其余入口锁定；公开赛不锁、管理员恒为 false }
         entered: { type: boolean, description: 是否已入场（该竞赛） }
         team_name:
           type: string
@@ -2925,7 +2925,7 @@ paths:
   /competitions/me:
     get:
       tags: [competitions]
-      summary: 当前用户参赛状态（已入场未结束 → locked=true，前端据此锁定平台入口）
+      summary: 当前用户参赛状态（仅邀请赛已入场未结束 → locked=true；公开赛与管理员不锁）
       responses:
         '200':
           description: OK
@@ -2936,7 +2936,7 @@ paths:
   /competitions/{id}/enter:
     post:
       tags: [competitions]
-      summary: 竞赛入场（邀请赛凭站内邀请邮件的邀请码；公开赛已报名用户免码进入；成功后锁定至比赛结束）
+      summary: 竞赛入场（邀请赛凭站内邀请邮件的邀请码入场并锁定至结束；公开赛已报名用户免码进入、可自由进出）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:

@@ -96,7 +96,7 @@ const ending = ref(false)
 async function endCompetition() {
   try {
     await dialogs.confirm(
-      `手动结束竞赛「${detail.value?.name}」？立即生效：参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可重新配置起止时间再次开赛。`,
+      `手动结束竞赛「${detail.value?.name}」？立即生效：邀请赛参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可重新配置起止时间再次开赛。`,
       '手动结束竞赛',
       { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
     )
