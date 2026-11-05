@@ -6,7 +6,7 @@ import { useCompetitionStore } from '../stores/competition'
 //   普通端 /（教程 / 题库，路由段保留 /training）——普通人与管理员均可。
 //   管理端 /admin —— 仅管理员（global_role === admin）；普通人无入口且路由守卫拦截。
 // 两端复用同一组视图组件（Topics/TopicDetail/RoomDetail/Training）。
-// 竞赛参赛流程为独立满屏布局（入场页 + 竞赛首页），对应"入场后锁定在竞赛页面"。
+// 竞赛参赛流程为独立满屏布局（入场页 + 竞赛首页），邀请赛入场后锁定在竞赛页面。
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -107,8 +107,8 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAdmin && auth.user?.global_role !== 'admin') {
     return { name: 'topics' }
   }
-  // 参赛锁定（仅学生；管理员不锁）：已入场且竞赛未结束时，
-  // 平台其余路径全部引导回竞赛首页 —— 与后端锁定中间件同语义。
+  // 参赛锁定（仅普通学生且仅邀请赛；公开赛/管理员不锁）：资格由服务端派生，
+  // 命中后平台其余路径引导回竞赛首页 —— 与后端锁定中间件同语义。
   if (auth.user?.global_role !== 'admin' && !to.path.startsWith('/competitions')) {
     const compStore = useCompetitionStore()
     const lockedId = await compStore.ensureChecked()

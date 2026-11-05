@@ -31,7 +31,7 @@ type Router struct {
 	accessLog *slog.Logger
 }
 
-// EntryLockChecker 竞赛入场锁：已入场且竞赛未结束的参赛者，
+// EntryLockChecker 竞赛入场锁：已入场且竞赛未结束的邀请赛参赛者，
 // 平台其余接口一律 403（锁定直到比赛结束，登出重进同样受控）。
 type EntryLockChecker interface {
 	// LockedCompetition 返回 (竞赛ID, true) 表示该用户当前被锁定。

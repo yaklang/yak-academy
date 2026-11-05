@@ -61,7 +61,7 @@ onMounted(load)
     <div>
       <h2 class="page-title">竞赛<span class="accent">广场</span></h2>
       <p class="page-sub">
-        公开赛在此开放报名：报名后开赛即可免邀请码入场；邀请赛凭站内邀请邮件中的邀请码入场，不在此展示。
+        公开赛在此开放报名：报名后开赛即可免邀请码入场，比赛期间可自由进出；邀请赛凭站内邀请邮件中的邀请码入场并锁定至结束，不在此展示。
       </p>
     </div>
   </header>

@@ -92,7 +92,7 @@ const ending = ref('')
 async function end(row: Competition) {
   try {
     await dialogs.confirm(
-      `手动结束竞赛「${row.name}」？立即生效：参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可在详情页重新配置起止时间再次开赛。`,
+      `手动结束竞赛「${row.name}」？立即生效：邀请赛参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可在详情页重新配置起止时间再次开赛。`,
       '手动结束竞赛',
       { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
     )
@@ -152,7 +152,7 @@ onMounted(load)
     <div>
       <h2 class="page-title">竞赛<span class="accent">管理</span></h2>
       <p class="page-sub">
-        创建与配置竞赛（起止时间决定状态与参赛锁定）；详情页内管理题目、参赛人员、容器、反作弊警告、WP 与排行榜。
+        创建与配置竞赛（起止时间决定状态与邀请赛锁定）；详情页内管理题目、参赛人员、容器、反作弊警告、WP 与排行榜。
       </p>
     </div>
   </header>

@@ -871,13 +871,19 @@ func (s *CompetitionService) teamOverview(ctx context.Context, id uint, teams []
 }
 
 // LockedCompetition 入场锁检查（api 层中间件调用）：已入场且竞赛 running
-// → (竞赛ID, true)。ended 后自动解锁。管理员不查此接口（中间件短路）。
+// 的邀请赛 → (竞赛ID, true)。公开赛报名即可入场、可随时返回平台，不锁定；
+// ended 后自动解锁。管理员不查此接口（中间件短路）。
 func (s *CompetitionService) LockedCompetition(ctx context.Context, userID uint) (uint, bool) {
 	active, err := s.comps.ActiveCompetitions(ctx, s.now())
 	if err != nil {
 		return 0, false // 查询失败不锁（可用性优先）
 	}
-	for _, c := range active {
+	for i := range active {
+		c := &active[i]
+		// 锁定只属于邀请赛：公开赛是开放报名的自由进出模式。
+		if c.Kind != model.CompetitionInvitational {
+			continue
+		}
 		part, err := s.comps.FindParticipant(ctx, c.ID, userID)
 		if err != nil {
 			continue
@@ -985,14 +991,18 @@ func (s *CompetitionService) publicItem(ctx context.Context, c *model.Competitio
 	}, nil
 }
 
-// MyEntry 当前用户参赛状态：已入场且竞赛 running → locked=true
-// （前端据此锁定平台入口；服务端所有竞赛接口同样校验）。
-func (s *CompetitionService) MyEntry(ctx context.Context, userID uint) (*MyCompetitionEntry, error) {
+// MyEntry 当前用户参赛状态：优先返回已入场的邀请赛（locked=true）；
+// 否则返回已入场的公开赛（entered=true, locked=false，可自由进出）。
+// 管理员恒不锁（锁是参赛者隔离，不是权限；与路由中间件豁免同语义）。
+// 前端据 locked 锁定平台入口，据 entered 判断是否可回到竞赛首页。
+func (s *CompetitionService) MyEntry(ctx context.Context, userID uint, role model.GlobalRole) (*MyCompetitionEntry, error) {
 	active, err := s.comps.ActiveCompetitions(ctx, s.now())
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range active {
+	var enteredPublic *MyCompetitionEntry
+	for i := range active {
+		c := &active[i]
 		part, err := s.comps.FindParticipant(ctx, c.ID, userID)
 		if err != nil {
 			return nil, err
@@ -1000,12 +1010,25 @@ func (s *CompetitionService) MyEntry(ctx context.Context, userID uint) (*MyCompe
 		if part == nil || part.EnteredAt == nil {
 			continue
 		}
-		view := toView(&c, s.now())
+		view := toView(c, s.now())
 		teamName, err := s.participantTeamName(ctx, part)
 		if err != nil {
 			return nil, err
 		}
-		return &MyCompetitionEntry{Competition: &view, Locked: true, Entered: true, TeamName: teamName}, nil
+		entry := &MyCompetitionEntry{
+			Competition: &view, Locked: locksPlatform(c, role),
+			Entered: true, TeamName: teamName,
+		}
+		// 邀请赛锁定优先：同时参加公开赛与邀请赛时以邀请赛为准。
+		if entry.Locked {
+			return entry, nil
+		}
+		if enteredPublic == nil {
+			enteredPublic = entry
+		}
+	}
+	if enteredPublic != nil {
+		return enteredPublic, nil
 	}
 	return &MyCompetitionEntry{Competition: nil, Locked: false, Entered: false}, nil
 }
@@ -1019,9 +1042,9 @@ type MyCompetitionEntry struct {
 
 // Enter 入场：仅 running 竞赛有效（scheduled 未开赛、ended 已结束 → 422）。
 // 凭据两种：邀请码（邀请赛/公开赛通用——参赛者列表可查码），或公开赛已报名
-// 者免码（报名即入场资格）。入场后不可退出：锁定状态派生自 (entered 且
-// running)，直到比赛结束。
-func (s *CompetitionService) Enter(ctx context.Context, userID, id uint, inviteCode string) (*MyCompetitionEntry, error) {
+// 者免码（报名即入场资格）。邀请赛入场后不可退出：锁定状态派生自
+// (entered 且 running 且邀请赛)，直到比赛结束；公开赛入场不锁定，可自由进出。
+func (s *CompetitionService) Enter(ctx context.Context, userID, id uint, inviteCode string, role model.GlobalRole) (*MyCompetitionEntry, error) {
 	c, err := s.find(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1061,7 +1084,16 @@ func (s *CompetitionService) Enter(ctx context.Context, userID, id uint, inviteC
 	if err != nil {
 		return nil, err
 	}
-	return &MyCompetitionEntry{Competition: &view, Locked: true, Entered: true, TeamName: teamName}, nil
+	return &MyCompetitionEntry{
+		Competition: &view, Locked: locksPlatform(c, role),
+		Entered: true, TeamName: teamName,
+	}, nil
+}
+
+// locksPlatform 该竞赛是否把已入场者锁定在竞赛域：仅邀请赛，且管理员恒不锁。
+// 与 router.go 的中间件豁免同语义；集中在这里避免入口页/守卫各自判断。
+func locksPlatform(c *model.Competition, role model.GlobalRole) bool {
+	return c.Kind == model.CompetitionInvitational && role.Normalize() != model.GlobalRoleAdmin
 }
 
 func (s *CompetitionService) participantTeamName(ctx context.Context, part *model.Participant) (*string, error) {

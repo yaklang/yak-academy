@@ -124,3 +124,61 @@ func TestRouterAdminPassesAndLegacyTeacherDemoted(t *testing.T) {
 		t.Fatalf("legacy teacher: status = %d, want 403", rec.Code)
 	}
 }
+
+// alwaysLocked 入场锁探针：无论用户是谁都报告已锁定（管理员豁免由中间件判定）。
+type alwaysLocked struct{}
+
+func (alwaysLocked) LockedCompetition(context.Context, uint) (uint, bool) { return 1, true }
+
+// TestRouterEntryLockSkipsAdminAndAllowlist 锁定中间件：普通用户访问非竞赛接口
+// 403、白名单（/me、/competitions*）放行；管理员进入任何竞赛都不受锁定约束。
+func TestRouterEntryLockSkipsAdminAndAllowlist(t *testing.T) {
+	router, auth, _ := newRouterTestEnv(t)
+	ctx := context.Background()
+	router.Handle(http.MethodGet, "/api/v1/me", "", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	router.Handle(http.MethodGet, "/api/v1/competitions/probe", "", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	router.SetEntryLock(alwaysLocked{})
+
+	if _, err := auth.CreateUser(ctx, "locked-student", "pw", model.GlobalRoleStudent); err != nil {
+		t.Fatal(err)
+	}
+	studentToken, _, err := auth.Login(ctx, "locked-student", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.CreateUser(ctx, "free-admin", "pw", model.GlobalRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	adminToken, _, err := auth.Login(ctx, "free-admin", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 普通用户：平台接口 403（错误码 FORBIDDEN），锁定白名单仍可用。
+	rec := authedGet(router, "/api/v1/whoami", studentToken)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("locked student on platform route: status = %d, want 403", rec.Code)
+	}
+	var env errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != "FORBIDDEN" {
+		t.Fatalf("code = %q, want FORBIDDEN", env.Error.Code)
+	}
+	if rec := authedGet(router, "/api/v1/me", studentToken); rec.Code != http.StatusOK {
+		t.Fatalf("locked student on /me: status = %d, want 200", rec.Code)
+	}
+	if rec := authedGet(router, "/api/v1/competitions/probe", studentToken); rec.Code != http.StatusOK {
+		t.Fatalf("locked student on competition route: status = %d, want 200", rec.Code)
+	}
+
+	// 管理员：即使入场锁检查报告已锁定，也照常访问平台接口。
+	if rec := authedGet(router, "/api/v1/whoami", adminToken); rec.Code != http.StatusOK {
+		t.Fatalf("admin under entry lock: status = %d, want 200", rec.Code)
+	}
+}

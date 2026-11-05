@@ -371,7 +371,7 @@ func (h *Handlers) registerCompetition(w http.ResponseWriter, req *http.Request)
 // myCompetitionEntry 当前用户参赛/锁定状态（前端路由守卫）。
 func (h *Handlers) myCompetitionEntry(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
-	entry, err := h.Competitions.MyEntry(req.Context(), user.ID)
+	entry, err := h.Competitions.MyEntry(req.Context(), user.ID, user.GlobalRole)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -396,7 +396,7 @@ func (h *Handlers) enterCompetition(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	user := UserFrom(req.Context())
-	entry, err := h.Competitions.Enter(req.Context(), user.ID, id, body.InviteCode)
+	entry, err := h.Competitions.Enter(req.Context(), user.ID, id, body.InviteCode, user.GlobalRole)
 	if err != nil {
 		mapError(w, err)
 		return
@@ -449,7 +449,7 @@ func (h *Handlers) competitionSubmitFlag(w http.ResponseWriter, req *http.Reques
 	}
 	var body struct {
 		ChallengeSlug string `json:"challenge_slug"`
-		Answer       string `json:"answer"`
+		Answer        string `json:"answer"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ChallengeSlug == "" || body.Answer == "" {
 		writeError(w, errValidation)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 竞赛首页（参赛者满屏视图，锁定期间的全部可用功能）。
-// 头部仅保留锁定白名单能力：竞赛信息 + 本人（邮箱/资料不可达）+ 登出。
+// 竞赛首页（参赛者满屏视图；邀请赛锁定期间的全部可用功能）。
+// 邀请赛锁定期间头部不出现平台导航；公开赛/管理员/结束后提供「返回平台」入口。
 // 题目抽屉内完成开容器/提 flag（复用题库详情交互模式），异步判题后延时刷新。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -65,6 +65,15 @@ const elapsedPercent = computed(() => {
   return Math.min(100, Math.max(0, Math.round(p)))
 })
 const kindLabel = computed(() => (comp.value?.kind === 'public' ? '公开赛' : '邀请赛'))
+// 当前页面是否处于「锁定」态：仅进行中的邀请赛锁普通参赛者；公开赛与管理员不锁。
+const isAdmin = computed(() => auth.user?.global_role === 'admin')
+const lockedHere = computed(() => running.value && comp.value?.kind === 'invitational' && !isAdmin.value)
+// 非锁定态提供返回入口：公开赛回平台，管理员回管理端，结束后的邀请赛也回平台。
+const platformHome = computed(() => (isAdmin.value ? '/admin/tutorials' : '/learn'))
+const platformHomeLabel = computed(() => (isAdmin.value ? '返回管理端' : '返回平台'))
+function returnToPlatform() {
+  router.push(platformHome.value)
+}
 // 头部只展示到分钟：秒级精度留给倒计时，避免赛程行过长。
 function shortDateTime(value: string) {
   const d = new Date(value)
@@ -332,8 +341,10 @@ onMounted(async () => {
   loading.value = false
   // 未组队时个人榜才是自己的名次；有队伍则默认看战队榜。
   if (view.value && !view.value.team_name) boardMode.value = 'individual'
-  // 竞赛期间保持锁定标记（刷新/登出重登后守卫仍能引导回此页）。
-  if (running.value) compStore.lock(compId)
+  // 仅邀请赛参赛者保持锁定标记（刷新/登出重登后守卫仍能引导回此页）；
+  // 公开赛与管理员不锁，清除可能残留的本竞赛锁定缓存。
+  if (lockedHere.value) compStore.lock(compId)
+  else if (compStore.lockedCompetitionId === compId) compStore.unlock()
   if (view.value) await loadBoard()
   // 双节拍：秒级推进倒计时；周期检查比赛是否结束（结束后解锁并提示可交 WP）。
   tick = window.setInterval(() => {
@@ -394,6 +405,9 @@ onUnmounted(() => {
 
         <div class="comp-user">
           <span class="user-name">{{ auth.user?.username }}</span>
+          <UiButton v-if="!lockedHere" size="small" variant="ghost" @click="returnToPlatform">
+            {{ platformHomeLabel }}
+          </UiButton>
           <UiButton size="small" variant="ghost" @click="logout">登出</UiButton>
         </div>
       </div>
@@ -632,7 +646,7 @@ onUnmounted(() => {
 <style scoped>
 .comp-home { min-height: 100vh; background: var(--background); }
 
-/* 竞赛顶栏：品牌 + 赛事身份 + 赛程时钟 + 本人；锁定期间不出现平台导航。 */
+/* 竞赛顶栏：品牌 + 赛事身份 + 赛程时钟 + 本人；邀请赛锁定期间不出现平台导航。 */
 .comp-header {
   position: sticky;
   top: 0;

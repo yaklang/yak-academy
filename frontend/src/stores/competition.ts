@@ -2,9 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { competitionApi } from '../api'
 
-// 参赛锁定态（服务端派生：已入场 ∧ 竞赛未结束）。前端缓存仅做 UX 引导，
-// 真正的强制隔离在后端中间件（非竞赛接口一律 403）。
-// 锁只可能经"入场页显式输入邀请码"产生，入场成功即置位；登录/登出后重查。
+// 参赛锁定态（服务端派生：已入场 ∧ 进行中的邀请赛）。公开赛与管理员不锁，
+// 前端缓存仅做 UX 引导，真正的强制隔离在后端中间件（非竞赛接口一律 403）。
+// 锁只可能经"邀请赛入场页显式输入邀请码"产生，入场成功即置位；登录/登出后重查。
 export const useCompetitionStore = defineStore('competition', () => {
   const lockedCompetitionId = ref<number | null>(null)
   let checked = false

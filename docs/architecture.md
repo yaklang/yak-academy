@@ -124,11 +124,11 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 ### 3.8 competition — 竞赛域
 
 - **赛制分档（kind）**：创建时二选一——`public`（公开赛）/ `invitational`（邀请赛，旧库缺省回填），**创建后不可更改**。公开赛不发邀请函：展示在竞赛广场（`GET /competitions`，仅 kind=public），学生自助报名（`POST /competitions/{id}/register`，幂等个人报名；仍生成备用邀请码但不投递），已报名者免邀请码入场。邀请赛不对外展示，参赛者由管理端定向导入或一键生成。
-- **赛程状态机**：`scheduled → running → ended`（派生自 start_time/end_time，非落库列）；运行中的竞赛只允许延后 end_time 与改描述（收紧起止时间会破坏已入场的锁定语义）。
+- **赛程状态机**：`scheduled → running → ended`（派生自 start_time/end_time，非落库列）；运行中的竞赛只允许延后 end_time 与改描述（收紧起止时间会破坏邀请赛已入场者的锁定语义）。
 - **题目绑定**：三种入参统一入口——题目 JSON（对象/数组，复用 content 管线导入后绑定）、`{"slugs": [...]}` 绑定既有题目、zip 题目包；单题失败整体拒绝，已绑定幂等跳过；running 竞赛禁止解绑（榜单已产生，撤题破坏现场）。
 - **参赛者与队伍（仅邀请赛）**：批量导入条目按「账号编码或用户名」引用既有账号，**不自动建号**——未命中条目在响应 `missing[]` 排序回报（管理端可先用一键生成补号再重导）；每人生成唯一邀请码并投递站内邀请邮件（投递失败仅标记，不回滚，管理端可重发）；已参赛幂等跳过并沿用原邀请码；队伍归属以首次导入为准。前端导入走固定格式 CSV（个人名单每行一条；队伍名单每行 `队伍名,成员,…`，首行表头自动跳过）。
 - **一键生成参赛账号（仅邀请赛）**：`POST /admin/competitions/{id}/generate-users`——按前缀批量建号（用户名 = `前缀-零填充序号`，count ≤500）并全部导入为本场参赛者；可配置自动组队（team_size >0 按生成顺序每 N 人编入「第 n 队」，余数进最后一队）与初始密码（默认 `123456`，≥6 位）。新建账号的初始密码仅本次响应返回（管理端可导出 CSV 分发）；同名既有账号复用（沿用原密码）。
-- **入场与锁定**：凭邀请码入场仅 running 竞赛有效；公开赛已报名者可免码入场（未报名先去广场报名，邀请赛无码拒绝）。入场后不可退出，锁定状态 = `(已入场 且 running)`，比赛结束自动解锁。中间件层面强制：已锁定的普通用户访问平台任何非竞赛接口 → 403，前端路由守卫做同语义 UX 重定向（服务端是兜底权威）；管理员不受锁定约束。
+- **入场与锁定**：凭邀请码入场仅 running 竞赛有效；公开赛已报名者可免码入场（未报名先去广场报名，邀请赛无码拒绝）。**锁定只属于邀请赛**：邀请赛入场后不可退出，锁定状态 = `(已入场 且 running 且 kind=invitational)`，比赛结束自动解锁；公开赛报名入场不锁定，可随时返回平台。中间件层面强制：已锁定的普通用户访问平台任何非竞赛接口 → 403，前端路由守卫做同语义 UX 重定向（服务端是兜底权威）；管理员进入任何竞赛都不受锁定约束。
 - **竞赛做题**：题目/容器/提交都在 `/competitions/{id}/...` 命名空间下复用训练场能力（容器按竞赛隔离管理），判定走与平台完全相同的 judge 管线（异步、恒时比较、动态计分）。
 - **反作弊**：judge 在竞赛提交上执行跨队检测——提交串命中「本竞赛其他队伍成员」的运行中实例 flag（cross_team_flag）等类型写 CheatWarning，只产生管理端警告，不打断提交与判定。
 - **双榜**：队伍榜/个人榜均从 CompetitionScore 派生表只读聚合（派生行由事件派生器在竞赛首通时写入，AddScore 幂等）；竞赛服务不触碰派生表写入（event-sourcing-rules）。
@@ -174,7 +174,7 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 3. **做题判定流**：student 在题目详情页提交 → 入队 pending → worker 恒时比较 → `submission.judged` 事件 → 派生器更新积分/进度/排行榜（题目关联教程时同步发 Room 通关事件；竞赛提交另派生 CompetitionScore 并做跨队反作弊检测）；
 4. **鉴权流**：请求 → JWT 解析 → 角色中间件（student/admin）→ handler；
 5. **注册流**：登录页发码（限频/窗口校验 → SmsCode 落库 → 开发投递器写日志）→ 凭码建号（核销一次性 → 建号角色固定 student → 签发登录 token）；
-6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请码或公开赛报名免码；锁定至比赛结束）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）。
+6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请赛凭码入场并锁定至比赛结束；公开赛凭报名免码入场、可自由进出）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）。
 
 ## 6. API 契约总览
 
@@ -218,8 +218,8 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 | `POST /admin/competitions` 等 14 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind，不可改）/题目绑定/参赛者导入（仅邀请赛，编码或用户名引用，missing 回报）/一键生成账号（仅邀请赛，自动组队+初始密码导出）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
 | `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/题目绑定/提交/WP/容器记录，事件历史保留） |
 | `GET /competitions` / `POST /competitions/{id}/register` | student | 竞赛广场（仅公开赛，含报名状态）/ 公开赛自助报名（幂等；邀请赛拒绝） |
-| `GET /competitions/me` | student | 本人参赛与锁定状态（路由守卫轮询） |
-| `POST /competitions/{id}/enter` | student | 入场：邀请码（两档通用）或公开赛已报名免码（running 限定，入场后锁定至结束） |
+| `GET /competitions/me` | student | 本人参赛与锁定状态（仅邀请赛锁定；路由守卫轮询） |
+| `POST /competitions/{id}/enter` | student | 入场：邀请码（两档通用）或公开赛已报名免码（running 限定；仅邀请赛锁定至结束） |
 | `/competitions/{id}/view`、`.../challenges/{slug}/instance`、`.../submissions`、`.../leaderboard`、`.../writeups*` | 参赛者 | 竞赛内做题闭环：题目列表/容器/提交/双榜/WP 提交与覆盖（ended 后） |
 
 ## 7. 技术选型
@@ -261,7 +261,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
 - **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
-- **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（手机验证码，开发投递器通道）。
+- **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与邀请赛锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（手机验证码，开发投递器通道）。
 - **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 [flaggateway 入口层 + 上游二进制] + instance 判定：每实例唯一 flag，靶机内 /flag.txt 与带按题门禁的 GET /flag、authz 题命令模拟接口 cat flag.txt，跨题捷径均已封死）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 3.7** ✅ 已完成：ACM 编程题源码判定（对齐 ICPC 出题/判题模型）：题目包 zip `judge` 段 + `testdata/` 数据组（`acm_judges`/`judge_testdata` 表），学生提交 yak 源码，`CodeEngine`（`ACADEMY_YAK_BIN`）逐组运行对拍（token 化比对、时限、逐组全跑），`Submission.verdict` 判定结果（ac/wa/tle/re/internal_error）随 `submission.judged` 事件下发，计分/首通/反作弊复用既有管线；样例组专端点下发，管理端编辑支持元数据维护（judge 段不带数据组 = 保留库内数据）。**部分得分制**：数据组配分（`judge.testdata[].score` 内联 / `testdata/scores.json` / 管理端编辑弹窗），部分通过按权重折算得分（未配置 = 全有全无），详情页逐组结论反馈（`Submission.groups` + 事件 `groups`）。
 - **Phase 3.8** ✅ 已完成：ACM 自测运行（动态执行框，custom invocation）：题目详情页内置 CodeMirror 6 编辑器（Go 语法近似 yak 高亮）+ 运行面板，对样例组或自定义 stdin 异步运行当前源码（202 票据 + 轮询，与判题共用 `CodeEngine` 与题目时限）；运营态与判定/事件流完全隔离（无 Submission、无事件、不计分），样例模式服务端比对期望输出，票据进程内存 + TTL 10 分钟；引擎未装配创建即 422（与提交判定的 internal_error 路径区分）；判题引擎管理端化——题目管理 ACM tab 状态卡可从 yaklang 官方 OSS 异步下载 yak 二进制（约 220MB，进度轮询、完成即换装无需重启、重启自动探测复用，见 §3.4 引擎装配与管理）。

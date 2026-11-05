@@ -42,6 +42,10 @@ export const E2E = {
     publicName: 'E2E 公开广场赛',
     hiddenName: 'E2E 广场隐藏邀请赛',
     generateName: 'E2E 一键生成赛',
+    // 锁定范围回归（bugfix-competition-lock-scope）：公开赛不锁、邀请赛仍锁、管理员免锁。
+    publicNoLockName: 'E2E 公开赛自由进出赛',
+    inviteLockName: 'E2E 邀请赛仍锁对照赛',
+    adminNoLockName: 'E2E 邀请赛管理员免锁赛',
   },
   // 删除旅程专用包（独立 slug，避免与 e2e-test 种子冲突）：
   // spec 内经 UI 上传→发布→删除，验证两侧消失。
