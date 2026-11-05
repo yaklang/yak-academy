@@ -251,7 +251,33 @@ export interface InstanceLog {
   detail: string
   created_at: string
 }
-export interface LeaderboardEntry { rank: number; username: string; score: number; solved_count: number }
+// 全站排行榜（事件派生只读投影）：分页名次 + 全场前三 + 我的排名 + 聚合统计 + 积分分布。
+export interface LeaderboardEntry {
+  rank: number
+  username: string
+  score: number
+  solved_count: number
+  last_active_at: string | null
+}
+export interface LeaderboardStats {
+  participants: number
+  total_score: number
+  total_solves: number
+  average_score: number
+  top_score: number
+  updated_at: string | null
+}
+export interface ScoreDistributionBand { label: string; count: number }
+export interface LeaderboardView {
+  total: number
+  page: number
+  page_size: number
+  items: LeaderboardEntry[]
+  top: LeaderboardEntry[]
+  me: LeaderboardEntry | null
+  stats: LeaderboardStats
+  distribution: ScoreDistributionBand[]
+}
 // 徽章（计算型读模型：积分/进度/路径派生数据的实时投影，不落库）。
 export interface Badge { code: string; title: string; description: string; earned: boolean }
 export interface ContentPackage {
@@ -530,7 +556,8 @@ export const performanceApi = {
 
 export const progressApi = {
   mine: () => http.get<{ xp: number; completed_rooms: number; in_progress_rooms: number }>('/progress'),
-  leaderboard: (page = 1) => http.get<Paged<LeaderboardEntry>>(`/leaderboard?page=${page}`),
+  leaderboard: (page = 1, pageSize = 20) =>
+    http.get<LeaderboardView>(`/leaderboard?page=${page}&page_size=${pageSize}`),
 }
 
 export const badgeApi = {

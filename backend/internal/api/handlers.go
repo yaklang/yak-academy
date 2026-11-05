@@ -927,7 +927,7 @@ func (h *Handlers) getBuiltinImageStatus(w http.ResponseWriter, req *http.Reques
 }
 
 // getBuiltinTutorials 管理端：内置训练集教程目录与导入状态
-//（教程管理页「内置训练集」区块；内置教程只读，更新走一键导入）。
+// （教程管理页「内置训练集」区块；内置教程只读，更新走一键导入）。
 func (h *Handlers) getBuiltinTutorials(w http.ResponseWriter, req *http.Request) {
 	res, err := h.Content.BuiltinTutorialCatalog(req.Context())
 	if err != nil {
@@ -950,7 +950,7 @@ func (h *Handlers) buildBuiltinImage(w http.ResponseWriter, req *http.Request) {
 }
 
 // getYakEngineStatus 管理端：yak 判题引擎装配态与下载任务进度
-//（题目管理 ACM tab 状态卡；轮询数据源）。
+// （题目管理 ACM tab 状态卡；轮询数据源）。
 func (h *Handlers) getYakEngineStatus(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, h.Judge.YakEngineStatus())
 }
@@ -1091,14 +1091,13 @@ func (h *Handlers) myProgress(w http.ResponseWriter, req *http.Request) {
 
 func (h *Handlers) leaderboard(w http.ResponseWriter, req *http.Request) {
 	page, pageSize := pageParams(req)
-	items, total, err := h.Progress.Leaderboard(req.Context(), (page-1)*pageSize, pageSize)
+	user := UserFrom(req.Context())
+	view, err := h.Progress.Leaderboard(req.Context(), user.ID, page, pageSize)
 	if err != nil {
 		mapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"total": total, "page": page, "page_size": pageSize, "items": items,
-	})
+	writeJSON(w, http.StatusOK, view)
 }
 
 // checkpoint 环境检测点回调（公开接口，token 即能力凭证）：

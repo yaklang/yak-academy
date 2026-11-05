@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
@@ -33,29 +34,120 @@ func (s *UserProgressService) MyProgress(ctx context.Context, userID uint) (map[
 		xp = rec.Score
 	}
 	return map[string]any{
-		"xp":                 xp,
-		"completed_rooms":    completed,
-		"in_progress_rooms":  inProgress,
+		"xp":                xp,
+		"completed_rooms":   completed,
+		"in_progress_rooms": inProgress,
 	}, nil
 }
 
 // LeaderboardEntry 排行榜条目（含用户名组装，契约 LeaderboardEntry schema）。
 type LeaderboardEntry struct {
-	Rank       int    `json:"rank"`
-	Username   string `json:"username"`
-	Score      int    `json:"score"`
-	SolveCount int    `json:"solved_count"`
+	Rank         int     `json:"rank"`
+	Username     string  `json:"username"`
+	Score        int     `json:"score"`
+	SolveCount   int     `json:"solved_count"`
+	LastActiveAt *string `json:"last_active_at"`
+}
+
+// LeaderboardStats 全站排行榜聚合（事件派生表只读统计）。
+type LeaderboardStats struct {
+	Participants int64   `json:"participants"`
+	TotalScore   int64   `json:"total_score"`
+	TotalSolves  int64   `json:"total_solves"`
+	AverageScore int     `json:"average_score"`
+	TopScore     int     `json:"top_score"`
+	UpdatedAt    *string `json:"updated_at"`
+}
+
+// ScoreDistributionBand 积分分布区间：标签与分档由 service 生成，
+// repo 只返回 score/step 桶计数（展示文案不进数据层）。
+type ScoreDistributionBand struct {
+	Label string `json:"label"`
+	Count int64  `json:"count"`
+}
+
+// LeaderboardView 排行榜整页响应：分页名次 + 全场前三 + 当前用户 +
+// 聚合统计 + 积分分布。所有数据来自事件派生表，只读。
+type LeaderboardView struct {
+	Total        int64                   `json:"total"`
+	Page         int                     `json:"page"`
+	PageSize     int                     `json:"page_size"`
+	Items        []LeaderboardEntry      `json:"items"`
+	Top          []LeaderboardEntry      `json:"top"`
+	Me           *LeaderboardEntry       `json:"me"`
+	Stats        LeaderboardStats        `json:"stats"`
+	Distribution []ScoreDistributionBand `json:"distribution"`
 }
 
 // Leaderboard 排行榜（派生数据视图）。rank = 1 + 严格靠前记录数：
 // 同分同解决数并列同名次，且跨页一致（count-based，替代 offset+i+1 的分页错位）。
-func (s *UserProgressService) Leaderboard(ctx context.Context, offset, limit int) ([]LeaderboardEntry, int64, error) {
-	records, total, err := s.scores.Leaderboard(ctx, offset, limit)
-	if err != nil {
-		return nil, 0, err
+// top 固定取全场前三（任何分页都返回）；me 不受分页限制（未上榜为 nil）。
+func (s *UserProgressService) Leaderboard(ctx context.Context, userID uint, page, pageSize int) (*LeaderboardView, error) {
+	if page < 1 {
+		page = 1
 	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	records, total, err := s.scores.Leaderboard(ctx, (page-1)*pageSize, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.leaderboardEntries(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+	topRecords, _, err := s.scores.Leaderboard(ctx, 0, 3)
+	if err != nil {
+		return nil, err
+	}
+	top, err := s.leaderboardEntries(ctx, topRecords)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.scores.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	buckets, err := s.scores.ScoreBuckets(ctx, distributionStep(stats.MaxScore))
+	if err != nil {
+		return nil, err
+	}
+	me, err := s.leaderboardMe(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	avg := 0
+	if stats.Participants > 0 {
+		avg = int(stats.TotalScore / stats.Participants)
+	}
+	view := &LeaderboardView{
+		Total:        total,
+		Page:         page,
+		PageSize:     pageSize,
+		Items:        items,
+		Top:          top,
+		Me:           me,
+		Stats:        LeaderboardStats{Participants: stats.Participants, TotalScore: stats.TotalScore, TotalSolves: stats.TotalSolves, AverageScore: avg, TopScore: stats.MaxScore, UpdatedAt: formatOptionalTime(stats.LastActiveAt)},
+		Distribution: buildDistribution(stats.MaxScore, buckets),
+	}
+	if view.Items == nil {
+		view.Items = []LeaderboardEntry{}
+	}
+	if view.Top == nil {
+		view.Top = []LeaderboardEntry{}
+	}
+	if view.Distribution == nil {
+		view.Distribution = []ScoreDistributionBand{}
+	}
+	return view, nil
+}
+
+// leaderboardEntries 把派生行组装为契约条目（用户名 + count-based 名次）。
+func (s *UserProgressService) leaderboardEntries(ctx context.Context, records []model.ScoreRecord) ([]LeaderboardEntry, error) {
+	entries := make([]LeaderboardEntry, 0, len(records))
 	if len(records) == 0 {
-		return []LeaderboardEntry{}, total, nil
+		return entries, nil
 	}
 	ids := make([]uint, len(records))
 	for i, r := range records {
@@ -63,24 +155,121 @@ func (s *UserProgressService) Leaderboard(ctx context.Context, offset, limit int
 	}
 	users, err := s.users.FindByIDs(ctx, ids...)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	names := make(map[uint]string, len(users))
 	for _, u := range users {
 		names[u.ID] = u.Username
 	}
-	entries := make([]LeaderboardEntry, len(records))
-	for i, r := range records {
+	for _, r := range records {
 		ahead, err := s.scores.CountAhead(ctx, r.Score, r.SolveCount)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
-		entries[i] = LeaderboardEntry{
-			Rank: int(ahead) + 1, Username: names[r.UserID],
-			Score: r.Score, SolveCount: r.SolveCount,
+		name := names[r.UserID]
+		if name == "" {
+			name = fmt.Sprintf("用户 #%d", r.UserID)
+		}
+		entries = append(entries, LeaderboardEntry{
+			Rank: int(ahead) + 1, Username: name,
+			Score: r.Score, SolveCount: r.SolveCount, LastActiveAt: formatOptionalTime(&r.UpdatedAt),
+		})
+	}
+	return entries, nil
+}
+
+// leaderboardMe 当前用户排名（未上榜返回 nil, nil；排行榜页「我的位置」用）。
+func (s *UserProgressService) leaderboardMe(ctx context.Context, userID uint) (*LeaderboardEntry, error) {
+	rec, err := s.scores.Get(ctx, userID)
+	if err != nil {
+		if errorsIsNotFound(err) {
+			return nil, nil // 未产生积分记录 = 未上榜
+		}
+		return nil, err
+	}
+	users, err := s.users.FindByIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	name := ""
+	if len(users) > 0 {
+		name = users[0].Username
+	}
+	if name == "" {
+		name = fmt.Sprintf("用户 #%d", userID)
+	}
+	ahead, err := s.scores.CountAhead(ctx, rec.Score, rec.SolveCount)
+	if err != nil {
+		return nil, err
+	}
+	return &LeaderboardEntry{
+		Rank: int(ahead) + 1, Username: name,
+		Score: rec.Score, SolveCount: rec.SolveCount, LastActiveAt: formatOptionalTime(&rec.UpdatedAt),
+	}, nil
+}
+
+func formatOptionalTime(t *time.Time) *string {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	v := t.UTC().Format(time.RFC3339)
+	return &v
+}
+
+// distributionStep 根据榜首积分选取 5 档的档宽（1/2/2.5/5/10 × 10^n）。
+func distributionStep(maxScore int) int {
+	raw := (maxScore + 4) / 5 // ceil(max/5)
+	if raw < 1 {
+		return 1
+	}
+	pow := 1
+	for pow*10 <= raw {
+		pow *= 10
+	}
+	candidates := []int{pow, 2 * pow, 5 * pow, 10 * pow}
+	if pow >= 10 {
+		candidates = []int{pow, 2 * pow, pow * 5 / 2, 5 * pow, 10 * pow}
+	}
+	for _, c := range candidates {
+		if c >= raw {
+			return c
 		}
 	}
-	return entries, total, nil
+	return 10 * pow
+}
+
+// buildDistribution 将 repo 的整数桶组装为展示区间；负分单独一档。
+// 非负分固定 5 档，总数与 participants 对得上（最后一档吸收所有 >=4*step 的桶）。
+func buildDistribution(maxScore int, buckets []repo.ScoreBucket) []ScoreDistributionBand {
+	counts := make(map[int]int64, len(buckets))
+	for _, b := range buckets {
+		counts[b.Bucket] += b.Count
+	}
+	out := make([]ScoreDistributionBand, 0, 6)
+	if n := counts[-1]; n > 0 {
+		out = append(out, ScoreDistributionBand{Label: "负分", Count: n})
+	}
+	if maxScore <= 0 {
+		if n := counts[0]; n > 0 {
+			out = append(out, ScoreDistributionBand{Label: "0", Count: n})
+		}
+		return out
+	}
+	step := distributionStep(maxScore)
+	for i := 0; i < 5; i++ {
+		count := counts[i]
+		label := fmt.Sprintf("%d–%d", i*step, (i+1)*step-1)
+		if i == 4 {
+			label = fmt.Sprintf("%d+", 4*step)
+			for b, n := range counts {
+				if b >= 4 {
+					count += n
+				}
+			}
+		}
+		out = append(out, ScoreDistributionBand{Label: label, Count: count})
+	}
+	return out
 }
 
 // Deriver 事件派生器：消费事件 → 增量更新 ScoreRecord/Progress/CompetitionScore。

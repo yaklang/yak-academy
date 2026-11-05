@@ -263,6 +263,23 @@ components:
         username: { type: string }
         score: { type: integer }
         solved_count: { type: integer }
+        last_active_at: { type: string, format: date-time, nullable: true, description: 最近一次积分变动时间（通关得分或提示扣分） }
+    LeaderboardStats:
+      type: object
+      description: 全站排行榜聚合（事件派生表的只读统计）
+      properties:
+        participants: { type: integer, description: 有积分记录的上榜学员数 }
+        total_score: { type: integer, description: 累计积分（含提示扣分） }
+        total_solves: { type: integer, description: 累计通关题次 }
+        average_score: { type: integer, description: 平均积分（向下取整） }
+        top_score: { type: integer, description: 榜首积分（相对分数条基准） }
+        updated_at: { type: string, format: date-time, nullable: true, description: 最近一次积分变动时间 }
+    ScoreDistributionBand:
+      type: object
+      description: 积分分布区间（按榜首积分动态分 5 档，负分单独一档）
+      properties:
+        label: { type: string, description: 区间标签（如 0–19、100+、负分） }
+        count: { type: integer, description: 落在该区间的学员数 }
     Badge:
       type: object
       properties:
@@ -1584,20 +1601,33 @@ paths:
   /leaderboard:
     get:
       tags: [student]
-      summary: 排行榜（事件派生数据）
+      summary: 排行榜（事件派生数据：分页名次 + 全场前三 + 当前用户排名 + 聚合统计 + 积分分布）
+      description: >
+        按积分降序、通关数降序排序；同分同通关数并列同名次（count-based，跨页一致）。
+        所有字段来自 score_records 派生表，只读，不做任何直接改写。
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, default: 20, maximum: 100 } }
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    properties:
-                      items: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' } }
+                type: object
+                properties:
+                  total: { type: integer, description: 上榜学员总数 }
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' } }
+                  top: { type: array, items: { $ref: '#/components/schemas/LeaderboardEntry' }, description: 全场前三（任意页都返回，供领奖台展示） }
+                  me:
+                    allOf:
+                      - $ref: '#/components/schemas/LeaderboardEntry'
+                    nullable: true
+                    description: 当前用户排名（未上榜为 null；不受分页限制）
+                  stats: { $ref: '#/components/schemas/LeaderboardStats' }
+                  distribution: { type: array, items: { $ref: '#/components/schemas/ScoreDistributionBand' }, description: 积分分布（按榜首积分动态分档，负分单独一档） }
 
   /badges:
     get:
