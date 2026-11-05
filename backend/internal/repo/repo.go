@@ -238,6 +238,27 @@ type ScoreRepo interface {
 	// CountAhead 统计 (score, solve_count) 严格靠前的记录数：rank = 1 + CountAhead，
 	// 并列同名次且跨页一致（服务端分页下 offset+i+1 会错位）。
 	CountAhead(ctx context.Context, score, solveCount int) (int64, error)
+	// Stats 全站积分聚合（人数/总分/总解题/最高分/最近变动时间），排行榜页头用。
+	Stats(ctx context.Context) (ScoreStats, error)
+	// ScoreBuckets 按 score/step 分组计数（负分统一 bucket=-1）；区间标签由
+	// service 组装，repo 不感知展示文案。
+	ScoreBuckets(ctx context.Context, step int) ([]ScoreBucket, error)
+}
+
+// ScoreStats 积分派生表的全站聚合（只读）。
+type ScoreStats struct {
+	Participants int64
+	TotalScore   int64
+	TotalSolves  int64
+	MaxScore     int
+	MinScore     int
+	LastActiveAt *time.Time
+}
+
+// ScoreBucket 积分分组计数：Bucket=-1 表示负分，其余为 score/step 的整数桶。
+type ScoreBucket struct {
+	Bucket int
+	Count  int64
 }
 
 type ProgressRepo interface {

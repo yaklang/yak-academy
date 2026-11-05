@@ -236,18 +236,72 @@ func TestLeaderboardAssemblesEntries(t *testing.T) {
 	if err := repo.NewScoreRepo(gdb).UpdateScore(ctx, 2, 50, 1); err != nil {
 		t.Fatal(err)
 	}
-	entries, total, err := svc.Leaderboard(ctx, 0, 20)
+	view, err := svc.Leaderboard(ctx, 1, 1, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 2 || len(entries) != 2 {
-		t.Fatalf("total=%d len=%d, want 2/2", total, len(entries))
+	if view.Total != 2 || len(view.Items) != 2 {
+		t.Fatalf("total=%d len=%d, want 2/2", view.Total, len(view.Items))
 	}
-	if entries[0].Rank != 1 || entries[0].Username != "alice" || entries[0].Score != 100 || entries[0].SolveCount != 2 {
-		t.Fatalf("entry[0] = %+v", entries[0])
+	if view.Items[0].Rank != 1 || view.Items[0].Username != "alice" || view.Items[0].Score != 100 || view.Items[0].SolveCount != 2 {
+		t.Fatalf("entry[0] = %+v", view.Items[0])
 	}
-	if entries[1].Rank != 2 || entries[1].Username != "bob" {
-		t.Fatalf("entry[1] = %+v", entries[1])
+	if view.Items[1].Rank != 2 || view.Items[1].Username != "bob" {
+		t.Fatalf("entry[1] = %+v", view.Items[1])
+	}
+	// 全场前三与我的排名不受分页影响；统计与积分分布来自派生表聚合。
+	if len(view.Top) != 2 || view.Top[0].Username != "alice" {
+		t.Fatalf("top = %+v", view.Top)
+	}
+	if view.Me == nil || view.Me.Rank != 1 || view.Me.Username != "alice" {
+		t.Fatalf("me = %+v", view.Me)
+	}
+	s := view.Stats
+	if s.Participants != 2 || s.TotalScore != 150 || s.TotalSolves != 3 || s.AverageScore != 75 || s.TopScore != 100 {
+		t.Fatalf("stats = %+v", s)
+	}
+	if s.UpdatedAt == nil || view.Items[0].LastActiveAt == nil {
+		t.Fatalf("timestamps should be present: stats=%+v entry=%+v", s, view.Items[0])
+	}
+	// max=100 → 档宽 20：bob(50) 落 40–59，alice(100) 落 80+。
+	if len(view.Distribution) != 5 || view.Distribution[2].Count != 1 || view.Distribution[4].Count != 1 || view.Distribution[4].Label != "80+" {
+		t.Fatalf("distribution = %+v", view.Distribution)
+	}
+}
+
+func TestLeaderboardEmpty(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:lbrdempty?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(gdb); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		sqlDB, _ := gdb.DB()
+		sqlDB.Close()
+	})
+	ctx := context.Background()
+	users := repo.NewUserRepo(gdb)
+	if err := users.Create(ctx, &model.User{Username: "alice", GlobalRole: model.GlobalRoleStudent}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewUserProgressService(repo.NewScoreRepo(gdb), repo.NewProgressRepo(gdb), users)
+	view, err := svc.Leaderboard(ctx, 1, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Total != 0 || view.Items == nil || len(view.Items) != 0 {
+		t.Fatalf("total=%d items=%v, want 0/empty", view.Total, view.Items)
+	}
+	if view.Top == nil || len(view.Top) != 0 || view.Me != nil {
+		t.Fatalf("top=%v me=%+v, want empty/nil", view.Top, view.Me)
+	}
+	if view.Stats.Participants != 0 || view.Stats.TotalScore != 0 || view.Stats.AverageScore != 0 || view.Stats.UpdatedAt != nil {
+		t.Fatalf("stats = %+v, want zero", view.Stats)
+	}
+	if view.Distribution == nil || len(view.Distribution) != 0 {
+		t.Fatalf("distribution = %v, want empty", view.Distribution)
 	}
 }
 
@@ -282,19 +336,78 @@ func TestLeaderboardTiesShareRankAcrossPages(t *testing.T) {
 	if err := scores.UpdateScore(ctx, 3, 50, 1); err != nil {
 		t.Fatal(err)
 	}
-	page1, _, err := svc.Leaderboard(ctx, 0, 2)
+	page1, err := svc.Leaderboard(ctx, 1, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page1[0].Rank != 1 || page1[1].Rank != 2 {
-		t.Fatalf("page1 ranks = %d,%d, want 1,2", page1[0].Rank, page1[1].Rank)
+	if len(page1.Items) != 2 || page1.Items[0].Rank != 1 || page1.Items[1].Rank != 2 {
+		t.Fatalf("page1 ranks = %+v, want 1,2", page1.Items)
 	}
 	// 第二页的并列者必须仍是 rank 2（count-based），而非 offset 错位的 3。
-	page2, _, err := svc.Leaderboard(ctx, 2, 2)
+	page2, err := svc.Leaderboard(ctx, 1, 2, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page2) != 1 || page2[0].Rank != 2 {
-		t.Fatalf("page2 = %+v, want single entry with rank 2", page2)
+	if len(page2.Items) != 1 || page2.Items[0].Rank != 2 {
+		t.Fatalf("page2 = %+v, want single entry with rank 2", page2.Items)
+	}
+}
+
+// TestDistributionBands 积分分布是纯展示派生：负分单独一档，非负分固定
+// 5 档且最后一档吸收所有越界桶；总数必须与 participants 一致。
+func TestDistributionBands(t *testing.T) {
+	cases := []struct {
+		name    string
+		max     int
+		buckets []repo.ScoreBucket
+		want    []ScoreDistributionBand
+	}{
+		{
+			name: "zero score", max: 0,
+			buckets: []repo.ScoreBucket{{Bucket: 0, Count: 3}},
+			want:    []ScoreDistributionBand{{Label: "0", Count: 3}},
+		},
+		{
+			name: "negative band", max: 0,
+			buckets: []repo.ScoreBucket{{Bucket: -1, Count: 2}, {Bucket: 0, Count: 3}},
+			want:    []ScoreDistributionBand{{Label: "负分", Count: 2}, {Label: "0", Count: 3}},
+		},
+		{
+			name: "100 top", max: 100,
+			buckets: []repo.ScoreBucket{{Bucket: 0, Count: 1}, {Bucket: 2, Count: 1}, {Bucket: 5, Count: 1}},
+			want: []ScoreDistributionBand{
+				{Label: "0–19", Count: 1}, {Label: "20–39", Count: 0}, {Label: "40–59", Count: 1},
+				{Label: "60–79", Count: 0}, {Label: "80+", Count: 1},
+			},
+		},
+		{
+			name: "50 top", max: 50,
+			buckets: []repo.ScoreBucket{{Bucket: 0, Count: 2}, {Bucket: 1, Count: 3}, {Bucket: 5, Count: 1}},
+			want: []ScoreDistributionBand{
+				{Label: "0–9", Count: 2}, {Label: "10–19", Count: 3}, {Label: "20–29", Count: 0},
+				{Label: "30–39", Count: 0}, {Label: "40+", Count: 1},
+			},
+		},
+		{
+			name: "large top", max: 12345,
+			buckets: []repo.ScoreBucket{{Bucket: 0, Count: 4}, {Bucket: 9, Count: 2}},
+			want: []ScoreDistributionBand{
+				{Label: "0–2499", Count: 4}, {Label: "2500–4999", Count: 0}, {Label: "5000–7499", Count: 0},
+				{Label: "7500–9999", Count: 0}, {Label: "10000+", Count: 2},
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := buildDistribution(c.max, c.buckets)
+			if len(got) != len(c.want) {
+				t.Fatalf("bands = %+v, want %+v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("band[%d] = %+v, want %+v", i, got[i], c.want[i])
+				}
+			}
+		})
 	}
 }

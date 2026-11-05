@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,7 +60,7 @@ func NewScoreRepo(db *gorm.DB) ScoreRepo { return &scoreRepo{db} }
 // UpdateScore 原子累加积分/通关数（upsert）。ON CONFLICT 语法 SQLite ≥3.24 与
 // PostgreSQL 均原生支持；已有行列必须表名限定（PG 中裸列名与 excluded 同名
 // 列歧义报 42702，SQLite 同样接受限定写法）；时间戳走绑定参数
-//（datetime('now') 是 SQLite 方言）。仅派生器调用（event-sourcing-rules skill）。
+// （datetime('now') 是 SQLite 方言）。仅派生器调用（event-sourcing-rules skill）。
 func (r *scoreRepo) UpdateScore(ctx context.Context, userID uint, delta, solveDelta int) error {
 	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO score_records (user_id, score, solve_count, updated_at)
@@ -87,9 +88,67 @@ func (r *scoreRepo) Leaderboard(ctx context.Context, offset, limit int) ([]model
 	if err := r.db.WithContext(ctx).Model(&model.ScoreRecord{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err := r.db.WithContext(ctx).Order("score DESC, solve_count DESC").
+	// 同分并列同名次；updated_at/user_id 只做稳定排序，保证分页不重不漏。
+	err := r.db.WithContext(ctx).Order("score DESC, solve_count DESC, updated_at ASC, user_id ASC").
 		Offset(offset).Limit(limit).Find(&list).Error
 	return list, total, err
+}
+
+// Stats 全站积分聚合 + 最近变动时间：排行榜 KPI 与我的排名共用。
+func (r *scoreRepo) Stats(ctx context.Context) (ScoreStats, error) {
+	var row struct {
+		Participants int64
+		TotalScore   int64
+		TotalSolves  int64
+		MaxScore     int
+		MinScore     int
+	}
+	err := r.db.WithContext(ctx).Model(&model.ScoreRecord{}).
+		Select(`COUNT(*) AS participants,
+			COALESCE(SUM(score), 0) AS total_score,
+			COALESCE(SUM(solve_count), 0) AS total_solves,
+			COALESCE(MAX(score), 0) AS max_score,
+			COALESCE(MIN(score), 0) AS min_score`).
+		Scan(&row).Error
+	if err != nil {
+		return ScoreStats{}, err
+	}
+	stats := ScoreStats{
+		Participants: row.Participants,
+		TotalScore:   row.TotalScore,
+		TotalSolves:  row.TotalSolves,
+		MaxScore:     row.MaxScore,
+		MinScore:     row.MinScore,
+	}
+	if row.Participants == 0 {
+		return stats, nil
+	}
+	// MAX(updated_at) 在 SQLite 驱动中返回字符串，直接扫 time.Time 会失败；
+	// 单独取最新一行交给 GORM 解析时间，SQLite/PostgreSQL 行为一致。
+	var last model.ScoreRecord
+	err = r.db.WithContext(ctx).Model(&model.ScoreRecord{}).
+		Select("updated_at").Order("updated_at DESC").Limit(1).Take(&last).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return stats, nil
+	}
+	if err != nil {
+		return ScoreStats{}, err
+	}
+	stats.LastActiveAt = &last.UpdatedAt
+	return stats, nil
+}
+
+// ScoreBuckets 按 score/step 整数桶分组；负分归入 bucket=-1。
+// 整数除法在 SQLite/PostgreSQL 均为截断语义，负分单独分流避免与 0 混桶。
+func (r *scoreRepo) ScoreBuckets(ctx context.Context, step int) ([]ScoreBucket, error) {
+	if step < 1 {
+		step = 1
+	}
+	var rows []ScoreBucket
+	err := r.db.WithContext(ctx).Model(&model.ScoreRecord{}).
+		Select("CASE WHEN score < 0 THEN -1 ELSE score / ? END AS bucket, COUNT(*) AS count", step).
+		Group("bucket").Order("bucket").Scan(&rows).Error
+	return rows, err
 }
 
 func (r *scoreRepo) CountAhead(ctx context.Context, score, solveCount int) (int64, error) {
@@ -117,7 +176,7 @@ func (r *progressRepo) MarkInProgress(ctx context.Context, userID uint, roomSlug
 }
 
 // DeleteByRoomSlugs 派生表唯一例外写路径：内容包删除时清理被删 Room 的进度行
-//（event-sourcing-rules skill「内容包删除例外」；deriver 对不存在 Room 的
+// （event-sourcing-rules skill「内容包删除例外」；deriver 对不存在 Room 的
 // room.completed 事件跳过，重放不复活已删进度）。
 func (r *progressRepo) DeleteByRoomSlugs(ctx context.Context, roomSlugs []string) (int64, error) {
 	if len(roomSlugs) == 0 {
@@ -129,8 +188,8 @@ func (r *progressRepo) DeleteByRoomSlugs(ctx context.Context, roomSlugs []string
 
 func (r *progressRepo) Stats(ctx context.Context, userID uint) (completed, inProgress int, err error) {
 	var row struct {
-		Completed   int64
-		InProgress  int64
+		Completed  int64
+		InProgress int64
 	}
 	err = r.db.WithContext(ctx).Model(&model.Progress{}).
 		Select(`SUM(CASE WHEN completed THEN 1 ELSE 0 END) AS completed,
