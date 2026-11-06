@@ -865,7 +865,11 @@ func (s *CompetitionService) teamOverview(ctx context.Context, id uint, teams []
 	out := make([]TeamLeaderboardEntry, 0, len(teams))
 	for _, t := range teams {
 		name := t.Name
-		out = append(out, TeamLeaderboardEntry{TeamID: t.ID, TeamName: &name, Members: members[t.ID]})
+		memberNames := members[t.ID]
+		if memberNames == nil {
+			memberNames = []string{}
+		}
+		out = append(out, TeamLeaderboardEntry{TeamID: t.ID, TeamName: &name, Members: memberNames})
 	}
 	return out, nil
 }

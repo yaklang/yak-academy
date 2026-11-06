@@ -362,6 +362,28 @@ func TestImportParticipantsResolvesReferencesAndReportsMissing(t *testing.T) {
 	if alicePart.ID == 0 || alicePart.InviteCode == "" || alicePart.TeamID == 0 {
 		t.Fatalf("alice participant not linked: %+v", alicePart)
 	}
+	// 队伍总览的空队成员必须是 [] 而不是 null：前端按数组成员渲染，
+	// null 会在导入结果弹窗打开时打断 Vue 更新。
+	emptyTeam := &model.Team{CompetitionID: comp.ID, Name: "空队"}
+	if err := compRepo.CreateTeam(ctx, emptyTeam); err != nil {
+		t.Fatalf("create empty team: %v", err)
+	}
+	_, overview, _, err := e.comps.AdminParticipants(ctx, comp.ID, 1, 20)
+	if err != nil {
+		t.Fatalf("admin participants: %v", err)
+	}
+	emptyFound := false
+	for _, team := range overview {
+		if team.TeamName != nil && *team.TeamName == "空队" {
+			emptyFound = true
+			if team.Members == nil {
+				t.Fatalf("empty team members must be an array, got nil")
+			}
+		}
+	}
+	if !emptyFound {
+		t.Fatalf("empty team missing from overview: %+v", overview)
+	}
 	// 重复导入幂等：不重建参赛行、沿用邀请码、missing 稳定。
 	res2, err := e.comps.ImportParticipants(ctx, comp.ID, req)
 	if err != nil {
