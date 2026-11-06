@@ -14,7 +14,9 @@ type UserRepo interface {
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	FindByID(ctx context.Context, id uint) (*model.User, error)
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
-	// FindByPhone 注册手机号查重（自助注册）。调用前应保证 phone 非空。
+	// FindByEmail 注册邮箱查重（邮箱自助注册）。调用前应保证 email 非空且已小写归一。
+	FindByEmail(ctx context.Context, email string) (*model.User, error)
+	// FindByPhone 旧版注册手机号查重（兼容保留）。调用前应保证 phone 非空。
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	// FindByAccountCode 账号编码查人（邀请赛表格导入解析编码引用）。
 	FindByAccountCode(ctx context.Context, code string) (*model.User, error)
@@ -32,7 +34,7 @@ type UserRepo interface {
 }
 
 // UserListFilter 管理端用户列表过滤（零值 = 不过滤）：Q 对用户名/账号编码/
-// 手机号做 LOWER LIKE 子串匹配（方言中立）；Role 空 = 不限角色；Active nil =
+// 邮箱/手机号做 LOWER LIKE 子串匹配（方言中立）；Role 空 = 不限角色；Active nil =
 // 不限（true = 活跃，false = 6 个月不活跃）；NoSolves nil = 不限（true = 从未
 // 完成题目，false = 完成过）；Now 为活跃判定基准时刻（零值取 time.Now，测试可注入）。
 type UserListFilter struct {
@@ -51,15 +53,20 @@ type UserItem struct {
 	SolvedAny bool `json:"solved_any"`
 }
 
-// SmsCodeRepo 手机验证码（自助注册/找回密码）：发码入库、限频计数、核销。
-// 查询按 purpose（register / password_reset）隔离：一种用途的码不可被另一种用途核销。
+// SmsCodeRepo 验证码（邮箱注册/找回密码为邮箱码，旧版手机号注册为短信码）：
+// 发码入库、限频计数、核销。查询按 purpose（register / password_reset）隔离：
+// 一种用途的码不可被另一种用途核销；手机号与邮箱各自独立计数。
 type SmsCodeRepo interface {
 	Create(ctx context.Context, c *model.SmsCode) error
 	// LatestByPhone 该手机号指定用途最近一条验证码（含已用/已过期，供核销判定）；
 	// gorm.ErrRecordNotFound = 从未发过。
 	LatestByPhone(ctx context.Context, phone, purpose string) (*model.SmsCode, error)
-	// CountSince 该手机号指定用途 windowStart 之后已发送条数（限频窗口计数）。
-	CountSince(ctx context.Context, phone, purpose string, windowStart time.Time) (int64, error)
+	// LatestByEmail 该邮箱指定用途最近一条验证码；语义同 LatestByPhone。
+	LatestByEmail(ctx context.Context, email, purpose string) (*model.SmsCode, error)
+	// CountSinceByPhone 该手机号指定用途 windowStart 之后已发送条数（限频窗口计数）。
+	CountSinceByPhone(ctx context.Context, phone, purpose string, windowStart time.Time) (int64, error)
+	// CountSinceByEmail 该邮箱指定用途 windowStart 之后已发送条数。
+	CountSinceByEmail(ctx context.Context, email, purpose string, windowStart time.Time) (int64, error)
 	// MarkUsed 核销（一次性；返回 0 = 已被并发核销或不存在）。
 	MarkUsed(ctx context.Context, id uint) (int64, error)
 }

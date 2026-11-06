@@ -2,13 +2,18 @@
 import { http } from './client'
 
 export interface TokenResponse { token: string; expires_at: string }
+export interface VerificationCodeResponse { ok: boolean; retry_after?: number; code?: string }
+// 找回密码的账号标识：邮箱（主通道）或旧账号手机号，必须二选一。
+export interface AccountIdentifier { email?: string; phone?: string }
 // account_code：学号式账号编码（YA{YY}-{NNNNN}，建号时按年分配；旧库迁移行可能为空串）。
+// email/phone：注册凭据（邮箱主通道；旧手机号账号/导入建号对应字段可为空）。
 // last_login_at：最近登录（从未登录为 null；管理端不活跃判定 = 最近登录或注册超 6 个月）。
 export interface User {
   id: number
   username: string
   global_role: 'student' | 'admin'
   account_code: string
+  email: string
   phone: string
   bio: string
   last_login_at: string | null
@@ -336,19 +341,23 @@ export const adminApi = {
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),
-  // 注册发码：限频时后端不报错，返回 200 + retry_after（秒），前端据此倒计时。
-  // code 回显默认开启（生产严格模式默认关闭，可用 ACADEMY_SMS_SHOW_CODE 覆盖）。
+  // 注册发码（邮箱主通道）：限频时后端不报错，返回 200 + retry_after（秒）。
+  // code 仅本地演示回显模式返回（生产默认关闭，严格模式禁止开启）。
+  sendEmailCode: (email: string) =>
+    http.post<VerificationCodeResponse>('/auth/email/code', { email }),
+  // 旧版手机号注册发码（兼容保留，当前页面不再使用）。
   sendSmsCode: (phone: string) =>
-    http.post<{ ok: boolean; retry_after?: number; code?: string }>('/auth/sms/code', { phone }),
+    http.post<VerificationCodeResponse>('/auth/sms/code', { phone }),
   // 凭验证码建号（角色固定 student），成功直接返回登录 token。
-  register: (phone: string, code: string, username: string, password: string) =>
-    http.post<TokenResponse>('/auth/register', { phone, code, username, password }),
-  // 找回密码发码：限频语义同注册发码（200 + retry_after；code 回显默认开启）。
-  sendResetCode: (phone: string) =>
-    http.post<{ ok: boolean; retry_after?: number; code?: string }>('/auth/password-reset/code', { phone }),
-  // 凭找回验证码重置密码；返回用户名与账号编码（忘记用户名的学员凭手机号找回账号）。
-  resetPassword: (phone: string, code: string, newPassword: string) =>
+  register: (email: string, code: string, username: string, password: string) =>
+    http.post<TokenResponse>('/auth/register', { email, code, username, password }),
+  // 找回密码发码：email / phone 二选一；限频语义同注册发码。
+  sendResetCode: (identifier: AccountIdentifier) =>
+    http.post<VerificationCodeResponse>('/auth/password-reset/code', identifier),
+  // 凭找回验证码重置密码；返回用户名与账号编码（忘记用户名也可完整找回）。
+  resetPassword: ({ email, phone, code, newPassword }: AccountIdentifier & { code: string; newPassword: string }) =>
     http.post<{ username: string; account_code: string }>('/auth/password-reset', {
+      email,
       phone,
       code,
       new_password: newPassword,

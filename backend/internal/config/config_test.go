@@ -17,6 +17,7 @@ func TestStrictViolations(t *testing.T) {
 		{"short secret", Config{JWTSecret: "short", AdminPassword: strongPass}, 1},
 		{"short password", Config{JWTSecret: strongSecret, AdminPassword: "short"}, 1},
 		{"strong credentials", Config{JWTSecret: strongSecret, AdminPassword: strongPass}, 0},
+		{"strict mode rejects verification echo", Config{JWTSecret: strongSecret, AdminPassword: strongPass, VerificationShowCode: true}, 1},
 	}
 	for _, c := range cases {
 		if got := len(c.cfg.StrictViolations()); got != c.want {
@@ -25,31 +26,51 @@ func TestStrictViolations(t *testing.T) {
 	}
 }
 
-// TestSmsShowCodeDefault 回显默认值：非严格模式默认开（学员直接看到验证码），
-// 生产严格模式默认关（避免找回验证码被任意请求方读取）；显式 0/1 恒优先。
-func TestSmsShowCodeDefault(t *testing.T) {
+// TestVerificationShowCodeDefault 回显默认关闭（生产安全）；新变量优先，
+// 旧 ACADEMY_SMS_SHOW_CODE 兼容。
+func TestVerificationShowCodeDefault(t *testing.T) {
 	cases := []struct {
 		name   string
-		strict string
 		show   string
+		legacy string
 		want   bool
 	}{
-		{"default non-strict", "", "", true},
-		{"default strict", "1", "", false},
-		{"explicit off non-strict", "", "0", false},
-		{"explicit off strict", "1", "0", false},
-		{"explicit on strict", "1", "1", true},
+		{"default off", "", "", false},
+		{"new on", "1", "", true},
+		{"new off", "0", "", false},
+		{"legacy on", "", "1", true},
 		{"legacy true", "", "true", true},
-		{"legacy false", "1", "false", false},
+		{"legacy off", "", "0", false},
+		{"new off overrides legacy on", "0", "1", false},
+		{"new on with legacy off", "1", "0", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("ACADEMY_STRICT", c.strict)
-			t.Setenv("ACADEMY_SMS_SHOW_CODE", c.show)
-			if got := Load().SmsShowCode; got != c.want {
-				t.Fatalf("SmsShowCode = %v, want %v (strict=%q show=%q)", got, c.want, c.strict, c.show)
+			t.Setenv("ACADEMY_SHOW_VERIFICATION_CODE", c.show)
+			t.Setenv("ACADEMY_SMS_SHOW_CODE", c.legacy)
+			if got := Load().VerificationShowCode; got != c.want {
+				t.Fatalf("VerificationShowCode = %v, want %v (show=%q legacy=%q)", got, c.want, c.show, c.legacy)
 			}
 		})
+	}
+}
+
+func TestLoadSMTPEnvs(t *testing.T) {
+	t.Setenv("ACADEMY_SMTP_ADDR", "smtp.example.com:587")
+	t.Setenv("ACADEMY_SMTP_USERNAME", "mailer@example.com")
+	t.Setenv("ACADEMY_SMTP_PASSWORD", "secret")
+	t.Setenv("ACADEMY_SMTP_FROM", "Yak Academy <no-reply@example.com>")
+	t.Setenv("ACADEMY_SMTP_TLS", "STARTTLS")
+
+	cfg := Load()
+	if cfg.SMTPAddr != "smtp.example.com:587" || cfg.SMTPUsername != "mailer@example.com" {
+		t.Fatalf("smtp options: %+v", cfg)
+	}
+	if cfg.SMTPPassword != "secret" || cfg.SMTPFrom != "Yak Academy <no-reply@example.com>" {
+		t.Fatalf("smtp credentials/from: %+v", cfg)
+	}
+	if cfg.SMTPTLS != "starttls" {
+		t.Fatalf("smtp tls normalized: %q", cfg.SMTPTLS)
 	}
 }
 

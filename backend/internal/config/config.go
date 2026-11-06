@@ -56,12 +56,26 @@ type Config struct {
 	// 后无需重启即装配；重启时自动探测该目录下的 yak 二进制。
 	YakDownloadDir string
 
-	// SmsShowCode 验证码回显模式：开启后 /auth/sms/code 响应携带验证码原文、
-	// 注册页内联显示，学员可自助完成注册。默认投递器只写服务日志，学员拿不到
-	// 码会卡死在注册第一步，因此非严格模式默认开启；生产严格模式
-	// （ACADEMY_STRICT=1）默认关闭，避免账号找回验证码被任意请求方读取。
-	// 两种模式均可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖。
-	SmsShowCode bool
+	// VerificationShowCode 验证码回显模式（仅本地演示）：开启后
+	// /auth/email/code、/auth/sms/code 与找回发码响应携带验证码原文，页面
+	// 内联显示。默认关闭；本地联调可设 ACADEMY_SHOW_VERIFICATION_CODE=1
+	// （旧变量 ACADEMY_SMS_SHOW_CODE 兼容）。严格模式（ACADEMY_STRICT=1）
+	// 禁止开启（StrictViolations 拒绝启动），避免任意请求方读取验证码。
+	VerificationShowCode bool
+
+	// SMTPAddr SMTP/事务邮件服务地址（host:port，如 smtp.example.com:587）。
+	// 空 = 未配置：非严格模式验证码写服务日志（本地联调），严格模式邮箱
+	// 发码返回 501（生产必须配置，避免把验证码写进生产日志）。
+	SMTPAddr string
+	// SMTPUsername/SMTPPassword SMTP 登录凭据（空 = 不认证，仅限内网中继）。
+	SMTPUsername string
+	SMTPPassword string
+	// SMTPFrom 发件人（可含显示名，如 "Yak Academy <no-reply@example.com>"）；
+	// 空 = 取 SMTPUsername。
+	SMTPFrom string
+	// SMTPTLS TLS 模式：starttls（默认，587/25）/ implicit（465 直连 TLS）/ none
+	// （仅限本地或内网明文中继）。
+	SMTPTLS string
 
 	// Strict 生产严格模式（ACADEMY_STRICT=1）：启动时拒绝开发默认/弱凭据
 	// （StrictViolations）。compose 部署已用 :? 强制变量存在，但显式设置
@@ -112,25 +126,30 @@ const (
 
 func Load() *Config {
 	return &Config{
-		Addr:               getenv("ACADEMY_ADDR", ":8080"),
-		Database:           getenv("ACADEMY_DB", "academy.db"),
-		DatabaseDSN:        os.Getenv("ACADEMY_DB_DSN"),
-		JWTSecret:          getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
-		AdminUsername:      getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
-		AdminPassword:      getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
-		EnvDriver:          getenv("ACADEMY_ENV_DRIVER", "auto"),
-		AttachmentsDir:     getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
-		AvatarsDir:         getenv("ACADEMY_AVATARS_DIR", "avatars"),
-		WriteupsDir:        getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
-		InstanceMemory:     getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
-		InstanceCPUs:       getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
-		PublicURL:          getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
-		InstancePublicHost: getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
-		YakBin:             getenv("ACADEMY_YAK_BIN", ""),
-		YakDownloadDir:     getenv("ACADEMY_YAK_DIR", filepath.Dir(getenv("ACADEMY_DB", "academy.db"))),
-		SmsShowCode:        getenvBoolDefault("ACADEMY_SMS_SHOW_CODE", !getenvBool("ACADEMY_STRICT")),
-		Strict:             getenvBool("ACADEMY_STRICT"),
-		WriteupsStoreKind:  getenv("ACADEMY_WRITEUPS_STORE", "fs"),
+		Addr:                 getenv("ACADEMY_ADDR", ":8080"),
+		Database:             getenv("ACADEMY_DB", "academy.db"),
+		DatabaseDSN:          os.Getenv("ACADEMY_DB_DSN"),
+		JWTSecret:            getenv("ACADEMY_JWT_SECRET", DefaultJWTSecret),
+		AdminUsername:        getenv("ACADEMY_ADMIN_USERNAME", DefaultAdminUsername),
+		AdminPassword:        getenv("ACADEMY_ADMIN_PASSWORD", DefaultAdminPassword),
+		EnvDriver:            getenv("ACADEMY_ENV_DRIVER", "auto"),
+		AttachmentsDir:       getenv("ACADEMY_ATTACHMENTS_DIR", "attachments"),
+		AvatarsDir:           getenv("ACADEMY_AVATARS_DIR", "avatars"),
+		WriteupsDir:          getenv("ACADEMY_WRITEUPS_DIR", "writeups"),
+		InstanceMemory:       getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
+		InstanceCPUs:         getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
+		PublicURL:            getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
+		InstancePublicHost:   getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
+		YakBin:               getenv("ACADEMY_YAK_BIN", ""),
+		YakDownloadDir:       getenv("ACADEMY_YAK_DIR", filepath.Dir(getenv("ACADEMY_DB", "academy.db"))),
+		VerificationShowCode: getenvBoolFirst("ACADEMY_SHOW_VERIFICATION_CODE", "ACADEMY_SMS_SHOW_CODE"),
+		SMTPAddr:             getenv("ACADEMY_SMTP_ADDR", ""),
+		SMTPUsername:         getenv("ACADEMY_SMTP_USERNAME", ""),
+		SMTPPassword:         os.Getenv("ACADEMY_SMTP_PASSWORD"),
+		SMTPFrom:             getenv("ACADEMY_SMTP_FROM", ""),
+		SMTPTLS:              strings.ToLower(getenv("ACADEMY_SMTP_TLS", "starttls")),
+		Strict:               getenvBool("ACADEMY_STRICT"),
+		WriteupsStoreKind:    getenv("ACADEMY_WRITEUPS_STORE", "fs"),
 		WriteupsS3: S3Options{
 			Endpoint:  os.Getenv("ACADEMY_WRITEUPS_S3_ENDPOINT"),
 			Region:    getenv("ACADEMY_WRITEUPS_S3_REGION", "us-east-1"),
@@ -147,9 +166,10 @@ func Load() *Config {
 	}
 }
 
-// StrictViolations 严格模式凭据检查：返回违规项清单（空 = 通过）。
+// StrictViolations 严格模式检查：返回违规项清单（空 = 通过）。
 // JWT secret 必须非内置默认且 ≥32 字符；初始管理员密码必须非内置默认且
-// ≥12 字符。密码仅约束 users 表为空时的种子创建，但严格模式宁可误拦。
+// ≥12 字符；验证码回显必须关闭（生产禁止把验证码原文返回给任意请求方）。
+// 密码仅约束 users 表为空时的种子创建，但严格模式宁可误拦。
 func (c *Config) StrictViolations() []string {
 	var violations []string
 	if c.JWTSecret == DefaultJWTSecret {
@@ -161,6 +181,9 @@ func (c *Config) StrictViolations() []string {
 		violations = append(violations, "ACADEMY_ADMIN_PASSWORD is the built-in dev default")
 	} else if len(c.AdminPassword) < 12 {
 		violations = append(violations, "ACADEMY_ADMIN_PASSWORD is shorter than 12 chars")
+	}
+	if c.VerificationShowCode {
+		violations = append(violations, "ACADEMY_SHOW_VERIFICATION_CODE must be disabled in strict mode")
 	}
 	return violations
 }
@@ -182,17 +205,19 @@ func getenvBool(key string) bool {
 	}
 }
 
-// getenvBoolDefault 带默认值的开关型环境变量：未设置/空串回退 def；
-// 0/false 显式关闭，1/true 显式开启（非法值按未设置处理）。
-func getenvBoolDefault(key string, def bool) bool {
-	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(key))); v {
-	case "1", "true":
-		return true
-	case "0", "false":
-		return false
-	default:
-		return def
+// getenvBoolFirst 按优先级读取一组开关型环境变量：第一个显式设置且合法的
+// 1/true 或 0/false 生效；全部未设置/非法时按关处理。用于新变量优先、
+// 旧变量兼容的场景（如 ACADEMY_SHOW_VERIFICATION_CODE → ACADEMY_SMS_SHOW_CODE）。
+func getenvBoolFirst(keys ...string) bool {
+	for _, key := range keys {
+		switch v := strings.ToLower(strings.TrimSpace(os.Getenv(key))); v {
+		case "1", "true":
+			return true
+		case "0", "false":
+			return false
+		}
 	}
+	return false
 }
 
 // getenvInt 整型环境变量（非法/缺省回退 def）。

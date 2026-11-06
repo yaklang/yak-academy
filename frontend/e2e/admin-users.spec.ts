@@ -20,20 +20,20 @@ test.describe('管理端用户管理', () => {
 
     // 搜索：按账号编码（新维度的核心断言——编码是导入表格的条目来源）。
     const code = await stuRow.locator('code').textContent()
-    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 手机号').fill(code!)
+    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 邮箱 / 手机号').fill(code!)
     await page.getByRole('button', { name: '搜索' }).click()
     await expect(stuRow).toBeVisible()
     // 用户名子串同样命中。
-    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 手机号').fill('stu-e2e')
+    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 邮箱 / 手机号').fill('stu-e2e')
     await page.getByRole('button', { name: '搜索' }).click()
     await expect(stuRow).toBeVisible()
     // 无命中：空表。
-    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 手机号').fill('no-such-user-xyz')
+    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 邮箱 / 手机号').fill('no-such-user-xyz')
     await page.getByRole('button', { name: '搜索' }).click()
     await expect(page.getByText('暂无用户')).toBeVisible()
 
     // 角色过滤：管理员只剩 admin 行（下拉按 DOM 序：角色/活跃/解题）。
-    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 手机号').fill('')
+    await page.getByPlaceholder('搜索：用户名 / 账号编码 / 邮箱 / 手机号').fill('')
     await page.getByRole('button', { name: '搜索' }).click()
     const selects = page.locator('.filters [role=combobox]')
     await selects.nth(0).click()
