@@ -63,48 +63,105 @@ onMounted(load)
 
 <template>
   <div class="enter-page">
-    <UiCard shadow="never" class="enter-card">
-      <h2>{{ title }}</h2>
-      <p class="dim">
-        凭邀请码入场（邀请码在站内邮箱的竞赛邀请邮件中）；
-        公开赛已报名者可留空邀请码直接进入。
-      </p>
-      <UiForm label-position="top" @submit.prevent="enter">
-        <UiFormItem label="邀请码（公开赛已报名可留空）">
-          <UiInput v-model="code" placeholder="邀请码" size="large" @keyup.enter="enter" />
-        </UiFormItem>
-        <UiButton type="primary" size="large" :loading="entering" class="enter-btn" @click="enter">
-          进入竞赛
-        </UiButton>
-      </UiForm>
-      <UiAlert
-        type="warning"
-        :closable="false"
-        title="邀请赛入场后将被锁定在竞赛页面，平台其他板块不可访问，直到比赛结束；公开赛入场后可自由进出，随时返回平台。"
-        class="lock-tip"
-      />
-      <p v-if="loadFailed" class="dim">{{ loadFailed }}</p>
-      <p class="dim">
-        还没有邀请邮件？邀请赛参赛者请到
-        <router-link to="/mailbox">站内邮箱</router-link>
-        查收竞赛邀请；公开赛可先到
-        <router-link to="/competitions">竞赛广场</router-link>
-        报名。
-      </p>
-    </UiCard>
+    <main class="enter-shell">
+      <header class="enter-head">
+        <p class="enter-eyebrow">YAK ACADEMY · COMPETITION</p>
+        <h1 class="enter-title">{{ title }}</h1>
+        <p class="enter-sub">输入邀请码进入赛场；公开赛已报名者可直接进入。</p>
+      </header>
+
+      <UiCard shadow="never" class="enter-card">
+        <UiForm label-position="top" @submit.prevent="enter">
+          <UiFormItem label="邀请码">
+            <UiInput v-model="code" placeholder="粘贴邀请邮件中的邀请码" size="large" @keyup.enter="enter" />
+            <p class="field-hint">公开赛已报名者可留空邀请码直接进入。</p>
+          </UiFormItem>
+          <UiButton type="primary" size="large" :loading="entering" class="enter-btn" @click="enter">
+            进入竞赛
+          </UiButton>
+        </UiForm>
+
+        <UiAlert
+          type="warning"
+          :closable="false"
+          title="入场须知"
+          description="邀请赛入场后将被锁定在竞赛页面，平台其他板块不可访问，直到比赛结束；公开赛入场后可自由进出，随时返回平台。"
+          class="lock-tip"
+        />
+        <UiAlert v-if="loadFailed" type="error" :closable="false" :title="loadFailed" class="enter-alert" />
+        <p class="enter-help">
+          还没有邀请邮件？邀请赛参赛者请到
+          <router-link to="/mailbox">站内邮箱</router-link>
+          查收竞赛邀请；公开赛可先到
+          <router-link to="/competitions">竞赛广场</router-link>
+          报名。
+        </p>
+      </UiCard>
+    </main>
   </div>
 </template>
 
 <style scoped>
 .enter-page {
-  min-height: 100vh;
   display: flex;
+  min-height: 100vh;
+  min-height: 100svh;
   align-items: center;
   justify-content: center;
+  padding: var(--space-8) var(--space-4);
   background: var(--background);
 }
-.enter-card { width: 440px; padding: 0.5rem; }
-.enter-btn { width: 100%; margin-top: 0.4rem; }
-.lock-tip { margin-top: 1rem; }
-.dim { color: var(--muted-foreground); font-size: 0.85rem; }
+.enter-shell {
+  display: grid;
+  gap: var(--space-6);
+  width: min(100%, 480px);
+  min-width: 0;
+}
+.enter-head { display: grid; gap: var(--space-2); }
+.enter-eyebrow {
+  margin: 0;
+  color: var(--accent-foreground);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+.enter-title {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  line-height: var(--leading-tight);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+.enter-sub {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+.enter-card { width: 100%; padding: 0; }
+.field-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+.enter-btn { width: 100%; margin-top: var(--space-1); }
+.lock-tip { margin-top: var(--space-5); }
+.enter-alert { margin-top: var(--space-3); }
+.enter-help {
+  margin: var(--space-5) 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+.enter-help a { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 560px) {
+  .enter-page { padding: var(--space-6) var(--space-4); align-items: flex-start; }
+  .enter-shell { gap: var(--space-5); }
+}
 </style>

@@ -31,14 +31,24 @@ const compId = Number(route.params.id)
 
 const detail = ref<CompetitionDetail | null>(null)
 const loading = ref(true)
+const loadError = ref('')
 const activeTab = ref('config')
 
 async function loadDetail() {
+  loading.value = true
+  loadError.value = ''
   try {
     detail.value = await adminCompetitionApi.detail(compId)
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '竞赛详情加载失败，请稍后重试'
+  } finally {
+    loading.value = false
   }
+}
+
+async function reloadDetail() {
+  await loadDetail()
+  syncForm()
 }
 
 const status = computed<Competition['status']>(() => detail.value?.status ?? 'scheduled')
@@ -117,15 +127,18 @@ async function endCompetition() {
 
 // ---------- 题目 ----------
 const challenges = ref<TrainingItem[]>([])
-const challengesLoading = ref(false)
+const challengesLoading = ref(true)
+const challengesError = ref('')
 
 async function loadChallenges() {
   challengesLoading.value = true
+  challengesError.value = ''
+  challenges.value = []
   try {
     const resp = await adminCompetitionApi.challenges(compId)
     challenges.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    challengesError.value = e instanceof Error ? e.message : '题目列表加载失败，请稍后重试'
   } finally {
     challengesLoading.value = false
   }
@@ -146,6 +159,7 @@ const pickPage = ref(1)
 const pickTotal = ref(0)
 const pickItems = ref<TrainingItem[]>([])
 const pickLoading = ref(false)
+const pickError = ref('')
 const pickedSlugs = ref<string[]>([])
 const pickTable = ref()
 // 翻页回填 selection 的过渡窗口：此间 selection-change 是数据替换的副作用，
@@ -154,6 +168,9 @@ const suspending = ref(false)
 
 async function loadPickList() {
   pickLoading.value = true
+  pickError.value = ''
+  pickItems.value = []
+  pickTotal.value = 0
   try {
     const resp = await adminChallengeApi.list({
       page: pickPage.value,
@@ -169,7 +186,7 @@ async function loadPickList() {
     await nextTick()
     suspending.value = false
   } catch (e) {
-    notify.error((e as Error).message)
+    pickError.value = e instanceof Error ? e.message : '可选题库加载失败，请稍后重试'
   } finally {
     pickLoading.value = false
   }
@@ -326,17 +343,22 @@ const participants = ref<CompetitionParticipantItem[]>([])
 const teams = ref<TeamLeaderboardEntry[]>([])
 const partTotal = ref(0)
 const partPage = ref(1)
-const partLoading = ref(false)
+const partLoading = ref(true)
+const partError = ref('')
 
 async function loadParticipants() {
   partLoading.value = true
+  partError.value = ''
+  participants.value = []
+  teams.value = []
+  partTotal.value = 0
   try {
     const resp = await adminCompetitionApi.participants(compId, partPage.value)
     participants.value = resp.items
     teams.value = resp.teams
     partTotal.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    partError.value = e instanceof Error ? e.message : '参赛人员加载失败，请稍后重试'
   } finally {
     partLoading.value = false
   }
@@ -498,16 +520,20 @@ function exportGeneratedCsv() {
 const instances = ref<AdminLabInstance[]>([])
 const instTotal = ref(0)
 const instPage = ref(1)
-const instLoading = ref(false)
+const instLoading = ref(true)
+const instError = ref('')
 
 async function loadInstances() {
   instLoading.value = true
+  instError.value = ''
+  instances.value = []
+  instTotal.value = 0
   try {
     const resp = await adminCompetitionApi.instances(compId, instPage.value)
     instances.value = resp.items
     instTotal.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    instError.value = e instanceof Error ? e.message : '竞赛容器加载失败，请稍后重试'
   } finally {
     instLoading.value = false
   }
@@ -515,15 +541,18 @@ async function loadInstances() {
 
 // ---------- 反作弊 ----------
 const warnings = ref<CheatWarningItem[]>([])
-const warningsLoading = ref(false)
+const warningsLoading = ref(true)
+const warningsError = ref('')
 
 async function loadWarnings() {
   warningsLoading.value = true
+  warningsError.value = ''
+  warnings.value = []
   try {
     const resp = await adminCompetitionApi.warnings(compId)
     warnings.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    warningsError.value = e instanceof Error ? e.message : '警告列表加载失败，请稍后重试'
   } finally {
     warningsLoading.value = false
   }
@@ -538,16 +567,19 @@ function warningType(k: CheatWarningItem['kind']) {
 
 // ---------- WP（单位 = 题目 × 队伍/个人，仅返回已提交条目） ----------
 const writeups = ref<WriteupItem[]>([])
-const writeupsLoading = ref(false)
+const writeupsLoading = ref(true)
+const writeupsError = ref('')
 const viewing = ref<WriteupItem | null>(null)
 
 async function loadWriteups() {
   writeupsLoading.value = true
+  writeupsError.value = ''
+  writeups.value = []
   try {
     const resp = await adminCompetitionApi.writeups(compId)
     writeups.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    writeupsError.value = e instanceof Error ? e.message : 'WP 列表加载失败，请稍后重试'
   } finally {
     writeupsLoading.value = false
   }
@@ -604,15 +636,18 @@ async function downloadWriteupZip(w: WriteupItem) {
 // ---------- 排行榜 ----------
 const boardMode = ref<'team' | 'individual'>('team')
 const board = ref<TeamLeaderboardEntry[]>([])
-const boardLoading = ref(false)
+const boardLoading = ref(true)
+const boardError = ref('')
 
 async function loadBoard() {
   boardLoading.value = true
+  boardError.value = ''
+  board.value = []
   try {
     const resp = await adminCompetitionApi.leaderboard(compId, boardMode.value)
     board.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    boardError.value = e instanceof Error ? e.message : '排行榜加载失败，请稍后重试'
   } finally {
     boardLoading.value = false
   }
@@ -635,12 +670,23 @@ async function onTab(name: string | number) {
 onMounted(async () => {
   await loadDetail()
   syncForm()
-  loading.value = false
 })
 </script>
 
 <template>
-  <div v-busy="loading">
+  <div v-if="loading" class="detail-skeleton" role="status" aria-label="正在加载竞赛详情">
+    <div class="sk-head" aria-hidden="true">
+      <i class="sk-line title" />
+      <i class="sk-line medium" />
+    </div>
+    <div class="sk-stats" aria-hidden="true">
+      <div v-for="n in 4" :key="n" class="sk-stat"><i class="sk-line short" /><i class="sk-line medium" /></div>
+    </div>
+    <div class="sk-tabs" aria-hidden="true"><i v-for="n in 5" :key="n" /></div>
+    <div class="sk-panel" aria-hidden="true"><i class="sk-line" /><i class="sk-line medium" /><i class="sk-line short" /></div>
+  </div>
+  <UiLoadError v-else-if="loadError" :message="loadError" @retry="reloadDetail" />
+  <div v-else>
     <div class="head">
       <h2>
         {{ detail?.name ?? '竞赛详情' }}
@@ -709,8 +755,9 @@ onMounted(async () => {
               <UiButton type="primary" size="small" @click="openBind">绑定 / 导入题目</UiButton>
             </div>
           </template>
-          <UiTable :data="challenges" v-busy="challengesLoading" empty-text="尚未绑定题目">
-            <UiTableColumn prop="slug" label="Slug" width="180" />
+          <UiLoadError v-if="challengesError" compact :message="challengesError" @retry="loadChallenges" class="block" />
+          <UiTable v-else :data="challenges" :loading="challengesLoading" empty-text="尚未绑定题目">
+            <UiTableColumn prop="slug" label="Slug" width="180" show-overflow-tooltip />
             <UiTableColumn prop="title" label="标题" min-width="160" />
             <UiTableColumn prop="category" label="分类" width="110" />
             <UiTableColumn prop="difficulty" label="难度" width="100" />
@@ -721,7 +768,7 @@ onMounted(async () => {
                 <UiTag v-else size="small" type="info">无</UiTag>
               </template>
             </UiTableColumn>
-            <UiTableColumn label="操作" width="110">
+            <UiTableColumn label="操作" width="110" fixed="right">
               <template #default="{ row }">
                 <UiButton
                   size="small"
@@ -758,8 +805,9 @@ onMounted(async () => {
             title="公开赛无需导入参赛者"
             description="公开赛展示在竞赛广场，用户自助报名；已报名者开赛后免邀请码直接入场。"
           />
-          <UiTable :data="participants" v-busy="partLoading" empty-text="尚无参赛人员">
-            <UiTableColumn prop="username" label="用户" width="130" />
+          <UiLoadError v-if="partError" compact :message="partError" @retry="loadParticipants" class="block" />
+          <UiTable v-else :data="participants" :loading="partLoading" empty-text="尚无参赛人员">
+            <UiTableColumn prop="username" label="用户" width="130" fixed="left" />
             <UiTableColumn label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
             </UiTableColumn>
@@ -788,9 +836,9 @@ onMounted(async () => {
             class="pager"
           />
         </UiCard>
-        <UiCard shadow="never">
+        <UiCard v-if="!partError" shadow="never">
           <template #header><span>队伍总览（{{ teams.length }}）</span></template>
-          <UiTable :data="teams" empty-text="暂无队伍">
+          <UiTable :data="teams" :loading="partLoading" empty-text="暂无队伍">
             <UiTableColumn prop="team_name" label="队伍" width="160" />
             <UiTableColumn label="成员" min-width="200">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
@@ -808,8 +856,9 @@ onMounted(async () => {
               <UiButton size="small" @click="loadInstances">刷新</UiButton>
             </div>
           </template>
-          <UiTable :data="instances" v-busy="instLoading" empty-text="暂无竞赛容器">
-            <UiTableColumn prop="id" label="ID" width="70" />
+          <UiLoadError v-if="instError" compact :message="instError" @retry="loadInstances" class="block" />
+          <UiTable v-else :data="instances" :loading="instLoading" empty-text="暂无竞赛容器">
+            <UiTableColumn prop="id" label="ID" width="70" fixed="left" />
             <UiTableColumn prop="username" label="用户" width="120" />
             <UiTableColumn prop="challenge_title" label="题目" min-width="160" />
             <UiTableColumn prop="status" label="状态" width="100" />
@@ -841,8 +890,9 @@ onMounted(async () => {
               <UiButton size="small" @click="loadWarnings">刷新</UiButton>
             </div>
           </template>
-          <UiTable :data="warnings" v-busy="warningsLoading" empty-text="暂无警告">
-            <UiTableColumn label="时间" width="160">
+          <UiLoadError v-if="warningsError" compact :message="warningsError" @retry="loadWarnings" class="block" />
+          <UiTable v-else :data="warnings" :loading="warningsLoading" empty-text="暂无警告">
+            <UiTableColumn label="时间" width="160" fixed="left">
               <template #default="{ row }">{{ fmt(row.created_at) }}</template>
             </UiTableColumn>
             <UiTableColumn label="类型" width="110">
@@ -871,7 +921,11 @@ onMounted(async () => {
               <UiButton size="small" @click="loadWriteups">刷新</UiButton>
             </div>
           </template>
-          <div v-busy="writeupsLoading">
+          <UiLoadError v-if="writeupsError" compact :message="writeupsError" @retry="loadWriteups" class="block" />
+          <div v-else-if="writeupsLoading" class="wp-skeleton" role="status" aria-label="正在加载 WP">
+            <i v-for="n in 4" :key="n" class="sk-line" />
+          </div>
+          <div v-else>
             <template v-if="writeupsByChallenge.length">
               <div v-for="group in writeupsByChallenge" :key="group.title" class="wp-group">
                 <h4>{{ group.title }}（{{ group.items.length }} 份）</h4>
@@ -924,8 +978,9 @@ onMounted(async () => {
               </UiRadioGroup>
             </div>
           </template>
-          <UiTable :data="board" v-busy="boardLoading" empty-text="暂无成绩">
-            <UiTableColumn prop="rank" label="名次" width="80" />
+          <UiLoadError v-if="boardError" compact :message="boardError" @retry="loadBoard" class="block" />
+          <UiTable v-else :data="board" :loading="boardLoading" empty-text="暂无成绩">
+            <UiTableColumn prop="rank" label="名次" width="80" fixed="left" />
             <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
               <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
             </UiTableColumn>
@@ -971,10 +1026,12 @@ onMounted(async () => {
         <UiButton @click="searchPick">搜索</UiButton>
         <span class="dim picked-sum">已勾选 {{ pickedCount }} 题</span>
       </div>
+      <UiLoadError v-if="pickError" compact :message="pickError" @retry="loadPickList" class="block" />
       <UiTable
+        v-else
         ref="pickTable"
         :data="pickItems"
-        v-busy="pickLoading"
+        :loading="pickLoading"
         size="small"
         max-height="340"
         row-key="slug"
@@ -1032,7 +1089,7 @@ onMounted(async () => {
         <UiButton size="small" @click="stagePaste">解析并加入</UiButton>
       </div>
       <UiTable v-if="staged.length" :data="staged" size="small" class="stage-table" empty-text="暂存列表为空">
-        <UiTableColumn label="来源" width="140" show-overflow-tooltip>
+        <UiTableColumn label="来源" width="140">
           <template #default="{ row }">{{ row.source }}</template>
         </UiTableColumn>
         <UiTableColumn label="题目" min-width="160">
@@ -1241,43 +1298,63 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.head { display: flex; align-items: center; justify-content: space-between; }
-.hint { color: var(--muted-foreground); font-size: 0.9rem; margin-top: 0; }
-.stats { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 0.8rem 0 1.2rem; }
+.head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.hint { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 0; }
+.stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-3) 0 var(--space-5); }
 .stat {
-  min-width: 96px; padding: 0.6rem 1rem; text-align: center;
+  min-width: 96px; padding: var(--space-3) var(--space-4); text-align: center;
   border: 1px solid var(--border); border-radius: 6px;
-  display: flex; flex-direction: column; gap: 0.2rem;
+  display: flex; flex-direction: column; gap: var(--space-1);
 }
-.stat b { font-size: 1.3rem; }
-.stat span { color: var(--muted-foreground); font-size: 0.8rem; }
+.stat b { font-size: var(--text-xl); }
+.stat span { color: var(--muted-foreground); font-size: var(--text-xs); }
 .stat.warn b { color: var(--destructive); }
-.card-head { display: flex; align-items: center; justify-content: space-between; }
-.block { margin-bottom: 1.2rem; }
-.dim { color: var(--muted-foreground); font-size: 0.8rem; }
-.pager { margin-top: 1rem; }
-.bind-mode { margin-bottom: 0.8rem; }
-.pick-filters { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.6rem; flex-wrap: wrap; }
-.pick-q { width: 240px; }
-.pick-bank { width: 150px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.block { margin-bottom: var(--space-5); }
+.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
+.pager { margin-top: var(--space-4); }
+.bind-mode { margin-bottom: var(--space-3); }
+.pick-filters { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); flex-wrap: wrap; }
+.pick-q { width: 240px; max-width: 100%; }
+.pick-bank { width: 150px; max-width: 100%; }
 .picked-sum { margin-left: auto; }
-.pick-pager { margin-top: 0.6rem; display: flex; justify-content: flex-end; }
-.tpl-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.pick-pager { margin-top: var(--space-2); display: flex; justify-content: flex-end; }
+.tpl-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .tpl-hint { margin: 0; }
-.stage-del { margin-left: 0.8rem; }
+.stage-del { margin-left: var(--space-3); }
 .member-chip {
-  display: inline-block; margin: 0 0.4rem 0.3rem 0; padding: 0 0.4rem;
+  display: inline-block; margin: 0 var(--space-1) var(--space-1) 0; padding: 0 var(--space-1);
   background: var(--muted); border-radius: 3px;
 }
-.stage-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.8rem; }
+.stage-actions { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-3); }
 .stage-actions .ui-button { margin-left: 0; }
-.stage-table { margin-bottom: 0.4rem; }
-.stage-errs { display: flex; align-items: flex-start; gap: 0.4rem; }
-.stage-errs span { color: var(--destructive); font-size: 0.82rem; line-height: 1.4; }
+.stage-table { margin-bottom: var(--space-1); }
+.stage-errs { display: flex; align-items: flex-start; gap: var(--space-1); }
+.stage-errs span { color: var(--destructive); font-size: var(--text-xs); line-height: 1.4; }
 .wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
-.wp-group { margin-bottom: 1.4rem; }
-.wp-group h4 { margin: 0 0 0.5rem; }
-.wp-missing { margin: 0.4rem 0 0; }
-.wp-dialog-meta { margin: 0 0 0.6rem; }
-.wp-dialog-zip { margin-left: 1rem; }
+.wp-group { margin-bottom: var(--space-6); }
+.wp-group h4 { margin: 0 0 var(--space-2); }
+.wp-missing { margin: var(--space-1) 0 0; }
+.wp-dialog-meta { margin: 0 0 var(--space-2); }
+.wp-dialog-zip { margin-left: var(--space-4); }
+
+.detail-skeleton { display: grid; gap: var(--space-5); }
+.sk-head { display: grid; gap: var(--space-3); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 32%; }
+.sk-line.medium { width: 58%; }
+.sk-line.title { width: 36%; height: 28px; }
+.sk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.sk-stat { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
+.sk-tabs { display: flex; gap: var(--space-2); border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+.sk-tabs i { width: 84px; height: 28px; border-radius: var(--radius-control); background: var(--muted); }
+.sk-panel { display: grid; gap: var(--space-3); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
+.wp-skeleton { display: grid; gap: var(--space-3); padding: var(--space-4) 0; }
+.detail-skeleton .sk-line,
+.detail-skeleton .sk-tabs i,
+.wp-skeleton .sk-line { animation: detail-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes detail-skeleton-pulse { 50% { opacity: .45; } }
+@media (max-width: 720px) {
+  .sk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

@@ -8,17 +8,20 @@ import { formatDateTime } from '@/lib/format'
 import { adminBackupApi, type BackupInfo } from '../../api'
 
 const items = ref<BackupInfo[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const creating = ref(false)
 const downloading = ref('')
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  items.value = []
   try {
     const resp = await adminBackupApi.list()
     items.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '备份列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -89,8 +92,9 @@ onMounted(load)
         </div>
       </div>
     </template>
-    <UiTable :data="items" v-busy="loading" empty-text="暂无备份；点击「立即备份」生成第一份">
-      <UiTableColumn prop="name" label="归档" min-width="240">
+    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+    <UiTable v-else :data="items" :loading="loading" empty-text="暂无备份；点击「立即备份」生成第一份">
+      <UiTableColumn prop="name" label="归档" min-width="240" fixed="left" show-overflow-tooltip>
         <template #default="{ row }">
           <code>{{ row.name }}</code>
         </template>
@@ -108,7 +112,7 @@ onMounted(load)
           </UiTag>
         </template>
       </UiTableColumn>
-      <UiTableColumn label="操作" width="110">
+      <UiTableColumn label="操作" width="110" fixed="right">
         <template #default="{ row }">
           <UiButton size="small" :loading="downloading === row.name" @click="download(row)">下载</UiButton>
         </template>
@@ -118,6 +122,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.block { margin-bottom: 1.2rem; }
+.block { margin-bottom: var(--space-5); }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
+.list-error { margin-bottom: var(--space-3); }
 </style>

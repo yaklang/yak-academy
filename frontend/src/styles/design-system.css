@@ -432,6 +432,45 @@ html, * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted
 .ui-data-table [data-slot=table-container] { max-width: 100%; }
 .ui-data-table th { font-size: 12px; }
 .ui-data-table td { font-size: 13px; overflow-wrap: anywhere; }
+.ui-data-table td.table-cell-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.ui-data-table .ui-fixed-right { border-left: 1px solid var(--border); }
+.ui-data-table .ui-fixed-left { border-right: 1px solid var(--border); }
+.ui-data-table[aria-busy=true] .table-skeleton-bar { animation: table-skeleton-pulse 1.4s ease-in-out infinite; }
+.table-skeleton-bar { display: block; width: min(100%, 220px); height: 12px; border-radius: var(--radius-control); background: var(--muted); }
+.table-skeleton-bar.is-narrow { width: 40%; max-width: 96px; }
+@keyframes table-skeleton-pulse { 50% { opacity: .45; } }
+.table-loading-note {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  z-index: 20;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  pointer-events: none;
+}
+.ui-load-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--destructive) 30%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--destructive) 6%, var(--card));
+}
+.ui-load-error.is-compact { padding: var(--space-3) var(--space-4); }
+.ui-load-error-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--destructive); }
+.ui-load-error-title { margin: 0; color: var(--foreground); font-size: var(--text-sm); font-weight: 600; }
+.ui-load-error-message { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--text-sm); line-height: var(--leading-relaxed); overflow-wrap: anywhere; }
+.ui-load-error-action { justify-self: end; }
+@media (max-width: 560px) {
+  .ui-load-error { grid-template-columns: auto minmax(0, 1fr); }
+  .ui-load-error-action { grid-column: 2; justify-self: start; }
+}
 .ui-data-table td .ui-button { font-size: 12px; }
 .ui-data-table td .ui-button + .ui-button { margin-left: 6px; }
 .ui-alert { background: var(--muted); color: var(--foreground); }

@@ -27,10 +27,13 @@ test.describe('可见性旅程', () => {
     await page.goto('/training')
     await expect(page.getByRole('link', { name: C.title })).toHaveCount(0)
 
-    // 学生端：直连详情 404（错误提示 + 页面无题目标题，骨架外无内容）
+    // 学生端：直连详情 404（页面内错误提示 + 重试，页面无题目标题）
     await page.goto(`/training/${C.slug}`)
     await expect(page.getByRole('heading', { name: C.title })).toHaveCount(0)
-    await expect(page.locator('[data-sonner-toast]')).toContainText(/not found|不存在/i)
+    const loadAlert = page.getByRole('alert')
+    await expect(loadAlert).toBeVisible()
+    await expect(loadAlert).toContainText(/not found|不存在/i)
+    await expect(loadAlert.getByRole('button', { name: '重试' })).toBeVisible()
 
     // 恢复可见：学生立即可见
     await loginAsAdmin(page)

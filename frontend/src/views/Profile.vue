@@ -166,13 +166,28 @@ onMounted(() => {
     </div>
   </header>
 
-  <UiSkeleton v-if="loading" :rows="6" animated />
-  <UiCard v-else-if="loadError" class="card">
-    <div class="load-error" role="alert">
-      <p>{{ loadError }}</p>
-      <UiButton size="small" @click="load">重试</UiButton>
+  <div v-if="loading" class="profile-grid profile-skeleton" role="status" aria-label="正在加载账号信息">
+    <div class="column" aria-hidden="true">
+      <div class="sk-card tall">
+        <div class="sk-card-head"><i class="sk-line medium" /><i class="sk-pill" /></div>
+        <div class="sk-identity"><i class="sk-avatar" /><div class="sk-lines"><i class="sk-line" /><i class="sk-line short" /></div></div>
+        <div class="sk-lines"><i class="sk-line" /><i class="sk-line medium" /></div>
+      </div>
+      <div class="sk-card">
+        <i class="sk-line medium" />
+        <i class="sk-line" />
+        <i class="sk-line short" />
+      </div>
     </div>
-  </UiCard>
+    <div class="column" aria-hidden="true">
+      <div class="sk-card tall">
+        <div class="sk-card-head"><i class="sk-line medium" /><i class="sk-pill" /></div>
+        <div class="sk-score-row"><i class="sk-stat" /><i class="sk-stat" /><i class="sk-stat" /></div>
+        <i class="sk-radar" />
+      </div>
+    </div>
+  </div>
+  <UiLoadError v-else-if="loadError" class="profile-load-error" :message="loadError" @retry="load" />
   <div v-else-if="profile" class="profile-grid">
     <div class="column">
       <UiCard class="card">
@@ -302,13 +317,21 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-if="capabilitiesLoading" class="capability-state" role="status" aria-label="正在加载能力画像">
-          <UiSkeleton :rows="3" animated />
+        <div v-if="capabilitiesLoading" class="capability-state capability-skeleton" role="status" aria-label="正在加载能力画像">
+          <i class="sk-radar" aria-hidden="true" />
+          <div class="sk-lines" aria-hidden="true">
+            <i class="sk-line" />
+            <i class="sk-line medium" />
+            <i class="sk-line short" />
+          </div>
         </div>
-        <div v-else-if="capabilitiesError" class="capability-state" role="alert">
-          <p>{{ capabilitiesError }}</p>
-          <UiButton size="small" @click="loadCapabilities">重试</UiButton>
-        </div>
+        <UiLoadError
+          v-else-if="capabilitiesError"
+          compact
+          title="能力画像加载失败"
+          :message="capabilitiesError"
+          @retry="loadCapabilities"
+        />
         <CapabilityRadar v-else-if="capabilities" :dimensions="capabilities.dimensions" />
 
         <p v-if="capabilities && capabilities.dimensions.length" class="capability-note">
@@ -355,6 +378,37 @@ onMounted(() => {
   gap: var(--space-5);
 }
 .column { display: grid; gap: var(--space-5); min-width: 0; }
+.profile-load-error { max-width: 720px; }
+.sk-card {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+.sk-card.tall { min-height: 300px; align-content: start; }
+.sk-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.sk-identity { display: flex; align-items: center; gap: var(--space-4); }
+.sk-avatar { width: 88px; height: 88px; flex: none; border-radius: 999px; background: var(--muted); }
+.sk-lines { display: grid; flex: 1; gap: var(--space-3); min-width: 0; }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 28%; }
+.sk-line.medium { width: 52%; }
+.sk-pill { width: 52px; height: 20px; border-radius: 999px; background: var(--muted); }
+.sk-score-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.sk-stat { height: 52px; border-radius: var(--radius-control); background: var(--muted); }
+.sk-radar { display: block; width: min(100%, 300px); aspect-ratio: 1; margin-inline: auto; border-radius: 999px; background: var(--muted); }
+.capability-skeleton { grid-template-columns: minmax(0, 240px) minmax(0, 1fr); justify-items: stretch; align-items: center; }
+.capability-skeleton .sk-radar { width: 100%; }
+.profile-skeleton .sk-line,
+.profile-skeleton .sk-pill,
+.profile-skeleton .sk-avatar,
+.profile-skeleton .sk-stat,
+.profile-skeleton .sk-radar,
+.capability-skeleton .sk-line,
+.capability-skeleton .sk-radar { animation: profile-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes profile-skeleton-pulse { 50% { opacity: .45; } }
 
 .card-head {
   display: flex;
@@ -441,9 +495,6 @@ onMounted(() => {
 .capability-state { min-height: 220px; display: grid; justify-items: center; align-content: center; gap: var(--space-3); }
 .capability-state p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
 .capability-note { margin: var(--space-4) 0 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: var(--leading-normal); }
-
-.load-error { display: grid; justify-items: start; gap: var(--space-3); }
-.load-error p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
 
 @media (max-width: 1023px) {
   .profile-grid { grid-template-columns: minmax(0, 1fr); }

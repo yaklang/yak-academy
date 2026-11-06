@@ -20,7 +20,8 @@ const auth = useAuthStore()
 const packages = ref<ContentPackage[]>([])
 const total = ref(0)
 const page = ref(1)
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const uploading = ref(false)
 
 // 版本弹窗（回滚入口）。
@@ -28,17 +29,21 @@ const detailVisible = ref(false)
 const detailPkg = ref<ContentPackage | null>(null)
 const versions = ref<ContentVersion[]>([])
 const versionsLoading = ref(false)
+const versionsError = ref('')
 const rollbackLoading = ref(0)
 const specVisible = ref(false)
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  packages.value = []
+  total.value = 0
   try {
     const resp = await contentApi.list(page.value)
     packages.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '内容包列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -99,17 +104,24 @@ async function removePackage(pkg: ContentPackage) {
   }
 }
 
-async function openDetail(pkg: ContentPackage) {
-  detailPkg.value = pkg
-  detailVisible.value = true
+async function loadVersions() {
+  if (!detailPkg.value) return
   versionsLoading.value = true
+  versionsError.value = ''
+  versions.value = []
   try {
-    versions.value = await contentApi.versions(pkg.id)
+    versions.value = await contentApi.versions(detailPkg.value.id)
   } catch (e) {
-    notify.error((e as Error).message)
+    versionsError.value = e instanceof Error ? e.message : '版本历史加载失败，请稍后重试'
   } finally {
     versionsLoading.value = false
   }
+}
+
+async function openDetail(pkg: ContentPackage) {
+  detailPkg.value = pkg
+  detailVisible.value = true
+  await loadVersions()
 }
 
 async function rollback(version: ContentVersion) {
@@ -137,16 +149,18 @@ function statusType(s: ContentPackage['status']) {
 // 资产，不依赖已导入）；导入/更新走题目管理同一入口 POST /admin/challenges/builtin
 //（教程与题目同批写入，一教程对一题）。
 const builtin = ref<BuiltinTutorialCatalog | null>(null)
-const builtinLoading = ref(false)
+const builtinLoading = ref(true)
+const builtinError = ref('')
 const builtinImporting = ref(false)
 const builtinExpanded = ref(false)
 
 async function loadBuiltin() {
   builtinLoading.value = true
+  builtinError.value = ''
   try {
     builtin.value = await adminChallengeApi.builtinTutorialCatalog()
   } catch (e) {
-    notify.error(`内置训练集目录加载失败：${(e as Error).message}`)
+    builtinError.value = e instanceof Error ? e.message : '内置训练集目录加载失败，请稍后重试'
   } finally {
     builtinLoading.value = false
   }
@@ -254,7 +268,7 @@ flow:                                    # 可选：教程流程（2-12 步，�
       <p class="dim">上传后进入 draft，由 admin 发布才对学生可见；同一包可多次上传新版本，旧版本支持归档 / 回滚。题目（flag、容器环境、提示）不经教程包——用"题目管理"的 challenge.json 定义。</p>
     </UiCard>
   </UiCollapseTransition>
-  <UiCard v-busy="builtinLoading" class="builtin-card" shadow="never">
+  <UiCard class="builtin-card" shadow="never">
     <template #header>
       <div class="builtin-header">
         <span class="builtin-title">
@@ -277,30 +291,38 @@ flow:                                    # 可选：教程流程（2-12 步，�
         >{{ builtin && builtin.imported_rooms > 0 ? '重新导入/更新' : '导入内置训练' }}</UiButton>
       </div>
     </template>
-    <p v-if="builtin" class="dim">
-      平台自带 {{ builtin.topics.length }} 个专题 / {{ builtinRoomCount() }} 篇教程（一教程对一道配套题目，随平台版本分发）。内置教程不走内容包版本管线，<strong>不支持删除与编辑</strong>——更新随平台升级由「{{ builtin.imported_rooms > 0 ? '重新导入/更新' : '导入内置训练' }}」完成，普通内容包也不得覆盖内置教程。
-    </p>
-    <UiCollapseTransition>
-      <div v-show="builtinExpanded && builtin">
-        <div v-for="topic in builtin?.topics" :key="topic.slug" class="builtin-topic">
-          <h4>{{ topic.title }}<span class="dim slug">（{{ topic.slug }}）</span></h4>
-          <ul class="builtin-rooms">
-            <li v-for="room in topic.rooms" :key="room.slug" :class="{ 'not-imported': !room.imported }">
-              <span class="room-title">{{ room.title }}</span>
-              <UiTag size="small" :type="room.imported ? 'success' : 'info'">{{ roomState(room) }}</UiTag>
-            </li>
-          </ul>
+    <UiLoadError v-if="builtinError" compact :message="builtinError" @retry="loadBuiltin" />
+    <div v-else-if="builtinLoading" class="builtin-skeleton" role="status" aria-label="正在加载内置训练集">
+      <i class="sk-line medium" />
+      <i class="sk-line" />
+    </div>
+    <template v-else>
+      <p v-if="builtin" class="dim">
+        平台自带 {{ builtin.topics.length }} 个专题 / {{ builtinRoomCount() }} 篇教程（一教程对一道配套题目，随平台版本分发）。内置教程不走内容包版本管线，<strong>不支持删除与编辑</strong>——更新随平台升级由「{{ builtin.imported_rooms > 0 ? '重新导入/更新' : '导入内置训练' }}」完成，普通内容包也不得覆盖内置教程。
+      </p>
+      <UiCollapseTransition>
+        <div v-show="builtinExpanded && builtin">
+          <div v-for="topic in builtin?.topics" :key="topic.slug" class="builtin-topic">
+            <h4>{{ topic.title }}<span class="dim slug">（{{ topic.slug }}）</span></h4>
+            <ul class="builtin-rooms">
+              <li v-for="room in topic.rooms" :key="room.slug" :class="{ 'not-imported': !room.imported }">
+                <span class="room-title">{{ room.title }}</span>
+                <UiTag size="small" :type="room.imported ? 'success' : 'info'">{{ roomState(room) }}</UiTag>
+              </li>
+            </ul>
+          </div>
         </div>
-      </div>
-    </UiCollapseTransition>
-    <UiButton v-if="builtin" link type="primary" @click="builtinExpanded = !builtinExpanded">
-      {{ builtinExpanded ? '收起目录' : `展开目录（${builtin.topics.length} 专题 / ${builtinRoomCount()} 篇）` }}
-    </UiButton>
+      </UiCollapseTransition>
+      <UiButton v-if="builtin" link type="primary" @click="builtinExpanded = !builtinExpanded">
+        {{ builtinExpanded ? '收起目录' : `展开目录（${builtin.topics.length} 专题 / ${builtinRoomCount()} 篇）` }}
+      </UiButton>
+    </template>
   </UiCard>
 
-  <UiTable :data="packages" v-busy="loading">
-    <UiTableColumn prop="id" label="ID" width="60" />
-    <UiTableColumn prop="name" label="包名" />
+  <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+  <UiTable v-else :data="packages" :loading="loading">
+    <UiTableColumn prop="id" label="ID" width="60" fixed="left" />
+    <UiTableColumn prop="name" label="包名" min-width="180" show-overflow-tooltip />
     <UiTableColumn prop="latest_version" label="版本" width="100" />
     <UiTableColumn label="状态" width="110">
       <template #default="{ row }">
@@ -308,7 +330,7 @@ flow:                                    # 可选：教程流程（2-12 步，�
       </template>
     </UiTableColumn>
     <UiTableColumn prop="error" label="错误" show-overflow-tooltip />
-    <UiTableColumn label="操作" width="280">
+    <UiTableColumn label="操作" width="280" fixed="right">
       <template #default="{ row }">
         <UiButton
           v-if="auth.user?.global_role === 'admin' && row.status === 'draft'"
@@ -342,7 +364,8 @@ flow:                                    # 可选：教程流程（2-12 步，�
   />
 
   <UiDialog v-model="detailVisible" :title="`版本历史 - ${detailPkg?.name ?? ''}`" width="560px">
-    <UiTable :data="versions" v-busy="versionsLoading" size="small">
+    <UiLoadError v-if="versionsError" compact :message="versionsError" @retry="loadVersions" />
+    <UiTable v-else :data="versions" :loading="versionsLoading" :loading-rows="4" size="small">
       <UiTableColumn prop="version" label="版本" width="100" />
       <UiTableColumn label="状态" width="110">
         <template #default="{ row }">
@@ -350,7 +373,7 @@ flow:                                    # 可选：教程流程（2-12 步，�
         </template>
       </UiTableColumn>
       <UiTableColumn prop="checksum" label="Checksum" show-overflow-tooltip />
-      <UiTableColumn label="操作" width="100">
+      <UiTableColumn label="操作" width="100" fixed="right">
         <template #default="{ row }">
           <UiButton
             v-if="auth.user?.global_role === 'admin' && detailPkg?.status === 'published' && row.status === 'archived'"
@@ -366,19 +389,25 @@ flow:                                    # 可选：教程流程（2-12 步，�
 </template>
 
 <style scoped>
-.toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+.toolbar { margin-bottom: var(--space-4); display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .spec h3 { margin-top: 0; }
-.spec pre { background: var(--muted); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
+.spec pre { background: var(--muted); padding: var(--space-3); border-radius: 4px; font-size: var(--text-xs); overflow: auto; }
 .spec .tree { line-height: 1.5; }
 .spec .yaml { line-height: 1.6; }
-.dim { color: var(--muted-foreground); font-size: 0.85rem; }
-.builtin-card { margin-bottom: 1rem; }
-.builtin-header { display: flex; align-items: center; justify-content: space-between; }
-.builtin-title { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; }
-.builtin-topic h4 { margin: 0.6rem 0 0.3rem; }
+.dim { color: var(--muted-foreground); font-size: var(--text-sm); }
+.builtin-card { margin-bottom: var(--space-4); }
+.builtin-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.builtin-title { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; }
+.builtin-topic h4 { margin: var(--space-2) 0 var(--space-1); }
 .builtin-topic .slug { font-weight: 400; }
-.builtin-rooms { list-style: none; margin: 0; padding: 0 0 0 0.2rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.3rem 1.2rem; }
-.builtin-rooms li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.15rem 0; }
+.builtin-rooms { list-style: none; margin: 0; padding: 0 0 0 var(--space-1); display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-1) var(--space-5); }
+.builtin-rooms li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) 0; }
 .builtin-rooms li.not-imported .room-title { color: var(--muted-foreground); }
-.builtin-rooms .room-title { font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.builtin-rooms .room-title { font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-error { margin-bottom: var(--space-3); }
+.builtin-skeleton { display: grid; gap: var(--space-3); padding: var(--space-2) 0; }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.medium { width: 56%; }
+.builtin-skeleton .sk-line { animation: builtin-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes builtin-skeleton-pulse { 50% { opacity: .45; } }
 </style>

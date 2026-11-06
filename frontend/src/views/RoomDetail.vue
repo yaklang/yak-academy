@@ -60,11 +60,18 @@ onMounted(load)
 </script>
 
 <template>
-  <UiSkeleton v-if="loading" :rows="8" animated />
-  <div v-else-if="loadError" class="load-error" role="alert">
-    <p>{{ loadError }}</p>
-    <UiButton size="small" @click="load">重试</UiButton>
+  <div v-if="loading" class="room-skeleton" role="status" aria-label="正在加载教程">
+    <div class="sk-head" aria-hidden="true">
+      <i class="sk-line title" />
+      <i class="sk-line short" />
+      <i class="sk-line short" />
+    </div>
+    <div class="sk-reading" aria-hidden="true">
+      <i class="sk-block" />
+      <i v-for="n in 7" :key="n" class="sk-line" :class="{ short: n === 3 || n === 7 }" />
+    </div>
   </div>
+  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
   <div v-else-if="room" class="page">
     <header class="page-head">
       <div>
@@ -109,19 +116,16 @@ onMounted(load)
   margin-inline: auto;
 }
 .page-head { max-width: var(--lesson-reading-width); }
-.load-error {
-  display: grid;
-  justify-items: start;
-  gap: var(--space-3);
-  max-width: 860px;
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--panel);
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-}
+.room-skeleton { max-width: var(--lesson-reading-width); }
+.sk-head { display: grid; gap: var(--space-3); margin-bottom: var(--space-6); }
+.sk-reading { display: grid; gap: var(--space-3); }
+.sk-line { display: block; width: 100%; height: 13px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 32%; }
+.sk-line.title { width: 48%; height: 28px; }
+.sk-block { display: block; height: 260px; margin-bottom: var(--space-4); border-radius: var(--radius-card); background: var(--muted); }
+.room-skeleton .sk-line,
+.room-skeleton .sk-block { animation: room-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes room-skeleton-pulse { 50% { opacity: .45; } }
 .lesson-kind { margin-left: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
 .challenge-link {
   display: inline-flex;

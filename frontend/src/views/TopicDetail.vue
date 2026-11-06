@@ -49,11 +49,30 @@ onMounted(load)
 </script>
 
 <template>
-  <UiSkeleton v-if="loading" :rows="6" animated />
-  <div v-else-if="loadError" class="load-error" role="alert">
-    <p>{{ loadError }}</p>
-    <UiButton size="small" @click="load">重试</UiButton>
+  <div v-if="loading" class="topic-skeleton" role="status" aria-label="正在加载专题">
+    <div class="sk-head" aria-hidden="true">
+      <i class="sk-line short" />
+      <i class="sk-line title" />
+      <i class="sk-line medium" />
+    </div>
+    <div class="sk-route" aria-hidden="true">
+      <div v-for="n in 5" :key="n" class="sk-stop">
+        <i class="sk-line short" />
+        <i class="sk-line" />
+        <i class="sk-line short" />
+      </div>
+    </div>
+    <div class="sk-tree" aria-hidden="true">
+      <div v-for="n in 4" :key="n" class="sk-room">
+        <i class="sk-node" />
+        <div class="sk-room-card">
+          <i class="sk-line" />
+          <i class="sk-line short" />
+        </div>
+      </div>
+    </div>
   </div>
+  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
   <template v-else-if="topic">
     <header class="page-head">
       <div>
@@ -131,19 +150,37 @@ onMounted(load)
   font-size: var(--text-sm);
 }
 .route-meta .mono { color: var(--foreground); }
-.load-error {
+.topic-skeleton { max-width: 1040px; }
+.sk-head { display: grid; gap: var(--space-3); margin-bottom: var(--space-8); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 22%; }
+.sk-line.medium { width: 58%; }
+.sk-line.title { width: 38%; height: 26px; }
+.sk-route {
+  display: flex;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  margin-bottom: var(--space-8);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+.sk-stop { display: grid; flex: 1 0 160px; gap: var(--space-2); }
+.sk-tree { display: grid; gap: var(--space-4); }
+.sk-room { display: grid; grid-template-columns: var(--space-10) minmax(0, 1fr); align-items: center; gap: var(--space-4); }
+.sk-node { display: block; width: var(--space-10); height: var(--space-10); border-radius: 999px; background: var(--muted); }
+.sk-room-card {
   display: grid;
-  justify-items: start;
   gap: var(--space-3);
-  max-width: 860px;
-  padding: var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--panel);
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
 }
+.sk-room-card .sk-line:first-child { width: 46%; }
+.sk-room-card .sk-line:last-child { width: 24%; }
+.topic-skeleton .sk-line,
+.topic-skeleton .sk-node { animation: topic-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes topic-skeleton-pulse { 50% { opacity: .45; } }
 .section-head {
   display: flex;
   align-items: baseline;

@@ -32,6 +32,7 @@ declare module 'vue' {
     UiCard: typeof Presentation.UiCard
     UiAlert: typeof Presentation.UiAlert
     UiEmpty: typeof Presentation.UiEmpty
+    UiLoadError: typeof Presentation.UiLoadError
     UiResult: typeof Presentation.UiResult
     UiSkeleton: typeof Presentation.UiSkeleton
     UiProgress: typeof Presentation.UiProgress

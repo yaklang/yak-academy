@@ -31,7 +31,8 @@ const auth = useAuthStore()
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
 const page = ref(1)
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const uploading = ref(false)
 const specVisible = ref(false)
 
@@ -413,16 +414,24 @@ async function onBuildBuiltinImage() {
   }
 }
 
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
+  loadError.value = ''
+  // 切 tab / 筛选时先清空旧行，避免新结果的加载期仍展示上一个 tab 的题目。
+  items.value = []
+  total.value = 0
   try {
     const resp = await adminChallengeApi.list(currentQuery())
+    if (seq !== loadSeq) return
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    if (seq !== loadSeq) return
+    loadError.value = e instanceof Error ? e.message : '题目列表加载失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -545,15 +554,18 @@ async function toggleVisible(row: TrainingItem) {
 // 挂在 editExistingSlug（行内编辑已入库题目）上；文件导入新建流程不显示。
 const attachments = ref<ChallengeAttachment[]>([])
 const attachLoading = ref(false)
+const attachError = ref('')
 const attachUploading = ref(false)
 
 async function loadAttachments() {
   if (!editExistingSlug.value) return
   attachLoading.value = true
+  attachError.value = ''
+  attachments.value = []
   try {
     attachments.value = await adminChallengeApi.listAttachments(editExistingSlug.value)
   } catch (e) {
-    notify.error(`附件列表加载失败：${(e as Error).message}`)
+    attachError.value = `附件列表加载失败：${(e as Error).message}`
   } finally {
     attachLoading.value = false
   }
@@ -800,8 +812,9 @@ onUnmounted(stopEnginePolling)
     </UiCard>
   </UiCollapseTransition>
 
-  <UiTable :data="items" v-busy="loading" class="chal-table">
-    <UiTableColumn prop="slug" label="Slug" width="180" show-overflow-tooltip />
+  <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+  <UiTable v-else :data="items" :loading="loading" class="chal-table">
+    <UiTableColumn prop="slug" label="Slug" width="180" fixed="left" show-overflow-tooltip />
     <UiTableColumn prop="title" label="标题" min-width="160" show-overflow-tooltip />
     <UiTableColumn prop="category" label="分类" width="140" show-overflow-tooltip />
     <UiTableColumn label="难度" width="110">
@@ -816,7 +829,7 @@ onUnmounted(stopEnginePolling)
         <span v-else>—</span>
       </template>
     </UiTableColumn>
-    <UiTableColumn label="关联教程" min-width="140" show-overflow-tooltip>
+    <UiTableColumn label="关联教程" min-width="140">
       <template #default="{ row }">
         <span v-if="row.tutorial_slug">{{ row.tutorial_title || row.tutorial_slug }}</span>
         <span v-else>—</span>
@@ -835,7 +848,7 @@ onUnmounted(stopEnginePolling)
           />
         </template>
       </UiTableColumn>
-      <UiTableColumn v-if="auth.user?.global_role === 'admin'" label="操作" width="140">
+      <UiTableColumn v-if="auth.user?.global_role === 'admin'" label="操作" width="140" fixed="right">
         <template #default="{ row }">
           <UiButton size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</UiButton>
           <UiButton size="small" type="danger" @click="remove(row)">删除</UiButton>
@@ -1013,7 +1026,8 @@ onUnmounted(stopEnginePolling)
             <UiButton type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</UiButton>
           </UiUpload>
         </div>
-        <UiTable :data="attachments" v-busy="attachLoading" size="small" empty-text="暂无附件">
+        <UiLoadError v-if="attachError" compact :message="attachError" @retry="loadAttachments" class="attach-error" />
+        <UiTable v-else :data="attachments" :loading="attachLoading" :loading-rows="3" size="small" empty-text="暂无附件">
           <UiTableColumn prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
           <UiTableColumn label="大小" width="100">
             <template #default="{ row }">{{ attachSize(row.size) }}</template>
@@ -1021,7 +1035,7 @@ onUnmounted(stopEnginePolling)
           <UiTableColumn label="上传时间" width="150">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </UiTableColumn>
-          <UiTableColumn label="操作" width="70">
+          <UiTableColumn label="操作" width="70" fixed="right">
             <template #default="{ row }">
               <UiButton size="small" type="danger" link @click="removeAttachment(row.filename)">删除</UiButton>
             </template>
@@ -1053,50 +1067,52 @@ onUnmounted(stopEnginePolling)
 .hint { color: var(--muted-foreground); font-size: var(--text-sm); margin: 0 0 var(--space-4); }
 
 /* 工具栏与筛选 */
-.toolbar { margin-bottom: 0.9rem; display: flex; gap: 0.5rem; align-items: flex-start; }
-.filter-bar { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.9rem; }
-.filter-search { width: 300px; }
-.filter { width: 170px; }
+.toolbar { margin-bottom: var(--space-4); display: flex; gap: var(--space-2); align-items: flex-start; flex-wrap: wrap; }
+.filter-bar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
+.filter-search { width: 300px; max-width: 100%; }
+.filter { width: 170px; max-width: 100%; }
 .filter-clear {
-  color: var(--accent-foreground); font-size: 0.85rem; cursor: pointer; user-select: none;
+  color: var(--accent-foreground); font-size: var(--text-sm); cursor: pointer; user-select: none;
 }
 .filter-clear:hover { opacity: 0.8; }
+.list-error { margin-bottom: var(--space-3); }
+.attach-error { margin-bottom: var(--space-3); }
 
 /* 镜像状态卡 / 引擎状态卡 / 规范折叠卡 / 表格 */
-.image-card { margin-bottom: 1rem; }
-.image-card :deep([data-slot="card-content"]) { padding: 0.6rem 1rem; }
-.image-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.image-card { margin-bottom: var(--space-4); }
+.image-card :deep([data-slot="card-content"]) { padding: var(--space-3) var(--space-4); }
+.image-status { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .image-label { font-weight: 600; }
-.image-tag { color: var(--muted-foreground); font-size: 0.82rem; }
+.image-tag { color: var(--muted-foreground); font-size: var(--text-xs); }
 /* 引擎下载进度行 / 失败提示：与 image-tag 同一字号体系 */
-.engine-progress { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; max-width: 480px; }
+.engine-progress { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); max-width: 480px; }
 .engine-progress .ui-progress { flex: 1; }
-.engine-progress-text { color: var(--muted-foreground); font-size: 0.82rem; white-space: nowrap; }
-.engine-error { color: var(--destructive); font-size: 0.82rem; margin: 0.5rem 0 0; }
-.spec { margin-bottom: 1rem; }
+.engine-progress-text { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
+.engine-error { color: var(--destructive); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
+.spec { margin-bottom: var(--space-4); }
 .spec h3 { margin-top: 0; }
-.spec pre { background: var(--muted); padding: 0.8rem; border-radius: 4px; font-size: 0.82rem; overflow: auto; }
+.spec pre { background: var(--muted); padding: var(--space-3); border-radius: 4px; font-size: var(--text-xs); overflow: auto; }
 .spec .json { line-height: 1.5; font-family: Consolas, monospace; }
-.chal-table { margin-bottom: 0.8rem; }
-.dim { color: var(--muted-foreground); font-size: 0.85rem; }
+.chal-table { margin-bottom: var(--space-3); }
+.dim { color: var(--muted-foreground); font-size: var(--text-sm); }
 
 /* 编辑弹窗 */
-.form-errors { margin-bottom: 1rem; }
-.err-line { margin: 0.15rem 0; font-size: 0.85rem; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.8rem; }
+.form-errors { margin-bottom: var(--space-4); }
+.err-line { margin: var(--space-1) 0; font-size: var(--text-sm); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--space-3); }
 .lib-select { width: 100%; }
 .mono :deep(textarea) { font-family: Consolas, monospace; }
-.env-image { width: 320px; margin-left: 0.8rem; margin-right: 0.5rem; }
-.hints { width: 100%; display: flex; flex-direction: column; gap: 0.5rem; }
-.hint-row { display: flex; gap: 0.5rem; align-items: center; }
+.env-image { width: 320px; max-width: 100%; margin-left: var(--space-3); margin-right: var(--space-2); }
+.hints { width: 100%; display: flex; flex-direction: column; gap: var(--space-2); }
+.hint-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .hint-title { width: 140px; flex: none; }
 .hint-content { flex: 1; }
 .hint-cost { flex: none; }
-.attach-toolbar { margin-bottom: 0.8rem; }
+.attach-toolbar { margin-bottom: var(--space-3); }
 .form-hint { line-height: 1.4; margin-top: 2px; }
 /* ACM 数据组行：与 attach-row 同一排版体系（等宽组名 + 说明文字） */
-.testdata-list { display: flex; flex-direction: column; gap: 0.4rem; }
-.testdata-row { display: flex; align-items: center; gap: 0.6rem; }
-.testdata-name { font-family: Consolas, monospace; min-width: 8rem; }
+.testdata-list { display: flex; flex-direction: column; gap: var(--space-1); }
+.testdata-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.testdata-name { font-family: Consolas, monospace; min-width: 104px; }
 .testdata-score { width: 130px; }
 </style>

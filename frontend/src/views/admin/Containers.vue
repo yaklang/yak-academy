@@ -12,19 +12,22 @@ import {
 } from '../../api'
 
 const perf = ref<PerformanceReport | null>(null)
-const perfLoading = ref(false)
+const perfLoading = ref(true)
+const perfError = ref('')
 const autoRefresh = ref(true)
 let perfTimer: number | undefined
 
 const active = ref<AdminLabInstance[]>([])
-const activeLoading = ref(false)
+const activeLoading = ref(true)
+const activeError = ref('')
 const destroying = ref(0)
 
 const logs = ref<InstanceLog[]>([])
 const logTotal = ref(0)
 const logPage = ref(1)
 const logPageSize = ref(20)
-const logLoading = ref(false)
+const logLoading = ref(true)
+const logError = ref('')
 
 const REFRESH_MS = 10000
 
@@ -32,9 +35,12 @@ async function loadPerf(silent = true) {
   if (!silent) perfLoading.value = true
   try {
     perf.value = await performanceApi.get()
+    perfError.value = ''
   } catch (e) {
-    // 自动刷新失败不打断页面（瞬时抖动）；手动刷新显式提示。
-    if (!silent) notify.error((e as Error).message)
+    // 自动刷新失败不打断页面，但必须把失败原因留在卡片里；
+    // 否则会退化成“未配置容器运行时”的误导性空态。
+    perfError.value = e instanceof Error ? e.message : '性能数据加载失败，请稍后重试'
+    if (!silent) notify.error(perfError.value)
   } finally {
     perfLoading.value = false
   }
@@ -59,11 +65,13 @@ function onAutoRefreshChange() {
 
 async function loadActive() {
   activeLoading.value = true
+  activeError.value = ''
+  active.value = []
   try {
     const resp = await adminInstanceApi.active()
     active.value = resp.items
   } catch (e) {
-    notify.error((e as Error).message)
+    activeError.value = e instanceof Error ? e.message : '活跃容器加载失败，请稍后重试'
   } finally {
     activeLoading.value = false
   }
@@ -71,12 +79,15 @@ async function loadActive() {
 
 async function loadLogs() {
   logLoading.value = true
+  logError.value = ''
+  logs.value = []
+  logTotal.value = 0
   try {
     const resp = await adminInstanceApi.logs(logPage.value, logPageSize.value)
     logs.value = resp.items
     logTotal.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    logError.value = e instanceof Error ? e.message : '容器日志加载失败，请稍后重试'
   } finally {
     logLoading.value = false
   }
@@ -181,7 +192,7 @@ onUnmounted(stopPerf)
   </header>
 
   <!-- 主机性能面板 -->
-  <UiCard class="block" shadow="never" v-busy="perfLoading">
+  <UiCard class="block" shadow="never">
     <template #header>
       <div class="card-head">
         <span>主机性能</span>
@@ -192,7 +203,15 @@ onUnmounted(stopPerf)
         </div>
       </div>
     </template>
-    <template v-if="perf">
+    <UiLoadError v-if="perfError" compact :message="perfError" @retry="loadPerf(false)" class="card-error" />
+    <div v-if="!perf && perfLoading" class="perf-skeleton" role="status" aria-label="正在加载主机性能">
+      <div v-for="n in 4" :key="n" class="sk-metric">
+        <i class="sk-line short" />
+        <i class="sk-line" />
+        <i class="sk-line medium" />
+      </div>
+    </div>
+    <template v-else-if="perf">
       <div class="host-grid">
         <div class="metric">
           <div class="metric-title">CPU（{{ perf.ncpu }} 核）</div>
@@ -276,7 +295,7 @@ onUnmounted(stopPerf)
         <UiTableColumn prop="pids" label="PIDs" width="70" />
       </UiTable>
     </template>
-    <div v-else-if="!perfLoading" class="dim">
+    <div v-else-if="!perfLoading && !perfError" class="dim">
       性能数据不可用：未配置容器运行时（Docker）或守护进程不可达。
     </div>
   </UiCard>
@@ -289,13 +308,15 @@ onUnmounted(stopPerf)
         <UiTag size="small" type="primary">{{ active.length }}</UiTag>
       </div>
     </template>
+    <UiLoadError v-if="activeError" compact :message="activeError" @retry="loadActive" class="card-error" />
     <UiTable
+      v-else
       :data="active"
-      v-busy="activeLoading"
+      :loading="activeLoading"
       max-height="360"
       empty-text="当前没有运行中的容器"
     >
-      <UiTableColumn prop="id" label="ID" width="70" />
+      <UiTableColumn prop="id" label="ID" width="70" fixed="left" />
       <UiTableColumn prop="username" label="用户" width="120" />
       <UiTableColumn label="题目" min-width="180">
         <template #default="{ row }">
@@ -317,7 +338,7 @@ onUnmounted(stopPerf)
       <UiTableColumn label="到期时间" width="100">
         <template #default="{ row }">{{ fmtTime(row.expire_at) }}</template>
       </UiTableColumn>
-      <UiTableColumn label="操作" width="110">
+      <UiTableColumn label="操作" width="110" fixed="right">
         <template #default="{ row }">
           <UiButton
             size="small"
@@ -338,13 +359,15 @@ onUnmounted(stopPerf)
         <UiButton size="small" @click="load">刷新</UiButton>
       </div>
     </template>
+    <UiLoadError v-if="logError" compact :message="logError" @retry="loadLogs" class="card-error" />
     <UiTable
+      v-else
       :data="logs"
-      v-busy="logLoading"
+      :loading="logLoading"
       max-height="480"
       empty-text="暂无容器操作记录"
     >
-      <UiTableColumn label="时间" width="170">
+      <UiTableColumn label="时间" width="170" fixed="left">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
       </UiTableColumn>
       <UiTableColumn prop="instance_id" label="实例" width="80" />
@@ -372,7 +395,7 @@ onUnmounted(stopPerf)
         </template>
       </UiTableColumn>
     </UiTable>
-    <!-- 分页常驻（含总数与每页条数）：日志 append-only 只增不减，total 短暂为 0 也应保留翻页入口 -->
+    <!-- 超过一页才显示分页器；只有一页时保留总数没有可执行意义。 -->
     <UiPagination
       background
       layout="total, sizes, prev, pager, next, jumper"
@@ -388,14 +411,22 @@ onUnmounted(stopPerf)
 </template>
 
 <style scoped>
-.block { margin-bottom: 1.2rem; }
+.block { margin-bottom: var(--space-5); }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
-.head-actions { display: flex; align-items: center; gap: 0.6rem; }
-.dim { color: var(--muted-foreground); font-size: 0.8rem; }
-.pager { margin-top: 1rem; }
-.host-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.2rem; margin-bottom: 1rem; }
-.metric-title { font-weight: 600; margin-bottom: 0.5rem; }
-.metric-line { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.head-actions { display: flex; align-items: center; gap: var(--space-2); }
+.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
+.pager { margin-top: var(--space-4); }
+.card-error { margin-bottom: var(--space-4); }
+.host-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); margin-bottom: var(--space-4); }
+.metric-title { font-weight: 600; margin-bottom: var(--space-2); }
+.metric-line { display: flex; gap: var(--space-1); align-items: center; flex-wrap: wrap; }
 .res-table { width: 100%; }
-.mem-line { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.mem-line { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.perf-skeleton { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); }
+.sk-metric { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 32%; }
+.sk-line.medium { width: 68%; }
+.perf-skeleton .sk-line { animation: perf-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes perf-skeleton-pulse { 50% { opacity: .45; } }
 </style>

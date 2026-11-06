@@ -12,7 +12,8 @@ const items = ref<Competition[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 
 const showCreate = ref(false)
 const creating = ref(false)
@@ -66,12 +67,15 @@ async function submitCreate() {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  items.value = []
+  total.value = 0
   try {
     const resp = await adminCompetitionApi.list(page.value, pageSize.value)
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '竞赛列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -164,9 +168,10 @@ onMounted(load)
         <UiButton type="primary" size="small" @click="openCreate">创建竞赛</UiButton>
       </div>
     </template>
-    <UiTable :data="items" v-busy="loading" empty-text="暂无竞赛">
+    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+    <UiTable v-else :data="items" :loading="loading" empty-text="暂无竞赛">
       <UiTableColumn prop="id" label="ID" width="70" />
-      <UiTableColumn prop="name" label="名称" min-width="160" />
+      <UiTableColumn prop="name" label="名称" min-width="160" show-overflow-tooltip />
       <UiTableColumn label="赛制" width="100">
         <template #default="{ row }">
           <UiTag :type="row.kind === 'public' ? 'success' : 'warning'" size="small">
@@ -185,7 +190,7 @@ onMounted(load)
       <UiTableColumn label="结束时间" width="170">
         <template #default="{ row }">{{ fmt(row.end_time) }}</template>
       </UiTableColumn>
-      <UiTableColumn label="操作" width="220">
+      <UiTableColumn label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <router-link :to="`/admin/panel/competitions/${row.id}`">
             <UiButton size="small" type="primary" link>详情与配置</UiButton>
@@ -253,8 +258,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.dim { color: var(--muted-foreground); font-size: 0.8rem; margin-top: 4px; }
-.block { margin-bottom: 1.2rem; }
+.dim { color: var(--muted-foreground); font-size: var(--text-xs); margin-top: var(--space-1); }
+.block { margin-bottom: var(--space-5); }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
-.pager { margin-top: 1rem; }
+.pager { margin-top: var(--space-4); }
+.list-error { margin-bottom: var(--space-3); }
 </style>
