@@ -55,6 +55,7 @@ test.describe('回归：容器错误信息去 emoji', () => {
     //（用范围扫描而非逐个枚举，防止镜像代理更换装饰符绕过断言）。
     await loginAsAdmin(page)
     await page.goto('/admin/panel/containers')
+    await expect(page.getByRole('tab', { name: '容器管理' })).toHaveAttribute('aria-selected', 'true')
     const detailCell = page
       .locator('tr.ui-data-row', { hasText: seedTitle })
       .filter({ hasText: 'create failed' })

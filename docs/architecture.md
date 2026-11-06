@@ -30,8 +30,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │ 表现层  frontend/  Vue3 + TS + Vite                          │
 │   学生端：Topic/Room 教程浏览、题库（题目分组列表+详情）、       │
 │           进度、排行榜、竞赛广场（公开赛报名+入场/做题/双榜/WP）│
-│   管理端：资源管理（教程/题目/容器/竞赛/用户管理）              │
-│           （用户管理为只读画像表格：搜索/过滤/不活跃标记；      │
+│   管理端：资源管理（教程/题目/用户与容器/竞赛管理）             │
+│           （用户管理为只读画像表格；容器管理为同页 tab；        │
 │            建号入口在邀请赛「一键生成账号」与自助注册，         │
 │            角色是账号固有属性）                                 │
 ├────────────────────────────────────────────────────────────┤
@@ -62,7 +62,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 两档角色：`student`（普通人，仅学习端）/ `admin`（管理员，管理端全部能力）；普通人前端不显示管理入口。
 - 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
 - **账号编码（学号式）**：每号分配唯一编码 `YA{YY}-{NNNNN}`（建号年两位 + 年内序号 1~99999 零填充，如 `YA26-00042`），建号入口统一在 `userRepo.Create`（同年前缀字典序 MAX+1 分配，唯一冲突重试）；序号按建号年分组互不挤占。旧库迁移按 created_at 年分组回填（幂等，起始取该年已有最大序号+1）；部分唯一索引（`account_code <> ''`）兼容旧空值行。编码是用户对外可报读的稳定标识（区别于可读用户名），邀请赛导入表格、用户管理搜索均支持按编码引用/检索。
-- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/邮箱/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走邀请赛一键生成或自助注册。
+- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/邮箱/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；用户与容器页的用户管理 tab 为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走邀请赛一键生成或自助注册。
 - **自助注册（邮箱验证码为主通道）**：登录页提供注册入口，流程为 `POST /auth/email/code`（邮箱发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同邮箱 60 秒限频、10 分钟内最多 3 次。`EmailSender` 为投递抽象：管理端「系统设置 → 邮件服务」保存 SMTP 配置后立即热加载（支持 starttls / implicit TLS / none）；环境变量 `ACADEMY_SMTP_*` 仅作为首次启动默认值，数据库配置优先。未配置/停用时非严格模式用开发投递器写服务日志，严格模式返回 501（生产必须配置 SMTP，不在生产日志中暴露验证码）。邮箱作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复邮箱注册拒绝。旧版 `POST /auth/sms/code` + `phone` 注册保留兼容，`User.phone` 字段继续保留给已有手机号账号，不做数据迁移。
 - **运行期统一设置（管理端系统设置）**：可热更新的服务参数存 `system_settings` 表（一行一个配置域，Value 为域内 JSON），当前提供 SMTP 域：`GET/PUT /admin/settings/smtp` 读取/保存，`POST /admin/settings/smtp/test` 发送测试邮件。保存时先构造投递器再落库，成功后原子替换 `DynamicEmailSender`，无需重启；配置非法不写入、不切换，旧配置继续服务。SMTP 密码使用 AES-256-GCM 加密落库（随机 nonce，密钥由 JWT secret 经 HKDF-SHA256 按域分离派生），API 只返回 `has_password`、永不回显；JWT secret 轮换后旧密码不可解密，设置页会提示重新填写。每次保存/测试写 `admin_audit_logs`（不含密码）。
 - **验证码回显（仅本地演示）**：默认关闭。本地联调/E2E 可设 `ACADEMY_SHOW_VERIFICATION_CODE=1`（旧变量 `ACADEMY_SMS_SHOW_CODE` 兼容）让发码响应携带验证码原文；`ACADEMY_STRICT=1` 时该开关必须关闭，否则拒绝启动，避免任意请求方读取注册/找回验证码。
@@ -284,7 +284,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - 备份为应用内单机快照（SQLite `VACUUM INTO` + 数据目录 tar.gz，`ACADEMY_BACKUP_INTERVAL` 周期触发 / 管理端手动触发，按 `ACADEMY_BACKUP_KEEP` 保留份数自动清理）：PostgreSQL 模式不支持（外部 pg_dump）；归档落数据卷本地目录，数据卷整卷损坏时备份同失——异地容灾由运维侧下载归档离机保存或同步 backups/ 目录（平台不内置）。
 - 可观测性为「暴露而不内置」：`/metrics`（Prometheus 文本格式，HTTP 按路由聚合 + 运行时指标，`ACADEMY_METRICS_TOKEN` 令牌门控，未配置即关闭）与 slog 结构化访问日志（`ACADEMY_LOG_JSON=1` 切 JSON 行）；采集、存储、看板与告警由外部 Prometheus + Alertmanager / 日志采集器完成，平台不内置监控栈。`/health` 探针与 `/metrics` 采集不进指标与访问日志（高频探针噪音）。
 - 管理操作审计为独立 append-only 表（`admin_audit_logs`：管理端全部写操作——内容上传/发布/回滚/删除、题目与附件、竞赛、用户与角色、备份等——成功后 best-effort 落一行，查询走 `GET /admin/audit-logs`）：与 Event 学生行为流分工，不进事件总线、不参与积分重放；审计写失败仅服务日志告警不阻断业务响应，无防篡改（单库同卷，与库共生死）。
-- 性能面板（容器管理页，`GET /admin/performance`）为即时快照无历史：数据源 docker info/stats + Linux 宿主 `/proc` 采样（容器内即宿主全局视图）+ 数据卷 statfs；趋势与告警不在平台内置（走外部 Prometheus 栈），非 Linux 开发态宿主占用与数据卷字段为 null。
+- 性能面板（用户与容器页的容器管理 tab，`GET /admin/performance`）为即时快照无历史：数据源 docker info/stats + Linux 宿主 `/proc` 采样（容器内即宿主全局视图）+ 数据卷 statfs；服务端缓存最近成功快照（启动预热，5s 新鲜期，过期先返回旧值并后台刷新，刷新失败保留最近快照并告警），避免每次进入页面同步等待 docker stats 的秒级采样窗口。趋势与告警不在平台内置（走外部 Prometheus 栈），非 Linux 开发态宿主占用与数据卷字段为 null。
 - 不引入 Casbin / Redis / K8s；数据层默认 SQLite，`ACADEMY_DB_DSN` 可选切 PostgreSQL（Phase 4 已落地的第一步；存量 SQLite 数据不自动迁移）。
 - JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限、或开启验证码回显时拒绝启动，非严格路径仅启动告警）。邮箱验证码的 SMTP 配置在管理端「系统设置」统一管理（保存后覆盖环境变量默认值）——未配置/停用时严格模式发码返回 501。SMTP 密码加密密钥由 JWT secret 派生，轮换 JWT secret 后需在设置页重新填写 SMTP 密码。
 - 内置训练的 vulinbox 基础镜像构建依赖官方 CDN（`oss-qn.yaklang.com`，离线部署需手工预构建镜像）且仅 amd64；二进制 sha256 锁定在 Dockerfile，上游更新会使导入 422（防靶机行为漂移，更新题集时重新锁定）。

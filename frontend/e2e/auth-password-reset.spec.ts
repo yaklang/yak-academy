@@ -137,7 +137,7 @@ test.describe('找回账号与重置密码', () => {
 
     await loginAsAdmin(page)
     await page.goto('/admin/panel/users')
-    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '用户与容器' })).toBeVisible()
     await page.getByPlaceholder('搜索：用户名 / 账号编码 / 邮箱 / 手机号').fill(username)
     await page.getByRole('button', { name: '搜索' }).click()
     const row = page.locator('tr', { hasText: username })

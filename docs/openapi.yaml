@@ -156,6 +156,16 @@ components:
                 items: { type: integer, nullable: true }
                 description: "[读, 写]；解析失败为 null 元素"
               pids: { type: integer }
+        sampled_at:
+          type: string
+          format: date-time
+          description: 最近一次成功采集时间；服务端缓存命中时用于提示数据新鲜度
+        refreshing:
+          type: boolean
+          description: 后台正在采集更新快照；前端可短暂轮询追平
+        warning:
+          type: string
+          description: 后台刷新失败但返回最近一次成功快照时的提示
     LoginRequest:
       type: object
       required: [username, password]
@@ -2680,9 +2690,11 @@ paths:
     get:
       tags: [admin]
       summary: >
-        主机/容器性能快照（容器管理页性能面板；ops 硬化）：docker info 宿主
+        主机/容器性能快照（用户与容器页容器管理 tab 的性能面板；ops 硬化）：docker info 宿主
         概览 + docker stats 全容器资源占用 + Linux /proc 宿主 CPU/内存采样 +
-        数据卷 statfs 用量。容器运行时未配置（无 docker）返回 501
+        数据卷 statfs 用量。服务端缓存最近成功快照：命中直接返回，过期先返回
+        旧值并后台刷新（响应 refreshing/sampled_at，可据此短暂轮询追平）。
+        容器运行时未配置（无 docker）返回 501
       responses:
         '200':
           description: OK

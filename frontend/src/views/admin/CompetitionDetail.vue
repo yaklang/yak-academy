@@ -679,10 +679,10 @@ onMounted(async () => {
       <i class="sk-line title" />
       <i class="sk-line medium" />
     </div>
+    <div class="sk-tabs" aria-hidden="true"><i v-for="n in 5" :key="n" /></div>
     <div class="sk-stats" aria-hidden="true">
       <div v-for="n in 4" :key="n" class="sk-stat"><i class="sk-line short" /><i class="sk-line medium" /></div>
     </div>
-    <div class="sk-tabs" aria-hidden="true"><i v-for="n in 5" :key="n" /></div>
     <div class="sk-panel" aria-hidden="true"><i class="sk-line" /><i class="sk-line medium" /><i class="sk-line short" /></div>
   </div>
   <UiLoadError v-else-if="loadError" :message="loadError" @retry="reloadDetail" />
@@ -702,18 +702,20 @@ onMounted(async () => {
       <span v-if="detail?.description"> · {{ detail.description }}</span>
     </p>
 
-    <!-- 统计卡片 -->
-    <div v-if="detail" class="stats">
-      <div class="stat"><b>{{ detail.stats.teams }}</b><span>战队</span></div>
-      <div class="stat"><b>{{ detail.stats.participants }}</b><span>参赛人数</span></div>
-      <div class="stat"><b>{{ detail.stats.entered }}</b><span>已入场</span></div>
-      <div class="stat"><b>{{ detail.stats.challenges }}</b><span>题目</span></div>
-      <div class="stat"><b>{{ detail.stats.instances }}</b><span>容器</span></div>
-      <div class="stat warn"><b>{{ detail.stats.warnings }}</b><span>反作弊警告</span></div>
-      <div class="stat"><b>{{ detail.stats.writeups }}</b><span>WP 提交</span></div>
-    </div>
-
     <UiTabs v-model="activeTab" @tab-change="onTab">
+      <template #summary>
+        <!-- 统计卡片 -->
+        <div v-if="detail" class="stats">
+          <div class="stat"><b>{{ detail.stats.teams }}</b><span>战队</span></div>
+          <div class="stat"><b>{{ detail.stats.participants }}</b><span>参赛人数</span></div>
+          <div class="stat"><b>{{ detail.stats.entered }}</b><span>已入场</span></div>
+          <div class="stat"><b>{{ detail.stats.challenges }}</b><span>题目</span></div>
+          <div class="stat"><b>{{ detail.stats.instances }}</b><span>容器</span></div>
+          <div class="stat warn"><b>{{ detail.stats.warnings }}</b><span>反作弊警告</span></div>
+          <div class="stat"><b>{{ detail.stats.writeups }}</b><span>WP 提交</span></div>
+        </div>
+      </template>
+
       <!-- 配置 -->
       <UiTabPane label="配置" name="config">
         <UiCard shadow="never">
@@ -1300,7 +1302,7 @@ onMounted(async () => {
 <style scoped>
 .head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .hint { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 0; }
-.stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-3) 0 var(--space-5); }
+.stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-5); }
 .stat {
   min-width: 96px; padding: var(--space-3) var(--space-4); text-align: center;
   border: 1px solid var(--border); border-radius: 6px;
@@ -1346,8 +1348,8 @@ onMounted(async () => {
 .sk-line.title { width: 36%; height: 28px; }
 .sk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .sk-stat { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
-.sk-tabs { display: flex; gap: var(--space-2); border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
-.sk-tabs i { width: 84px; height: 28px; border-radius: var(--radius-control); background: var(--muted); }
+.sk-tabs { display: flex; gap: var(--space-5); border-bottom: 1px solid var(--border); padding-bottom: var(--space-3); }
+.sk-tabs i { width: 64px; height: 14px; border-radius: 3px; background: var(--muted); }
 .sk-panel { display: grid; gap: var(--space-3); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
 .wp-skeleton { display: grid; gap: var(--space-3); padding: var(--space-4) 0; }
 .detail-skeleton .sk-line,

@@ -2,20 +2,25 @@
 // 管理面板：容器管理。整体视图 = 主机性能面板（宿主 CPU/内存/容器与镜像计数/
 // 数据卷用量 + 全容器资源占用表，可自动刷新）+ 当前活跃容器概览（含题目信息，
 // 可强制销毁）+ 下方容器生命周期日志（append-only，记录每次启动/停止及失败原因）。
-// 后两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
-import { onMounted, onUnmounted, ref } from 'vue'
+// 三张表均分页，默认 20 条/页；性能与活跃表在前端分页，日志表走服务端分页。
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime, formatTime } from '@/lib/format'
+import { useClientPagination } from '@/composables/useClientPagination'
 import {
   adminInstanceApi, performanceApi,
   type AdminLabInstance, type InstanceLog, type PerformanceReport,
 } from '../../api'
+
+const props = defineProps<{ embedded?: boolean }>()
 
 const perf = ref<PerformanceReport | null>(null)
 const perfLoading = ref(true)
 const perfError = ref('')
 const autoRefresh = ref(true)
 let perfTimer: number | undefined
+let perfCatchUpTimer: number | undefined
+let disposed = false
 
 const active = ref<AdminLabInstance[]>([])
 const activeLoading = ref(true)
@@ -29,13 +34,31 @@ const logPageSize = ref(20)
 const logLoading = ref(true)
 const logError = ref('')
 
+const perfContainers = computed(() => perf.value?.containers ?? [])
+const {
+  page: perfPage,
+  pageSize: perfPageSize,
+  total: perfTotal,
+  items: perfItems,
+} = useClientPagination(perfContainers)
+const {
+  page: activePage,
+  pageSize: activePageSize,
+  total: activeTotal,
+  items: activeItems,
+} = useClientPagination(active)
+
 const REFRESH_MS = 10000
+// 服务端返回缓存快照并后台刷新时，短暂轮询追平；docker stats 采样约 1-2s，
+// 1.5s 一次不会造成请求堆积，也不会让旧 CPU/内存数字停留到下一个 10s 周期。
+const PERF_CATCHUP_MS = 1500
 
 async function loadPerf(silent = true) {
   if (!silent) perfLoading.value = true
   try {
     perf.value = await performanceApi.get()
     perfError.value = ''
+    schedulePerfCatchUp()
   } catch (e) {
     // 自动刷新失败不打断页面，但必须把失败原因留在卡片里；
     // 否则会退化成“未配置容器运行时”的误导性空态。
@@ -44,6 +67,18 @@ async function loadPerf(silent = true) {
   } finally {
     perfLoading.value = false
   }
+}
+
+function schedulePerfCatchUp() {
+  if (perfCatchUpTimer !== undefined) {
+    window.clearTimeout(perfCatchUpTimer)
+    perfCatchUpTimer = undefined
+  }
+  if (disposed || !perf.value?.refreshing) return
+  perfCatchUpTimer = window.setTimeout(() => {
+    perfCatchUpTimer = undefined
+    loadPerf()
+  }, PERF_CATCHUP_MS)
 }
 
 function schedulePerf() {
@@ -55,6 +90,10 @@ function stopPerf() {
   if (perfTimer !== undefined) {
     window.clearInterval(perfTimer)
     perfTimer = undefined
+  }
+  if (perfCatchUpTimer !== undefined) {
+    window.clearTimeout(perfCatchUpTimer)
+    perfCatchUpTimer = undefined
   }
 }
 
@@ -178,11 +217,14 @@ onMounted(() => {
   schedulePerf()
 })
 
-onUnmounted(stopPerf)
+onUnmounted(() => {
+  disposed = true
+  stopPerf()
+})
 </script>
 
 <template>
-  <header class="page-head">
+  <header v-if="!props.embedded" class="page-head">
     <div>
       <h2 class="page-title">容器<span class="accent">管理</span></h2>
       <p class="page-sub">
@@ -197,6 +239,9 @@ onUnmounted(stopPerf)
       <div class="card-head">
         <span>主机性能</span>
         <div class="head-actions">
+          <span v-if="perf?.sampled_at" class="dim sample-time" role="status">
+            采样于 {{ formatTime(perf.sampled_at) }}<template v-if="perf.refreshing"> · 刷新中…</template>
+          </span>
           <span v-if="autoRefresh" class="dim">每 {{ REFRESH_MS / 1000 }}s 自动刷新</span>
           <UiSwitch v-model="autoRefresh" size="small" @change="onAutoRefreshChange" />
           <UiButton size="small" @click="loadPerf(false)">刷新</UiButton>
@@ -204,6 +249,13 @@ onUnmounted(stopPerf)
       </div>
     </template>
     <UiLoadError v-if="perfError" compact :message="perfError" @retry="loadPerf(false)" class="card-error" />
+    <UiLoadError
+      v-else-if="perf?.warning"
+      compact
+      :message="perf.warning"
+      @retry="loadPerf(false)"
+      class="card-error"
+    />
     <div v-if="!perf && perfLoading" class="perf-skeleton" role="status" aria-label="正在加载主机性能">
       <div v-for="n in 4" :key="n" class="sk-metric">
         <i class="sk-line short" />
@@ -262,7 +314,7 @@ onUnmounted(stopPerf)
         </div>
       </div>
 
-      <UiTable :data="perf.containers" max-height="320" empty-text="当前没有容器" class="res-table">
+      <UiTable :data="perfItems" max-height="320" empty-text="当前没有容器" class="res-table">
         <UiTableColumn prop="name" label="容器" min-width="180">
           <template #default="{ row }">
             <span>{{ row.name }}</span>
@@ -294,6 +346,16 @@ onUnmounted(stopPerf)
         </UiTableColumn>
         <UiTableColumn prop="pids" label="PIDs" width="70" />
       </UiTable>
+      <UiPagination
+        background
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="perfTotal"
+        :page-sizes="[20, 50, 100]"
+        v-model:page-size="perfPageSize"
+        v-model:current-page="perfPage"
+        show-single-page
+        class="pager"
+      />
     </template>
     <div v-else-if="!perfLoading && !perfError" class="dim">
       性能数据不可用：未配置容器运行时（Docker）或守护进程不可达。
@@ -305,13 +367,13 @@ onUnmounted(stopPerf)
     <template #header>
       <div class="card-head">
         <span>当前打开的容器</span>
-        <UiTag size="small" type="primary">{{ active.length }}</UiTag>
+        <UiTag size="small" type="primary">{{ activeTotal }}</UiTag>
       </div>
     </template>
     <UiLoadError v-if="activeError" compact :message="activeError" @retry="loadActive" class="card-error" />
     <UiTable
       v-else
-      :data="active"
+      :data="activeItems"
       :loading="activeLoading"
       max-height="360"
       empty-text="当前没有运行中的容器"
@@ -349,6 +411,16 @@ onUnmounted(stopPerf)
         </template>
       </UiTableColumn>
     </UiTable>
+    <UiPagination
+      background
+      layout="total, sizes, prev, pager, next, jumper"
+      :total="activeTotal"
+      :page-sizes="[20, 50, 100]"
+      v-model:page-size="activePageSize"
+      v-model:current-page="activePage"
+      show-single-page
+      class="pager"
+    />
   </UiCard>
 
   <!-- 容器生命周期日志 -->
@@ -395,7 +467,7 @@ onUnmounted(stopPerf)
         </template>
       </UiTableColumn>
     </UiTable>
-    <!-- 超过一页才显示分页器；只有一页时保留总数没有可执行意义。 -->
+    <!-- 分页器常驻：默认 20 条/页，有数据即可见总数与每页条数。 -->
     <UiPagination
       background
       layout="total, sizes, prev, pager, next, jumper"
@@ -405,6 +477,7 @@ onUnmounted(stopPerf)
       v-model:current-page="logPage"
       @current-change="loadLogs"
       @size-change="onLogSizeChange"
+      show-single-page
       class="pager"
     />
   </UiCard>
@@ -413,7 +486,12 @@ onUnmounted(stopPerf)
 <style scoped>
 .block { margin-bottom: var(--space-5); }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
-.head-actions { display: flex; align-items: center; gap: var(--space-2); }
+.head-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+.sample-time { white-space: nowrap; }
+@media (max-width: 640px) {
+  .card-head { align-items: flex-start; flex-wrap: wrap; row-gap: var(--space-2); }
+  .head-actions { flex-basis: 100%; justify-content: flex-start; }
+}
 .dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 .pager { margin-top: var(--space-4); }
 .card-error { margin-bottom: var(--space-4); }

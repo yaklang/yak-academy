@@ -1,4 +1,4 @@
-import { computed, defineComponent, h, inject, nextTick, provide, ref, useId, type InjectionKey, type PropType, type SlotsType } from 'vue'
+import { computed, defineComponent, h, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, useId, type InjectionKey, type PropType, type SlotsType } from 'vue'
 import { ChevronLeft, ChevronRight, Search, X } from '@lucide/vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TagsInput, TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText } from '@/components/ui/tags-input'
@@ -79,15 +79,43 @@ export const UiTabs = defineComponent({
   name: 'UiTabs', inheritAttrs: false,
   props: { modelValue: [String, Number], type: String }, emits: ['update:modelValue', 'tab-change', 'tab-click'],
   setup(props, { attrs, slots, emit }) {
+    const scrollEl = ref<HTMLDivElement | null>(null)
+    const scrollLeft = ref(false)
+    const scrollRight = ref(false)
+    let resizeObserver: ResizeObserver | null = null
+
+    const syncScroll = () => {
+      const el = scrollEl.value
+      if (!el) return
+      const left = el.scrollLeft > 1
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+      if (scrollLeft.value !== left) scrollLeft.value = left
+      if (scrollRight.value !== right) scrollRight.value = right
+    }
+
+    onMounted(() => {
+      const el = scrollEl.value
+      if (!el) return
+      syncScroll()
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(syncScroll)
+        resizeObserver.observe(el)
+        if (el.firstElementChild) resizeObserver.observe(el.firstElementChild)
+      }
+    })
+    onBeforeUnmount(() => resizeObserver?.disconnect())
+
     return () => {
       const panes = childComponents(slots.default?.(), 'UiTabPane')
+      const summary = slots.summary?.()
       const value = String(props.modelValue ?? panes[0]?.props?.name ?? '')
-      return h(Tabs as any, { ...attrs, modelValue: value, class: cn('ui-tabs min-w-0 w-full', attrs.class as string), 'onUpdate:modelValue': (next: string) => { emit('update:modelValue', next); emit('tab-change', next); emit('tab-click', { paneName: next }) } }, {
+      return h(Tabs as any, { ...attrs, modelValue: value, class: cn('ui-tabs min-w-0 w-full gap-0', attrs.class as string), 'onUpdate:modelValue': (next: string) => { emit('update:modelValue', next); emit('tab-change', next); emit('tab-click', { paneName: next }) } }, {
         default: () => [
-          h('div', { class: 'tabs-scroll max-w-full overflow-x-auto' }, [h(TabsList, { class: 'h-auto min-h-10 w-max max-w-none justify-start gap-1 bg-muted p-1' }, {
-            default: () => panes.map((pane, index) => h(TabsTrigger, { value: String(pane.props?.name ?? index), disabled: !!pane.props?.disabled, class: 'min-h-8 shrink-0 px-4 text-sm' }, { default: () => (pane.children as any)?.label?.() ?? pane.props?.label })),
+          h('div', { ref: scrollEl, class: cn('tabs-scroll max-w-full overflow-x-auto', scrollLeft.value && 'is-scroll-left', scrollRight.value && 'is-scroll-right'), onScroll: syncScroll }, [h(TabsList, { variant: 'line', class: 'h-auto min-h-10 w-full justify-start gap-6 rounded-none bg-transparent p-0' }, {
+            default: () => panes.map((pane, index) => h(TabsTrigger, { value: String(pane.props?.name ?? index), disabled: !!pane.props?.disabled, class: 'h-auto min-h-10 flex-none rounded-none px-1 pb-3 pt-1 text-sm' }, { default: () => (pane.children as any)?.label?.() ?? pane.props?.label })),
           })]),
-          ...panes.map((pane, index) => h(TabsContent, { value: String(pane.props?.name ?? index), class: 'mt-5 min-w-0 outline-none' }, { default: () => (pane.children as any)?.default?.() })),
+          ...(summary ? [h('div', { class: 'tabs-summary min-w-0' }, summary)] : []),
+          ...panes.map((pane, index) => h(TabsContent, { value: String(pane.props?.name ?? index), class: 'min-w-0 outline-none' }, { default: () => (pane.children as any)?.default?.() })),
         ],
       })
     }
@@ -159,14 +187,16 @@ export const UiUpload = defineComponent({
 
 export const UiPagination = defineComponent({
   name: 'UiPagination', inheritAttrs: false,
-  props: { currentPage: { type: Number, default: 1 }, pageSize: { type: Number, default: 10 }, total: { type: Number, default: 0 }, pageSizes: { type: Array as PropType<number[]>, default: () => [10, 20, 50, 100] }, layout: String, small: Boolean, background: Boolean },
+  props: { currentPage: { type: Number, default: 1 }, pageSize: { type: Number, default: 10 }, total: { type: Number, default: 0 }, pageSizes: { type: Array as PropType<number[]>, default: () => [10, 20, 50, 100] }, layout: String, small: Boolean, background: Boolean, showSinglePage: Boolean },
   emits: ['update:currentPage', 'update:pageSize', 'current-change', 'size-change'],
   setup(props, { attrs, emit }) {
     const pages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
     const changePage = (value: number) => { const page = Math.min(pages.value, Math.max(1, value)); emit('update:currentPage', page); emit('current-change', page) }
     return () => {
-      // 只有一页时不渲染分页器：没有可执行操作，只留下视觉噪音。
-      if (props.total <= props.pageSize) return null
+      // 默认只有一页时不渲染分页器（无操作可做）；管理端关键表格用
+      // showSinglePage 常驻总数与每页条数，避免“是否分页”随数据量跳变。
+      if (props.total <= 0) return null
+      if (!props.showSinglePage && props.total <= props.pageSize) return null
       return h('nav', { ...attrs, 'aria-label': '分页', class: cn('ui-pagination mt-5 flex min-w-0 flex-wrap items-center gap-2 text-sm', attrs.class as string) }, [
       h('span', { class: 'mr-auto text-xs text-muted-foreground' }, `共 ${props.total} 条`),
       props.layout?.includes('sizes') ? h('select', { class: 'page-size-control', 'aria-label': '每页条数', value: props.pageSize, onChange: (event: Event) => { const size = Number((event.target as HTMLSelectElement).value); emit('update:pageSize', size); emit('update:currentPage', 1); emit('size-change', size) } }, props.pageSizes.map(size => h('option', { value: size }, `${size} 条 / 页`))) : null,

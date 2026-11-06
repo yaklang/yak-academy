@@ -52,17 +52,18 @@ const router = createRouter({
         // 题库板块（预览视角）
         { path: 'training', name: 'admin-training', component: () => import('../views/Training.vue') },
         { path: 'training/:challengeSlug', name: 'admin-challenge-detail', component: () => import('../views/ChallengeDetail.vue') },
-        // 资源管理（教程管理 / 题目管理 + 容器、竞赛、用户管理）。
+        // 资源管理（教程管理 / 题目管理 + 用户与容器、竞赛管理）。
         // 用户管理为只读画像表格（过滤/搜索/不活跃标记）；建号入口在邀请赛
-        // 导入/一键生成与自助注册，角色为账号固有属性。
+        // 导入/一键生成与自助注册，角色为账号固有属性。容器管理作为同页 tab，
+        // 旧路径保留重定向，避免书签/外部链接失效。
         { path: 'panel', redirect: '/admin/panel/tutorials' },
         { path: 'panel/tutorials', name: 'admin-tutorials-mgmt', component: () => import('../views/admin/ContentPackages.vue') },
         { path: 'panel/challenges', name: 'admin-challenges', component: () => import('../views/admin/Challenges.vue') },
-        { path: 'panel/containers', name: 'admin-containers', component: () => import('../views/admin/Containers.vue') },
+        { path: 'panel/containers', redirect: (to) => ({ path: '/admin/panel/users', query: { ...to.query, tab: 'containers' } }) },
         { path: 'panel/backups', name: 'admin-backups', component: () => import('../views/admin/Backups.vue') },
         { path: 'panel/audit-logs', name: 'admin-audit-logs', component: () => import('../views/admin/AuditLogs.vue') },
         { path: 'panel/settings', name: 'admin-settings', component: () => import('../views/admin/Settings.vue') },
-        { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/Users.vue') },
+        { path: 'panel/users', name: 'admin-users', component: () => import('../views/admin/UsersContainers.vue') },
         { path: 'panel/competitions', name: 'admin-competitions', component: () => import('../views/admin/Competitions.vue') },
         {
           path: 'panel/competitions/:id',
