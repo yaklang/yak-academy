@@ -2,7 +2,8 @@
 // 管理端布局：与学生端同一「顶栏 + 内容」外壳（同头部/同导航样式/同内容宽），
 // 管理端不再使用独立侧栏，避免两端观感割裂。
 // 顶栏只保留少量入口：2 个学习预览 + 4 个管理项；其中「内容管理」「系统管理」
-// 是分组入口，组内兄弟页面（教程/题目、容器/备份/审计/系统设置）在顶栏下方次级 tab 展开。
+// 是分组入口，组内兄弟页面（教程/题目、备份/审计/系统设置）在顶栏下方次级 tab 展开。
+// 用户与容器同页，通过页面级 tab 切换，不再占用系统管理分组。
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Menu, ArrowUpRight, LogOut } from '@lucide/vue'
@@ -23,9 +24,9 @@ const nav = [
   { title: '教程', to: '/admin/tutorials' },
   { title: '题库', to: '/admin/training' },
   { title: '内容管理', to: '/admin/panel/tutorials', group: 'content' },
-  { title: '用户管理', to: '/admin/panel/users' },
+  { title: '用户与容器', to: '/admin/panel/users' },
   { title: '竞赛管理', to: '/admin/panel/competitions' },
-  { title: '系统管理', to: '/admin/panel/containers', group: 'system' },
+  { title: '系统管理', to: '/admin/panel/backups', group: 'system' },
 ]
 
 // 分组次级 tab：仅当前路由命中该组时渲染。
@@ -36,9 +37,8 @@ const subnav = computed(() => {
       { title: '题目管理', to: '/admin/panel/challenges' },
     ]
   }
-  if (/^\/admin\/panel\/(containers|backups|audit-logs|settings)/.test(route.path)) {
+  if (/^\/admin\/panel\/(backups|audit-logs|settings)/.test(route.path)) {
     return [
-      { title: '容器管理', to: '/admin/panel/containers' },
       { title: '备份管理', to: '/admin/panel/backups' },
       { title: '操作审计', to: '/admin/panel/audit-logs' },
       { title: '系统设置', to: '/admin/panel/settings' },

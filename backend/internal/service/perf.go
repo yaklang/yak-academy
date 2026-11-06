@@ -23,44 +23,50 @@ import (
 // HostUsage 宿主自身占用（Linux /proc 采样；容器内 /proc 即宿主全局视图）。
 // 不可用平台字段为 nil（前端显示「—」）。
 type HostUsage struct {
-	CPUPercent  *float64 `json:"cpu_percent"`
-	MemTotalBytes int64  `json:"mem_total_bytes"`
-	MemUsedBytes  *int64 `json:"mem_used_bytes"`
+	CPUPercent    *float64 `json:"cpu_percent"`
+	MemTotalBytes int64    `json:"mem_total_bytes"`
+	MemUsedBytes  *int64   `json:"mem_used_bytes"`
 }
 
 // VolumeUsage 数据卷所在文件系统用量（statfs）。
 type VolumeUsage struct {
-	Path             string `json:"path"`
-	TotalBytes       int64  `json:"total_bytes"`
-	UsedBytes        int64  `json:"used_bytes"`
-	AvailBytes       int64  `json:"avail_bytes"`
+	Path       string `json:"path"`
+	TotalBytes int64  `json:"total_bytes"`
+	UsedBytes  int64  `json:"used_bytes"`
+	AvailBytes int64  `json:"avail_bytes"`
 }
 
 // ContainerResource 单容器资源占用（docker stats --no-stream 一行）。
 type ContainerResource struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	CPUPercent       float64  `json:"cpu_percent"`
-	MemUsedBytes     int64    `json:"mem_used_bytes"`
-	MemLimitBytes    int64    `json:"mem_limit_bytes"`
-	MemPercent       float64  `json:"mem_percent"`
-	NetIOBytes       [2]*int64 `json:"net_io_bytes"`       // 收/发；解析失败为 nil
-	BlockIOBytes     [2]*int64 `json:"block_io_bytes"`     // 读/写；解析失败为 nil
-	PIDs             int      `json:"pids"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	CPUPercent    float64   `json:"cpu_percent"`
+	MemUsedBytes  int64     `json:"mem_used_bytes"`
+	MemLimitBytes int64     `json:"mem_limit_bytes"`
+	MemPercent    float64   `json:"mem_percent"`
+	NetIOBytes    [2]*int64 `json:"net_io_bytes"`   // 收/发；解析失败为 nil
+	BlockIOBytes  [2]*int64 `json:"block_io_bytes"` // 读/写；解析失败为 nil
+	PIDs          int       `json:"pids"`
 }
 
 // HostStats 性能面板整体快照。
 type HostStats struct {
-	NCPU               int                `json:"ncpu"`
-	MemTotalBytes      int64              `json:"mem_total_bytes"`
-	ContainersTotal    int                `json:"containers_total"`
-	ContainersRunning  int                `json:"containers_running"`
-	ContainersPaused   int                `json:"containers_paused"`
-	ContainersStopped  int                `json:"containers_stopped"`
-	Images             int                `json:"images"`
-	Host               *HostUsage         `json:"host"`
-	DataVolume         *VolumeUsage       `json:"data_volume"`
-	Containers         []ContainerResource `json:"containers"`
+	NCPU              int                 `json:"ncpu"`
+	MemTotalBytes     int64               `json:"mem_total_bytes"`
+	ContainersTotal   int                 `json:"containers_total"`
+	ContainersRunning int                 `json:"containers_running"`
+	ContainersPaused  int                 `json:"containers_paused"`
+	ContainersStopped int                 `json:"containers_stopped"`
+	Images            int                 `json:"images"`
+	Host              *HostUsage          `json:"host"`
+	DataVolume        *VolumeUsage        `json:"data_volume"`
+	Containers        []ContainerResource `json:"containers"`
+	// SampledAt 最近一次成功采集时间（服务端缓存快照）；缓存命中时用于提示数据新鲜度。
+	SampledAt *time.Time `json:"sampled_at,omitempty"`
+	// Refreshing 表示后台正在采集更新快照：前端可短暂轮询追平，避免展示旧值过久。
+	Refreshing bool `json:"refreshing"`
+	// Warning 后台刷新失败且返回最近一次成功快照时的提示（无缓存时直接报错）。
+	Warning string `json:"warning,omitempty"`
 }
 
 // dockerInfoFields docker info JSON 输出中本面板关心的字段（其余忽略）。
@@ -87,35 +93,71 @@ type statsLine struct {
 }
 
 // HostStats 采集性能快照：docker info + docker stats + Linux /proc 采样。
-// CPU 占用率需两次采样（200ms 窗口）权衡精度与接口延迟（面板 10s 级刷新）。
+// 三路并发：docker stats 的采样窗口约 1-2s，是接口的主要延迟；docker info 与
+// 200ms CPU 采样与其重叠，冷启动耗时只取最长的一路。
 func (d DockerDriver) HostStats(ctx context.Context) (*HostStats, error) {
-	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{json .}}").CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("docker info: %v: %s", err, sanitizeToolOutput(string(out)))
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	infoCh := make(chan commandResult, 1)
+	statsCh := make(chan commandResult, 1)
+	hostCh := make(chan *HostUsage, 1)
+	go func() {
+		out, err := exec.CommandContext(runCtx, "docker", "info", "--format", "{{json .}}").CombinedOutput()
+		infoCh <- commandResult{out: out, err: err}
+	}()
+	go func() {
+		out, err := exec.CommandContext(runCtx, "docker", "stats", "--no-stream", "--format", "{{json .}}").CombinedOutput()
+		statsCh <- commandResult{out: out, err: err}
+	}()
+	go func() { hostCh <- sampleHostUsage() }()
+
+	info := <-infoCh
+	if info.err != nil {
+		cancel()
+		return nil, fmt.Errorf("docker info: %v: %s", info.err, sanitizeToolOutput(string(info.out)))
 	}
-	stats, err := hostStatsFromInfo(out)
+	stats, err := hostStatsFromInfo(info.out)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
-	if out, err = exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{json .}}").CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("docker stats: %v: %s", err, sanitizeToolOutput(string(out)))
+	statsRes := <-statsCh
+	if statsRes.err != nil {
+		cancel()
+		return nil, fmt.Errorf("docker stats: %v: %s", statsRes.err, sanitizeToolOutput(string(statsRes.out)))
 	}
-	stats.Containers = parseStatsOutput(string(out))
+	stats.Containers = parseStatsOutput(string(statsRes.out))
+	stats.Host = <-hostCh
+	// 非 Linux 无 /proc 总量，用 docker info 的宿主内存补齐。
+	if stats.Host.MemTotalBytes == 0 {
+		stats.Host.MemTotalBytes = stats.MemTotalBytes
+	}
+	return stats, nil
+}
+
+type commandResult struct {
+	out []byte
+	err error
+}
+
+// sampleHostUsage 采集宿主内存与 CPU 占用。CPU 两次采样间隔 200ms；该 goroutine
+// 与 docker info/stats 并发，不额外拖慢接口。非 Linux 内存/CPU 字段保持不可用。
+func sampleHostUsage() *HostUsage {
+	usage := &HostUsage{}
 	if total, used, ok := hostMemory(); ok {
-		stats.Host = &HostUsage{MemTotalBytes: total, MemUsedBytes: &used}
-	} else {
-		stats.Host = &HostUsage{MemTotalBytes: stats.MemTotalBytes}
+		usage.MemTotalBytes = total
+		usage.MemUsedBytes = &used
 	}
 	if busy1, total1, ok := sampleCPUTicks(); ok {
-		// 采样窗口内 ctx 不感知（time.Sleep）；200ms 量级可接受。
 		time.Sleep(200 * time.Millisecond)
 		if busy2, total2, ok := sampleCPUTicks(); ok {
 			pct := cpuPercent(busy1, total1, busy2, total2)
-			stats.Host.CPUPercent = &pct
+			usage.CPUPercent = &pct
 		}
 	}
-	return stats, nil
+	return usage
 }
 
 // hostStatsFromInfo 解析 docker info JSON（纯函数便于测试）。

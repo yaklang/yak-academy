@@ -9,6 +9,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -77,7 +78,24 @@ func (NoopDriver) Build(ctx context.Context, tag, contextDir string) error {
 const (
 	// instanceTTL 实例存活时长：超时由 reaper 回收。
 	instanceTTL = time.Hour
+	// hostStatsFreshFor 性能快照新鲜期：命中缓存立即返回，超过后由后台刷新。
+	// 页面每 10s 轮询一次，因此面板打开期间每轮都会触发一次后台采集。
+	hostStatsFreshFor = 5 * time.Second
+	// hostStatsTimeout 单次采集上限：docker daemon 卡住时不无限占用请求或后台 goroutine。
+	hostStatsTimeout = 10 * time.Second
+	// hostStatsRetryAfter 后台刷新失败后的重试冷却，避免 Docker 故障时页面轮询打成重试风暴。
+	hostStatsRetryAfter = 10 * time.Second
+	// hostStatsStaleWarning 刷新失败但仍可返回最近一次成功快照时的提示。
+	hostStatsStaleWarning = "容器运行时状态刷新失败，展示最近一次成功采样"
 )
+
+// hostStatsFlight 一次进行中的性能采集；并发请求共享同一结果，避免重复执行
+// docker info/stats（两者都是秒级操作）。
+type hostStatsFlight struct {
+	done  chan struct{}
+	stats *HostStats
+	err   error
+}
 
 type EnvService struct {
 	instances  repo.LabInstanceRepo
@@ -92,6 +110,15 @@ type EnvService struct {
 	now func() time.Time
 	// dataDir 数据卷目录（性能面板 statfs 用量统计；空 = 不统计）。
 	dataDir string
+
+	statsMu      sync.Mutex
+	statsCache   *HostStats
+	statsAt      time.Time
+	statsWarning string
+	statsRetryAt time.Time
+	statsFlight  *hostStatsFlight
+	// statsFreshFor 缓存新鲜期；生产取 hostStatsFreshFor，测试可置 0 强制刷新。
+	statsFreshFor time.Duration
 }
 
 func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, challenges repo.ChallengeRepo, users repo.UserRepo, events repo.EventRepo, bus *eventbus.Bus, d InstanceDriver, publicURL string) *EnvService {
@@ -99,6 +126,7 @@ func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, ch
 		instances: instances, logs: logs, challenges: challenges, users: users,
 		events: events, bus: bus,
 		driver: d, publicURL: publicURL, now: time.Now,
+		statsFreshFor: hostStatsFreshFor,
 	}
 }
 
@@ -106,9 +134,124 @@ func NewEnvService(instances repo.LabInstanceRepo, logs repo.InstanceLogRepo, ch
 // 数据库所在目录）。空或非 Linux 不统计（DataVolume 为 null）。
 func (s *EnvService) SetDataDir(dir string) { s.dataDir = dir }
 
-// HostStats 性能面板快照：驱动侧采集（docker info/stats + /proc），
-// 服务侧补数据卷用量。
+// PrewarmHostStats 启动时后台采集一次性能快照，让首个进入容器管理页的请求
+// 直接命中缓存，而不是在请求里等待 docker stats 的秒级采样窗口。
+func (s *EnvService) PrewarmHostStats(ctx context.Context) { s.startStatsRefresh(ctx) }
+
+// HostStats 性能面板快照：优先返回缓存（采样时间随响应返回）；缓存过期时
+// 立即返回旧快照并并发刷新，页面轮询随后追平。无缓存（服务刚启动）时等待
+// 一次采集结果，失败直接返回错误。
 func (s *EnvService) HostStats(ctx context.Context) (*HostStats, error) {
+	s.statsMu.Lock()
+	if s.statsCache == nil {
+		s.statsMu.Unlock()
+		return s.refreshHostStats(ctx)
+	}
+	snapshot := s.snapshotLocked()
+	now := s.now()
+	stale := now.Sub(s.statsAt) > s.statsFreshFor
+	inflight := s.statsFlight != nil
+	retryAt := s.statsRetryAt
+	s.statsMu.Unlock()
+
+	if stale {
+		switch {
+		case inflight:
+			snapshot.Refreshing = true
+		case !now.Before(retryAt):
+			snapshot.Refreshing = true
+			s.startStatsRefresh(ctx)
+		}
+	}
+	return snapshot, nil
+}
+
+// refreshHostStats 同步等待一次采集（冷启动/无缓存路径）。已有后台采集时
+// 等待同一结果；多个冷请求也只会真正执行一次 docker 命令。
+func (s *EnvService) refreshHostStats(ctx context.Context) (*HostStats, error) {
+	s.statsMu.Lock()
+	if s.statsCache != nil {
+		snapshot := s.snapshotLocked()
+		s.statsMu.Unlock()
+		return snapshot, nil
+	}
+	flight := s.statsFlight
+	started := false
+	if flight == nil {
+		flight = &hostStatsFlight{done: make(chan struct{})}
+		s.statsFlight = flight
+		started = true
+	}
+	s.statsMu.Unlock()
+
+	if started {
+		var stats *HostStats
+		var err error
+		if safego.Run("env.host-stats", func() { stats, err = s.collectHostStats(ctx) }) {
+			s.finishStatsRefresh(flight, stats, err)
+		} else {
+			s.finishStatsRefresh(flight, nil, fmt.Errorf("host stats collection panic"))
+		}
+	}
+
+	select {
+	case <-flight.done:
+		if flight.stats != nil {
+			return flight.stats, nil
+		}
+		return nil, flight.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// startStatsRefresh 后台采集一次；采集不受触发请求取消影响，但受超时约束。
+func (s *EnvService) startStatsRefresh(ctx context.Context) {
+	s.statsMu.Lock()
+	if s.statsFlight != nil {
+		s.statsMu.Unlock()
+		return
+	}
+	flight := &hostStatsFlight{done: make(chan struct{})}
+	s.statsFlight = flight
+	s.statsMu.Unlock()
+
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostStatsTimeout)
+	safego.Go("env.host-stats", func() {
+		defer cancel()
+		defer safego.Guard("env.host-stats", func() {
+			s.finishStatsRefresh(flight, nil, fmt.Errorf("host stats collection panic"))
+		})
+		stats, err := s.collectHostStats(bg)
+		s.finishStatsRefresh(flight, stats, err)
+	})
+}
+
+// finishStatsRefresh 落缓存并唤醒等待者；失败但已有旧快照时保留旧值并附告警，
+// 避免运维面板在 Docker 短暂不可用时整块消失。
+func (s *EnvService) finishStatsRefresh(flight *hostStatsFlight, stats *HostStats, err error) {
+	s.statsMu.Lock()
+	if err == nil && stats != nil {
+		s.statsCache = stats
+		s.statsAt = s.now()
+		s.statsWarning = ""
+		s.statsRetryAt = time.Time{}
+	} else {
+		s.statsWarning = hostStatsStaleWarning
+		s.statsRetryAt = s.now().Add(hostStatsRetryAfter)
+		log.Printf("env: refresh performance snapshot: %v", err)
+	}
+	flight.stats = s.snapshotLocked()
+	flight.err = err
+	if flight.stats != nil {
+		flight.err = nil
+	}
+	s.statsFlight = nil
+	close(flight.done)
+	s.statsMu.Unlock()
+}
+
+func (s *EnvService) collectHostStats(ctx context.Context) (*HostStats, error) {
 	stats, err := s.driver.HostStats(ctx)
 	if err != nil {
 		return nil, err
@@ -117,6 +260,37 @@ func (s *EnvService) HostStats(ctx context.Context) (*HostStats, error) {
 		stats.DataVolume = volumeUsage(s.dataDir)
 	}
 	return stats, nil
+}
+
+// snapshotLocked 返回缓存的独立副本（调用方不得改写内部缓存）；调用方需持有 statsMu。
+func (s *EnvService) snapshotLocked() *HostStats {
+	if s.statsCache == nil {
+		return nil
+	}
+	out := cloneHostStats(s.statsCache)
+	at := s.statsAt
+	out.SampledAt = &at
+	out.Refreshing = false
+	out.Warning = s.statsWarning
+	return out
+}
+
+// cloneHostStats 复制快照外层结构与容器列表；内部标量指针只读共享。
+func cloneHostStats(in *HostStats) *HostStats {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Host != nil {
+		host := *in.Host
+		out.Host = &host
+	}
+	if in.DataVolume != nil {
+		volume := *in.DataVolume
+		out.DataVolume = &volume
+	}
+	out.Containers = append([]ContainerResource(nil), in.Containers...)
+	return &out
 }
 
 // EnsureInstance 幂等启动：已有 running 实例直接返回；

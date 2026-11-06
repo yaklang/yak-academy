@@ -11,6 +11,8 @@ import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
 import { adminApi, type AdminUserItem } from '../../api'
 
+const props = defineProps<{ embedded?: boolean }>()
+
 const items = ref<AdminUserItem[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -38,6 +40,7 @@ async function load() {
   try {
     const resp = await adminApi.listUsers({
       page: page.value,
+      page_size: pageSize.value,
       q: q.value.trim() || undefined,
       role: role.value || undefined,
       active: active.value === '' ? undefined : active.value === 'true',
@@ -53,6 +56,12 @@ async function load() {
 }
 
 function search() {
+  page.value = 1
+  load()
+}
+
+// 每页条数变化：分页器已把页码重置为 1，这里只需重新取数。
+function onSizeChange() {
   page.value = 1
   load()
 }
@@ -96,7 +105,7 @@ onMounted(load)
 </script>
 
 <template>
-  <header class="page-head">
+  <header v-if="!props.embedded" class="page-head">
     <div>
       <h2 class="page-title">用户<span class="accent">管理</span></h2>
       <p class="page-sub">
@@ -171,11 +180,14 @@ onMounted(load)
     </UiTable>
     <UiPagination
       background
-      layout="total, prev, pager, next"
+      layout="total, sizes, prev, pager, next, jumper"
       :total="total"
-      :page-size="pageSize"
+      :page-sizes="[20, 50, 100]"
+      v-model:page-size="pageSize"
       v-model:current-page="page"
       @current-change="load"
+      @size-change="onSizeChange"
+      show-single-page
       class="pager"
     />
   </UiCard>
