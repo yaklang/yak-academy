@@ -4,7 +4,7 @@
 // 不加欢迎区，内容管理入口在管理端外壳的导航里。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowRight } from '@lucide/vue'
+import { ArrowRight, ArrowUpRight } from '@lucide/vue'
 import { topicApi, progressApi, BANK_LABELS, type Topic, type ChallengeBank } from '../api'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -86,14 +86,21 @@ onMounted(async () => {
 
   <header id="topics" class="page-head section-head">
     <div>
-      <h2 class="page-title">学习<span class="accent">路线</span></h2>
+      <h2 class="page-title">
+        {{ isAdmin ? '教程' : '学习' }}<span class="accent">{{ isAdmin ? '预览' : '路线' }}</span>
+      </h2>
       <p class="page-sub">
-        {{ isAdmin ? '管理端视图：专题与 Room 结构同学生端，内容管理在顶部导航。' : '挑一个专题，从第一篇 Room 开始。' }}
+        {{ isAdmin ? '按学生视角查看专题与 Room。上传、发布与版本管理请前往教程管理。' : '挑一个专题，从第一篇 Room 开始。' }}
       </p>
     </div>
-    <div v-if="!loading && topics.length" class="topic-stats" aria-label="专题统计">
-      <span><b>{{ topics.length }}</b> 个专题</span>
-      <span><b>{{ totalRooms }}</b> 个 Room</span>
+    <div v-if="isAdmin || (!loading && topics.length)" class="page-actions topic-head-actions">
+      <div v-if="!loading && topics.length" class="topic-stats" aria-label="专题统计">
+        <span><b>{{ topics.length }}</b> 个专题</span>
+        <span><b>{{ totalRooms }}</b> 个 Room</span>
+      </div>
+      <RouterLink v-if="isAdmin" class="page-action-link" to="/admin/panel/tutorials">
+        教程管理 <ArrowUpRight :size="14" aria-hidden="true" />
+      </RouterLink>
     </div>
   </header>
 
@@ -129,7 +136,7 @@ onMounted(async () => {
         <p v-if="t.summary" class="summary">{{ t.summary }}</p>
         <div class="card-meta">
           <span class="mono"><span class="accent">#</span> {{ t.room_count }} 个 Room</span>
-          <span class="go">进入专题 <ArrowRight :size="14" aria-hidden="true" /></span>
+          <span class="go">{{ isAdmin ? '查看专题' : '进入专题' }} <ArrowRight :size="14" aria-hidden="true" /></span>
         </div>
       </div>
     </router-link>
@@ -241,6 +248,11 @@ onMounted(async () => {
 
 .section-head { scroll-margin-top: 96px; }
 .topics { margin-top: 0; }
+.topic-head-actions { gap: var(--space-5); }
+@media (max-width: 720px) {
+  .topic-head-actions { gap: var(--space-3); }
+  .topic-head-actions .topic-stats { width: auto; }
+}
 .topic-stats {
   display: flex;
   align-items: baseline;

@@ -138,6 +138,11 @@ func main() {
 	topicSvc := service.NewTopicService(topicRepo, roomRepo, challengeRepo, submissionRepo, eventRepo)
 	envSvc := service.NewEnvService(instanceRepo, instanceLogRepo, challengeRepo, userRepo, eventRepo, bus, driver, cfg.PublicURL)
 	envSvc.SetDataDir(filepath.Dir(dbTarget))
+	if useDocker {
+		// 后台预热性能快照：docker stats 的采样窗口约 1-2s，预热后首个管理端
+		// 容器页请求直接命中缓存，不在请求路径里等待。
+		envSvc.PrewarmHostStats(ctx)
+	}
 	challengeSvc.SetEnvService(envSvc)
 	envSvc.StartReaper(ctx, time.Minute)
 	badgeSvc := service.NewBadgeService(scoreRepo, progressRepo)

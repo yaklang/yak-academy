@@ -630,7 +630,7 @@ onUnmounted(stopEnginePolling)
     <span class="head-count" v-if="total">共 {{ total }} 题</span>
   </header>
 
-  <UiTabs v-model="activeTab" class="bank-tabs">
+  <UiTabs v-model="activeTab">
     <UiTabPane name="builtin">
       <template #label>
         <span class="tab-label">内置训练<span class="tab-sub">只读</span></span>
@@ -1058,11 +1058,11 @@ onUnmounted(stopEnginePolling)
 .head-count { color: var(--muted-foreground); font-size: var(--text-sm); }
 
 /* 题库 tab */
-.bank-tabs :deep([data-slot="tabs-list"]) { margin-bottom: var(--space-1); }
 .tab-label { font-size: var(--text-sm); }
 .tab-sub {
-  font-size: var(--text-xs); color: var(--accent-foreground); border: 1px solid var(--border);
-  padding: 0 var(--space-1); margin-left: var(--space-1); border-radius: var(--radius-control); vertical-align: 1px;
+  display: inline-block; margin-left: 6px; padding: 1px 6px; vertical-align: 1px;
+  border-radius: 999px; background: var(--accent); color: var(--accent-foreground);
+  font-size: var(--text-xs); font-weight: 500; line-height: 1.5; white-space: nowrap;
 }
 .hint { color: var(--muted-foreground); font-size: var(--text-sm); margin: 0 0 var(--space-4); }
 

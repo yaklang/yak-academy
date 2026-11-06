@@ -15,7 +15,7 @@ test.describe('系统设置', () => {
 
   test('保存 SMTP 配置后立即生效，刷新不丢失且密码不回显', async ({ page, request }) => {
     await loginAsAdmin(page)
-    await page.goto('/admin/panel/containers')
+    await page.goto('/admin/panel/backups')
     await page.getByRole('link', { name: '系统设置' }).click()
     await page.waitForURL('**/admin/panel/settings')
     await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()

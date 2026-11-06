@@ -3,7 +3,7 @@
 // 普通端与管理端共用；题目是独立资源，Room 详情页再给配套题目入口。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowRight } from '@lucide/vue'
+import { ArrowRight, ArrowUpRight } from '@lucide/vue'
 import { DIFFICULTY_LABELS, topicApi, type TopicDetail } from '../api'
 
 const route = useRoute()
@@ -13,6 +13,7 @@ const loadError = ref('')
 
 // 普通端 /topics/:slug/rooms/:slug；管理端 /admin/tutorials/...。
 const base = computed(() => (route.path.startsWith('/admin') ? '/admin/tutorials' : '/topics'))
+const isAdmin = computed(() => route.path.startsWith('/admin'))
 const topicSlug = computed(() => route.params.topicSlug as string)
 
 const roomCount = computed(() => topic.value?.rooms.length ?? 0)
@@ -76,20 +77,28 @@ onMounted(load)
   <template v-else-if="topic">
     <header class="page-head">
       <div>
-        <p class="route-eyebrow">LEARNING ROUTE · 学习路线</p>
+        <nav v-if="isAdmin" class="page-breadcrumb" aria-label="面包屑">
+          <RouterLink to="/admin/tutorials">教程预览</RouterLink>
+          <span class="crumb-sep" aria-hidden="true">/</span>
+          <span aria-current="page">{{ topic.title }}</span>
+        </nav>
+        <p v-else class="route-eyebrow">LEARNING ROUTE · 学习路线</p>
         <h2 class="page-title">{{ topic.title }}</h2>
         <p v-if="topic.summary" class="page-sub">{{ topic.summary }}</p>
       </div>
       <div class="page-actions route-meta">
         <span><b class="mono">{{ roomCount }}</b> 个 Room</span>
         <span v-if="difficultyRange">{{ difficultyRange }}</span>
+        <RouterLink v-if="isAdmin" class="page-action-link" to="/admin/panel/tutorials">
+          教程管理 <ArrowUpRight :size="14" aria-hidden="true" />
+        </RouterLink>
       </div>
     </header>
 
     <UiEmpty v-if="roomCount === 0" description="该主题暂无 Room" />
 
     <template v-else>
-      <section class="route-section" aria-labelledby="route-title">
+      <section v-if="!isAdmin" class="route-section" aria-labelledby="route-title">
         <div class="section-head">
           <h3 id="route-title">学习路线</h3>
           <span class="section-hint">按顺序完成 {{ roomCount }} 个学习节点，点击节点跳转到对应专题</span>
@@ -109,8 +118,10 @@ onMounted(load)
 
       <section class="subjects-section" aria-labelledby="subjects-title">
         <div class="section-head">
-          <h3 id="subjects-title">具体专题</h3>
-          <span class="section-hint">共 {{ roomCount }} 个学习节点</span>
+          <h3 id="subjects-title">{{ isAdmin ? '教程目录' : '具体专题' }}</h3>
+          <span class="section-hint">
+            {{ isAdmin ? `共 ${roomCount} 篇教程，点击直接预览` : `共 ${roomCount} 个学习节点` }}
+          </span>
         </div>
         <div class="room-tree">
           <router-link
@@ -126,7 +137,7 @@ onMounted(load)
                 <h4>{{ r.title }}</h4>
                 <UiTag size="small" effect="plain">{{ DIFFICULTY_LABELS[r.difficulty] }}</UiTag>
               </div>
-              <span class="enter">进入学习 <ArrowRight :size="14" aria-hidden="true" /></span>
+              <span class="enter">{{ isAdmin ? '预览教程' : '进入学习' }} <ArrowRight :size="14" aria-hidden="true" /></span>
             </div>
           </router-link>
         </div>
@@ -144,11 +155,12 @@ onMounted(load)
   letter-spacing: 0.12em;
 }
 .route-meta {
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
   color: var(--muted-foreground);
   font-size: var(--text-sm);
 }
+.route-meta .page-action-link { margin-left: var(--space-2); }
 .route-meta .mono { color: var(--foreground); }
 .topic-skeleton { max-width: 1040px; }
 .sk-head { display: grid; gap: var(--space-3); margin-bottom: var(--space-8); }

@@ -175,6 +175,10 @@ onMounted(load)
     </div>
   </header>
 
+  <UiTabs v-model="activeBank">
+    <UiTabPane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
+  </UiTabs>
+
   <!-- 页头统计：有题时展示容器/附件/配套教程计数 + 难度分布；空题库不渲染零值统计。 -->
   <div v-if="!loading && total > 0" class="stats-strip" role="status">
     <span class="stat">容器题 <b class="mono">{{ envCount }}</b></span>
@@ -195,10 +199,6 @@ onMounted(load)
       </template>
     </span>
   </div>
-
-  <UiTabs v-model="activeBank" class="bank-tabs">
-    <UiTabPane v-for="b in banks" :key="b" :name="b" :label="BANK_LABELS[b]" />
-  </UiTabs>
 
   <!-- 过滤条只在题库有内容时保留；过滤后结果为空也要能直接清除条件。 -->
   <div v-if="!loading && items.length > 0" class="filters">
@@ -383,7 +383,6 @@ onMounted(load)
 .seg-expert { background: var(--destructive); }
 .diff-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
 
-.bank-tabs { margin-bottom: var(--space-1); }
 .filters {
   display: flex;
   align-items: center;

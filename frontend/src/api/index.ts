@@ -312,6 +312,7 @@ export interface AdminUserItem extends User {
 // 用户列表过滤（GET /admin/users）：全部可选，零值 = 不过滤。
 export interface AdminUserQuery {
   page?: number
+  page_size?: number
   q?: string
   role?: 'student' | 'admin'
   active?: boolean
@@ -323,6 +324,7 @@ export const adminApi = {
   listUsers: (query: AdminUserQuery = {}) => {
     const params = new URLSearchParams()
     if (query.page) params.set('page', String(query.page))
+    if (query.page_size) params.set('page_size', String(query.page_size))
     if (query.q) params.set('q', query.q)
     if (query.role) params.set('role', query.role)
     if (query.active !== undefined) params.set('active', String(query.active))
@@ -592,6 +594,10 @@ export interface PerformanceReport {
   host: HostUsage | null
   data_volume: VolumeUsage | null
   containers: ContainerResource[]
+  // 服务端缓存字段：最近一次成功采样时间、是否后台刷新中、刷新失败告警。
+  sampled_at?: string
+  refreshing?: boolean
+  warning?: string
 }
 
 export const performanceApi = {

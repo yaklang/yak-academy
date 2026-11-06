@@ -9,7 +9,7 @@ test.describe('管理端用户管理', () => {
   test('表格展示账号编码与画像标记；搜索/角色/不活跃过滤生效', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/users')
-    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '用户与容器' })).toBeVisible()
 
     // 学生行：账号编码（YA{YY}-{NNNNN}）+ 活跃标记。
     const stuRow = page.locator('tr', { hasText: E2E.student.username })
