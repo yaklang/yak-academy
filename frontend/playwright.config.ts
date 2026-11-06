@@ -52,7 +52,7 @@ if (isMainProcess) mkdirSync(stateDir, { recursive: true })
 // 先编译再运行单进程二进制（而不是 go run）：Playwright 杀进程树时
 // go run 的子进程在 Windows 上容易残留孤儿容器/进程。
 const serverBin = path.join(stateDir, `academy-e2e${process.platform === 'win32' ? '.exe' : ''}`)
-// 后端 stdout 落盘：注册 e2e 从中取开发投递的短信验证码；排障时直接看日志。
+// 后端 stdout 落盘：排障时直接看日志（E2E 验证码走回显，不依赖日志取码）。
 const backendLog = path.join(stateDir, 'backend.log')
 
 export default defineConfig({
@@ -90,9 +90,10 @@ export default defineConfig({
         ACADEMY_ADMIN_USERNAME: 'admin',
         ACADEMY_ADMIN_PASSWORD: 'e2e-admin-pass-1',
         ACADEMY_ENV_DRIVER: useDocker ? 'docker' : 'noop',
-        // 验证码回显走产品默认（非严格模式默认开启）：显式置空，避免外部
-        // shell/CI 的 ACADEMY_SMS_SHOW_CODE / ACADEMY_STRICT 干扰默认路径。
-        ACADEMY_SMS_SHOW_CODE: '',
+        // E2E 是本地演示：显式开启验证码回显，从页面/响应直接取码；SMTP 留空
+        // 走开发投递器。生产默认关闭回显，严格模式禁止开启。
+        ACADEMY_SHOW_VERIFICATION_CODE: '1',
+        ACADEMY_SMTP_ADDR: '',
         ACADEMY_STRICT: '',
         ACADEMY_PUBLIC_URL: apiURL,
         // 实例 endpoint 对外主机名（docker project）：localhost 而非 127.0.0.1，

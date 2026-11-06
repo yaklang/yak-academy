@@ -38,6 +38,14 @@ ACADEMY_JWT_SECRET=$jwt_secret
 ACADEMY_ADMIN_USERNAME=admin
 ACADEMY_ADMIN_PASSWORD=$admin_password
 ACADEMY_STRICT=1
+# 邮箱验证码投递：可留空，登录管理端「系统设置 → 邮件服务」保存后立即生效
+#（数据库配置优先、密码加密存储）；以下环境变量仅作为首次启动默认值。
+# 未配置/停用时注册/找回发码返回 501。
+# ACADEMY_SMTP_ADDR=smtp.example.com:587
+# ACADEMY_SMTP_USERNAME=no-reply@example.com
+# ACADEMY_SMTP_PASSWORD=change-me
+# ACADEMY_SMTP_FROM=Yak Academy <no-reply@example.com>
+# ACADEMY_SMTP_TLS=starttls
 ACADEMY_DATA_DIR=$DATA_DIR
 ACADEMY_WEB_PORT=127.0.0.1:18081
 ACADEMY_BACKEND_PORT=127.0.0.1:18080

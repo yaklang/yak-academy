@@ -71,10 +71,13 @@ func TestListUsersFiltersAndMarkers(t *testing.T) {
 
 	m7ago := now.AddDate(0, -7, 0)   // 不活跃界外
 	m1ago := now.AddDate(0, -1, 0)   // 活跃界内
-	old7m := m7ago                    // 注册即 7 个月前（从未登录 → 不活跃）
+	old7m := m7ago                   // 注册即 7 个月前（从未登录 → 不活跃）
 	recent := now.AddDate(0, 0, -10) // 注册 10 天前（无登录 → 活跃）
 
 	activeSolver := seedUser(t, gdb, users, "active-solver", recent, &m1ago)
+	if err := gdb.Model(&model.User{}).Where("id = ?", activeSolver.ID).Update("email", "solver@example.com").Error; err != nil {
+		t.Fatal(err)
+	}
 	_ = seedUser(t, gdb, users, "active-nosolve", recent, nil)
 	staleSolver := seedUser(t, gdb, users, "stale-solver", old7m, &m7ago)
 	_ = seedUser(t, gdb, users, "stale-nosolve", old7m, nil)
@@ -142,6 +145,11 @@ func TestListUsersFiltersAndMarkers(t *testing.T) {
 	byCode := list(repo.UserListFilter{Now: now, Q: activeSolver.AccountCode})
 	if len(byCode) != 1 || byCode[activeSolver.Username].Username == "" {
 		t.Fatalf("q=account_code = %v", keysOf(byCode))
+	}
+	// 关键字按邮箱子串命中（管理端检索邮箱注册账号）。
+	byEmail := list(repo.UserListFilter{Now: now, Q: "solver@example"})
+	if len(byEmail) != 1 || byEmail[activeSolver.Username].Username == "" {
+		t.Fatalf("q=email = %v", keysOf(byEmail))
 	}
 
 	// 角色过滤：提一个 admin。

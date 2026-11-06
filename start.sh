@@ -53,6 +53,9 @@ BIN="academy-server-bin"
 
 log "启动后端 $BACKEND_URL"
 export ACADEMY_ENV_DRIVER="$ENV_DRIVER"
+# 本地演示默认回显验证码（无需访问服务端日志）；生产 compose 默认关闭，
+# 严格模式禁止开启。需要关闭时显式设置 ACADEMY_SHOW_VERIFICATION_CODE=0。
+export ACADEMY_SHOW_VERIFICATION_CODE="${ACADEMY_SHOW_VERIFICATION_CODE:-1}"
 (cd backend && "./$BIN") &
 BACKEND_PID=$!
 

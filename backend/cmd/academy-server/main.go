@@ -181,11 +181,24 @@ func main() {
 		log.Println("metrics endpoint enabled at /metrics (Prometheus text format, token-gated)")
 	}
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
-	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil)
-	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil)
+	// 邮箱验证码投递：管理端设置 > 环境变量默认值；未配置时非严格模式写日志，
+	// 严格模式返回 501。DynamicEmailSender 支持设置页保存后立即热切换。
+	emailSender := service.NewDynamicEmailSender(service.NewUnavailableEmailSender())
+	settingsSvc := service.NewSettingsService(repo.NewSettingsRepo(gdb), cfg.JWTSecret, service.SMTPEnvConfig{
+		Addr: cfg.SMTPAddr, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+		From: cfg.SMTPFrom, TLS: cfg.SMTPTLS,
+	}, !cfg.Strict, emailSender)
+	if err := settingsSvc.Initialize(ctx); err != nil {
+		log.Fatalf("smtp settings: %v", err)
+	}
+	if cfg.VerificationShowCode {
+		log.Println("warning: verification code echo enabled — use for local demos only, never in production")
+	}
+	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil, emailSender)
+	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil, emailSender)
 	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
 	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, resetSvc, backupSvc, auditSvc, cfg.SmsShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

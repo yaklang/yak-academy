@@ -31,10 +31,10 @@ export const useAuthStore = defineStore('auth', () => {
     setToken(resp.token)
   }
 
-  // 自助注册（手机验证码）：建号成功即视为登录（后端直接签发 token），
+  // 自助注册（邮箱验证码）：建号成功即视为登录（后端直接签发 token），
   // 与 login 相同的本地态切换（作废 in-flight /me、清用户缓存、重置竞赛锁）。
-  async function register(phone: string, code: string, username: string, password: string) {
-    const resp = await authApi.register(phone, code, username, password)
+  async function register(email: string, code: string, username: string, password: string) {
+    const resp = await authApi.register(email, code, username, password)
     meInFlight = null
     user.value = null
     resetCompetition()

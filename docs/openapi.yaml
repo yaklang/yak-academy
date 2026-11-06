@@ -65,6 +65,38 @@ components:
         created_at: { type: string, format: date-time }
         database: { type: string, description: 数据库模式（sqlite；归档内含一致性快照） }
         store_kinds: { type: string, description: WP 附件存储后端（fs/s3；s3 时 WP zip 不在归档内） }
+    AdminSMTPSettings:
+      type: object
+      description: 管理端邮件服务配置（统一管理；密码只写不读，落库前 AES-256-GCM 加密）
+      required: [enabled, addr, username, from, tls, has_password, password_error, config_error, source]
+      properties:
+        enabled: { type: boolean, description: 是否启用 SMTP 投递；关闭时邮箱验证码不可用（非严格模式回退开发日志投递器） }
+        addr: { type: string, description: SMTP 地址 host:port（省略端口按 587） }
+        username: { type: string, description: SMTP 登录账号（空 = 不认证，仅限内网中继） }
+        from: { type: string, description: 发件人（可含显示名；空则取 username） }
+        tls: { type: string, enum: [starttls, implicit, none], description: TLS 模式：starttls（587）/ implicit（465）/ none（仅限内网） }
+        has_password: { type: boolean, description: 是否已保存密码；密码原文永不返回 }
+        password_error: { type: boolean, description: 已保存密码无法解密（通常为 JWT secret 变更）；需重新填写密码 }
+        config_error: { type: boolean, description: 已保存配置损坏；再次保存即可覆盖修复 }
+        source: { type: string, enum: [database, environment, none], description: 当前生效配置来源；保存后恒为 database }
+        updated_at: { type: string, format: date-time, nullable: true, description: 最后保存时间（来源为 environment 时为 null） }
+        updated_by: { type: string, description: 最后保存的管理员用户名（来源为 environment 时为空） }
+    AdminSMTPSettingsUpdate:
+      type: object
+      description: 保存邮件服务配置；保存成功后立即热加载，无需重启服务
+      required: [enabled, addr, username, from, tls]
+      properties:
+        enabled: { type: boolean }
+        addr: { type: string, description: 启用时必填；host:port，省略端口按 587 }
+        username: { type: string }
+        password: { type: string, description: 新密码；空 = 保留已保存密码（首次保存且来源为环境变量时沿用环境变量密码） }
+        from: { type: string }
+        tls: { type: string, enum: [starttls, implicit, none] }
+    AdminSMTPTestRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, format: email, description: 测试收件邮箱 }
     AdminAuditLog:
       type: object
       description: 管理操作审计行（append-only；与 Event 学生行为流分工，不参与事件重放）
@@ -142,6 +174,8 @@ components:
         username: { type: string }
         global_role: { type: string, enum: [student, admin], description: student=普通人，admin=管理员 }
         account_code: { type: string, description: 用户账号编码（YA+两位年份-五位零填充序号，如 YA26-00042；建号自动分配、不可变，用于表格导入与人工对照） }
+        email: { type: string, description: 注册邮箱（邮箱注册账号；旧手机号账号/导入建号可为空） }
+        phone: { type: string, description: 注册手机号（旧版手机号注册账号；邮箱注册/导入建号可为空） }
     AdminUserItem:
       type: object
       description: 管理端用户条目：基础字段 + 活跃度与解题画像（过滤/标记依据）
@@ -150,7 +184,8 @@ components:
         username: { type: string }
         account_code: { type: string }
         global_role: { type: string, enum: [student, admin] }
-        phone: { type: string, description: 注册手机号（导入/生成建号可为空） }
+        email: { type: string, description: 注册邮箱（邮箱注册账号；旧手机号账号/导入建号可为空） }
+        phone: { type: string, description: 注册手机号（旧版手机号注册账号；邮箱注册/导入建号可为空） }
         created_at: { type: string, description: 注册时间（RFC3339） }
         last_login_at: { type: string, nullable: true, description: 最近登录时间（从未登录为 null） }
         active: { type: boolean, description: 是否活跃：最近登录（无则注册时间）在 6 个月内 }
@@ -907,18 +942,55 @@ paths:
               schema: { $ref: '#/components/schemas/TokenResponse' }
         '401': { $ref: '#/components/responses/ErrorResp' }
 
+  /auth/email/code:
+    post:
+      tags: [auth]
+      security: []
+      summary: 发送注册邮箱验证码（主通道）
+      description: >
+        向邮箱发送 6 位验证码（5 分钟有效，核销一次性），用于自助注册。
+        同邮箱 60 秒内仅允许发送一次、10 分钟内最多 3 次。
+        邮箱已注册时优先于限频返回 422（发码即拒，不发无谓的验证码）。
+        投递：配置 ACADEMY_SMTP_ADDR 后经 SMTP/事务邮件服务发送；未配置时
+        非严格模式写服务日志（本地联调），严格模式返回 501（生产必须配置 SMTP）。
+        回显默认关闭；本地演示可设 ACADEMY_SHOW_VERIFICATION_CODE=1（旧变量
+        ACADEMY_SMS_SHOW_CODE 仍兼容）。严格模式（ACADEMY_STRICT=1）禁止回显。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        '200':
+          description: OK（已发送；60 秒内重复请求返回此状态并带 retry_after 提示）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
+                  code: { type: string, description: 验证码原文；仅本地演示回显模式（ACADEMY_SHOW_VERIFICATION_CODE=1）返回，生产严格模式禁止开启 }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '501': { $ref: '#/components/responses/ErrorResp' }
+
   /auth/sms/code:
     post:
       tags: [auth]
       security: []
-      summary: 发送注册验证码
+      deprecated: true
+      summary: 发送注册短信验证码（兼容旧版手机号注册）
       description: >
         向手机号发送 6 位验证码（5 分钟有效，核销一次性）。
         同手机号 60 秒内仅允许发送一次、10 分钟内最多 3 次。
         手机号已注册时优先于限频返回 422（发码即拒，不发无谓的验证码）。
-        第一版为开发投递器：验证码写入服务日志（不接第三方短信通道）。
-        回显模式默认开启（非严格模式）：响应携带验证码原文，注册页内联显示；
-        生产严格模式（ACADEMY_STRICT=1）默认关闭，可用 ACADEMY_SMS_SHOW_CODE 显式覆盖。
+        新客户端请使用邮箱通道（POST /auth/email/code）；本接口仅为已有手机号
+        注册客户端保留。投递器为开发日志（未接短信网关）；回显开关与安全约束
+        同邮箱发码。严格模式（ACADEMY_STRICT=1）禁止回显。
       requestBody:
         required: true
         content:
@@ -938,26 +1010,29 @@ paths:
                 properties:
                   ok: { type: boolean }
                   retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
-                  code: { type: string, description: 验证码原文；回显模式默认开启（非严格模式），生产严格模式（ACADEMY_STRICT=1）默认关闭；可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖 }
+                  code: { type: string, description: 验证码原文；仅本地演示回显模式返回 }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
   /auth/register:
     post:
       tags: [auth]
       security: []
-      summary: 自助注册（手机验证码核销）
+      summary: 自助注册（邮箱验证码核销，兼容手机号）
       description: >
         凭有效验证码创建账号，角色固定 student（禁止自选）。
-        验证码错误/过期/已核销 → 422；用户名或手机号已存在 → 422。
+        推荐使用 email + /auth/email/code；phone + /auth/sms/code 仅兼容旧客户端。
+        email 与 phone 必须且只能填写一个，验证码必须与填写渠道一致。
+        验证码错误/过期/已核销 → 422；用户名或邮箱/手机号已存在 → 422。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [phone, code, username, password]
+              required: [code, username, password]
               properties:
-                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                email: { type: string, format: email, maxLength: 254, description: 注册邮箱（推荐）；与 phone 二选一 }
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$', description: 兼容旧版手机号注册；与 email 二选一 }
                 code: { type: string, minLength: 6, maxLength: 6 }
                 username: { type: string, minLength: 3, maxLength: 64 }
                 password: { type: string, minLength: 6 }
@@ -973,21 +1048,24 @@ paths:
     post:
       tags: [auth]
       security: []
-      summary: 发送找回密码验证码
+      summary: 发送找回密码验证码（邮箱主通道，兼容手机号）
       description: >
-        向已注册手机号发送 6 位验证码（5 分钟有效，核销一次性）。
-        手机号未注册 → 422（发码即拒；竞赛批量建号未绑定手机号，此类账号请联系管理员重置）。
-        限频与注册发码同策略：同手机号 60 秒内仅一次、10 分钟内最多 3 次（限频返回 200 + retry_after）。
+        向已注册邮箱发送 6 位验证码（5 分钟有效，核销一次性）；未绑定邮箱的
+        旧账号可填 phone 走短信通道（兼容保留）。
+        邮箱/手机号未注册 → 422（发码即拒；竞赛批量建号未绑定邮箱/手机号，
+        此类账号请联系管理员重置）。email 与 phone 必须且只能填写一个。
+        限频：同目标 60 秒内仅一次、10 分钟内最多 3 次（限频返回 200 + retry_after）。
         验证码用途隔离（purpose=password_reset）：注册验证码不可用于重置，反之亦然。
+        回显与投递安全约束同 /auth/email/code。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [phone]
               properties:
-                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                email: { type: string, format: email, maxLength: 254, description: 已注册邮箱（推荐） }
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$', description: 旧账号绑定手机号（兼容） }
       responses:
         '200':
           description: OK（已发送；60 秒内重复请求返回此状态并带 retry_after 提示）
@@ -998,8 +1076,9 @@ paths:
                 properties:
                   ok: { type: boolean }
                   retry_after: { type: integer, description: 限频剩余秒数，0 = 无需等待 }
-                  code: { type: string, description: 验证码原文；回显模式默认开启（非严格模式），生产严格模式（ACADEMY_STRICT=1）默认关闭；可用 ACADEMY_SMS_SHOW_CODE=0/1 显式覆盖 }
+                  code: { type: string, description: 验证码原文；仅本地演示回显模式返回 }
         '422': { $ref: '#/components/responses/ErrorResp' }
+        '501': { $ref: '#/components/responses/ErrorResp' }
 
   /auth/password-reset:
     post:
@@ -1008,17 +1087,19 @@ paths:
       summary: 凭验证码重置密码（找回账号）
       description: >
         核销找回验证码并更新密码，该账号全部已签发 token 随即失效。
-        成功响应返回用户名与账号编码——忘记用户名的学员凭手机号即可找回账号。
-        验证码错误/过期/已核销或手机号未注册 → 422。
+        成功响应返回用户名与账号编码——忘记用户名的学员凭邮箱（旧账号可凭手机号）
+        即可找回账号。email 与 phone 必须且只能填写一个，验证码必须与填写渠道一致。
+        验证码错误/过期/已核销或目标未注册 → 422。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [phone, code, new_password]
+              required: [code, new_password]
               properties:
-                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                email: { type: string, format: email, maxLength: 254, description: 已注册邮箱（推荐）；与 phone 二选一 }
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$', description: 旧账号绑定手机号；与 email 二选一 }
                 code: { type: string, minLength: 6, maxLength: 6 }
                 new_password: { type: string, minLength: 6 }
       responses:
@@ -2385,7 +2466,7 @@ paths:
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
-        - { name: q, in: query, schema: { type: string }, description: 关键字（用户名/账号编码/手机号模糊匹配） }
+        - { name: q, in: query, schema: { type: string }, description: 关键字（用户名/账号编码/邮箱/手机号模糊匹配） }
         - { name: role, in: query, schema: { type: string, enum: [student, admin] } }
         - { name: active, in: query, schema: { type: string, enum: [true, false] }, description: 活跃过滤：false=仅不活跃（最近登录或注册距今超 6 个月） }
         - { name: no_solves, in: query, schema: { type: string, enum: [true, false] }, description: true=仅从未完成过题目的用户（不存在判定通过的提交） }
@@ -2516,6 +2597,61 @@ paths:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/settings/smtp:
+    get:
+      tags: [admin]
+      summary: 读取邮件服务配置（统一管理；密码只返回是否已保存，永不回显）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSMTPSettings' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+    put:
+      tags: [admin]
+      summary: >
+        保存邮件服务配置并立即热加载（无需重启）。配置落 system_settings 表，
+        保存后优先于环境变量；密码使用 AES-256-GCM 加密存储，响应不回显。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminSMTPSettingsUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSMTPSettings' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/settings/smtp/test:
+    post:
+      tags: [admin]
+      summary: 使用当前已保存配置发送测试邮件（管理员自检 SMTP 投递链路）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminSMTPTestRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/audit-logs:
     get:

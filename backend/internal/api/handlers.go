@@ -31,20 +31,22 @@ type Handlers struct {
 	ResetSvc     *service.PasswordResetService
 	Backup       *service.BackupService
 	Audit        *service.AuditService
-	// smsShowCode 验证码回显模式（config SmsShowCode，见 sendSmsCode）。
-	smsShowCode bool
+	Settings     *service.SettingsService
+	// showVerificationCode 验证码回显模式（config VerificationShowCode，仅本地演示）。
+	showVerificationCode bool
 }
 
-// NewHandlers 构造 handler 集合；smsShowCode 见 config.SmsShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, smsShowCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, smsShowCode: smsShowCode}
+// NewHandlers 构造 handler 集合；showVerificationCode 见 config.VerificationShowCode。
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
 }
 
 func (h *Handlers) Register(r *Router) {
-	// 公开接口：登录（JWT）、注册/找回密码（手机验证码，发码+核销）、检测点回调
+	// 公开接口：登录（JWT）、注册/找回密码（邮箱主通道、手机号兼容）、检测点回调
 	// （token 能力鉴权，容器内 checker 调用）与健康检查（进程存活探针，无鉴权；
 	// compose healthcheck 用）。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/email/code", h.sendEmailCode)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/sms/code", h.sendSmsCode)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/register", h.register)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset/code", h.sendPasswordResetCode)
@@ -132,6 +134,11 @@ func (h *Handlers) Register(r *Router) {
 	// 管理操作审计（ops 硬化）：全部 admin 写操作的 append-only 审计视图。
 	r.Handle(http.MethodGet, "/api/v1/admin/audit-logs", "admin", h.listAuditLogs)
 
+	// 系统设置（统一管理）：SMTP 配置读写 + 投递自检；保存后热加载。
+	r.Handle(http.MethodGet, "/api/v1/admin/settings/smtp", "admin", h.getSMTPSettings)
+	r.Handle(http.MethodPut, "/api/v1/admin/settings/smtp", "admin", h.updateSMTPSettings)
+	r.Handle(http.MethodPost, "/api/v1/admin/settings/smtp/test", "admin", h.testSMTPSettings)
+
 	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions", "admin", h.adminCreateCompetition)
@@ -188,8 +195,22 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
 }
 
-// sendSmsCode 注册发码（公开）。限频不报错：按契约返回 200 + retry_after，
-// 前端据此显示倒计时（与真实短信通道行为一致，不泄漏限频细节差异）。
+// sendEmailCode 注册邮箱发码（公开，主通道）。限频不报错：按契约返回
+// 200 + retry_after，前端据此显示倒计时。
+func (h *Handlers) sendEmailCode(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Email == "" {
+		writeError(w, errValidation)
+		return
+	}
+	code, retryAfter, err := h.RegisterSvc.SendEmailCode(req.Context(), body.Email)
+	h.respondCodeSent(w, code, retryAfter, err)
+}
+
+// sendSmsCode 旧版手机号注册发码（公开，兼容保留）。限频不报错：
+// 按契约返回 200 + retry_after，前端据此显示倒计时。
 func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Phone string `json:"phone"`
@@ -199,6 +220,12 @@ func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	code, retryAfter, err := h.RegisterSvc.SendCode(req.Context(), body.Phone)
+	h.respondCodeSent(w, code, retryAfter, err)
+}
+
+// respondCodeSent 发码统一响应：限频 → 200 + retry_after；成功 → 仅回显模式下
+// 携带验证码原文（本地演示，生产严格模式禁止开启）。
+func (h *Handlers) respondCodeSent(w http.ResponseWriter, code string, retryAfter int, err error) {
 	if err != nil {
 		if errors.Is(err, service.ErrSmsThrottled) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "retry_after": retryAfter})
@@ -208,28 +235,30 @@ func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	resp := map[string]any{"ok": true}
-	// 回显模式（非严格模式默认开启）：验证码直接带回响应，注册页内联显示，
-	// 学员无需访问服务端日志即可完成注册。
-	if h.smsShowCode {
+	if h.showVerificationCode {
 		resp["code"] = code
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // register 凭验证码建号（公开，角色固定 student），成功即签发登录 token。
+// email 为推荐渠道（配 /auth/email/code），phone 兼容旧客户端（配 /auth/sms/code）。
 func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
 	var body struct {
+		Email    string `json:"email"`
 		Phone    string `json:"phone"`
 		Code     string `json:"code"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" || body.Code == "" || body.Username == "" || body.Password == "" {
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Code == "" || body.Username == "" || body.Password == "" {
 		writeError(w, errValidation)
 		return
 	}
-	token, expires, _, err := h.RegisterSvc.Register(req.Context(), body.Phone, body.Code, body.Username, body.Password,
-		func(u *model.User) (string, time.Time, error) { return h.Auth.IssueToken(req.Context(), u) })
+	token, expires, _, err := h.RegisterSvc.Register(req.Context(), service.RegisterInput{
+		Email: body.Email, Phone: body.Phone, Code: body.Code,
+		Username: body.Username, Password: body.Password,
+	}, func(u *model.User) (string, time.Time, error) { return h.Auth.IssueToken(req.Context(), u) })
 	if err != nil {
 		mapError(w, err)
 		return
@@ -237,45 +266,37 @@ func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
 }
 
-// sendPasswordResetCode 找回密码发码（公开）。限频不报错（同注册发码）：
-// 200 + retry_after，回显模式（非严格模式默认开启）附带验证码原文。
+// sendPasswordResetCode 找回密码发码（公开）。email / phone 二选一；
+// 限频不报错（同注册发码）：200 + retry_after，回显模式附带验证码原文。
 func (h *Handlers) sendPasswordResetCode(w http.ResponseWriter, req *http.Request) {
 	var body struct {
+		Email string `json:"email"`
 		Phone string `json:"phone"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" {
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeError(w, errValidation)
 		return
 	}
-	code, retryAfter, err := h.ResetSvc.SendResetCode(req.Context(), body.Phone)
-	if err != nil {
-		if errors.Is(err, service.ErrSmsThrottled) {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "retry_after": retryAfter})
-			return
-		}
-		mapError(w, err)
-		return
-	}
-	resp := map[string]any{"ok": true}
-	if h.smsShowCode {
-		resp["code"] = code
-	}
-	writeJSON(w, http.StatusOK, resp)
+	code, retryAfter, err := h.ResetSvc.SendResetCode(req.Context(), body.Email, body.Phone)
+	h.respondCodeSent(w, code, retryAfter, err)
 }
 
 // passwordReset 凭找回验证码重置密码（公开）。返回账号标识（用户名/账号编码）
-// 供「找回账号」：忘记用户名的学员凭手机号即可找回。
+// 供「找回账号」：忘记用户名的学员凭邮箱（旧账号可凭手机号）即可找回。
 func (h *Handlers) passwordReset(w http.ResponseWriter, req *http.Request) {
 	var body struct {
+		Email       string `json:"email"`
 		Phone       string `json:"phone"`
 		Code        string `json:"code"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" || body.Code == "" || body.NewPassword == "" {
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Code == "" || body.NewPassword == "" {
 		writeError(w, errValidation)
 		return
 	}
-	user, err := h.ResetSvc.ResetPassword(req.Context(), body.Phone, body.Code, body.NewPassword)
+	user, err := h.ResetSvc.ResetPassword(req.Context(), service.PasswordResetInput{
+		Email: body.Email, Phone: body.Phone, Code: body.Code, NewPassword: body.NewPassword,
+	})
 	if err != nil {
 		mapError(w, err)
 		return
