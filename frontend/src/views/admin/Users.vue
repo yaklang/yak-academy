@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 管理面板：用户管理。表格 + 过滤/搜索：
-//   q 对用户名/账号编码/手机号子串匹配；role 按角色；
+//   q 对用户名/账号编码/邮箱/手机号子串匹配；role 按角色；
 //   active=false = 6 个月未登录（最近登录或注册超 6 个月）的不活跃账号；
 //   no_solves=true = 从未完成过题目（无判定通过的提交）。
 // 过滤条件与表格内标记（活跃/完成过题目）同口径，由服务端统一判定。
 // 行内操作「重置密码」：管理员直接设新密码（不校验旧密码），目标用户全部
-// 已登录会话立即失效——未绑定手机号的竞赛批量账号走此入口找回。
+// 已登录会话立即失效——未绑定邮箱/手机号的竞赛批量账号走此入口找回。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
@@ -110,7 +110,7 @@ onMounted(load)
     <div class="filters">
       <UiInput
         v-model="q"
-        placeholder="搜索：用户名 / 账号编码 / 手机号"
+        placeholder="搜索：用户名 / 账号编码 / 邮箱 / 手机号"
         clearable
         class="q-input"
         @keyup.enter="search"
@@ -138,6 +138,9 @@ onMounted(load)
       <UiTableColumn prop="username" label="用户名" min-width="130" show-overflow-tooltip />
       <UiTableColumn label="账号编码" width="130">
         <template #default="{ row }"><code>{{ row.account_code || '-' }}</code></template>
+      </UiTableColumn>
+      <UiTableColumn label="邮箱" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.email || '-' }}</template>
       </UiTableColumn>
       <UiTableColumn label="角色" width="90">
         <template #default="{ row }">

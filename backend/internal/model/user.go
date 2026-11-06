@@ -43,7 +43,11 @@ type User struct {
 	// 由 userRepo.Create 统一分配（同年序号 MAX+1），不参与登录鉴权。
 	// 唯一性排除空串：旧库回填前的空值行（NULL/''）互不冲突（同 phone 先例）。
 	AccountCode string `gorm:"size:16;index:idx_users_account_code,unique,where:account_code <> ''" json:"account_code"`
-	// Phone 注册手机号（自助注册凭据，唯一；竞赛导入建号可为空）。不参与登录。
+	// Email 注册邮箱（邮箱注册凭据，唯一；旧手机号账号/竞赛导入建号可为空）。
+	// 统一小写存储；不参与登录。唯一性排除空串（同 phone：导入建号的空 Email
+	// 不能撞唯一索引，重复邮箱查重由 service FindByEmail 兜住）。
+	Email string `gorm:"size:254;index:idx_users_email,unique,where:email <> ''" json:"email"`
+	// Phone 注册手机号（旧版手机号注册凭据，兼容保留，唯一；可为空）。不参与登录。
 	// SQLite 唯一索引允许多个 NULL，但空串不空——竞赛批量建号的空 Phone 会撞唯一索引，
 	// 故唯一性排除空串（手机号已注册的查重由 service FindByPhone 兜住）。
 	Phone string `gorm:"index:idx_users_phone,unique,where:phone <> ''" json:"phone"`
@@ -88,14 +92,17 @@ type TokenRevocation struct {
 	CreatedAt time.Time
 }
 
-// SmsCode 手机验证码（自助注册 / 找回密码核销）。鉴权辅助状态而非派生数据，
-// 不进事件表（同 TokenRevocation）。核销一次性：Used 置位后不可重复使用。
+// SmsCode 验证码（邮箱注册/找回密码为邮箱码，旧版手机号注册为短信码）：
+// 发码、限频与核销记录。鉴权辅助状态而非派生数据，不进事件表（同 TokenRevocation）。
+// 按 Phone 或 Email 二选一落库；核销一次性：Used 置位后不可重复使用。
+// 表名沿用 sms_codes 兼容已有数据，不做迁移。
 type SmsCode struct {
 	ID        uint      `gorm:"primaryKey"`
 	Phone     string    `gorm:"size:20;index"`
+	Email     string    `gorm:"size:254;index"`
 	Code      string    `gorm:"size:6"`
 	Purpose   string    `gorm:"size:32;index;default:register"` // register / password_reset，发码与核销同用途比对
-	ExpiresAt time.Time `gorm:"index"` // 5 分钟有效
+	ExpiresAt time.Time `gorm:"index"`                          // 5 分钟有效
 	Used      bool      // 核销一次性标记
 	CreatedAt time.Time
 }

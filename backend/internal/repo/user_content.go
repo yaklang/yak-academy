@@ -50,6 +50,14 @@ func (r *userRepo) FindByIDs(ctx context.Context, ids ...uint) ([]model.User, er
 	return list, err
 }
 
+func (r *userRepo) FindByEmail(ctx context.Context, email string) (*model.User, error) {
+	var u model.User
+	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *userRepo) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
 	var u model.User
 	if err := r.db.WithContext(ctx).Where("phone = ?", phone).First(&u).Error; err != nil {
@@ -92,8 +100,8 @@ func userFilterScope(f UserListFilter, now time.Time) func(*gorm.DB) *gorm.DB {
 		if f.Q != "" {
 			like := "%" + strings.ToLower(f.Q) + "%"
 			db = db.Where(
-				"LOWER(username) LIKE ? OR LOWER(account_code) LIKE ? OR phone LIKE ?",
-				like, like, like,
+				"LOWER(username) LIKE ? OR LOWER(account_code) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ?",
+				like, like, like, like,
 			)
 		}
 		if f.Role != "" {
@@ -257,8 +265,8 @@ func (r *contentPackageRepo) Delete(ctx context.Context, id uint) error {
 	})
 }
 
-// smsCodeRepo 手机验证码表实现。核销走条件更新（used=0 → 1）保证一次性；
-// 查询按 purpose 过滤（注册码与重置码互不可用）。
+// smsCodeRepo 验证码表实现（表名沿用 sms_codes，承载邮箱码与旧版短信码）。
+// 核销走条件更新（used=0 → 1）保证一次性；查询按 purpose 过滤（注册码与重置码互不可用）。
 type smsCodeRepo struct{ db *gorm.DB }
 
 func NewSmsCodeRepo(db *gorm.DB) SmsCodeRepo { return &smsCodeRepo{db: db} }
@@ -276,10 +284,27 @@ func (r *smsCodeRepo) LatestByPhone(ctx context.Context, phone, purpose string) 
 	return &c, nil
 }
 
-func (r *smsCodeRepo) CountSince(ctx context.Context, phone, purpose string, windowStart time.Time) (int64, error) {
+func (r *smsCodeRepo) LatestByEmail(ctx context.Context, email, purpose string) (*model.SmsCode, error) {
+	var c model.SmsCode
+	if err := r.db.WithContext(ctx).Where("email = ? AND purpose = ?", email, purpose).
+		Order("id DESC").First(&c).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *smsCodeRepo) CountSinceByPhone(ctx context.Context, phone, purpose string, windowStart time.Time) (int64, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.SmsCode{}).
 		Where("phone = ? AND purpose = ? AND created_at >= ?", phone, purpose, windowStart).
+		Count(&n).Error
+	return n, err
+}
+
+func (r *smsCodeRepo) CountSinceByEmail(ctx context.Context, email, purpose string, windowStart time.Time) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.SmsCode{}).
+		Where("email = ? AND purpose = ? AND created_at >= ?", email, purpose, windowStart).
 		Count(&n).Error
 	return n, err
 }

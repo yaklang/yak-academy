@@ -14,7 +14,7 @@ import type { User } from '../api'
 
 const fakeUser: User = {
   id: 1, username: 'admin', global_role: 'admin',
-  account_code: 'YA26-00001', phone: '', bio: '', last_login_at: null,
+  account_code: 'YA26-00001', email: '', phone: '', bio: '', last_login_at: null,
   created_at: '2026-01-01T00:00:00Z',
 }
 
