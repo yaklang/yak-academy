@@ -164,12 +164,16 @@ export const UiPagination = defineComponent({
   setup(props, { attrs, emit }) {
     const pages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
     const changePage = (value: number) => { const page = Math.min(pages.value, Math.max(1, value)); emit('update:currentPage', page); emit('current-change', page) }
-    return () => h('nav', { ...attrs, 'aria-label': '分页', class: cn('ui-pagination mt-5 flex min-w-0 flex-wrap items-center gap-2 text-sm', attrs.class as string) }, [
+    return () => {
+      // 只有一页时不渲染分页器：没有可执行操作，只留下视觉噪音。
+      if (props.total <= props.pageSize) return null
+      return h('nav', { ...attrs, 'aria-label': '分页', class: cn('ui-pagination mt-5 flex min-w-0 flex-wrap items-center gap-2 text-sm', attrs.class as string) }, [
       h('span', { class: 'mr-auto text-xs text-muted-foreground' }, `共 ${props.total} 条`),
       props.layout?.includes('sizes') ? h('select', { class: 'page-size-control', 'aria-label': '每页条数', value: props.pageSize, onChange: (event: Event) => { const size = Number((event.target as HTMLSelectElement).value); emit('update:pageSize', size); emit('update:currentPage', 1); emit('size-change', size) } }, props.pageSizes.map(size => h('option', { value: size }, `${size} 条 / 页`))) : null,
       h(Button, { variant: 'outline', size: 'icon', 'aria-label': '上一页', disabled: props.currentPage <= 1, onClick: () => changePage(props.currentPage - 1) }, { default: () => h(ChevronLeft, { class: 'size-4' }) }),
       ...Array.from({ length: Math.min(5, pages.value) }, (_, index) => Math.min(Math.max(1, props.currentPage - 2), Math.max(1, pages.value - 4)) + index).map(page => h(Button, { variant: page === props.currentPage ? 'default' : 'ghost', size: 'icon', 'aria-current': page === props.currentPage ? 'page' : undefined, class: cn('page-number', page !== props.currentPage && 'page-neighbor'), onClick: () => changePage(page) }, { default: () => String(page) })),
       h(Button, { variant: 'outline', size: 'icon', 'aria-label': '下一页', disabled: props.currentPage >= pages.value, onClick: () => changePage(props.currentPage + 1) }, { default: () => h(ChevronRight, { class: 'size-4' }) }),
-    ])
+      ])
+    }
   },
 })

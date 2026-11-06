@@ -21,10 +21,21 @@ export const UiTableColumn = defineComponent({
 const pixels = (value: unknown) => typeof value === 'number' || /^\d+$/.test(String(value)) ? `${value}px` : value ? String(value) : undefined
 function slotOf(column: VNode, name: string): ColumnSlot | undefined { return (column.children as Record<string, any> | null)?.[name] }
 function cellValue(row: any, path: unknown) { return String(path || '').split('.').reduce((value, key) => value?.[key], row) ?? '' }
+// VNode props 保留模板里的 kebab-case 与裸布尔原值（空字符串）：
+// 读取多词列属性时按需回退，避免 min-width / show-overflow-tooltip 静默失效。
+function columnSetting(settings: Record<string, any>, name: string) {
+  const value = settings[name]
+  if (value !== undefined) return value
+  return settings[name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)]
+}
+function isTruncated(settings: Record<string, any>) {
+  const value = columnSetting(settings, 'showOverflowTooltip')
+  return value !== undefined && value !== false && value !== null
+}
 
 export const UiTable = defineComponent({
   name: 'UiTable', inheritAttrs: false,
-  props: { data: { type: Array as PropType<any[]>, default: () => [] }, rowKey: [String, Function], rowClassName: [String, Function], emptyText: String, maxHeight: [Number, String], border: Boolean, stripe: Boolean, size: String, height: [Number, String] },
+  props: { data: { type: Array as PropType<any[]>, default: () => [] }, rowKey: [String, Function], rowClassName: [String, Function], emptyText: String, maxHeight: [Number, String], border: Boolean, stripe: Boolean, size: String, height: [Number, String], loading: Boolean, loadingRows: { type: Number, default: 5 } },
   emits: ['selection-change', 'row-click'],
   setup(props, { attrs, slots, emit, expose }) {
     const selected = ref(new Set<unknown>())
@@ -42,9 +53,31 @@ export const UiTable = defineComponent({
     return () => {
       const columns = childComponents(slots.default?.(), 'UiTableColumn')
       const canSelect = (column: VNode, row: any, index: number) => column.props?.selectable ? column.props.selectable(row, index) !== false : true
-      const columnStyle = (column: VNode) => ({ width: pixels(column.props?.width), minWidth: pixels(column.props?.minWidth ?? column.props?.width), textAlign: column.props?.align })
-      const fixedClass = (column: VNode) => column.props?.fixed === 'right' ? 'sticky right-0 z-10 bg-card' : ''
-      return h('div', { ...attrs, class: cn('ui-data-table min-w-0 max-w-full rounded-lg border border-border bg-card', attrs.class as string), style: [{ maxHeight: pixels(props.maxHeight || props.height), overflow: props.maxHeight || props.height ? 'auto' : undefined }, attrs.style as any] }, [
+      const columnStyle = (column: VNode) => {
+        const settings = column.props ?? {}
+        const minWidth = columnSetting(settings, 'minWidth') ?? settings.width
+        return { width: pixels(settings.width), minWidth: pixels(minWidth), textAlign: settings.align }
+      }
+      const cellStyle = (column: VNode) => {
+        const settings = column.props ?? {}
+        const truncate = isTruncated(settings) && settings.type == null
+        return { ...columnStyle(column), maxWidth: truncate ? pixels(settings.width ?? columnSetting(settings, 'minWidth')) : undefined }
+      }
+      const fixedClass = (column: VNode) => column.props?.fixed === 'right'
+        ? 'sticky right-0 z-10 bg-card ui-fixed-right'
+        : column.props?.fixed === 'left'
+          ? 'sticky left-0 z-10 bg-card ui-fixed-left'
+          : ''
+      // 首次加载用与真实列数一致的骨架行，避免先闪一下“暂无数据”再跳成表格；
+      // 已有数据时保留旧行，只在右上角显示刷新状态，避免筛选/翻页时整表塌陷。
+      const showSkeleton = props.loading && props.data.length === 0
+      const refreshing = props.loading && props.data.length > 0
+      const skeletonRows = Array.from({ length: Math.max(1, props.loadingRows) }, () => h(TableRow, { class: 'ui-data-row', 'aria-hidden': 'true' }, {
+        default: () => columns.map((column, index) => h(TableCell, { class: 'px-4 py-3' }, { default: () => h('span', { class: cn('table-skeleton-bar', index === 0 && 'is-narrow') }) })),
+      }))
+      return h('div', { ...attrs, 'aria-busy': props.loading ? 'true' : undefined, class: cn('ui-data-table relative min-w-0 max-w-full rounded-lg border border-border bg-card', attrs.class as string), style: [{ maxHeight: pixels(props.maxHeight || props.height), overflow: props.maxHeight || props.height ? 'auto' : undefined }, attrs.style as any] }, [
+        props.loading ? h('span', { class: 'sr-only', role: 'status' }, props.data.length ? '正在刷新数据' : '正在加载数据') : null,
+        refreshing ? h('div', { class: 'table-loading-note', role: 'status' }, '正在刷新…') : null,
         h(Table as any, { 'aria-label': attrs['aria-label'] || '数据列表', class: 'text-sm' }, {
           default: () => [
             h(TableHeader, {}, { default: () => h(TableRow, { class: 'hover:bg-transparent' }, { default: () => columns.map(column => {
@@ -64,13 +97,15 @@ export const UiTable = defineComponent({
                 }) : slotOf(column, 'header')?.({ row: null, $index: -1, column: settings }) ?? settings.label,
               })
             }) }) }),
-            h(TableBody, {}, { default: () => props.data.length ? props.data.map((row, index) => h(TableRow, {
+            h(TableBody, {}, { default: () => showSkeleton ? skeletonRows : props.data.length ? props.data.map((row, index) => h(TableRow, {
               key: keyFor(row) as any, 'data-state': selected.value.has(keyFor(row)) ? 'selected' : undefined,
               class: cn('ui-data-row', typeof props.rowClassName === 'function' ? props.rowClassName({ row, rowIndex: index }) : props.rowClassName),
               onClick: () => emit('row-click', row),
             }, { default: () => columns.map(column => {
               const settings = column.props ?? {}
-              return h(TableCell, { class: cn('px-4 py-3 whitespace-normal break-words align-middle', fixedClass(column)), style: columnStyle(column) }, {
+              const truncate = isTruncated(settings) && settings.type == null
+              const title = truncate ? cellValue(row, settings.prop) : ''
+              return h(TableCell, { class: cn('px-4 py-3 align-middle', truncate ? 'table-cell-truncate' : 'whitespace-normal break-words', fixedClass(column)), style: cellStyle(column), title: title || undefined }, {
                 default: () => settings.type === 'selection' ? h(Checkbox as any, {
                   'aria-label': `选择 ${row.title || row.username || row.slug || index + 1}`,
                   modelValue: selected.value.has(keyFor(row)), disabled: !canSelect(column, row, index),

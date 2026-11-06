@@ -83,17 +83,18 @@ function shortDateTime(value: string) {
 }
 
 async function loadView() {
+  loading.value = true
+  loadError.value = ''
   try {
     view.value = await competitionApi.view(compId)
   } catch (e) {
     // 登出时在途的轮询请求会以 401 返回：此时导航已由 auth.logout() 接管，
     // 这里再跳转会把刚打开的 /login 覆盖成首页（登出后停在 landing）。
     if (e instanceof ApiError && e.status === 401) return
-    // 未入场 / 竞赛不存在：回到入场页或平台。
-    loadError.value = (e as Error).message
-    notify.error(loadError.value)
-    if (compStore.lockedCompetitionId === compId) compStore.unlock()
-    router.replace('/')
+    loadError.value = e instanceof Error ? e.message : '竞赛数据加载失败，请稍后重试'
+    if (!view.value && compStore.lockedCompetitionId === compId) compStore.unlock()
+  } finally {
+    loading.value = false
   }
 }
 
@@ -370,7 +371,42 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-busy="loading" class="comp-home">
+  <div v-if="loading && !view" class="comp-home comp-skeleton" role="status" aria-label="正在加载竞赛">
+    <header class="comp-header">
+      <div class="comp-header-inner">
+        <div class="sk-identity">
+          <span class="sk-logo" />
+          <span class="sk-head-copy">
+            <i class="sk-line short" />
+            <i class="sk-line title" />
+            <i class="sk-line" />
+          </span>
+        </div>
+        <div class="sk-clock">
+          <i class="sk-line short" />
+          <i class="sk-line title" />
+        </div>
+      </div>
+    </header>
+    <main class="comp-body">
+      <div class="sk-kpis">
+        <div v-for="n in 4" :key="n" class="sk-kpi">
+          <i class="sk-line short" />
+          <i class="sk-line title" />
+          <i class="sk-line" />
+        </div>
+      </div>
+      <div class="sk-panel">
+        <i class="sk-line title" />
+        <i class="sk-block" />
+      </div>
+    </main>
+  </div>
+  <div v-else-if="loadError && !view" class="comp-home comp-home-error">
+    <UiLoadError title="无法加载竞赛" :message="loadError" @retry="loadView" />
+    <router-link class="enter-fallback" :to="`/competitions/enter/${compId}`">前往竞赛入场页</router-link>
+  </div>
+  <div v-else class="comp-home">
     <header class="comp-header">
       <div class="comp-header-inner">
         <div class="comp-identity">
@@ -412,6 +448,17 @@ onUnmounted(() => {
         </div>
       </div>
     </header>
+
+    <UiAlert
+      v-if="loadError"
+      type="error"
+      :closable="false"
+      :title="loadError"
+      description="当前显示上一次成功加载的数据。"
+      class="comp-refresh-error"
+    >
+      <UiButton size="small" @click="loadView">重试</UiButton>
+    </UiAlert>
 
     <main class="comp-body">
       <UiTabs v-model="activeTab" @tab-change="onTab">
@@ -538,7 +585,7 @@ onUnmounted(() => {
           <UiAlert v-if="boardError" type="error" :closable="false" :title="boardError" class="block">
             <UiButton size="small" @click="loadBoard">重试</UiButton>
           </UiAlert>
-          <UiTable :data="board" v-busy="boardLoading" empty-text="暂无成绩，提交首题后自动生成">
+          <UiTable v-else :data="board" :loading="boardLoading" empty-text="暂无成绩，提交首题后自动生成">
             <UiTableColumn prop="rank" label="名次" width="80" align="center" />
             <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140" align="left">
               <template #default="{ row }">
@@ -645,6 +692,26 @@ onUnmounted(() => {
 
 <style scoped>
 .comp-home { min-height: 100vh; background: var(--background); }
+.comp-home-error { display: grid; align-content: center; justify-items: center; gap: var(--space-4); padding: var(--space-8) var(--space-4); }
+.comp-home-error .ui-load-error { width: min(100%, 620px); }
+.enter-fallback { color: var(--accent-foreground); font-size: var(--text-sm); text-decoration: underline; text-underline-offset: 3px; }
+.comp-refresh-error { max-width: 1280px; margin: var(--space-4) auto 0; }
+.comp-skeleton .comp-header-inner { align-items: center; }
+.sk-identity { display: flex; flex: 1; align-items: center; gap: var(--space-3); min-width: 0; }
+.sk-logo { width: 22px; height: 26px; flex: none; border-radius: var(--radius-control); background: var(--muted); }
+.sk-head-copy { display: grid; flex: 1; gap: var(--space-2); max-width: 340px; min-width: 0; }
+.sk-clock { display: grid; gap: var(--space-2); width: 170px; }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 38%; }
+.sk-line.title { width: 64%; height: 18px; }
+.sk-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
+.sk-kpi { display: grid; gap: var(--space-3); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
+.sk-panel { display: grid; gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); }
+.sk-block { display: block; height: 220px; border-radius: var(--radius-control); background: var(--muted); }
+.comp-skeleton .sk-logo,
+.comp-skeleton .sk-line,
+.comp-skeleton .sk-block { animation: comp-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes comp-skeleton-pulse { 50% { opacity: .45; } }
 
 /* 竞赛顶栏：品牌 + 赛事身份 + 赛程时钟 + 本人；邀请赛锁定期间不出现平台导航。 */
 .comp-header {
@@ -808,10 +875,13 @@ h4 { margin: 12px 0 6px; }
   .comp-clock { width: auto; flex: 1; }
   .comp-user .user-name { display: none; }
   .status-filter { margin-left: 0; }
+  .sk-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
   .comp-name-row h1 { font-size: 16px; }
   .comp-body { padding: 16px 16px 32px; }
   .challenge-search { width: 100%; }
+  .sk-kpis { grid-template-columns: minmax(0, 1fr); }
+  .comp-refresh-error { margin-inline: var(--space-4); }
 }
 </style>

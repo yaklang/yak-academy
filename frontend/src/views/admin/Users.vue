@@ -15,7 +15,8 @@ const items = ref<AdminUserItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 
 // 重置密码对话框：目标用户 + 新密码（预填平台批量建号同款初始密码 123456，可改）。
 const resetVisible = ref(false)
@@ -31,6 +32,9 @@ const noSolves = ref<'' | 'true' | 'false'>('')
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  items.value = []
+  total.value = 0
   try {
     const resp = await adminApi.listUsers({
       page: page.value,
@@ -42,7 +46,7 @@ async function load() {
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '用户列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -128,9 +132,10 @@ onMounted(load)
       <UiButton @click="filterStaleNoSolves">不活跃且从未解题</UiButton>
     </div>
 
-    <UiTable :data="items" v-busy="loading" empty-text="暂无用户">
-      <UiTableColumn prop="id" label="ID" width="70" />
-      <UiTableColumn prop="username" label="用户名" min-width="130" />
+    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+    <UiTable v-else :data="items" :loading="loading" empty-text="暂无用户">
+      <UiTableColumn prop="id" label="ID" width="70" fixed="left" />
+      <UiTableColumn prop="username" label="用户名" min-width="130" show-overflow-tooltip />
       <UiTableColumn label="账号编码" width="130">
         <template #default="{ row }"><code>{{ row.account_code || '-' }}</code></template>
       </UiTableColumn>
@@ -195,11 +200,12 @@ onMounted(load)
 </template>
 
 <style scoped>
-.filters { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
-.q-input { width: 260px; }
-.sel { width: 200px; }
-.pager { margin-top: 1rem; }
+.filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4); align-items: center; }
+.q-input { width: 260px; max-width: 100%; }
+.sel { width: 200px; max-width: 100%; }
+.pager { margin-top: var(--space-4); }
+.list-error { margin-bottom: var(--space-3); }
 .dialog-hint { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); line-height: var(--leading-normal); }
-.reset-who { font-size: 0.92rem; }
-.reset-who code { margin-left: 0.5rem; color: var(--muted-foreground); }
+.reset-who { font-size: var(--text-sm); }
+.reset-who code { margin-left: var(--space-2); color: var(--muted-foreground); }
 </style>

@@ -10,7 +10,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Inbox, Search, SearchX } from '@lucide/vue'
-import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { BANK_LABELS, CATEGORY_LABELS, DIFFICULTY_LABELS, trainingApi, type ChallengeBank, type TrainingItem } from '../api'
 
@@ -28,6 +27,7 @@ const emptyHint: Record<ChallengeBank, string> = {
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
 const loading = ref(true)
+const loadError = ref('')
 
 // ===== 过滤器 =====
 // 分类 chip 客户端筛选（选项与计数由当前 tab 数据派生）；来源（是否内置）
@@ -105,30 +105,39 @@ const emptyDescription = computed(() => {
     : '题目包由管理员上传后会自动出现在这里。'
 })
 
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
+  loadError.value = ''
+  // 切 tab / 来源时先清空旧行：否则新条件的加载期会继续展示上一个 tab 的题目。
+  items.value = []
+  total.value = 0
   categoryFilter.value = '' // 切 tab/来源后分类集合变化，重置已失效的选择
   try {
     const filter: { bank: ChallengeBank; builtin?: boolean } = { bank: activeBank.value }
     if (builtinFilter.value === 'yes') filter.builtin = true
     if (builtinFilter.value === 'no') filter.builtin = false
     const resp = await trainingApi.list(1, 100, filter)
+    if (seq !== loadSeq) return
     items.value = resp.items
     total.value = resp.total
     // 超过 100 条时分页拉余下页。
-    if (resp.total > resp.items.length) await loadRemaining(filter, resp.items.length)
+    if (resp.total > resp.items.length) await loadRemaining(filter, resp.items.length, seq)
   } catch (e) {
-    notify.error((e as Error).message)
+    if (seq !== loadSeq) return
+    loadError.value = e instanceof Error ? e.message : '题库加载失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
-async function loadRemaining(filter: { bank: ChallengeBank; builtin?: boolean }, loaded: number) {
+async function loadRemaining(filter: { bank: ChallengeBank; builtin?: boolean }, loaded: number, seq: number) {
   let offset = loaded
   while (offset < total.value) {
     const page = Math.floor(offset / 100) + 1
     const resp = await trainingApi.list(page, 100, filter)
+    if (seq !== loadSeq) return
     items.value.push(...resp.items)
     offset += resp.items.length
     if (resp.items.length === 0) break
@@ -235,7 +244,24 @@ onMounted(load)
     </div>
   </div>
 
-  <UiSkeleton v-if="loading" :rows="8" animated />
+  <div v-if="loading" class="training-skeleton" role="status" aria-label="正在加载题目">
+    <div class="sk-filter-row" aria-hidden="true">
+      <span v-for="n in 4" :key="n" class="sk-chip" />
+      <span class="sk-search" />
+    </div>
+    <div class="sk-list" aria-hidden="true">
+      <div v-for="n in 7" :key="n" class="sk-row">
+        <span class="sk-diff" />
+        <span class="sk-main">
+          <span class="sk-title" />
+          <span class="sk-sub" />
+        </span>
+        <span class="sk-score" />
+        <span class="sk-tag" />
+      </div>
+    </div>
+  </div>
+  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
   <template v-else-if="visibleItems.length === 0">
     <div class="empty-guide" data-testid="training-empty" role="status">
       <span class="empty-icon" aria-hidden="true">
@@ -467,8 +493,38 @@ onMounted(load)
   background: var(--accent);
   border-radius: 50%; width: 20px; height: 20px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 0.78rem; flex: none;
+  font-size: var(--text-xs); flex: none;
 }
+
+/* ===== 结构骨架：与 tabs / 过滤条 / 单行题目列表同形 ===== */
+.training-skeleton { min-width: 0; }
+.sk-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.sk-chip { width: 76px; height: 32px; border-radius: 999px; background: var(--muted); }
+.sk-search { width: 220px; height: 36px; margin-left: auto; border-radius: var(--radius-control); background: var(--muted); }
+.sk-list { border-top: 1px solid var(--border); }
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sk-diff { width: 4px; height: 32px; flex: none; border-radius: 2px; background: var(--muted); }
+.sk-main { display: grid; flex: 1; gap: var(--space-2); min-width: 0; }
+.sk-title { width: min(46%, 280px); height: 14px; border-radius: 4px; background: var(--muted); }
+.sk-sub { width: min(30%, 180px); height: 10px; border-radius: 4px; background: var(--muted); }
+.sk-score { width: 44px; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-tag { width: 52px; height: 20px; border-radius: 999px; background: var(--muted); }
+.training-skeleton .sk-chip,
+.training-skeleton .sk-search,
+.training-skeleton .sk-row span { animation: training-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes training-skeleton-pulse { 50% { opacity: .45; } }
 
 .empty-guide {
   display: grid;
@@ -496,7 +552,22 @@ onMounted(load)
 .empty-sub { max-width: 56ch; margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--muted-foreground); line-height: var(--leading-relaxed); }
 
 @media (max-width: 720px) {
-  .score { display: none; }
+  /* 移动端保留分数：改为两行栅格（标题 / 分数 + 状态），不再直接隐藏信息。 */
+  .chal-link {
+    display: grid;
+    grid-template-columns: 4px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "diff main check"
+      "diff meta check";
+    align-items: center;
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+  .diff-dot { grid-area: diff; align-self: stretch; }
+  .chal-main { grid-area: main; }
+  .score { grid-area: meta; justify-self: start; font-size: var(--text-xs); }
+  .row-tags { grid-area: meta; justify-self: end; }
+  .solved-check { grid-area: check; }
   .row-tags .ui-tag[data-tone='default'] { display: none; }
   .chal-link { min-height: 44px; }
   .stats-strip { gap: var(--space-2) var(--space-3); }
@@ -506,5 +577,8 @@ onMounted(load)
   .search { width: 100%; order: 0; flex: 1 1 100%; }
   .filter { width: auto; flex: 1 1 180px; }
   .empty-guide { margin-top: var(--space-4); padding: var(--space-6) var(--space-5); }
+  .sk-search { width: 100%; margin-left: 0; }
+  .sk-score { display: none; }
+  .sk-tag { display: none; }
 }
 </style>

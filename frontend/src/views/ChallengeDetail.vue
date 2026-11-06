@@ -48,6 +48,7 @@ function fileSize(n: number) {
 const route = useRoute()
 const challenge = ref<ChallengeDetail | null>(null)
 const loading = ref(true)
+const loadError = ref('')
 const answer = ref('')
 const instance = ref<LabInstance | null>(null)
 const instanceLoading = ref(false)
@@ -216,12 +217,14 @@ function slug() {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  challenge.value = null
   try {
     challenge.value = await trainingApi.detail(slug())
     if (challenge.value.has_env) loadInstance()
     if (challenge.value.judge) loadSamples()
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '题目加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -382,7 +385,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <UiSkeleton v-if="loading" :rows="6" animated />
+  <div v-if="loading" class="page challenge-skeleton" role="status" aria-label="正在加载题目">
+    <div class="sk-head" aria-hidden="true">
+      <span class="sk-title" />
+      <span class="sk-tags">
+        <i v-for="n in 4" :key="n" />
+      </span>
+    </div>
+    <div class="sk-body" aria-hidden="true">
+      <span v-for="n in 6" :key="n" class="sk-line" :class="{ short: n === 3 || n === 6 }" />
+    </div>
+    <div class="sk-card" aria-hidden="true">
+      <span class="sk-card-title" />
+      <span class="sk-input" />
+      <span class="sk-action" />
+    </div>
+  </div>
+  <UiLoadError v-else-if="loadError" class="page-load-error" :message="loadError" @retry="load" />
   <div v-else-if="challenge" class="page">
     <header class="head">
       <h2 class="title">{{ challenge.title }}</h2>
@@ -632,6 +651,39 @@ onUnmounted(() => {
 
 <style scoped>
 .page { max-width: 900px; }
+.page-load-error { max-width: 900px; }
+.challenge-skeleton .sk-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-3);
+}
+.sk-title { width: min(42%, 320px); height: 28px; border-radius: var(--radius-control); background: var(--muted); }
+.sk-tags { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.sk-tags i { width: 56px; height: 22px; border-radius: 999px; background: var(--muted); }
+.sk-body { display: grid; gap: var(--space-3); max-width: 72ch; margin: var(--space-4) 0 var(--space-8); }
+.sk-line { height: 14px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 62%; }
+.sk-card {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 640px;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+.sk-card-title { width: 80px; height: 16px; border-radius: 4px; background: var(--muted); }
+.sk-input { height: 38px; border-radius: var(--radius-control); background: var(--muted); }
+.sk-action { width: 108px; height: 34px; border-radius: var(--radius-control); background: var(--muted); }
+.challenge-skeleton .sk-title,
+.challenge-skeleton .sk-tags i,
+.challenge-skeleton .sk-line,
+.challenge-skeleton .sk-card span { animation: challenge-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes challenge-skeleton-pulse { 50% { opacity: .45; } }
 .head {
   display: flex; align-items: flex-end; justify-content: space-between;
   flex-wrap: wrap; gap: var(--space-3);
@@ -669,90 +721,90 @@ onUnmounted(() => {
 .description :deep(table) { width: 100%; border-collapse: collapse; margin: 0 0 var(--space-4); font-size: var(--text-sm); }
 .description :deep(th), .description :deep(td) { border-bottom: 1px solid var(--border); padding: var(--space-2) var(--space-3); text-align: left; }
 .description :deep(th) { font-weight: 600; }
-.attachments { margin: 0 0 1.2rem; }
-.attachments h4, .links h4 { margin: 0 0 0.4rem; }
-.attach-row { display: flex; align-items: center; gap: 0.8rem; padding: 0.25rem 0; }
+.attachments { margin: 0 0 var(--space-5); }
+.attachments h4, .links h4 { margin: 0 0 var(--space-2); }
+.attach-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; }
 .attach-name { font-family: Consolas, monospace; }
-.attach-size { color: var(--muted-foreground); font-size: 0.85rem; }
-.links { margin: 0 0 1.2rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.attach-size { color: var(--muted-foreground); font-size: var(--text-sm); }
+.links { margin: 0 0 var(--space-5); display: flex; flex-direction: column; gap: var(--space-1); }
 .links a { color: var(--accent-foreground); text-decoration: none; }
-.hints { margin-bottom: 1.5rem; }
-.hint-title { margin-right: 0.6rem; }
-.cost { margin-left: 0.3rem; }
+.hints { margin-bottom: var(--space-6); }
+.hint-title { margin-right: var(--space-2); }
+.cost { margin-left: var(--space-1); }
 .hint-content { margin: 0; color: var(--foreground); }
-.hint-locked { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
-.hint-locked-text { margin: 0; color: var(--muted-foreground); font-size: 0.9rem; }
+.hint-locked { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.hint-locked-text { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
 .solve { max-width: 640px; }
 /* ACM 逐组判定结论（部分得分反馈） */
 .group-results {
-  display: flex; flex-direction: column; gap: 0.35rem;
-  margin-top: 0.8rem; padding-top: 0.8rem;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  margin-top: var(--space-3); padding-top: var(--space-3);
   border-top: 1px dashed var(--border);
 }
-.group-row { display: flex; align-items: center; gap: 0.6rem; }
+.group-row { display: flex; align-items: center; gap: var(--space-2); }
 .group-name {
-  font-family: Consolas, monospace; font-size: 0.85rem;
-  color: var(--foreground); min-width: 6.5rem;
+  font-family: Consolas, monospace; font-size: var(--text-sm);
+  color: var(--foreground); min-width: 96px;
 }
 .group-score {
-  margin-left: auto; font-size: 0.85rem;
+  margin-left: auto; font-size: var(--text-sm);
   color: var(--muted-foreground); font-family: Consolas, monospace;
 }
 .group-fail .group-name { color: var(--destructive); }
-.instance-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-.endpoint { background: var(--muted); padding: 0.1rem 0.4rem; border-radius: 3px; font-family: Consolas, monospace; color: var(--accent-foreground); }
-.expire { color: var(--muted-foreground); font-size: 0.8rem; }
-.submit-row { display: flex; gap: 0.5rem; }
-.samples { margin: 0 0 1.5rem; }
-.samples h4 { margin: 0 0 0.4rem; }
-.sample-group { margin-bottom: 0.6rem; }
+.instance-row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+.endpoint { background: var(--muted); padding: 2px var(--space-1); border-radius: 3px; font-family: Consolas, monospace; color: var(--accent-foreground); }
+.expire { color: var(--muted-foreground); font-size: var(--text-xs); }
+.submit-row { display: flex; gap: var(--space-2); }
+.samples { margin: 0 0 var(--space-6); }
+.samples h4 { margin: 0 0 var(--space-2); }
+.sample-group { margin-bottom: var(--space-2); }
 .sample-name {
-  font-family: Consolas, monospace; font-size: 0.85rem;
+  font-family: Consolas, monospace; font-size: var(--text-sm);
   color: var(--muted-foreground);
 }
-.sample-io { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.sample-io { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .sample-block {
   flex: 1; min-width: 200px; background: var(--muted);
-  border-radius: 4px; padding: 0.5rem 0.7rem;
+  border-radius: 4px; padding: var(--space-2) var(--space-3);
 }
 .sample-label {
-  display: block; font-size: 0.8rem; color: var(--muted-foreground);
-  margin-bottom: 0.2rem;
+  display: block; font-size: var(--text-xs); color: var(--muted-foreground);
+  margin-bottom: var(--space-1);
 }
 .sample-block pre {
-  margin: 0; font-family: Consolas, monospace; font-size: 0.85rem;
+  margin: 0; font-family: Consolas, monospace; font-size: var(--text-sm);
   white-space: pre-wrap; word-break: break-all;
 }
 .sample-note {
-  margin-bottom: 0.8rem; font-size: 0.85rem;
+  margin-bottom: var(--space-3); font-size: var(--text-sm);
   color: var(--muted-foreground);
 }
-.engine-missing { margin-bottom: 0.8rem; }
+.engine-missing { margin-bottom: var(--space-3); }
 .lib-policy {
-  margin-bottom: 0.7rem; padding: 0.55rem 0.75rem;
+  margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3);
   background: var(--muted); border-radius: 6px;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
-.lib-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.lib-title { color: var(--muted-foreground); margin-right: 0.2rem; }
+.lib-row { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
+.lib-title { color: var(--muted-foreground); margin-right: var(--space-1); }
 .lib-chip { font-family: Consolas, monospace; }
 .lib-all { color: var(--foreground); }
-.lib-blocked { margin-top: 0.35rem; color: var(--destructive); opacity: 0.85; }
-.run-panel { margin-top: 0.6rem; }
-.run-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.stdin-input { margin-top: 0.5rem; font-family: Consolas, monospace; }
+.lib-blocked { margin-top: var(--space-1); color: var(--destructive); opacity: 0.85; }
+.run-panel { margin-top: var(--space-2); }
+.run-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.stdin-input { margin-top: var(--space-2); font-family: Consolas, monospace; }
 .run-output {
-  margin-top: 0.5rem; background: var(--muted);
-  border-radius: 4px; padding: 0.5rem 0.7rem;
+  margin-top: var(--space-2); background: var(--muted);
+  border-radius: 4px; padding: var(--space-2) var(--space-3);
 }
-.run-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.run-time { font-size: 0.8rem; color: var(--muted-foreground); }
+.run-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.run-time { font-size: var(--text-xs); color: var(--muted-foreground); }
 .run-output pre {
-  margin: 0.4rem 0 0; font-family: Consolas, monospace; font-size: 0.85rem;
+  margin: var(--space-1) 0 0; font-family: Consolas, monospace; font-size: var(--text-sm);
   white-space: pre-wrap; word-break: break-all;
 }
 .run-stderr { color: var(--destructive); }
-.submit-btn { margin-top: 0.6rem; }
-.solved-note { margin-bottom: 0.8rem; }
-.result { margin-top: 0.8rem; }
+.submit-btn { margin-top: var(--space-2); }
+.solved-note { margin-bottom: var(--space-3); }
+.result { margin-top: var(--space-3); }
 </style>

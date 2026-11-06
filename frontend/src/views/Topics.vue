@@ -8,7 +8,6 @@ import { ArrowRight } from '@lucide/vue'
 import { topicApi, progressApi, BANK_LABELS, type Topic, type ChallengeBank } from '../api'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { Button } from '@/components/ui/button'
 
 const route = useRoute()
 // 普通端 /topics/:slug；管理端 /admin/tutorials/:slug。
@@ -98,11 +97,24 @@ onMounted(async () => {
     </div>
   </header>
 
-  <UiSkeleton v-if="loading" :rows="3" animated />
-  <div v-else-if="loadError" class="load-error" role="alert">
-    <p>{{ loadError }}</p>
-    <Button variant="outline" size="sm" @click="load">重试</Button>
+  <div v-if="loading" class="topics-skeleton" role="status" aria-label="正在加载学习路线">
+    <div class="card-grid topics" aria-hidden="true">
+      <div v-for="n in 6" :key="n" class="topic-card tall-card sk-topic-card">
+        <div class="sk-topic-top">
+          <i class="sk-line short" />
+          <i class="sk-pill" />
+        </div>
+        <i class="sk-line heading" />
+        <i class="sk-line" />
+        <i class="sk-line medium" />
+        <div class="sk-topic-meta">
+          <i class="sk-line short" />
+          <i class="sk-line short" />
+        </div>
+      </div>
+    </div>
   </div>
+  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
   <UiEmpty v-else-if="empty" description="暂无内容：等待管理员上传内容包" />
   <div v-else class="card-grid topics">
     <router-link v-for="(t, i) in topics" :key="t.slug" :to="`${base}/${t.slug}`" class="topic-link">
@@ -309,17 +321,25 @@ onMounted(async () => {
   font-weight: 500;
   white-space: nowrap;
 }
-.load-error {
-  display: grid;
-  justify-items: center;
+.topics-skeleton .topic-card { display: flex; flex-direction: column; gap: var(--space-3); }
+.sk-topic-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-1); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line.short { width: 18%; }
+.sk-line.medium { width: 72%; }
+.sk-line.heading { width: 56%; height: 18px; }
+.sk-pill { width: 44px; height: 18px; border-radius: 999px; background: var(--muted); }
+.sk-topic-meta {
+  display: flex;
+  justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-12) var(--space-6);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-card);
-  color: var(--muted-foreground);
-  text-align: center;
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
 }
-.load-error p { margin: 0; font-size: var(--text-sm); }
+.sk-topic-meta .sk-line { width: 34%; }
+.topics-skeleton .sk-line,
+.topics-skeleton .sk-pill { animation: topics-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes topics-skeleton-pulse { 50% { opacity: .45; } }
 
 /* ===== 训练入口 ===== */
 .quick-section { margin-top: var(--space-10); }

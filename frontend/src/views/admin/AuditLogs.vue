@@ -2,7 +2,6 @@
 // 管理面板：操作审计。append-only 管理操作轨迹（上传/发布/回滚/删除/竞赛/用户/
 // 备份等），与 Event 学生行为流分工；可按动作与管理员过滤，新→旧分页。
 import { onMounted, ref } from 'vue'
-import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
 import { auditApi, type AdminAuditLog } from '../../api'
 
@@ -10,7 +9,8 @@ const items = ref<AdminAuditLog[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 20
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const actionFilter = ref('')
 const adminFilter = ref<number | null>(null)
 
@@ -29,6 +29,9 @@ const actionOptions = [
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  items.value = []
+  total.value = 0
   try {
     const resp = await auditApi.list({
       page: page.value, page_size: pageSize,
@@ -38,7 +41,7 @@ async function load() {
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '审计记录加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -78,8 +81,9 @@ onMounted(load)
         <UiButton size="small" @click="load">刷新</UiButton>
       </div>
     </template>
-    <UiTable :data="items" v-busy="loading" empty-text="暂无审计记录">
-      <UiTableColumn label="时间" width="180">
+    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+    <UiTable v-else :data="items" :loading="loading" empty-text="暂无审计记录">
+      <UiTableColumn label="时间" width="180" fixed="left">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
       </UiTableColumn>
       <UiTableColumn label="管理员" width="140">
@@ -99,7 +103,7 @@ onMounted(load)
         </template>
       </UiTableColumn>
     </UiTable>
-    <div class="pager">
+    <div v-if="total > pageSize" class="pager">
       <UiPagination
         v-model:current-page="page"
         layout="prev, pager, next, total"
@@ -112,9 +116,10 @@ onMounted(load)
 </template>
 
 <style scoped>
-.block { margin-bottom: 1.2rem; }
-.toolbar { display: flex; gap: 0.6rem; align-items: center; }
+.block { margin-bottom: var(--space-5); }
+.toolbar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .dim { color: var(--muted-foreground); }
-.detail { font-size: 0.8rem; word-break: break-all; }
-.pager { margin-top: 0.8rem; display: flex; justify-content: flex-end; }
+.detail { font-size: var(--text-xs); word-break: break-all; }
+.pager { margin-top: var(--space-3); display: flex; justify-content: flex-end; }
+.list-error { margin-bottom: var(--space-3); }
 </style>

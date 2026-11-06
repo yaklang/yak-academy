@@ -12,19 +12,23 @@ const total = ref(0)
 const unread = ref(0)
 const page = ref(1)
 const pageSize = 20
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const dialogVisible = ref(false)
 const current = ref<MailItem | null>(null)
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  mails.value = []
+  total.value = 0
   try {
     const resp = await profileApi.mails(page.value, pageSize)
     mails.value = resp.items
     total.value = resp.total
     unread.value = resp.unread
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '邮件加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -79,9 +83,11 @@ onMounted(load)
     </div>
   </header>
 
+  <UiLoadError v-if="loadError" :message="loadError" @retry="load" class="list-error" />
   <UiTable
+    v-else
     :data="mails"
-    v-busy="loading"
+    :loading="loading"
     max-height="560"
     empty-text="暂无邮件"
     :row-class-name="rowClass"
@@ -102,7 +108,7 @@ onMounted(load)
     <UiTableColumn label="时间" width="170">
       <template #default="{ row }">{{ fmt(row.created_at) }}</template>
     </UiTableColumn>
-    <UiTableColumn label="操作" width="90">
+    <UiTableColumn label="操作" width="90" fixed="right">
       <template #default="{ row }">
         <UiButton size="small" @click="openMail(row)">查看</UiButton>
       </template>

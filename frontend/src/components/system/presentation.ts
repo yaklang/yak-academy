@@ -1,5 +1,6 @@
 import { defineComponent, h, inject, provide, ref, useId, type InjectionKey } from 'vue'
-import { ArrowRight, CircleCheck, CircleHelp, CircleX, Info, Library, TriangleAlert, X } from '@lucide/vue'
+import { ArrowRight, CircleCheck, CircleHelp, CircleX, Info, Library, RefreshCw, TriangleAlert, X } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -31,6 +32,23 @@ export const UiAlert = defineComponent({
 export const UiEmpty = defineComponent({
   name: 'UiEmpty', props: { description: { type: String, default: '暂无内容' }, imageSize: Number },
   setup(props, { attrs, slots }) { return () => h('div', { ...attrs, class: cn('ui-empty', attrs.class as string), role: 'status' }, [h(Library, { class: 'mb-4 size-8 text-muted-foreground/60', 'aria-hidden': true }), h('p', { class: 'max-w-prose break-words text-sm text-muted-foreground' }, slots.description?.() ?? props.description), slots.default?.()]) },
+})
+
+// 页面内错误态：toast 会消失，数据页加载失败必须留下可重试的可见入口。
+export const UiLoadError = defineComponent({
+  name: 'UiLoadError', inheritAttrs: false,
+  props: { title: { type: String, default: '加载失败' }, message: { type: String, default: '数据加载失败，请稍后重试。' }, retryText: { type: String, default: '重试' }, compact: Boolean },
+  emits: ['retry'],
+  setup(props, { attrs, slots, emit }) {
+    return () => h('div', { ...attrs, role: 'alert', 'data-slot': 'load-error', class: cn('ui-load-error', props.compact && 'is-compact', attrs.class as string) }, [
+      h(CircleX, { class: 'ui-load-error-icon', 'aria-hidden': true }),
+      h('div', { class: 'ui-load-error-copy' }, [
+        h('p', { class: 'ui-load-error-title' }, slots.title?.() ?? props.title),
+        h('p', { class: 'ui-load-error-message' }, slots.default?.() ?? props.message),
+      ]),
+      h(Button, { variant: 'outline', size: 'sm', class: 'ui-load-error-action', onClick: () => emit('retry') }, { default: () => slots.action?.() ?? [h(RefreshCw, { class: 'size-3.5', 'aria-hidden': true }), props.retryText] }),
+    ])
+  },
 })
 
 export const UiResult = defineComponent({

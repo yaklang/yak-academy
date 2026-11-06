@@ -11,17 +11,21 @@ const items = ref<PublicCompetitionItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
 const registering = ref(0)
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  items.value = []
+  total.value = 0
   try {
     const resp = await competitionApi.plaza(page.value, pageSize.value)
     items.value = resp.items
     total.value = resp.total
   } catch (e) {
-    notify.error((e as Error).message)
+    loadError.value = e instanceof Error ? e.message : '竞赛列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -67,7 +71,8 @@ onMounted(load)
   </header>
 
   <UiCard shadow="never">
-    <UiTable :data="items" v-busy="loading" empty-text="暂无公开竞赛">
+    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
+    <UiTable v-else :data="items" :loading="loading" empty-text="暂无公开竞赛">
       <UiTableColumn prop="name" label="竞赛" min-width="180" />
       <UiTableColumn label="状态" width="100">
         <template #default="{ row }">
@@ -118,4 +123,5 @@ onMounted(load)
 .dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 .reg-tag { margin-right: var(--space-2); }
 .pager { margin-top: var(--space-4); }
+.list-error { margin-bottom: var(--space-4); }
 </style>
