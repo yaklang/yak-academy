@@ -378,3 +378,10 @@ type CompetitionRepo interface {
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
 }
+
+// SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
+// JSON）。Get 未命中返回 (nil, nil)，与 gorm.ErrRecordNotFound 区分开。
+type SettingsRepo interface {
+	Get(ctx context.Context, key string) (*model.SystemSetting, error)
+	Put(ctx context.Context, s *model.SystemSetting) error
+}

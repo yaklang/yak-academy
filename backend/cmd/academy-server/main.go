@@ -181,24 +181,15 @@ func main() {
 		log.Println("metrics endpoint enabled at /metrics (Prometheus text format, token-gated)")
 	}
 	smsCodeRepo := repo.NewSmsCodeRepo(gdb)
-	// 邮箱验证码投递：SMTP 配置齐全走真实邮件；未配置时非严格模式写日志，
-	// 严格模式返回 501（避免生产日志暴露验证码，也避免静默不可用）。
-	var emailSender service.EmailSender
-	if cfg.SMTPAddr == "" {
-		if cfg.Strict {
-			emailSender = service.NewUnavailableEmailSender()
-			log.Println("warning: ACADEMY_SMTP_ADDR unset in strict mode — email verification endpoints will return 501")
-		} else {
-			emailSender = service.DevEmailSender{}
-			log.Println("warning: ACADEMY_SMTP_ADDR unset — email verification codes will be written to the server log")
-		}
-	} else {
-		sender, err := service.NewSMTPEmailSender(cfg.SMTPAddr, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPTLS)
-		if err != nil {
-			log.Fatalf("smtp config: %v", err)
-		}
-		emailSender = sender
-		log.Printf("email delivery: SMTP %s (%s)", cfg.SMTPAddr, cfg.SMTPTLS)
+	// 邮箱验证码投递：管理端设置 > 环境变量默认值；未配置时非严格模式写日志，
+	// 严格模式返回 501。DynamicEmailSender 支持设置页保存后立即热切换。
+	emailSender := service.NewDynamicEmailSender(service.NewUnavailableEmailSender())
+	settingsSvc := service.NewSettingsService(repo.NewSettingsRepo(gdb), cfg.JWTSecret, service.SMTPEnvConfig{
+		Addr: cfg.SMTPAddr, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+		From: cfg.SMTPFrom, TLS: cfg.SMTPTLS,
+	}, !cfg.Strict, emailSender)
+	if err := settingsSvc.Initialize(ctx); err != nil {
+		log.Fatalf("smtp settings: %v", err)
 	}
 	if cfg.VerificationShowCode {
 		log.Println("warning: verification code echo enabled — use for local demos only, never in production")
@@ -207,7 +198,7 @@ func main() {
 	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil, emailSender)
 	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
 	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, resetSvc, backupSvc, auditSvc, cfg.VerificationShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

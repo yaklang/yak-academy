@@ -65,6 +65,38 @@ components:
         created_at: { type: string, format: date-time }
         database: { type: string, description: 数据库模式（sqlite；归档内含一致性快照） }
         store_kinds: { type: string, description: WP 附件存储后端（fs/s3；s3 时 WP zip 不在归档内） }
+    AdminSMTPSettings:
+      type: object
+      description: 管理端邮件服务配置（统一管理；密码只写不读，落库前 AES-256-GCM 加密）
+      required: [enabled, addr, username, from, tls, has_password, password_error, config_error, source]
+      properties:
+        enabled: { type: boolean, description: 是否启用 SMTP 投递；关闭时邮箱验证码不可用（非严格模式回退开发日志投递器） }
+        addr: { type: string, description: SMTP 地址 host:port（省略端口按 587） }
+        username: { type: string, description: SMTP 登录账号（空 = 不认证，仅限内网中继） }
+        from: { type: string, description: 发件人（可含显示名；空则取 username） }
+        tls: { type: string, enum: [starttls, implicit, none], description: TLS 模式：starttls（587）/ implicit（465）/ none（仅限内网） }
+        has_password: { type: boolean, description: 是否已保存密码；密码原文永不返回 }
+        password_error: { type: boolean, description: 已保存密码无法解密（通常为 JWT secret 变更）；需重新填写密码 }
+        config_error: { type: boolean, description: 已保存配置损坏；再次保存即可覆盖修复 }
+        source: { type: string, enum: [database, environment, none], description: 当前生效配置来源；保存后恒为 database }
+        updated_at: { type: string, format: date-time, nullable: true, description: 最后保存时间（来源为 environment 时为 null） }
+        updated_by: { type: string, description: 最后保存的管理员用户名（来源为 environment 时为空） }
+    AdminSMTPSettingsUpdate:
+      type: object
+      description: 保存邮件服务配置；保存成功后立即热加载，无需重启服务
+      required: [enabled, addr, username, from, tls]
+      properties:
+        enabled: { type: boolean }
+        addr: { type: string, description: 启用时必填；host:port，省略端口按 587 }
+        username: { type: string }
+        password: { type: string, description: 新密码；空 = 保留已保存密码（首次保存且来源为环境变量时沿用环境变量密码） }
+        from: { type: string }
+        tls: { type: string, enum: [starttls, implicit, none] }
+    AdminSMTPTestRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, format: email, description: 测试收件邮箱 }
     AdminAuditLog:
       type: object
       description: 管理操作审计行（append-only；与 Event 学生行为流分工，不参与事件重放）
@@ -2565,6 +2597,61 @@ paths:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/settings/smtp:
+    get:
+      tags: [admin]
+      summary: 读取邮件服务配置（统一管理；密码只返回是否已保存，永不回显）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSMTPSettings' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+    put:
+      tags: [admin]
+      summary: >
+        保存邮件服务配置并立即热加载（无需重启）。配置落 system_settings 表，
+        保存后优先于环境变量；密码使用 AES-256-GCM 加密存储，响应不回显。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminSMTPSettingsUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSMTPSettings' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/settings/smtp/test:
+    post:
+      tags: [admin]
+      summary: 使用当前已保存配置发送测试邮件（管理员自检 SMTP 投递链路）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminSMTPTestRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+        '500': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/audit-logs:
     get:

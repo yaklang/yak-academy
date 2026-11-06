@@ -125,6 +125,19 @@ var exactDetails = map[string]string{
 	"judge problem requires testdata/*.in and testdata/*.answer pairs":                          "ACM 题目需要 testdata/*.in 与 *.answer 成对提供",
 	"challenge import unavailable": "题目导入不可用（缺少内容服务）",
 
+	// 系统设置 / SMTP 投递（管理端统一配置）
+	"smtp address is required":                                "请填写 SMTP 服务器地址",
+	"invalid smtp address":                                    "SMTP 服务器地址格式不正确（需 host:port，端口省略按 587）",
+	"invalid smtp tls mode":                                   "TLS 模式只能是 starttls、implicit 或 none",
+	"smtp from address is required":                           "请填写发件人地址（或填写 SMTP 用户名作为默认发件人）",
+	"invalid smtp from address":                               "发件人地址格式不正确",
+	"smtp password is required when username is set":          "填写 SMTP 用户名时必须同时填写密码",
+	"saved smtp password cannot be decrypted; enter it again": "已保存的 SMTP 密码无法解密（服务器 JWT secret 可能已更换），请重新填写密码",
+	"smtp is not configured":                                  "邮件服务尚未配置或已停用，请先保存并启用 SMTP",
+	"smtp test recipient is required":                         "请填写测试收件邮箱",
+	"smtp test failed":                                        "测试邮件发送失败：请检查 SMTP 地址、TLS 模式与账号密码是否正确",
+	"invalid smtp configuration":                              "SMTP 配置不完整或格式不正确，请检查后重试",
+
 	// 备份 / 运维
 	"in-app backup supports SQLite only; dump the PostgreSQL database externally with pg_dump and back up data dirs separately": "应用内备份仅支持 SQLite；PostgreSQL 请用 pg_dump 外部备份，数据目录另行归档",
 	"docker driver unavailable; cannot build builtin image":                                                                     "Docker 驱动不可用，无法构建内置靶机镜像",
