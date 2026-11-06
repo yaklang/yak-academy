@@ -153,8 +153,8 @@ FE(未登录)         API                register SVC          repo            D
    │                                  │ 10min 窗口 ≤3 条                      │
    │                                  │ 邮箱已注册 → 422（不发码）             │
    │                                  │ genCode(crypto/rand 拒绝采样) ─────→│ SmsCode(email) 落库(5min TTL)
-   │                                  │ EmailSender：SMTP/事务邮件服务        │
-   │                                  │  未配置 SMTP：非严格模式写日志；       │
+   │                                  │ EmailSender：管理端设置 > 环境变量 SMTP │
+   │                                  │  未配置/停用：非严格模式写日志；       │
    │                                  │  严格模式返回 501                     │
    │   200 {ok:true}（限频 → 200 {ok, retry_after}，不报错）                  │
    │   code 仅本地演示回显（ACADEMY_SHOW_VERIFICATION_CODE=1）                │
@@ -179,6 +179,7 @@ FE(未登录)         API                register SVC          repo            D
 - 角色固定 `student`，接口无角色入参（禁止自选）。
 - 限频对客户端表现为 200 + retry_after，前端据此倒计时。
 - 回显默认关闭；生产严格模式禁止开启，验证码只经 SMTP（邮箱）或旧短信投递器发送。
+- SMTP 配置来源优先级：管理端「系统设置」保存的 `system_settings.smtp` > 环境变量 `ACADEMY_SMTP_*` > 未配置。管理端保存后立即热替换投递器；密码加密落库且不回显，JWT secret 轮换后需重新填写。
 
 ### 6.1 找回密码流（邮箱主通道，手机号兼容，同套验证码设施）
 

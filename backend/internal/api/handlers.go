@@ -31,13 +31,14 @@ type Handlers struct {
 	ResetSvc     *service.PasswordResetService
 	Backup       *service.BackupService
 	Audit        *service.AuditService
+	Settings     *service.SettingsService
 	// showVerificationCode 验证码回显模式（config VerificationShowCode，仅本地演示）。
 	showVerificationCode bool
 }
 
 // NewHandlers 构造 handler 集合；showVerificationCode 见 config.VerificationShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, showVerificationCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, showVerificationCode: showVerificationCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -132,6 +133,11 @@ func (h *Handlers) Register(r *Router) {
 
 	// 管理操作审计（ops 硬化）：全部 admin 写操作的 append-only 审计视图。
 	r.Handle(http.MethodGet, "/api/v1/admin/audit-logs", "admin", h.listAuditLogs)
+
+	// 系统设置（统一管理）：SMTP 配置读写 + 投递自检；保存后热加载。
+	r.Handle(http.MethodGet, "/api/v1/admin/settings/smtp", "admin", h.getSMTPSettings)
+	r.Handle(http.MethodPut, "/api/v1/admin/settings/smtp", "admin", h.updateSMTPSettings)
+	r.Handle(http.MethodPost, "/api/v1/admin/settings/smtp/test", "admin", h.testSMTPSettings)
 
 	// 竞赛：管理端（创建/配置/题目批量导入/参赛者队伍导入/容器/警告/WP/榜单）
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions", "admin", h.adminListCompetitions)

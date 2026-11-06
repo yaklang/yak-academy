@@ -63,7 +63,8 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
 - **账号编码（学号式）**：每号分配唯一编码 `YA{YY}-{NNNNN}`（建号年两位 + 年内序号 1~99999 零填充，如 `YA26-00042`），建号入口统一在 `userRepo.Create`（同年前缀字典序 MAX+1 分配，唯一冲突重试）；序号按建号年分组互不挤占。旧库迁移按 created_at 年分组回填（幂等，起始取该年已有最大序号+1）；部分唯一索引（`account_code <> ''`）兼容旧空值行。编码是用户对外可报读的稳定标识（区别于可读用户名），邀请赛导入表格、用户管理搜索均支持按编码引用/检索。
 - **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/邮箱/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走邀请赛一键生成或自助注册。
-- **自助注册（邮箱验证码为主通道）**：登录页提供注册入口，流程为 `POST /auth/email/code`（邮箱发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同邮箱 60 秒限频、10 分钟内最多 3 次。`EmailSender` 为投递抽象：配置 `ACADEMY_SMTP_ADDR` 后走 SMTP/事务邮件服务（支持 starttls / implicit TLS / none，账号密码从环境变量注入）；未配置时非严格模式用开发投递器写服务日志，严格模式返回 501（生产必须配置 SMTP，不在生产日志中暴露验证码）。邮箱作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复邮箱注册拒绝。旧版 `POST /auth/sms/code` + `phone` 注册保留兼容，`User.phone` 字段继续保留给已有手机号账号，不做数据迁移。
+- **自助注册（邮箱验证码为主通道）**：登录页提供注册入口，流程为 `POST /auth/email/code`（邮箱发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同邮箱 60 秒限频、10 分钟内最多 3 次。`EmailSender` 为投递抽象：管理端「系统设置 → 邮件服务」保存 SMTP 配置后立即热加载（支持 starttls / implicit TLS / none）；环境变量 `ACADEMY_SMTP_*` 仅作为首次启动默认值，数据库配置优先。未配置/停用时非严格模式用开发投递器写服务日志，严格模式返回 501（生产必须配置 SMTP，不在生产日志中暴露验证码）。邮箱作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复邮箱注册拒绝。旧版 `POST /auth/sms/code` + `phone` 注册保留兼容，`User.phone` 字段继续保留给已有手机号账号，不做数据迁移。
+- **运行期统一设置（管理端系统设置）**：可热更新的服务参数存 `system_settings` 表（一行一个配置域，Value 为域内 JSON），当前提供 SMTP 域：`GET/PUT /admin/settings/smtp` 读取/保存，`POST /admin/settings/smtp/test` 发送测试邮件。保存时先构造投递器再落库，成功后原子替换 `DynamicEmailSender`，无需重启；配置非法不写入、不切换，旧配置继续服务。SMTP 密码使用 AES-256-GCM 加密落库（随机 nonce，密钥由 JWT secret 经 HKDF-SHA256 按域分离派生），API 只返回 `has_password`、永不回显；JWT secret 轮换后旧密码不可解密，设置页会提示重新填写。每次保存/测试写 `admin_audit_logs`（不含密码）。
 - **验证码回显（仅本地演示）**：默认关闭。本地联调/E2E 可设 `ACADEMY_SHOW_VERIFICATION_CODE=1`（旧变量 `ACADEMY_SMS_SHOW_CODE` 兼容）让发码响应携带验证码原文；`ACADEMY_STRICT=1` 时该开关必须关闭，否则拒绝启动，避免任意请求方读取注册/找回验证码。
 - **找回密码/找回账号（邮箱主通道，手机号兼容）**：登录页「找回账号」入口，流程为 `POST /auth/password-reset/code`（发码，公开；限频策略与注册发码一致）→ `POST /auth/password-reset`（凭 code 重置密码，公开）。请求体 `email` 与 `phone` 必须且只能填一个：新账号走邮箱，未绑定邮箱的旧账号可继续用手机号。验证码按**用途隔离**（`SmsCode.purpose` = register / password_reset，发码与核销同用途比对，注册码不可用于重置、反之亦然；限频窗口也按用途独立计数）。重置成功返回用户名与账号编码——忘记用户名的学员凭邮箱（旧账号可凭手机号）一并找回（「找回账号」）；密码更新与本人改密/管理员重置同语义：bcrypt 更新 + `TokenInvalidBefore` 推进（该账号全部已签发 token 立即失效），不自动登录（回登录页用新密码登录）。未注册目标发码即拒（422）；竞赛批量建号未绑定邮箱/手机号，此类账号走管理端用户管理「重置密码」（`POST /admin/users/{id}/reset-password`，不校验旧密码，同样全量失效 token，预填平台初始密码 123456 可改）。
 
@@ -155,6 +156,7 @@ Challenge(slug 主键, category, difficulty, description_md,     # 独立题目�
          └─ Submission(user, answer, status, verdict)            # verdict: ac|wa|tle|re|internal_error（code 题判定结论）
 Event(id, user_id, type, payload, created_at)   # append-only
 ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
+SystemSetting(key, value JSON, updated_by)       # 运行期统一设置（SMTP；密码字段加密落库）
 
 Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域（kind: public|invitational，创建后不可改）
   ─┬─ CompetitionChallenge(绑定题目+分值快照)
@@ -174,8 +176,9 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 2. **题目上传流**：admin 上传 challenge.json → 校验 → upsert 即生效（无 draft/publish）；
 3. **做题判定流**：student 在题目详情页提交 → 入队 pending → worker 恒时比较 → `submission.judged` 事件 → 派生器更新积分/进度/排行榜（题目关联教程时同步发 Room 通关事件；竞赛提交另派生 CompetitionScore 并做跨队反作弊检测）；
 4. **鉴权流**：请求 → JWT 解析 → 角色中间件（student/admin）→ handler；
-5. **注册流**：登录页发码（限频/窗口校验 → SmsCode 落库 → 开发投递器写日志）→ 凭码建号（核销一次性 → 建号角色固定 student → 签发登录 token）；
-6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请赛凭码入场并锁定至比赛结束；公开赛凭报名免码入场、可自由进出）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）。
+5. **注册流**：登录页发码（限频/窗口校验 → SmsCode 落库 → SMTP 投递；管理端设置优先、环境变量兜底，未配置时开发投递器写日志）→ 凭码建号（核销一次性 → 建号角色固定 student → 签发登录 token）；
+6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请赛凭码入场并锁定至比赛结束；公开赛凭报名免码入场、可自由进出）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）；
+7. **系统设置流**：admin 保存 SMTP → 校验并构造投递器 → 密码加密写入 `system_settings` → 原子替换 `DynamicEmailSender` 立即生效；校验/落库失败不切换，旧配置继续服务；每次变更记管理审计。
 
 ## 6. API 契约总览
 
@@ -277,11 +280,11 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - 事件总线为进程内实现：无持久消费位点，崩溃窗口靠启动 Replay 补偿（Phase 4 外置后移除）。
 - 排行榜未按赛季切片；实例端口默认仅回环发布，对外直连依赖 `ACADEMY_INSTANCE_PUBLIC_HOST` 显式配置（无自动 NAT/域名分发）。
 - 徽章为计算型读模型：不落库、不产生事件；如未来需要"颁发时间/稀有度"再演进为事件派生表。
-- 邮箱通道通过 SMTP/事务邮件服务投递（`ACADEMY_SMTP_ADDR` 等）；未配置时仅非严格模式写开发日志，严格模式发码返回 501——生产必须配置 SMTP 后才能对外开放注册/找回。旧手机号通道仅保留兼容，未接真实短信网关。竞赛 WP 的 zip 附件默认落盘本地目录（`ACADEMY_WRITEUPS_DIR`），可选切 S3 兼容对象存储（`ACADEMY_WRITEUPS_STORE=s3` + `ACADEMY_WRITEUPS_S3_*`，MinIO/AWS S3 等；切换只影响新写入，存量文件不迁移）。
+- 邮箱通道通过 SMTP/事务邮件服务投递：管理端「系统设置」保存后热加载，环境变量 `ACADEMY_SMTP_*` 仅作为首次启动默认值；未配置/停用时仅非严格模式写开发日志，严格模式发码返回 501——生产必须在管理端配置 SMTP（或保留环境变量默认值）后才能对外开放注册/找回。旧手机号通道仅保留兼容，未接真实短信网关。竞赛 WP 的 zip 附件默认落盘本地目录（`ACADEMY_WRITEUPS_DIR`），可选切 S3 兼容对象存储（`ACADEMY_WRITEUPS_STORE=s3` + `ACADEMY_WRITEUPS_S3_*`，MinIO/AWS S3 等；切换只影响新写入，存量文件不迁移）。
 - 备份为应用内单机快照（SQLite `VACUUM INTO` + 数据目录 tar.gz，`ACADEMY_BACKUP_INTERVAL` 周期触发 / 管理端手动触发，按 `ACADEMY_BACKUP_KEEP` 保留份数自动清理）：PostgreSQL 模式不支持（外部 pg_dump）；归档落数据卷本地目录，数据卷整卷损坏时备份同失——异地容灾由运维侧下载归档离机保存或同步 backups/ 目录（平台不内置）。
 - 可观测性为「暴露而不内置」：`/metrics`（Prometheus 文本格式，HTTP 按路由聚合 + 运行时指标，`ACADEMY_METRICS_TOKEN` 令牌门控，未配置即关闭）与 slog 结构化访问日志（`ACADEMY_LOG_JSON=1` 切 JSON 行）；采集、存储、看板与告警由外部 Prometheus + Alertmanager / 日志采集器完成，平台不内置监控栈。`/health` 探针与 `/metrics` 采集不进指标与访问日志（高频探针噪音）。
 - 管理操作审计为独立 append-only 表（`admin_audit_logs`：管理端全部写操作——内容上传/发布/回滚/删除、题目与附件、竞赛、用户与角色、备份等——成功后 best-effort 落一行，查询走 `GET /admin/audit-logs`）：与 Event 学生行为流分工，不进事件总线、不参与积分重放；审计写失败仅服务日志告警不阻断业务响应，无防篡改（单库同卷，与库共生死）。
 - 性能面板（容器管理页，`GET /admin/performance`）为即时快照无历史：数据源 docker info/stats + Linux 宿主 `/proc` 采样（容器内即宿主全局视图）+ 数据卷 statfs；趋势与告警不在平台内置（走外部 Prometheus 栈），非 Linux 开发态宿主占用与数据卷字段为 null。
 - 不引入 Casbin / Redis / K8s；数据层默认 SQLite，`ACADEMY_DB_DSN` 可选切 PostgreSQL（Phase 4 已落地的第一步；存量 SQLite 数据不自动迁移）。
-- JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限、或开启验证码回显时拒绝启动，非严格路径仅启动告警）。生产必须配置 `ACADEMY_SMTP_ADDR` 等 SMTP 参数，否则邮箱验证码端点返回 501。
+- JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限、或开启验证码回显时拒绝启动，非严格路径仅启动告警）。邮箱验证码的 SMTP 配置在管理端「系统设置」统一管理（保存后覆盖环境变量默认值）——未配置/停用时严格模式发码返回 501。SMTP 密码加密密钥由 JWT secret 派生，轮换 JWT secret 后需在设置页重新填写 SMTP 密码。
 - 内置训练的 vulinbox 基础镜像构建依赖官方 CDN（`oss-qn.yaklang.com`，离线部署需手工预构建镜像）且仅 amd64；二进制 sha256 锁定在 Dockerfile，上游更新会使导入 422（防靶机行为漂移，更新题集时重新锁定）。

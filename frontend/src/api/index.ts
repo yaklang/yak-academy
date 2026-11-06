@@ -338,6 +338,41 @@ export const adminApi = {
     http.post<{ ok: boolean }>(`/admin/users/${id}/reset-password`, { password }),
 }
 
+// 系统设置（统一管理）：SMTP 配置读写与投递自检。密码只写不读，
+// 后端仅返回 has_password；保存后后端立即热加载，无需重启。
+export type SMTPTLSMode = 'starttls' | 'implicit' | 'none'
+
+export interface AdminSMTPSettings {
+  enabled: boolean
+  addr: string
+  username: string
+  from: string
+  tls: SMTPTLSMode
+  has_password: boolean
+  password_error: boolean
+  config_error: boolean
+  source: 'database' | 'environment' | 'none'
+  updated_at: string | null
+  updated_by: string
+}
+
+export interface AdminSMTPSettingsUpdate {
+  enabled: boolean
+  addr: string
+  username: string
+  password?: string
+  from: string
+  tls: SMTPTLSMode
+}
+
+export const adminSettingsApi = {
+  getSMTP: () => http.get<AdminSMTPSettings>('/admin/settings/smtp'),
+  updateSMTP: (payload: AdminSMTPSettingsUpdate) =>
+    http.put<AdminSMTPSettings>('/admin/settings/smtp', payload),
+  testSMTP: (to: string) =>
+    http.post<{ ok: boolean }>('/admin/settings/smtp/test', { to }),
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),

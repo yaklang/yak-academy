@@ -19,7 +19,8 @@
 # ACADEMY_INSTANCE_PUBLIC_HOST 为宿主对外地址，题目容器端口随之发布全网卡；
 # 验证码回显默认关闭（生产安全）；本地演示可设 ACADEMY_SHOW_VERIFICATION_CODE=1
 # （旧变量 ACADEMY_SMS_SHOW_CODE 兼容），严格模式（ACADEMY_STRICT=1）禁止回显。
-# 生产邮箱验证码需配置 ACADEMY_SMTP_ADDR 等 SMTP 参数；未配置时严格模式发码返回 501。
+# 邮箱验证码的 SMTP 参数可在管理端「系统设置」保存（加密落库、立即生效、优先于
+# 环境变量）；下列 ACADEMY_SMTP_* 仅作为首次启动默认值。未配置/停用时严格模式发码返回 501。
 # 端口与镜像均可参数化以支持同机多实例并行（每个 git worktree 一个实例，
 # 完整流程见 .agents/skills/remote-deploy）：ACADEMY_WEB_PORT 默认 8081、
 # ACADEMY_BACKEND_PORT 默认 8080，被占用时逐实例顺延；ACADEMY_IMAGE_TAG
@@ -48,8 +49,9 @@ services:
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
       ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
       ACADEMY_SHOW_VERIFICATION_CODE: ${ACADEMY_SHOW_VERIFICATION_CODE:-} # 验证码回显：默认关闭；本地演示设 1，严格模式禁止开启
-      # 邮箱验证码投递（生产必配）：SMTP/事务邮件服务地址（host:port）、账号、
-      # 密码、发件人，以及 TLS 模式 starttls（默认）/ implicit / none。
+      # 邮箱验证码投递（首次启动默认值）：管理端「系统设置」保存后数据库配置优先，
+      # 无需改这里。SMTP 地址（host:port）、账号、密码、发件人，以及 TLS 模式
+      # starttls（默认）/ implicit / none。
       ACADEMY_SMTP_ADDR: ${ACADEMY_SMTP_ADDR:-}
       ACADEMY_SMTP_USERNAME: ${ACADEMY_SMTP_USERNAME:-}
       ACADEMY_SMTP_PASSWORD: ${ACADEMY_SMTP_PASSWORD:-}
