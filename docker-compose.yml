@@ -30,6 +30,9 @@ services:
     build:
       context: .
       dockerfile: deploy/backend.Dockerfile
+      args:
+        # 受限网络构建时由 .env 的 ACADEMY_GOPROXY 覆盖（默认 Go 官方代理）
+        GOPROXY: ${ACADEMY_GOPROXY:-https://proxy.golang.org,direct}
     image: yak-academy/backend:${ACADEMY_IMAGE_TAG:-latest}
     ports:
       - "${ACADEMY_BACKEND_PORT:-8080}:8080" # 题目容器检测点回调经此端口回达（ACADEMY_PUBLIC_URL 指向它）
