@@ -731,7 +731,7 @@ onUnmounted(() => {
   padding: 14px 32px;
 }
 .comp-identity { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
-.comp-mark { display: grid; flex-shrink: 0; place-items: center; color: var(--primary); }
+.comp-mark { display: grid; flex-shrink: 0; place-items: center; color: var(--brand-mark); }
 .comp-title { min-width: 0; }
 .comp-eyebrow {
   margin: 0 0 2px;

@@ -30,6 +30,7 @@
     --color-success: var(--success);
     --color-warning: var(--warning);
     --color-accent-foreground: var(--accent-foreground);
+    --color-brand-mark: var(--brand-mark);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
     --color-muted: var(--muted);
@@ -73,6 +74,8 @@
     --muted-foreground: #6b6158;
     --accent: #f2e7d8;
     --accent-foreground: #6f452b;
+    /* 品牌标记（Logo 图形）：浅色用高饱和橙，深色沿用提亮后的铜橙。 */
+    --brand-mark: #ea580c;
     --destructive: #a63f34;
     --success: #3f7a52;
     --warning: #9c6a20;
@@ -126,6 +129,7 @@
     --muted-foreground: #a8a8a8;
     --accent: #202020;
     --accent-foreground: #e7b88e;
+    --brand-mark: #e7b88e;
     --destructive: #f0928a;
     --success: #7cc496;
     --warning: #e3b971;
@@ -199,7 +203,7 @@ html, * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted
 .tabs-scroll::-webkit-scrollbar { display: none; }
 .public-container { max-width: 1440px; padding-inline: clamp(24px, 4.5vw, 64px); margin-inline: auto; }
 .academy-brand { display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 16px; font-weight: 750; line-height: 1.2; letter-spacing: 0; }
-.academy-brand > svg { color: var(--accent-foreground); }
+.academy-brand > svg { color: var(--brand-mark); }
 .brand-academy { font-weight: 450; letter-spacing: .035em; }
 .public-header { height: 96px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--border); }
 .public-nav { display: flex; align-items: center; gap: 32px; color: var(--muted-foreground); }
