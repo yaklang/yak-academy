@@ -5,6 +5,10 @@
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
+# 受限网络（如部署机无法直连 proxy.golang.org）可通过 ACADEMY_GOPROXY 注入
+# 可达的模块代理；默认保持 Go 官方代理，CI 与本地构建行为不变。
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=$GOPROXY
 RUN go mod download
 COPY backend/ ./
 # glebarez/sqlite 纯 Go 驱动：CGO 关闭可静态编译。
