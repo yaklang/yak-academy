@@ -57,10 +57,10 @@ let reduced = false
 
 function palette() {
   // 浅色是油墨（ink），不是霓虹：头更深、尾更淡，靠对比度而不是发光。
-  // 深咖 #6f452b 对白底 7.02:1；深色用低饱和铜色，避免荧光橙。
+  // 深橙 #c2410c 对白底约 5.2:1；深色用低饱和铜色，避免荧光橙。
   const ink = props.mode === 'ink' || (props.mode === 'auto' && resolved.value !== 'dark')
   if (ink) {
-    return { ink, head: props.head ?? 'rgba(111,69,43,.78)', trail: props.trailColor ?? 'rgba(111,69,43,.22)' }
+    return { ink, head: props.head ?? 'rgba(194,65,12,.8)', trail: props.trailColor ?? 'rgba(194,65,12,.22)' }
   }
   return { ink, head: props.head ?? 'rgba(214,164,126,.96)', trail: props.trailColor ?? 'rgba(209,154,114,.42)' }
 }

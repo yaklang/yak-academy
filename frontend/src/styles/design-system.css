@@ -54,9 +54,9 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Academy theme tokens: light = white paper with coffee-toned panels,
+/* Academy theme tokens: light = white paper with warm panels,
    dark = neutral graphite with lifted surfaces. Keep every semantic surface
-   here. Dark surfaces stay near-neutral (no brown cast); the copper accent is
+   here. Dark surfaces stay near-neutral (no brown cast); the orange accent is
    reserved for small emphasis, never for large fills. */
 :root {
     --background: #ffffff;
@@ -66,14 +66,14 @@
     --panel: #f4eadf;
     --popover: #ffffff;
     --popover-foreground: #241f1a;
-    --primary: #7a5236;
+    --primary: #c2410c;
     --primary-foreground: #fffaf3;
     --secondary: #efe5d8;
     --secondary-foreground: #342a21;
     --muted: #f7f2eb;
     --muted-foreground: #6b6158;
     --accent: #f2e7d8;
-    --accent-foreground: #6f452b;
+    --accent-foreground: #c2410c;
     /* 品牌标记（Logo 图形）：浅色用高饱和橙，深色沿用提亮后的铜橙。 */
     --brand-mark: #ea580c;
     --destructive: #a63f34;
@@ -81,22 +81,22 @@
     --warning: #9c6a20;
     --border: #e6ddd2;
     --input: #e6ddd2;
-    --ring: #8b5e3c;
-    --chart-1: #7a5236;
-    --chart-2: #a97c58;
-    --chart-3: #c9a98d;
+    --ring: #ea580c;
+    --chart-1: #c2410c;
+    --chart-2: #ea580c;
+    --chart-3: #f0a46a;
     --chart-4: #9a9087;
     --chart-5: #6b6158;
     --radius: .5rem;
     --layout-max-width: 1280px;
     --sidebar: #f7f2eb;
     --sidebar-foreground: #241f1a;
-    --sidebar-primary: #7a5236;
+    --sidebar-primary: #c2410c;
     --sidebar-primary-foreground: #fffaf3;
     --sidebar-accent: #efe5d8;
-    --sidebar-accent-foreground: #6f452b;
+    --sidebar-accent-foreground: #c2410c;
     --sidebar-border: #e6ddd2;
-    --sidebar-ring: #8b5e3c;
+    --sidebar-ring: #ea580c;
     --shadow-popover: 0 16px 40px -12px rgb(36 31 26 / .16), 0 2px 8px rgb(36 31 26 / .05);
     /* 卡片头带强度：浅色靠压暗（咖啡底上 5% 深前景），深色只需一点点提亮。 */
     --card-header-tint: 5%;
