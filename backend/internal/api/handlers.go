@@ -29,6 +29,7 @@ type Handlers struct {
 	Competitions *service.CompetitionService
 	AWD          *service.AwdCompetitionService
 	Exam         *service.ExamService
+	Certificates *service.CertificateService
 	RegisterSvc  *service.RegisterService
 	ResetSvc     *service.PasswordResetService
 	Backup       *service.BackupService
@@ -39,8 +40,8 @@ type Handlers struct {
 }
 
 // NewHandlers 构造 handler 集合；showVerificationCode 见 config.VerificationShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, awd *service.AwdCompetitionService, exam *service.ExamService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, AWD: awd, Exam: exam, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, awd *service.AwdCompetitionService, exam *service.ExamService, certificates *service.CertificateService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, AWD: awd, Exam: exam, Certificates: certificates, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -196,6 +197,9 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/standings.csv", "admin", h.adminCompetitionStandingsCSV)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminListCtfAdjustments)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminCreateCtfAdjustment)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/certificates", "admin", h.adminListCertificates)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/certificates/preview", "admin", h.adminPreviewCertificates)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/certificates", "admin", h.adminIssueCertificates)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/qualifications", "admin", h.adminListQualifications)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/preview", "admin", h.adminPreviewQualification)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/apply", "admin", h.adminApplyQualification)

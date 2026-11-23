@@ -919,6 +919,70 @@ export interface QualificationRule {
   target_name: string
   usernames: string[]
 }
+// 证书签发：赛后按来源竞赛排名/分数筛选，证书含唯一验证码与姓名快照。
+export interface CertificateRuleInput {
+  title: string
+  level: string
+  mode: QualificationMode
+  threshold: number
+}
+export interface CertificateCandidateView {
+  recipient_kind: 'user' | 'team'
+  user_id: number
+  team_id: number
+  username: string
+  recipient_name: string
+  rank: number
+  score: number
+}
+export interface CertificatePreview {
+  competition_id: number
+  competition_name: string
+  title: string
+  level: string
+  mode: QualificationMode
+  threshold: number
+  total_ranked: number
+  candidates: CertificateCandidateView[]
+}
+export interface CertificateRuleView {
+  id: number
+  competition_id: number
+  title: string
+  level: string
+  mode: QualificationMode
+  threshold: number
+  created_by: number
+  created_at: string
+  issued_at: string | null
+  issued_count: number
+}
+export interface CompetitionCertificate {
+  id: number
+  rule_id: number
+  competition_id: number
+  recipient_kind: 'user' | 'team'
+  user_id: number
+  team_id: number
+  username: string
+  recipient_name: string
+  rank: number
+  score: number
+  level: string
+  code: string
+  created_at: string
+}
+export interface CertificateAdminView {
+  competition_id: number
+  rules: CertificateRuleView[]
+  certificates: CompetitionCertificate[]
+  total: number
+}
+export interface CertificateIssueResult {
+  rule: Omit<CertificateRuleView, 'issued_count'>
+  certificates: CompetitionCertificate[]
+  preview: CertificatePreview
+}
 // 批量导入请求（仅邀请赛）：队伍 + 个人参赛者。条目按「账号编码或用户名」
 // 引用既有账号，不自动建号——缺失条目在响应 missing 回报（补号走一键生成）。
 export interface ParticipantImportRequest {
@@ -1692,6 +1756,12 @@ export const adminCompetitionApi = {
     id: number,
     body: { source_competition_id: number; mode: QualificationMode; threshold: number },
   ) => http.post<QualificationApplyResult>(`/admin/competitions/${id}/qualifications/apply`, body),
+  certificates: (id: number) =>
+    http.get<CertificateAdminView>(`/admin/competitions/${id}/certificates`),
+  previewCertificates: (id: number, body: CertificateRuleInput) =>
+    http.post<CertificatePreview>(`/admin/competitions/${id}/certificates/preview`, body),
+  issueCertificates: (id: number, body: CertificateRuleInput) =>
+    http.post<CertificateIssueResult>(`/admin/competitions/${id}/certificates`, body),
 }
 
 // 竞赛参赛（学生端）。

@@ -70,6 +70,7 @@ func (r *competitionRepo) DeleteCascade(ctx context.Context, id uint) error {
 		for _, m := range []any{
 			&model.Participant{}, &model.CompetitionProfile{}, &model.Team{}, &model.CompetitionChallenge{},
 			&model.CheatWarning{}, &model.Writeup{}, &model.CompetitionScore{},
+			&model.Certificate{}, &model.CertificateRule{},
 			&model.Submission{}, &model.LabInstance{},
 		} {
 			if err := tx.Where("competition_id = ?", id).Delete(m).Error; err != nil {
@@ -364,4 +365,68 @@ func (r *competitionRepo) ActiveCompetitions(ctx context.Context, now time.Time)
 	var list []model.Competition
 	err := r.db.WithContext(ctx).Where("start_time <= ? AND end_time > ?", now.UTC(), now.UTC()).Find(&list).Error
 	return list, err
+}
+
+// FindCertificateRuleByTitle 竞赛内证书标题查重（nil = 不存在）。
+func (r *competitionRepo) FindCertificateRuleByTitle(ctx context.Context, competitionID uint, title string) (*model.CertificateRule, error) {
+	var rule model.CertificateRule
+	err := r.db.WithContext(ctx).
+		First(&rule, "competition_id = ? AND title = ?", competitionID, title).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// ListCertificateRules 竞赛已签发规则（新→旧）。
+func (r *competitionRepo) ListCertificateRules(ctx context.Context, competitionID uint) ([]model.CertificateRule, error) {
+	var rules []model.CertificateRule
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id DESC").Find(&rules).Error
+	return rules, err
+}
+
+// CreateCertificateRuleWithCertificates 单事务落规则、证书与签发时间。
+func (r *competitionRepo) CreateCertificateRuleWithCertificates(ctx context.Context, rule *model.CertificateRule, certs []model.Certificate) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(rule).Error; err != nil {
+			return err
+		}
+		for i := range certs {
+			certs[i].RuleID = rule.ID
+			certs[i].CompetitionID = rule.CompetitionID
+			certs[i].Level = rule.Level
+		}
+		if len(certs) > 0 {
+			if err := tx.Create(&certs).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&model.CertificateRule{}).Where("id = ?", rule.ID).
+			Update("issued_at", rule.IssuedAt).Error
+	})
+}
+
+// ListCertificates 竞赛全部证书（id 升序）。
+func (r *competitionRepo) ListCertificates(ctx context.Context, competitionID uint) ([]model.Certificate, error) {
+	var list []model.Certificate
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id").Find(&list).Error
+	return list, err
+}
+
+// FindCertificateByCode 验证码解析（nil = 不存在）。
+func (r *competitionRepo) FindCertificateByCode(ctx context.Context, code string) (*model.Certificate, error) {
+	var cert model.Certificate
+	err := r.db.WithContext(ctx).First(&cert, "code = ?", code).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
 }

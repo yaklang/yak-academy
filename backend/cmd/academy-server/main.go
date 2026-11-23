@@ -178,6 +178,9 @@ func main() {
 	examSvc.SetJudge(judgeSvc)
 	examSvc.SetEvents(eventRepo, bus)
 	examSvc.StartWorker(ctx)
+	certificateSvc := service.NewCertificateService(competitionRepo, userRepo)
+	certificateSvc.SetRankingSources(competitionSvc, awdSvc, examSvc)
+	certificateSvc.SetEvents(eventRepo)
 
 	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
 	//（外部 pg_dump），调度与手动创建均拒绝并给出指引。
@@ -222,7 +225,7 @@ func main() {
 	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil, emailSender)
 	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
 	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, examSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, examSvc, certificateSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

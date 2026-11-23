@@ -22,6 +22,8 @@ const (
 	EventExamAttemptStarted   EventType = "exam.attempt.started"
 	EventExamAttemptSubmitted EventType = "exam.attempt.submitted"
 	EventExamAttemptGraded    EventType = "exam.attempt.graded"
+	// 证书签发事实：规则与接收人快照批量落库后写一条审计事件。
+	EventCompetitionCertificateIssued EventType = "competition.certificate.issued"
 )
 
 // Event append-only 事件表：只允许 INSERT，禁止任何 UPDATE/DELETE

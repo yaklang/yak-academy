@@ -27,6 +27,7 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 | `exam.attempt.started` | 考试开始作答（服务端计时，payload 含 competition/paper/attempt/expires_at） |
 | `exam.attempt.submitted` | 考试交卷（手动或到期自动；payload 含 attempt/auto_submitted） |
 | `exam.attempt.graded` | 考试评分完成（客观题即时 + 编程题 judge 回写；ExamStanding 由此重放） |
+| `competition.certificate.issued` | 赛后证书批量签发（payload 含规则/级别/数量；证书快照只增不改） |
 
 每个事件必带：`user_id / type / payload(JSON) / created_at`。
 
