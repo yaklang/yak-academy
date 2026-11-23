@@ -181,6 +181,7 @@ func main() {
 	certificateSvc := service.NewCertificateService(competitionRepo, userRepo)
 	certificateSvc.SetRankingSources(competitionSvc, awdSvc, examSvc)
 	certificateSvc.SetEvents(eventRepo)
+	competitionSvc.SetQualificationSources(awdSvc, examSvc)
 
 	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
 	//（外部 pg_dump），调度与手动创建均拒绝并给出指引。

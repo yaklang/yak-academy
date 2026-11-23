@@ -4000,7 +4000,7 @@ paths:
   /admin/competitions/{id}/qualifications/preview:
     post:
       tags: [admin]
-      summary: 晋级预览（来源必须是已开赛 CTF；目标必须是未开始的邀请赛；不落库）
+      summary: 晋级预览（来源为已开赛 CTF/AWD/考试；AWD 队伍名次展开到成员；目标为未开始邀请赛）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -4027,7 +4027,7 @@ paths:
   /admin/competitions/{id}/qualifications/apply:
     post:
       tags: [admin]
-      summary: 应用晋级（导入目标邀请赛参赛者 + 落规则/名单；同一来源→目标仅一次；写 audit）
+      summary: 应用晋级（来源 CTF/AWD/考试；导入目标邀请赛参赛者 + 落规则/名单；同一来源→目标仅一次）
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:

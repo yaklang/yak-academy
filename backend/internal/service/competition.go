@@ -38,6 +38,8 @@ type CompetitionService struct {
 	users       repo.UserRepo
 	instances   repo.LabInstanceRepo
 	submissions repo.SubmissionRepo
+	// qualificationSources AWD/考试排名来源（CTF 由本服务自身提供；main 装配）。
+	qualificationSources map[model.CompetitionFormat]QualificationRankingSource
 	// writeups WP zip 附件存储（SetWriteupStore/SetWriteupDir 注入；测试用
 	// SetWriteupDir 指向 t.TempDir 的 fs 后端，或 SetWriteupStore 换 fake）。
 	writeups      WriteupStore
@@ -2142,12 +2144,16 @@ func (s *CompetitionService) qualificationPreview(ctx context.Context, sourceID,
 	if sourceID == targetID {
 		return nil, fmt.Errorf("%w: source and target competition must differ", ErrValidation)
 	}
-	source, err := s.requireFormat(ctx, sourceID, model.CompetitionFormatCTF)
+	source, err := s.find(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
 	if source.Status(s.now()) == model.CompetitionScheduled {
 		return nil, fmt.Errorf("%w: source competition has not started", ErrValidation)
+	}
+	rankingSource, err := s.qualificationSource(source.Format)
+	if err != nil {
+		return nil, err
 	}
 	target, err := s.find(ctx, targetID)
 	if err != nil {
@@ -2177,18 +2183,24 @@ func (s *CompetitionService) qualificationPreview(ctx context.Context, sourceID,
 			return nil, fmt.Errorf("%w: top_percent must be in 1..100", ErrValidation)
 		}
 	}
-	board, err := s.Leaderboard(ctx, sourceID, "individual")
+	ranking, err := rankingSource.QualificationRanking(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	items, _ := board["items"].([]TeamLeaderboardEntry)
-	total := len(items)
+	total := ranking.Total
 	quota := 0
 	if m == model.QualificationTopPercent {
 		quota = (total*threshold + 99) / 100
 	}
-	candidates := make([]QualificationCandidate, 0, total)
-	for _, item := range items {
+	candidates := make([]QualificationCandidate, 0, len(ranking.Candidates))
+	seenUsers := map[uint]struct{}{}
+	for _, item := range ranking.Candidates {
+		if item.UserID == 0 || item.Username == "" {
+			continue
+		}
+		if _, done := seenUsers[item.UserID]; done {
+			continue
+		}
 		eligible := false
 		switch m {
 		case model.QualificationMinScore:
@@ -2201,12 +2213,9 @@ func (s *CompetitionService) qualificationPreview(ctx context.Context, sourceID,
 		if !eligible {
 			continue
 		}
-		username := ""
-		if len(item.Members) > 0 {
-			username = item.Members[0]
-		}
+		seenUsers[item.UserID] = struct{}{}
 		candidates = append(candidates, QualificationCandidate{
-			UserID: item.UserID, Username: username, AccountCode: item.AccountCode,
+			UserID: item.UserID, Username: item.Username, AccountCode: item.AccountCode,
 			TeamName: item.TeamName, Rank: item.Rank, Score: item.Score,
 		})
 	}
@@ -2217,7 +2226,7 @@ func (s *CompetitionService) qualificationPreview(ctx context.Context, sourceID,
 	}, nil
 }
 
-// PreviewQualification 按来源竞赛个人榜预览晋级名单。
+// PreviewQualification 按来源竞赛排名预览晋级名单（CTF/AWD/考试）。
 func (s *CompetitionService) PreviewQualification(ctx context.Context, sourceID, targetID uint, mode string, threshold int) (*QualificationPreview, error) {
 	return s.qualificationPreview(ctx, sourceID, targetID, mode, threshold)
 }
