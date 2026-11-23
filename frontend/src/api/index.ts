@@ -793,6 +793,11 @@ export interface CompetitionDetail extends Competition {
     writeups: number
   }
 }
+// 竞赛入口元数据（格式无关）：前端按 format 分发 CTF/AWD/Exam。
+export interface CompetitionEntryView {
+  competition: Competition
+  team_name: string | null
+}
 // 参赛者视角题目条目（含描述与通关状态）。
 export interface CompetitionChallengeItem {
   id: number
@@ -1069,6 +1074,7 @@ export interface AwdStandingView {
   rank: number
   competitor_type: AwdCompetitorType
   competitor_id: number
+  competitor_name?: string
   score: number
   attack_score: number
   defense_loss: number
@@ -1129,6 +1135,16 @@ export interface AwdParticipantAttack {
   judged_at: string | null
 }
 export interface AwdParticipantView {
+  competition: {
+    id: number
+    name: string
+    description: string
+    kind: CompetitionKind
+    format: CompetitionFormat
+    status: CompetitionStatus
+    start_time: string
+    end_time: string
+  }
   game: {
     id: number
     status: AwdGameStatus
@@ -1141,6 +1157,7 @@ export interface AwdParticipantView {
   competitor_type: AwdCompetitorType
   competitor_id: number
   competitor_name: string
+  team_name: string | null
   round: {
     id: number
     number: number
@@ -1292,6 +1309,7 @@ export const competitionApi = {
   // 入场：邀请码入场（两档通用）；公开赛已报名者可省略邀请码。
   enter: (id: number, inviteCode?: string) =>
     http.post<MyCompetitionEntry>(`/competitions/${id}/enter`, inviteCode ? { invite_code: inviteCode } : {}),
+  entry: (id: number) => http.get<CompetitionEntryView>(`/competitions/${id}/entry`),
   view: (id: number) => http.get<CompetitionHomeView>(`/competitions/${id}/view`),
   startInstance: (id: number, slug: string) =>
     http.post<LabInstance>(`/competitions/${id}/challenges/${slug}/instance`),

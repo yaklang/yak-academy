@@ -1021,6 +1021,7 @@ components:
         rank: { type: integer }
         competitor_type: { type: string, enum: [team, user] }
         competitor_id: { type: integer }
+        competitor_name: { type: string }
         score: { type: integer }
         attack_score: { type: integer }
         defense_loss: { type: integer }
@@ -1040,6 +1041,18 @@ components:
       type: object
       description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
       properties:
+        competition:
+          type: object
+          description: 竞赛元数据（格式无关，供页面头部展示）
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            description: { type: string }
+            kind: { type: string, enum: [public, invitational] }
+            format: { type: string, enum: [ctf, awd, exam] }
+            status: { type: string, enum: [scheduled, running, ended] }
+            start_time: { type: string }
+            end_time: { type: string }
         game:
           type: object
           properties:
@@ -1053,6 +1066,7 @@ components:
         competitor_type: { type: string, enum: [team, user] }
         competitor_id: { type: integer }
         competitor_name: { type: string }
+        team_name: { type: string, nullable: true }
         round:
           type: object
           nullable: true
@@ -3792,6 +3806,24 @@ paths:
               schema: { $ref: '#/components/schemas/MyCompetitionEntry' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/entry:
+    get:
+      tags: [competitions]
+      summary: 竞赛入口元数据（格式无关；前端按 format 分发 CTF/AWD/Exam）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  competition: { $ref: '#/components/schemas/Competition' }
+                  team_name: { type: string, nullable: true }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/view:
     get:

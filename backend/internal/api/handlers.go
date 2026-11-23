@@ -183,6 +183,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/competitions/me", "", h.myCompetitionEntry)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/register", "", h.registerCompetition)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/enter", "", h.enterCompetition)
+	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/entry", "", h.competitionEntry)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/view", "", h.competitionView)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/challenges/{slug}/instance", "", h.competitionStartInstance)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/submissions", "", h.competitionSubmitFlag)

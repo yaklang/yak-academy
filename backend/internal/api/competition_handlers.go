@@ -567,6 +567,22 @@ func (h *Handlers) competitionView(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+// competitionEntry 竞赛入口元数据（格式无关）：前端按 format 分发 CTF/AWD/Exam。
+func (h *Handlers) competitionEntry(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Competitions.Entry(req.Context(), user.ID, id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 // competitionStartInstance 竞赛内启动题目容器。
 func (h *Handlers) competitionStartInstance(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
