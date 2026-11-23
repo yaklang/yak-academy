@@ -296,3 +296,22 @@ func TestIsPostgresDSN(t *testing.T) {
 		}
 	}
 }
+
+// TestAwdTablesMigrated AWD 独立域全部表由统一迁移建出（含 flag 账本/排名/
+// 攻击盒/战报）；AutoMigrate 幂等。
+func TestAwdTablesMigrated(t *testing.T) {
+	gdb := newTestDB(t, false)
+	for _, table := range []any{
+		&model.AwdGame{}, &model.AwdService{}, &model.AwdTeamService{},
+		&model.AwdRound{}, &model.AwdFlag{}, &model.AwdCheck{}, &model.AwdAttack{},
+		&model.AwdScoreEvent{}, &model.AwdStanding{}, &model.AwdIncident{},
+		&model.AwdAttackBox{}, &model.AwdReport{}, &model.AwdReportReview{},
+	} {
+		if !gdb.Migrator().HasTable(table) {
+			t.Fatalf("missing AWD table for %T", table)
+		}
+	}
+	if err := Migrate(gdb); err != nil {
+		t.Fatalf("idempotent migrate: %v", err)
+	}
+}
