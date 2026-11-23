@@ -215,6 +215,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/exam", "", h.examParticipantView)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/exam/attempts", "", h.examStartAttempt)
 	r.Handle(http.MethodPut, "/api/v1/competitions/{id}/exam/attempts/current/answers/{qid}", "", h.examSaveAnswer)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/exam/attempts/current/submit", "", h.examSubmitAttempt)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/leaderboard", "", h.competitionLeaderboard)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/writeups", "", h.competitionMyWriteups)
 	r.Handle(http.MethodPut, "/api/v1/competitions/{id}/writeups/{challengeId}", "", h.competitionSaveWriteup)

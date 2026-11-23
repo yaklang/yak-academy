@@ -101,13 +101,13 @@ func (r *examRepo) UpdateAttemptSelective(ctx context.Context, id uint, fields m
 	return r.db.WithContext(ctx).Model(&model.ExamAttempt{}).Where("id = ?", id).Updates(fields).Error
 }
 
-// ExpireAttempt 条件更新：只有仍处于 in_progress 且已到期的行会被置为 expired，
-// 重复调用不会覆盖已交卷/已评分的状态。
-func (r *examRepo) ExpireAttempt(ctx context.Context, id uint, at time.Time) (int64, error) {
+// FinalizeAttempt 条件更新：只有仍处于 in_progress 的行会被置为终态，
+// 重复调用不会覆盖已交卷/已评分的状态；返回受影响行数。
+func (r *examRepo) FinalizeAttempt(ctx context.Context, id uint, status model.ExamAttemptStatus, at time.Time, auto bool) (int64, error) {
 	res := r.db.WithContext(ctx).Model(&model.ExamAttempt{}).
 		Where("id = ? AND status = ?", id, model.ExamAttemptInProgress).
 		Updates(map[string]any{
-			"status": model.ExamAttemptExpired, "submitted_at": at, "auto_submitted": true,
+			"status": status, "submitted_at": at, "auto_submitted": auto,
 		})
 	return res.RowsAffected, res.Error
 }
@@ -120,6 +120,13 @@ func (r *examRepo) ListExpiredAttempts(ctx context.Context, now time.Time, limit
 	err := r.db.WithContext(ctx).
 		Where("status = ? AND expires_at <= ?", model.ExamAttemptInProgress, now).
 		Order("id asc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+func (r *examRepo) ListAttemptsByCompetition(ctx context.Context, competitionID uint) ([]model.ExamAttempt, error) {
+	var list []model.ExamAttempt
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
 	return list, err
 }
 
@@ -147,4 +154,30 @@ func (r *examRepo) UpsertAnswer(ctx context.Context, answer *model.ExamAnswer) e
 			"answer_json", "graded", "correct", "score", "code_submission_id", "updated_at",
 		}),
 	}).Create(answer).Error
+}
+
+func (r *examRepo) UpdateAnswerGrading(ctx context.Context, attemptID, questionID uint, correct bool, score int) error {
+	return r.db.WithContext(ctx).Model(&model.ExamAnswer{}).
+		Where("attempt_id = ? AND question_id = ?", attemptID, questionID).
+		Updates(map[string]any{"graded": true, "correct": correct, "score": score}).Error
+}
+
+func (r *examRepo) ListStandings(ctx context.Context, competitionID uint) ([]model.ExamStanding, error) {
+	var list []model.ExamStanding
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// ReplaceStandings 派生器专用：全量重建某考试的成绩（先删后插，事务内）。
+func (r *examRepo) ReplaceStandings(ctx context.Context, competitionID uint, standings []model.ExamStanding) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("competition_id = ?", competitionID).Delete(&model.ExamStanding{}).Error; err != nil {
+			return err
+		}
+		if len(standings) == 0 {
+			return nil
+		}
+		return tx.Create(&standings).Error
+	})
 }

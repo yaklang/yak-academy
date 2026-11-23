@@ -92,6 +92,12 @@ func main() {
 	if err := deriver.Replay(ctx, eventRepo); err != nil {
 		log.Printf("deriver replay: %v", err)
 	}
+	// 考试成绩派生器：ExamStanding 只由 exam.attempt.graded 重建。
+	examDeriver := service.NewExamDeriver(examRepo)
+	bus.Subscribe(examDeriver.Handle)
+	if err := examDeriver.Replay(ctx, eventRepo); err != nil {
+		log.Printf("exam deriver replay: %v", err)
+	}
 
 	// service 装配（横向依赖仅白名单：judge→event、content→challenge）
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)

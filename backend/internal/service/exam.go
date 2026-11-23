@@ -20,11 +20,15 @@ type ExamService struct {
 	challenges repo.ChallengeRepo
 	events     repo.EventRepo
 	bus        *eventbus.Bus
+	deriver    *ExamDeriver
 	now        func() time.Time
 }
 
 func NewExamService(exam repo.ExamRepo, comps repo.CompetitionRepo, challenges repo.ChallengeRepo) *ExamService {
-	return &ExamService{exam: exam, comps: comps, challenges: challenges, now: time.Now}
+	return &ExamService{
+		exam: exam, comps: comps, challenges: challenges,
+		deriver: NewExamDeriver(exam), now: time.Now,
+	}
 }
 
 // SetNow 测试注入时钟。
