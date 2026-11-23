@@ -260,3 +260,37 @@ type QualificationEntry struct {
 	Score               int       `json:"score"`
 	CreatedAt           time.Time `json:"created_at"`
 }
+
+// CertificateRule 证书签发规则（赛后按来源竞赛排名/分数筛选）。
+// 同一竞赛内标题唯一，防止重复点击生成两批同奖项证书。
+type CertificateRule struct {
+	ID            uint              `gorm:"primaryKey" json:"id"`
+	CompetitionID uint              `gorm:"uniqueIndex:idx_cert_rule_title;index" json:"competition_id"`
+	Title         string            `gorm:"size:128;uniqueIndex:idx_cert_rule_title" json:"title"`
+	Level         string            `gorm:"size:64" json:"level"`
+	Mode          QualificationMode `gorm:"size:16" json:"mode"`
+	Threshold     int               `json:"threshold"`
+	CreatedBy     uint              `json:"created_by"`
+	CreatedAt     time.Time         `json:"created_at"`
+	IssuedAt      *time.Time        `json:"issued_at"`
+}
+
+// Certificate 已签发证书：接收人快照（姓名/名次/分数）+ 唯一验证码。
+// 证书不依赖用户后续改名或竞赛数据变化，验证页只读本表快照。
+type Certificate struct {
+	ID            uint `gorm:"primaryKey" json:"id"`
+	RuleID        uint `gorm:"uniqueIndex:idx_cert_rule_recipient;index" json:"rule_id"`
+	CompetitionID uint `gorm:"index" json:"competition_id"`
+	// RecipientKey 接收人去重键：user:<id> 或 team:<id>。
+	RecipientKey  string    `gorm:"size:32;uniqueIndex:idx_cert_rule_recipient" json:"-"`
+	RecipientKind string    `gorm:"size:8" json:"recipient_kind"`
+	UserID        uint      `gorm:"index" json:"user_id"`
+	TeamID        uint      `gorm:"index" json:"team_id"`
+	Username      string    `gorm:"size:64" json:"username"`
+	RecipientName string    `gorm:"size:128" json:"recipient_name"`
+	Rank          int       `json:"rank"`
+	Score         int       `json:"score"`
+	Level         string    `gorm:"size:64" json:"level"`
+	Code          string    `gorm:"size:32;uniqueIndex" json:"code"`
+	CreatedAt     time.Time `json:"created_at"`
+}

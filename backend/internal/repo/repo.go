@@ -396,6 +396,16 @@ type CompetitionRepo interface {
 	ListQualificationRules(ctx context.Context, targetCompetitionID uint) ([]model.QualificationRule, error)
 	// ListQualificationEntries 某条规则的中选名单。
 	ListQualificationEntries(ctx context.Context, ruleID uint) ([]model.QualificationEntry, error)
+	// FindCertificateRuleByTitle 竞赛内证书标题查重（nil = 不存在）。
+	FindCertificateRuleByTitle(ctx context.Context, competitionID uint, title string) (*model.CertificateRule, error)
+	// ListCertificateRules 竞赛已签发规则（新→旧）。
+	ListCertificateRules(ctx context.Context, competitionID uint) ([]model.CertificateRule, error)
+	// CreateCertificateRuleWithCertificates 单事务落规则、证书与签发时间。
+	CreateCertificateRuleWithCertificates(ctx context.Context, rule *model.CertificateRule, certs []model.Certificate) error
+	// ListCertificates 竞赛全部证书（id 升序）。
+	ListCertificates(ctx context.Context, competitionID uint) ([]model.Certificate, error)
+	// FindCertificateByCode 验证码解析（nil = 不存在）。
+	FindCertificateByCode(ctx context.Context, code string) (*model.Certificate, error)
 
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)

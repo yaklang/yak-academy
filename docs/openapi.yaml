@@ -854,6 +854,83 @@ components:
         source_name: { type: string }
         target_name: { type: string }
         usernames: { type: array, items: { type: string } }
+    CertificateRuleInput:
+      type: object
+      required: [title, level, mode, threshold]
+      properties:
+        title: { type: string, maxLength: 128, description: 竞赛内唯一；重复签发按标题 422 }
+        level: { type: string, maxLength: 64, description: 证书级别（一等奖 / NISP1 / AD 初级等） }
+        mode: { type: string, enum: [min_score, top_n, top_percent] }
+        threshold: { type: integer, description: min_score>=0；top_n>0；top_percent 1..100 }
+    CertificateCandidateView:
+      type: object
+      properties:
+        recipient_kind: { type: string, enum: [user, team] }
+        user_id: { type: integer }
+        team_id: { type: integer }
+        username: { type: string }
+        recipient_name: { type: string, description: 名册实名优先，缺省用户名/队伍名 }
+        rank: { type: integer }
+        score: { type: integer }
+    CertificatePreview:
+      type: object
+      properties:
+        competition_id: { type: integer }
+        competition_name: { type: string }
+        title: { type: string }
+        level: { type: string }
+        mode: { type: string, enum: [min_score, top_n, top_percent] }
+        threshold: { type: integer }
+        total_ranked: { type: integer }
+        candidates: { type: array, items: { $ref: '#/components/schemas/CertificateCandidateView' } }
+    CertificateRule:
+      type: object
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        title: { type: string }
+        level: { type: string }
+        mode: { type: string, enum: [min_score, top_n, top_percent] }
+        threshold: { type: integer }
+        created_by: { type: integer }
+        created_at: { type: string }
+        issued_at: { type: string, nullable: true }
+    CertificateRuleSummary:
+      allOf:
+        - $ref: '#/components/schemas/CertificateRule'
+        - type: object
+          properties:
+            issued_count: { type: integer }
+    CompetitionCertificate:
+      type: object
+      description: 证书快照（接收人/名次/分数签发时固定；code 为公开验证码）
+      properties:
+        id: { type: integer }
+        rule_id: { type: integer }
+        competition_id: { type: integer }
+        recipient_kind: { type: string, enum: [user, team] }
+        user_id: { type: integer }
+        team_id: { type: integer }
+        username: { type: string }
+        recipient_name: { type: string }
+        rank: { type: integer }
+        score: { type: integer }
+        level: { type: string }
+        code: { type: string }
+        created_at: { type: string }
+    CertificateAdminView:
+      type: object
+      properties:
+        competition_id: { type: integer }
+        rules: { type: array, items: { $ref: '#/components/schemas/CertificateRuleSummary' } }
+        certificates: { type: array, items: { $ref: '#/components/schemas/CompetitionCertificate' } }
+        total: { type: integer }
+    CertificateIssueResult:
+      type: object
+      properties:
+        rule: { $ref: '#/components/schemas/CertificateRule' }
+        certificates: { type: array, items: { $ref: '#/components/schemas/CompetitionCertificate' } }
+        preview: { $ref: '#/components/schemas/CertificatePreview' }
     ParticipantImportRequest:
       type: object
       description: |
@@ -3957,6 +4034,61 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/QualificationApplyResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/certificates:
+    get:
+      tags: [admin]
+      summary: 已签发证书与批次（证书快照只增不改）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateAdminView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 签发一批证书（仅已结束竞赛；同标题不可重复签发；写 audit）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CertificateRuleInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateIssueResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/certificates/preview:
+    post:
+      tags: [admin]
+      summary: 证书接收人预览（不落库；排名口径随竞赛 format）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CertificateRuleInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificatePreview' }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
