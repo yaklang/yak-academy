@@ -1087,6 +1087,100 @@ export interface AwdSettlementView {
   events: number
   standings: AwdStandingView[]
 }
+export interface AwdRound {
+  id: number
+  game_id: number
+  number: number
+  status: 'pending' | 'running' | 'settled'
+  starts_at: string
+  ends_at: string
+  created_at: string
+}
+export interface AwdCheck {
+  id: number
+  round_id: number
+  team_service_id: number
+  action: 'check' | 'put' | 'get'
+  status: 'ok' | 'fail' | 'error'
+  latency_ms: number
+  output: string
+  created_at: string
+}
+export interface AwdTeamService {
+  id: number
+  game_id: number
+  service_id: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  container_id: string
+  internal_host: string
+  ports_json: string
+  status: string
+  last_check_at: string | null
+  created_at: string
+  updated_at: string
+}
+export interface AwdIncident {
+  id: number
+  competition_id: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  service_id: number
+  kind: string
+  detail: string
+  created_at: string
+}
+export interface AwdAttack {
+  id: number
+  game_id: number
+  round_id: number
+  attacker_type: AwdCompetitorType
+  attacker_id: number
+  victim_team_service_id: number
+  flag_id: number
+  status: AwdAttackStatus
+  reason: string
+  submitted_at: string
+  judged_at: string | null
+}
+export interface AwdAdminAttackBox {
+  id: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  status: string
+}
+export interface AwdDeployResult {
+  network: string
+  created: number
+  reused: number
+  failed: string[]
+}
+export interface AwdAttackBoxDeployResult {
+  created: number
+  reused: number
+  failed: string[]
+}
+export interface AwdRoundRunResult {
+  round: AwdRound
+  flags: number
+  checks: AwdCheck[]
+  failed: string[]
+}
+export interface AwdAdminView {
+  competition: Competition
+  game: AwdGame
+  services: AwdService[]
+  rounds: AwdRound[]
+  targets: AwdTeamService[]
+  attack_boxes: AwdAdminAttackBox[]
+  standings: AwdStandingView[]
+  incidents: AwdIncident[]
+  attacks: AwdAttack[]
+  checks: AwdCheck[]
+}
 export interface AwdCheckView {
   action: string
   status: string
@@ -1220,6 +1314,13 @@ export const adminAwdApi = {
     http.post<AwdSettlementView>(`/admin/competitions/${id}/awd/rounds/${rid}/settle`),
   standings: (id: number) =>
     http.get<{ items: AwdStandingView[] }>(`/admin/competitions/${id}/awd/standings`),
+  console: (id: number) => http.get<AwdAdminView>(`/admin/competitions/${id}/awd/console`),
+  deployTargets: (id: number) =>
+    http.post<AwdDeployResult>(`/admin/competitions/${id}/awd/deploy`),
+  deployAttackBoxes: (id: number) =>
+    http.post<AwdAttackBoxDeployResult>(`/admin/competitions/${id}/awd/attack-boxes`),
+  startRound: (id: number) =>
+    http.post<AwdRoundRunResult>(`/admin/competitions/${id}/awd/rounds`),
 }
 
 // 竞赛管理（管理端）。

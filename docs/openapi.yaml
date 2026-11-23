@@ -1037,6 +1037,111 @@ components:
         standings:
           type: array
           items: { $ref: '#/components/schemas/AwdStandingView' }
+    AwdRound:
+      type: object
+      properties:
+        id: { type: integer }
+        game_id: { type: integer }
+        number: { type: integer }
+        status: { type: string, enum: [pending, running, settled] }
+        starts_at: { type: string }
+        ends_at: { type: string }
+        created_at: { type: string }
+    AwdCheck:
+      type: object
+      properties:
+        id: { type: integer }
+        round_id: { type: integer }
+        team_service_id: { type: integer }
+        action: { type: string, enum: [check, put, get] }
+        status: { type: string, enum: [ok, fail, error] }
+        latency_ms: { type: integer }
+        output: { type: string }
+        created_at: { type: string }
+    AwdTeamService:
+      type: object
+      properties:
+        id: { type: integer }
+        game_id: { type: integer }
+        service_id: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        container_id: { type: string }
+        internal_host: { type: string }
+        ports_json: { type: string }
+        status: { type: string }
+        last_check_at: { type: string, nullable: true }
+        created_at: { type: string }
+        updated_at: { type: string }
+    AwdIncident:
+      type: object
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        service_id: { type: integer }
+        kind: { type: string }
+        detail: { type: string }
+        created_at: { type: string }
+    AwdAttack:
+      type: object
+      properties:
+        id: { type: integer }
+        game_id: { type: integer }
+        round_id: { type: integer }
+        attacker_type: { type: string, enum: [team, user] }
+        attacker_id: { type: integer }
+        victim_team_service_id: { type: integer }
+        flag_id: { type: integer }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        reason: { type: string }
+        submitted_at: { type: string }
+        judged_at: { type: string, nullable: true }
+    AwdAdminAttackBox:
+      type: object
+      properties:
+        id: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        ssh_host: { type: string }
+        ssh_port: { type: integer }
+        ssh_user: { type: string }
+        status: { type: string }
+    AwdDeployResult:
+      type: object
+      properties:
+        network: { type: string }
+        created: { type: integer }
+        reused: { type: integer }
+        failed: { type: array, items: { type: string } }
+    AwdAttackBoxDeployResult:
+      type: object
+      properties:
+        created: { type: integer }
+        reused: { type: integer }
+        failed: { type: array, items: { type: string } }
+    AwdRoundRunResult:
+      type: object
+      properties:
+        round: { $ref: '#/components/schemas/AwdRound' }
+        flags: { type: integer }
+        checks: { type: array, items: { $ref: '#/components/schemas/AwdCheck' } }
+        failed: { type: array, items: { type: string } }
+    AwdAdminView:
+      type: object
+      description: AWD 管理端控制台（攻击盒只返回连接元数据，密码不出库）
+      properties:
+        competition: { $ref: '#/components/schemas/Competition' }
+        game: { $ref: '#/components/schemas/AwdGame' }
+        services: { type: array, items: { $ref: '#/components/schemas/AwdService' } }
+        rounds: { type: array, items: { $ref: '#/components/schemas/AwdRound' } }
+        targets: { type: array, items: { $ref: '#/components/schemas/AwdTeamService' } }
+        attack_boxes: { type: array, items: { $ref: '#/components/schemas/AwdAdminAttackBox' } }
+        standings: { type: array, items: { $ref: '#/components/schemas/AwdStandingView' } }
+        incidents: { type: array, items: { $ref: '#/components/schemas/AwdIncident' } }
+        attacks: { type: array, items: { $ref: '#/components/schemas/AwdAttack' } }
+        checks: { type: array, items: { $ref: '#/components/schemas/AwdCheck' } }
     AwdParticipantView:
       type: object
       description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
@@ -3738,6 +3843,70 @@ paths:
                     items: { $ref: '#/components/schemas/AwdStandingView' }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/console:
+    get:
+      tags: [admin]
+      summary: AWD 管理端控制台（配置/服务/回合/目标/攻击盒/排名/检查/攻击/告警）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdAdminView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/deploy:
+    post:
+      tags: [admin]
+      summary: 部署 AWD 靶机（每竞域单位 × 服务一个容器；幂等复用）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdDeployResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/attack-boxes:
+    post:
+      tags: [admin]
+      summary: 部署 SSH 攻击盒（随机密码加密落库；重复部署幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdAttackBoxDeployResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/rounds:
+    post:
+      tags: [admin]
+      summary: 开启下一回合（生成确定性 flag + PUT/GET/CHECK 全部靶机）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdRoundRunResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions:
     get:

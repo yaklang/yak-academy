@@ -67,7 +67,7 @@ const router = createRouter({
         {
           path: 'panel/competitions/:id',
           name: 'admin-competition-detail',
-          component: () => import('../views/admin/CompetitionDetail.vue'),
+          component: () => import('../views/admin/CompetitionDetailEntry.vue'),
         },
       ],
     },
