@@ -38,11 +38,12 @@ type AwdCompetitionService struct {
 	builder ImageBuilder
 	runtime AwdRuntime
 	secret  string
+	deriver *AwdScoreDeriver
 	now     func() time.Time
 }
 
 func NewAwdCompetitionService(awd repo.AwdRepo, comps repo.CompetitionRepo) *AwdCompetitionService {
-	return &AwdCompetitionService{awd: awd, comps: comps, now: time.Now}
+	return &AwdCompetitionService{awd: awd, comps: comps, deriver: NewAwdScoreDeriver(awd), now: time.Now}
 }
 
 // SetImageBuilder 注入服务包镜像构建器（docker / noop）。

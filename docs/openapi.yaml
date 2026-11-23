@@ -1014,6 +1014,28 @@ components:
         victim_team_service_id: { type: integer }
         submitted_at: { type: string }
         judged_at: { type: string, nullable: true }
+    AwdStandingView:
+      type: object
+      description: AWD 排名条目（同分并列；未结算参赛者 0 分）
+      properties:
+        rank: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        score: { type: integer }
+        attack_score: { type: integer }
+        defense_loss: { type: integer }
+        sla_score: { type: integer }
+        last_event_at: { type: string, nullable: true }
+    AwdSettlementView:
+      type: object
+      description: 回合结算结果（events = 本次新增账本条数，重复结算为 0）
+      properties:
+        round_id: { type: integer }
+        round_number: { type: integer }
+        events: { type: integer }
+        standings:
+          type: array
+          items: { $ref: '#/components/schemas/AwdStandingView' }
 
   responses:
     ErrorResp:
@@ -3562,6 +3584,43 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/rounds/{rid}/settle:
+    post:
+      tags: [admin]
+      summary: 结算 AWD 回合（SLA/攻击/防守/checkdown 账本 + 重建排名；幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: rid, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdSettlementView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/standings:
+    get:
+      tags: [admin]
+      summary: AWD 排名（未结算参赛者 0 分；同分并列）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AwdStandingView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions:
     get:

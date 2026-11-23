@@ -1065,6 +1065,22 @@ export interface AwdAttackReceipt {
   submitted_at: string
   judged_at: string | null
 }
+export interface AwdStandingView {
+  rank: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  score: number
+  attack_score: number
+  defense_loss: number
+  sla_score: number
+  last_event_at: string | null
+}
+export interface AwdSettlementView {
+  round_id: number
+  round_number: number
+  events: number
+  standings: AwdStandingView[]
+}
 export const competitionAwdApi = {
   submitAttack: (id: number, flag: string) =>
     http.post<AwdAttackReceipt>(`/competitions/${id}/awd/attacks`, { flag }),
@@ -1105,6 +1121,10 @@ export const adminAwdApi = {
     http.patch<AwdService>(`/admin/competitions/${id}/awd/services/${sid}`, body),
   deleteService: (id: number, sid: number) =>
     http.del<{ ok: boolean }>(`/admin/competitions/${id}/awd/services/${sid}`),
+  settleRound: (id: number, rid: number) =>
+    http.post<AwdSettlementView>(`/admin/competitions/${id}/awd/rounds/${rid}/settle`),
+  standings: (id: number) =>
+    http.get<{ items: AwdStandingView[] }>(`/admin/competitions/${id}/awd/standings`),
 }
 
 // 竞赛管理（管理端）。

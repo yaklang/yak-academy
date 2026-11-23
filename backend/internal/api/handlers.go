@@ -168,6 +168,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/awd/services/package", "admin", h.adminUploadAwdServicePackage)
 	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}/awd/services/{sid}", "admin", h.adminUpdateAwdService)
 	r.Handle(http.MethodDelete, "/api/v1/admin/competitions/{id}/awd/services/{sid}", "admin", h.adminDeleteAwdService)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/awd/rounds/{rid}/settle", "admin", h.adminSettleAwdRound)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/awd/standings", "admin", h.adminListAwdStandings)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/leaderboard", "admin", h.adminCompetitionLeaderboard)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/standings.csv", "admin", h.adminCompetitionStandingsCSV)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminListCtfAdjustments)

@@ -246,6 +246,58 @@ func (r *awdRepo) CreateCheck(ctx context.Context, check *model.AwdCheck) error 
 	return r.db.WithContext(ctx).Create(check).Error
 }
 
+func (r *awdRepo) ListChecksByRound(ctx context.Context, roundID uint) ([]model.AwdCheck, error) {
+	var list []model.AwdCheck
+	err := r.db.WithContext(ctx).Where("round_id = ?", roundID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListAcceptedAttacksByRound(ctx context.Context, roundID uint) ([]model.AwdAttack, error) {
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).
+		Where("round_id = ? AND status = ?", roundID, model.AwdAttackAccepted).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// CreateScoreEvents 批量追加得分事件；idempotency_key 冲突（重复结算）
+// 静默跳过，返回实际新增条数。
+func (r *awdRepo) CreateScoreEvents(ctx context.Context, events []model.AwdScoreEvent) (int64, error) {
+	if len(events) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&events)
+	return res.RowsAffected, res.Error
+}
+
+func (r *awdRepo) ListScoreEvents(ctx context.Context, competitionID uint) ([]model.AwdScoreEvent, error) {
+	var list []model.AwdScoreEvent
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListStandings(ctx context.Context, competitionID uint) ([]model.AwdStanding, error) {
+	var list []model.AwdStanding
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// ReplaceStandings 派生器专用：全量重建某竞赛排名（先删后插，事务内）。
+func (r *awdRepo) ReplaceStandings(ctx context.Context, competitionID uint, standings []model.AwdStanding) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("competition_id = ?", competitionID).Delete(&model.AwdStanding{}).Error; err != nil {
+			return err
+		}
+		if len(standings) == 0 {
+			return nil
+		}
+		return tx.Create(&standings).Error
+	})
+}
+
 func (r *awdRepo) CreateIncident(ctx context.Context, incident *model.AwdIncident) error {
 	return r.db.WithContext(ctx).Create(incident).Error
 }

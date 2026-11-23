@@ -69,6 +69,14 @@ func awdServiceID(req *http.Request) (uint, error) {
 	return uint(id), nil
 }
 
+func awdRoundID(req *http.Request) (uint, error) {
+	id, err := strconv.ParseUint(req.PathValue("rid"), 10, 64)
+	if err != nil || id == 0 {
+		return 0, errValidation
+	}
+	return uint(id), nil
+}
+
 func (h *Handlers) adminStartAwdGame(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {
@@ -248,4 +256,40 @@ func (h *Handlers) awdSubmitAttack(w http.ResponseWriter, req *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, receipt)
+}
+
+// adminSettleAwdRound 结算回合：写 SLA/攻击/防守/checkdown 账本并重建排名。
+func (h *Handlers) adminSettleAwdRound(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	rid, err := awdRoundID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.SettleRound(req.Context(), id, rid)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.round.settle", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"round_id": rid, "events": view.Events})
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminListAwdStandings(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	items, err := h.AWD.Standings(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
