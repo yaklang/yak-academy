@@ -116,6 +116,31 @@ package.zip
 - 批量数组逐题校验、**单题失败整体不入库**；slug 重复 = 更新（upsert）。
 - 题目难度枚举与教程一致（apprentice/practitioner/expert），禁止其他值。
 
+## AWD 服务包（独立资源，不是题目/教程）
+
+`POST /admin/competitions/{id}/awd/services/package` 接收 zip（≤32MB、≤2000 条目、解包 ≤64MB），仅比赛未开始时允许；构建成功后按 slug upsert `AwdService`，失败不动 DB。
+
+```
+awd-service.json     # 必需；服务定义
+Dockerfile           # 必需；必须与 awd-service.json 同目录
+<context files...>   # 可选；同目录下的 checker/静态文件，作为 docker build 上下文
+```
+
+`awd-service.json` 字段（与 `AwdServiceInput` 一致）：
+
+| 字段 | 说明 |
+|---|---|
+| `slug` | `^[a-z0-9][a-z0-9-]{0,63}$`，竞赛内唯一 |
+| `name` / `ports` | 展示名；端口数组 `[{name,port,protocol}]`，至少一个 |
+| `checker_config` | JSON 对象：`type: http|tcp|command` + 参数（HTTP: check_path/flag_path/flag_method/flag_field；command 遵循 RuCTF 退出码 101/102/103/104/110） |
+| `base_score` / `sla_weight` / `attack_points` / `defense_loss` / `checkdown_penalty` | 计分参数（缺省由服务端补默认） |
+| `flag_lifetime_rounds` | flag 有效回合数（≥1） |
+| `image` | **包上传时忽略**：镜像由服务端按 `yak-awd-<competitionID>-<slug>` 构建 |
+
+- 解包路径一律经 `pathutil.CleanEntry`（拒绝 `..`/盘符/UNC），不跟随符号链接；多个 `awd-service.json` 或缺少 Dockerfile → 422。
+- 服务包只进 `AwdService`，不写 Challenge/教程表；AWD 靶机不得挂 Docker socket 或宿主目录（见 architecture §3.9）。
+- 平台不内置任何 AWD 服务包；示例由管理员自行上传。
+
 ## 教程包上传管线五步（顺序不可跳、不可合并）
 
 ```

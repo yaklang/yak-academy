@@ -1,6 +1,6 @@
 # yak-academy 关键数据流
 
-本文档描述核心时序。参与方缩写：FE=前端、API=api 层、SVC=service 层、EB=eventbus、DB=SQLite。
+本文档描述核心时序。参与方缩写：FE=前端、API=api 层、SVC=service 层、EB=eventbus、DB=SQLite（开发）/ PostgreSQL（生产，AWD 回合锁为 PG advisory lock）。
 
 ## 1. 教程上传流（Content Pipeline）
 
@@ -285,3 +285,91 @@ FE(参赛者)         API                judge SVC             EB              D
 - CompetitionScore 为事件派生表：competition 服务只读聚合双榜，**禁止**直写（event-sourcing-rules）。
 - 反作弊只告警不打断：cross_team_flag 等类型写 CheatWarning，管理端竞赛详情「反作弊」页浏览。
 - WP 仅 ended 后开放：按题目分条提交/覆盖（markdown + 可选 zip ≤20MB），管理端可下载附件。
+
+## 9. AWD 回合、攻击与结算流
+
+```
+FE(admin)          API                 AWD SVC                 Docker/DB
+   │  POST .../awd/rounds                   │                     │
+   ├───────────────────────────────────────→│ 竞赛级回合锁         │
+   │                                        │ 1.CreateRound(pending) ─→ DB
+   │                                        │ 2.GenerateFlags(HMAC) ──→ DB
+   │                                        │ 3.PUT/GET/CHECK 每靶机 ─→ 容器
+   │                                        │   检查明细/incident ────→ DB
+   │                                        │ 4.Round→running + 计时 ─→ DB
+   │  200 {round,flags,checks,failed}       │                     │
+   │←───────────────────────────────────────┤                     │
+
+FE(参赛者)         API                 AWD SVC             worker
+   │ POST .../awd/attacks {flag}            │                  │
+   ├───────────────────────────────────────→│ 预校验(存在/过期/自攻/首杀)
+   │                                        │ CreateAttack(pending) + 事件
+   │  202 {status:"pending"}                │                  │
+   │                                        │        worker 轮询 pending
+   │                                        │        条件更新 accepted/rejected
+   │                                        │        + awd.attack.judged 事件
+
+FE(admin)          API                 AWD SVC                 DB
+   │ POST .../rounds/{id}/settle            │                     │
+   ├───────────────────────────────────────→│ 回合锁 → 聚合 checks/attacks
+   │                                        │ SLA/攻击/防守/checkdown
+   │                                        │ AwdScoreEvent(idempotency_key) → DB
+   │                                        │ AwdScoreDeriver 重放账本 → AwdStanding
+   │  200 {events, standings}               │                     │
+```
+
+要点：
+- 回合先在 `pending` 落库，检查完成后才 `running`：崩溃后启动 `Recover` 补 flag、只补缺失检查（已完成的检查不重跑，避免污染 SLA 分母）并刷新计时；运行中的回合保留现场。
+- 开回合/结算/恢复共用竞赛级锁：PostgreSQL 会话级 advisory lock（跨进程），SQLite 进程内键控互斥。攻击判定不做全局锁，靠 `UPDATE ... WHERE status='pending'` 影响行数保证恰好一次。
+- flag 值只用于 checker 写入与比对；检查输出中的 flag 脱敏，API/导出不下发 flag 明文。
+- `AwdStanding` 只由 `AwdScoreDeriver` 从 append-only `AwdScoreEvent` 重建；结算可重复调用，`idempotency_key` 唯一保证不重复计分。
+- 运行中的回合/攻击/检查是运营事实表，与 Event 双写（攻击/战报审计）；回合与检查明细不写 Event，避免把高频运营数据混入学生事件流。
+
+## 10. 考试作答、评分与成绩派生流
+
+```
+FE(参赛者)         API                 Exam SVC                DB
+   │ POST /exam/attempts                    │                     │
+   ├───────────────────────────────────────→│ 单次尝试；expires=min(start+duration, end)
+   │                                        │ exam.attempt.started 事件
+   │  200 {paper, attempt, expires_at}      │                     │
+   │ PUT .../answers/{qid} {answer}         │ 自动保存（过期懒判定） │
+   │ POST .../submit                        │ 客观题即时评分        │
+   │                                        │ attempt→submitted + graded 事件
+   │                                        │ ExamDeriver 重建 ExamStanding（只由事件触发）
+   │ POST .../questions/{qid}/code           │ 走 judge exam scope  │
+   │                                        │ submission.judged(exam_attempt_id)
+   │                                        │ → 回写 code 分 + graded 事件
+
+worker（到期扫描）→ FinalizeAttempt(expired, auto) → graded 事件
+```
+
+要点：
+- 时间统一按 UTC 存储和比较（SQLite 字符串比较对 `+08:00`/`+00:00` 敏感，服务层 `nowUTC` 统一）。
+- 试卷/试题开赛前可编辑，开赛后锁定；作答接口只接受本人 current attempt。
+- 编程题判分复用 yak 引擎，但 `exam` scope 不进入 XP/CTF 竞赛积分；只有 `ExamDeriver` 消费 graded 事件重建成绩。
+
+## 11. 赛务：名册 / 晋级 / 证书流
+
+```
+FE(admin) → POST /admin/competitions/{id}/roster {entries}   # CSV 解析后提交
+          → 引用既有账号（用户名/账号编码），写 CompetitionProfile + Participant
+
+FE(admin) → POST .../qualification/preview {source,mode,threshold}
+          → QualificationRankingSource(CTF/Exam/AWD)
+             ├─ CTF: individual/team leaderboard
+             ├─ Exam: terminal results（分数/用时）
+             └─ AWD: FinalRanking（团队展开为成员，要求 game ended）
+          → 返回候选人（并列边界一并入选）
+          → POST .../qualification/apply → QualificationRule/Entry + 导入参赛者（邀请码）
+
+FE(admin) → POST .../certificates/preview
+          → CertificateRankingSource(CTF/Exam/AWD) + Profile 姓名
+          → POST .../certificates → 规则+接收人快照（唯一 code）→ competition.certificate.issued
+public    → GET /certificates/{code} → 仅快照（无内部用户 ID）
+```
+
+要点：
+- 晋级只能应用到**未开始的邀请赛**；同一来源竞赛对同一目标只应用一次；AWD 团队证书按队伍接收，获奖名单 CSV 不含验证码。
+- 证书规则/名称/接收人快照只增不改，重复签发按标题拒绝；验证码随机且唯一，验证页无需登录。
+- 实名名册仅管理端可见；证书接收人姓名取签发时快照，不再随用户资料变化。

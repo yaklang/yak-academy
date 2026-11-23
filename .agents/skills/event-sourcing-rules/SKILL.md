@@ -8,8 +8,9 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 ## 硬性原则
 
 1. **Event 表 append-only**：只允许 INSERT，**禁止**任何 UPDATE / DELETE（包括"修正数据"场景——修正本身就是一条新事件）。
-2. **派生表只读于事件**：Progress（进度）、ScoreRecord（积分）、排行榜全部是事件的物化视图，**禁止**任何业务代码直接改写派生表。刷新 = 重放或增量消费事件。**唯一例外**：`ProgressRepo.DeleteByRoomSlugs`（内容包删除时清理被删教程的进度行，见 content-package-spec「删除」）——必须与 deriver 的 Room 存在性守卫（`SetRoomLookup`，room.completed 对已删 Room 跳过）成对存在，否则启动重放会复活已删进度；新增类似例外必须先修订本 skill 并说明重放一致性依据。
+2. **派生表只读于事件**：Progress（进度）、ScoreRecord（积分）、排行榜、`ExamStanding`、`AwdStanding` 全部是事实的物化视图，**禁止**任何业务代码直接改写派生表。刷新 = 重放或增量消费事件。`ExamStanding` 由 `ExamDeriver` 消费 `exam.attempt.graded` 重建；`AwdStanding` 由 `AwdScoreDeriver` 重放 append-only `AwdScoreEvent` 重建。**唯一例外**：`ProgressRepo.DeleteByRoomSlugs`（内容包删除时清理被删教程的进度行，见 content-package-spec「删除」）——必须与 deriver 的 Room 存在性守卫（`SetRoomLookup`，room.completed 对已删 Room 跳过）成对存在，否则启动重放会复活已删进度；新增类似例外必须先修订本 skill 并说明重放一致性依据。
 3. **判题必须异步**：提交接口只做"入队 + 返回 pending"，判定由 worker 完成。**禁止**在提交的 HTTP 请求路径里同步判定。
+4. **AWD 得分账本独立于 Event**：`AwdScoreEvent` 是 AWD 域的 append-only 账本（`idempotency_key` 唯一），不是 `Event` 表；回合结算只允许写入账本，再由 `AwdScoreDeriver` 重建排名。`awd.attack.*` / `awd.report.*` 是运营审计事件，不参与排名重放。禁止在结算路径直接 UPDATE `AwdStanding` 或手工补写账本跳过 `idempotency_key`。
 
 ## 事件类型（第一版枚举，新增需更新本 skill）
 
@@ -57,6 +58,31 @@ worker 消费 → 判定（flag 题：比对；编程题：CodeEngine 逐组运�
 
 - 实例 Flag 在 `EnsureInstance` 生成并注入容器环境变量 `FLAG`，**不经 Event 表**（属实例运营态）。
 - TTL 续期只更新 `LabInstance.expire_at`，**不写 Event**（非积分/进度派生）。
+
+## AWD 得分账本（独立事实流）
+
+```
+回合结算（管理员/引擎） → 聚合 AwdCheck/AwdAttack
+  → 写 AwdScoreEvent[]（source=sla|attack|defense|checkdown|report|manual，
+     idempotency_key 唯一，重复结算影响行数 0）
+  → AwdScoreDeriver 全量重放该竞赛账本 → ReplaceStandings(AwdStanding)
+```
+
+- 结算可重复调用，结果必须幂等；新增得分来源 = 新增 `source` + 唯一幂等键，禁止直接改账本行。
+- 攻击提交/判定写 `awd.attack.submitted/judged` 事件（审计）；回合检查明细写 `AwdCheck`（运营事实表），两者都不驱动 `AwdStanding`。
+- 最终排名由 `AwdStanding` + `AwdReport.Score` + accepted attacks 计算，是读模型，不落派生表。
+
+## 考试成绩派生（事件驱动）
+
+```
+开始作答 → exam.attempt.started
+交卷/到期 → exam.attempt.submitted
+评分完成 → exam.attempt.graded（客观题即时；编程题由 submission.judged(exam_attempt_id) 回写后写）
+ExamDeriver 消费 graded → 重建该竞赛 ExamStanding（全量替换）
+```
+
+- 全局 deriver 对带 `exam_attempt_id` 的 `submission.judged` 跳过 XP/CFT 竞赛积分；考试分数只由 ExamService 写 attempt/answer，再经事件派生。
+- 到期自动交卷与手动交卷共用同一 Finalize 路径（条件更新，0 行 = 已被处理），禁止重复评分/重复发事件。
 
 ## 动态计分
 

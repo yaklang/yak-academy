@@ -22,9 +22,20 @@ description: yak-academy 教程与题目两类资源的内容模型约束。涉�
 
 - 该枚举出现在 model（Room 与 Challenge 各自持有）、题目 JSON 校验、教程包校验、前端展示四处，**必须保持一致**，禁止新增第四级（如 "beginner"）。
 
+## 竞赛形式与内容模型的边界
+
+- Competition 的 `format=ctf|awd|exam` 创建后不可更改；共享核心只含 Competition/Participant/Team/Profile/Qualification/Certificate。
+- **CTF** 才绑定 Challenge（CompetitionChallenge/CompetitionScore/Writeup）；**AWD 与考试不得内嵌进 Room/教程包**，也不得复用 Challenge 的 flag 判定做攻防/考试判定：
+  - AWD 的靶机服务用独立 `AwdService`/服务包（镜像+端口+checker），攻击 flag 按回合生成；
+  - 考试的客观题用 `ExamQuestion`，编程题只能通过 Challenge 的 `exam` judge scope 复用判题引擎（不是把整场考试塞进一道题）。
+- AWD/考试/CTF 的模型、service、路由、前端视图互相独立；跨赛制只允许通过 `QualificationRankingSource` / `CertificateRankingSource` 接口协作。
+- 训练场（/training）仍只服务 Challenge；竞赛入口 `/competitions/enter/{id}` 按 format 分发，禁止把 AWD 靶机或考试作答混进题目列表。
+
 ## 正反例
 
 ✅ 正确：题目 JSON 带 `tutorial_slug` 指向配套教程 Room，两边详情页互给入口。
 ✅ 正确：内置训练集一个教程对应一道内置题目（11 篇 Yakit 教程 ↔ 11 道 vulinbox 题），`tutorial_slug` 由内置导入的 challenges.json 注入；教程先于题目落库保证双向入口即刻生效（见 content-package-spec 例外二）。
 ✅ 正确：训练场列表只读展示（标题/难度/分值/容器/通关），交互集中在题目详情页。
+✅ 正确：AWD 服务包独立上传，比赛页面从 `/competitions/{id}/awd` 取数。
 ❌ 错误：在教程包里恢复 lab.yaml / 让 Challenge 携带 room_id 外键（回退到内嵌模式）。
+❌ 错误：把 AWD 靶机定义或考试试卷塞进 challenge.json / 教程包。
