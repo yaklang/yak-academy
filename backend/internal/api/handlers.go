@@ -27,6 +27,7 @@ type Handlers struct {
 	Badges       *service.BadgeService
 	Profile      *service.ProfileService
 	Competitions *service.CompetitionService
+	AWD          *service.AwdCompetitionService
 	RegisterSvc  *service.RegisterService
 	ResetSvc     *service.PasswordResetService
 	Backup       *service.BackupService
@@ -37,8 +38,8 @@ type Handlers struct {
 }
 
 // NewHandlers 构造 handler 集合；showVerificationCode 见 config.VerificationShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, awd *service.AwdCompetitionService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, AWD: awd, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
 }
 
 func (h *Handlers) Register(r *Router) {
@@ -156,6 +157,12 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/warnings", "admin", h.adminCompetitionWarnings)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups", "admin", h.adminCompetitionWriteups)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/writeups/{wid}/zip", "admin", h.adminDownloadWriteupZip)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/awd", "admin", h.adminGetAwdGame)
+	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}/awd", "admin", h.adminUpdateAwdGame)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/awd/services", "admin", h.adminListAwdServices)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/awd/services", "admin", h.adminCreateAwdService)
+	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}/awd/services/{sid}", "admin", h.adminUpdateAwdService)
+	r.Handle(http.MethodDelete, "/api/v1/admin/competitions/{id}/awd/services/{sid}", "admin", h.adminDeleteAwdService)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/leaderboard", "admin", h.adminCompetitionLeaderboard)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/standings.csv", "admin", h.adminCompetitionStandingsCSV)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminListCtfAdjustments)
