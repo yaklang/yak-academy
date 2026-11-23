@@ -110,7 +110,10 @@ func TestPostgresCompatDerivedPaths(t *testing.T) {
 }
 
 // startPostgresContainer 本地一次性 postgres 容器（ academy- 前缀名随机端口），
-// 就绪探测走容器内 pg_isready。
+// 就绪探测走容器内 TCP 回环：官方镜像初始化阶段会先起一个只监听 Unix
+// socket 的临时实例，随后停掉再启动正式实例；不带 -h 的 pg_isready 会在
+// 临时实例阶段就绪，导致紧随其后的连接被重置。显式 -h 127.0.0.1 只认
+// 最终实例的 TCP 监听。
 func startPostgresContainer(t *testing.T) string {
 	t.Helper()
 	name := fmt.Sprintf("academy-test-pg-%d", time.Now().UnixNano())
@@ -133,7 +136,8 @@ func startPostgresContainer(t *testing.T) string {
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := exec.Command("docker", "exec", name, "pg_isready", "-U", "postgres").Run(); err == nil {
+		if err := exec.Command("docker", "exec", name, "pg_isready",
+			"-h", "127.0.0.1", "-U", "postgres").Run(); err == nil {
 			return fmt.Sprintf("postgres://postgres:academytest@127.0.0.1:%s/academy_test?sslmode=disable", port)
 		}
 		time.Sleep(500 * time.Millisecond)
