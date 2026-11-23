@@ -375,6 +375,13 @@ type CompetitionRepo interface {
 	// ListScores 竞赛全部派生积分行（排行榜聚合）。
 	ListScores(ctx context.Context, competitionID uint) ([]model.CompetitionScore, error)
 
+	// CreateCtfAdjustment 追加一条 CTF 附加分（append-only 源事实）。
+	CreateCtfAdjustment(ctx context.Context, a *model.CtfAdjustment) error
+	// ListCtfAdjustments 竞赛全部附加分（排行榜聚合 + 管理端明细）。
+	ListCtfAdjustments(ctx context.Context, competitionID uint) ([]model.CtfAdjustment, error)
+	// SumPositiveCtfAdjustments 单人在该竞赛的正向附加分合计（BonusCap 校验）。
+	SumPositiveCtfAdjustments(ctx context.Context, competitionID, userID uint) (int, error)
+
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
 }

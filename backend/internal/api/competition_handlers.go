@@ -39,6 +39,7 @@ func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Reque
 		Kind              string     `json:"kind"`
 		Format            string     `json:"format"`
 		ScoringMode       string     `json:"scoring_mode"`
+		BonusCap          int        `json:"bonus_cap"`
 		RegistrationStart *time.Time `json:"registration_start"`
 		RegistrationEnd   *time.Time `json:"registration_end"`
 		StartTime         time.Time  `json:"start_time"`
@@ -51,7 +52,7 @@ func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Reque
 	comp, err := h.Competitions.Create(req.Context(), service.CompetitionCreate{
 		Name: body.Name, Description: body.Description,
 		Start: body.StartTime, End: body.EndTime, Kind: body.Kind,
-		Format: body.Format, ScoringMode: body.ScoringMode,
+		Format: body.Format, ScoringMode: body.ScoringMode, BonusCap: body.BonusCap,
 		RegistrationStart: body.RegistrationStart, RegistrationEnd: body.RegistrationEnd,
 	})
 	if err != nil {
@@ -99,6 +100,7 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 		StartTime         *time.Time `json:"start_time"`
 		EndTime           *time.Time `json:"end_time"`
 		ScoringMode       *string    `json:"scoring_mode"`
+		BonusCap          *int       `json:"bonus_cap"`
 		RegistrationStart *time.Time `json:"registration_start"`
 		RegistrationEnd   *time.Time `json:"registration_end"`
 		ClearRegistration *bool      `json:"clear_registration"`
@@ -111,6 +113,7 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 		Name: body.Name, Description: body.Description,
 		StartTime: body.StartTime, EndTime: body.EndTime,
 		ScoringMode:       body.ScoringMode,
+		BonusCap:          body.BonusCap,
 		RegistrationStart: body.RegistrationStart, RegistrationEnd: body.RegistrationEnd,
 		ClearRegistration: body.ClearRegistration,
 	})
@@ -368,6 +371,50 @@ func (h *Handlers) adminCompetitionStandingsCSV(w http.ResponseWriter, req *http
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// adminListCtfAdjustments 管理端附加分明细。
+func (h *Handlers) adminListCtfAdjustments(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	items, err := h.Competitions.ListCtfAdjustments(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// adminCreateCtfAdjustment 追加附加分（append-only；写 admin audit）。
+func (h *Handlers) adminCreateCtfAdjustment(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		UserID uint   `json:"user_id"`
+		Points int    `json:"points"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	item, err := h.Competitions.AddCtfAdjustment(req.Context(), id, user.ID, service.CtfAdjustmentCreate{
+		UserID: body.UserID, Points: body.Points, Reason: body.Reason,
+	})
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "competition.adjustment.create", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"user_id": body.UserID, "points": body.Points, "reason": body.Reason})
+	writeJSON(w, http.StatusCreated, item)
 }
 
 // ---------- 参赛者 ----------

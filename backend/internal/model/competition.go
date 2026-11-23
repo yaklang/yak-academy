@@ -75,10 +75,13 @@ type Competition struct {
 	// 两者必须同时配置或同时为空；为空 = 沿用旧语义，报名开放到竞赛结束）。
 	RegistrationStart *time.Time `json:"registration_start"`
 	RegistrationEnd   *time.Time `json:"registration_end"`
-	StartTime         time.Time  `gorm:"index" json:"start_time"`
-	EndTime           time.Time  `gorm:"index" json:"end_time"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	// BonusCap 单人正向附加分上限（0 = 不限制）；仅 CTF 生效。用于公告中
+	// “AI 附加 +10 封顶”一类赛务规则，管理端追加附加分时强制校验。
+	BonusCap  int       `gorm:"not null;default:0" json:"bonus_cap"`
+	StartTime time.Time `gorm:"index" json:"start_time"`
+	EndTime   time.Time `gorm:"index" json:"end_time"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // RegistrationOpen 当前时刻是否在可报名窗口内（未配置窗口 = 不限制，
@@ -187,4 +190,18 @@ type CompetitionScore struct {
 	ChallengeID uint `gorm:"uniqueIndex:idx_compscore"`
 	Score       int
 	SolvedAt    time.Time
+}
+
+// CtfAdjustment CTF 管理员附加分（append-only 源事实，不修改 CompetitionScore）：
+// 排行榜 = 首通分合计 + 附加分合计；Points 可为负（纠正），正向合计受
+// Competition.BonusCap 限制（0 = 不限）。Reason 必填，创建操作写 AdminAuditLog。
+type CtfAdjustment struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	CompetitionID uint      `gorm:"index" json:"competition_id"`
+	UserID        uint      `gorm:"index" json:"user_id"`
+	TeamID        uint      `gorm:"index" json:"team_id"` // 冗余队伍快照（0 = 个人）
+	Points        int       `json:"points"`
+	Reason        string    `gorm:"size:512" json:"reason"`
+	CreatedBy     uint      `gorm:"index" json:"created_by"`
+	CreatedAt     time.Time `gorm:"index" json:"created_at"`
 }

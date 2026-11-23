@@ -274,6 +274,28 @@ func (r *competitionRepo) ListScores(ctx context.Context, competitionID uint) ([
 	return list, err
 }
 
+// CreateCtfAdjustment 追加一条附加分（只 INSERT；修正走新记录，禁止 UPDATE）。
+func (r *competitionRepo) CreateCtfAdjustment(ctx context.Context, a *model.CtfAdjustment) error {
+	return r.db.WithContext(ctx).Create(a).Error
+}
+
+// ListCtfAdjustments 该竞赛全部附加分明细（按创建时间正序）。
+func (r *competitionRepo) ListCtfAdjustments(ctx context.Context, competitionID uint) ([]model.CtfAdjustment, error) {
+	var list []model.CtfAdjustment
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("created_at asc, id asc").Find(&list).Error
+	return list, err
+}
+
+// SumPositiveCtfAdjustments 单人在该竞赛的正向附加分合计。
+func (r *competitionRepo) SumPositiveCtfAdjustments(ctx context.Context, competitionID, userID uint) (int, error) {
+	var total int
+	err := r.db.WithContext(ctx).Model(&model.CtfAdjustment{}).
+		Where("competition_id = ? AND user_id = ? AND points > 0", competitionID, userID).
+		Select("COALESCE(SUM(points), 0)").Scan(&total).Error
+	return total, err
+}
+
 // ActiveCompetitions 当前处于 running 状态的竞赛（锁定判定用）。
 // 时间比较在 SQL 侧完成，避免时钟注入差异。入参统一转 UTC：
 // SQLite 以文本比较时间，与落库的 UTC 值保持同一基准才可靠。

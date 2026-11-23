@@ -22,6 +22,7 @@ import {
   type CompetitionFormat,
   type CompetitionParticipantItem,
   type CompetitionScoringMode,
+  type CtfAdjustment,
   type GenerateUsersResult,
   type ParticipantImportResult,
   type TeamLeaderboardEntry,
@@ -75,6 +76,7 @@ const form = ref({
   start: null as Date | null,
   end: null as Date | null,
   scoringMode: 'dynamic' as CompetitionScoringMode,
+  bonusCap: 0,
   registrationEnabled: false,
   registrationRange: null as [Date, Date] | null,
 })
@@ -90,6 +92,7 @@ function syncForm() {
     start: new Date(detail.value.start_time),
     end: new Date(detail.value.end_time),
     scoringMode: detail.value.scoring_mode,
+    bonusCap: detail.value.bonus_cap ?? 0,
     registrationEnabled: !!(regStart && regEnd),
     registrationRange: regStart && regEnd ? [regStart, regEnd] : null,
   }
@@ -111,12 +114,17 @@ async function saveConfig() {
       return
     }
   }
+  if (!Number.isInteger(form.value.bonusCap) || form.value.bonusCap < 0) {
+    notify.warning('附加分上限必须为非负整数（0 = 不限制）')
+    return
+  }
   const body: {
     name: string
     description: string
     start_time: string
     end_time: string
     scoring_mode?: CompetitionScoringMode
+    bonus_cap?: number
     registration_start?: string | null
     registration_end?: string | null
     clear_registration?: boolean
@@ -128,6 +136,9 @@ async function saveConfig() {
   }
   if (detail.value?.format === 'ctf' && status.value === 'scheduled') {
     body.scoring_mode = form.value.scoringMode
+  }
+  if (detail.value?.format === 'ctf') {
+    body.bonus_cap = form.value.bonusCap
   }
   if (form.value.registrationEnabled && form.value.registrationRange) {
     body.registration_start = form.value.registrationRange[0].toISOString()
@@ -723,6 +734,71 @@ async function exportBoard() {
   }
 }
 
+// ---------- 附加分（append-only） ----------
+const adjustments = ref<CtfAdjustment[]>([])
+const adjustmentsLoading = ref(true)
+const adjustmentsError = ref('')
+const showAdjustment = ref(false)
+const adjustmentSaving = ref(false)
+const adjustmentCandidates = ref<CompetitionParticipantItem[]>([])
+const adjustmentForm = ref({ userId: null as number | null, points: 10, reason: '' })
+
+async function loadAdjustments() {
+  adjustmentsLoading.value = true
+  adjustmentsError.value = ''
+  adjustments.value = []
+  try {
+    const resp = await adminCompetitionApi.adjustments(compId)
+    adjustments.value = resp.items
+  } catch (e) {
+    adjustmentsError.value = e instanceof Error ? e.message : '附加分加载失败，请稍后重试'
+  } finally {
+    adjustmentsLoading.value = false
+  }
+}
+
+async function openAdjustment() {
+  adjustmentForm.value = { userId: null, points: 10, reason: '' }
+  try {
+    const resp = await adminCompetitionApi.participants(compId, 1, 1000)
+    adjustmentCandidates.value = resp.items
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '参赛人员加载失败')
+    return
+  }
+  showAdjustment.value = true
+}
+
+async function submitAdjustment() {
+  if (!adjustmentForm.value.userId) {
+    notify.warning('请选择参赛选手')
+    return
+  }
+  if (!Number.isInteger(adjustmentForm.value.points) || adjustmentForm.value.points === 0) {
+    notify.warning('附加分必须为非 0 整数')
+    return
+  }
+  if (adjustmentForm.value.reason.trim().length < 2) {
+    notify.warning('请填写附加分原因')
+    return
+  }
+  adjustmentSaving.value = true
+  try {
+    await adminCompetitionApi.addAdjustment(compId, {
+      user_id: adjustmentForm.value.userId,
+      points: adjustmentForm.value.points,
+      reason: adjustmentForm.value.reason.trim(),
+    })
+    showAdjustment.value = false
+    notify.success('附加分已追加')
+    await Promise.all([loadAdjustments(), loadBoard()])
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '附加分追加失败')
+  } finally {
+    adjustmentSaving.value = false
+  }
+}
+
 async function onTab(name: string | number) {
   // 懒加载：进入对应标签页时拉取数据。
   if (name === 'challenges' && !challenges.value.length) await loadChallenges()
@@ -731,6 +807,7 @@ async function onTab(name: string | number) {
   if (name === 'warnings') await loadWarnings()
   if (name === 'writeups') await loadWriteups()
   if (name === 'leaderboard') await loadBoard()
+  if (name === 'adjustments') await loadAdjustments()
 }
 
 onMounted(async () => {
@@ -813,6 +890,10 @@ onMounted(async () => {
                 <UiRadio value="fixed">固定计分（按题目分值）</UiRadio>
               </UiRadioGroup>
               <div class="dim">{{ status === 'scheduled' ? '开赛后不可切换' : '已开赛，计分模式已锁定' }}</div>
+            </UiFormItem>
+            <UiFormItem v-if="detail?.format === 'ctf'" label="附加分上限">
+              <UiInputNumber v-model="form.bonusCap" :min="0" :max="1000000" :step="1" />
+              <div class="dim">单人正向附加分合计上限（0 = 不限制），用于 AI 附加分等赛务规则。</div>
             </UiFormItem>
             <UiFormItem label="报名窗口">
               <UiCheckbox v-model="form.registrationEnabled">启用报名起止时间</UiCheckbox>
@@ -1086,6 +1167,7 @@ onMounted(async () => {
               <template #default="{ row }">{{ row.members.join('、') }}</template>
             </UiTableColumn>
             <UiTableColumn prop="score" label="得分" width="100" />
+            <UiTableColumn prop="bonus" label="附加分" width="90" />
             <UiTableColumn prop="solved_count" label="解题数" width="90" />
             <UiTableColumn label="最近通关" width="160">
               <template #default="{ row }">{{ fmt(row.last_solve_at) }}</template>
@@ -1093,8 +1175,70 @@ onMounted(async () => {
           </UiTable>
         </UiCard>
       </UiTabPane>
+
+      <!-- 附加分（CTF） -->
+      <UiTabPane v-if="detail?.format === 'ctf'" label="附加分" name="adjustments">
+        <UiCard shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>附加分明细（{{ adjustments.length }}）</span>
+              <UiButton type="primary" size="small" @click="openAdjustment">追加附加分</UiButton>
+            </div>
+          </template>
+          <p class="dim">
+            附加分为 append-only 记录，直接计入个人/队伍总分；正向合计受「附加分上限」约束。
+          </p>
+          <UiLoadError v-if="adjustmentsError" compact :message="adjustmentsError" @retry="loadAdjustments" class="block" />
+          <UiTable v-else :data="adjustments" :loading="adjustmentsLoading" empty-text="暂无附加分">
+            <UiTableColumn label="选手" min-width="120">
+              <template #default="{ row }">{{ row.username ?? `#${row.user_id}` }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="队伍" min-width="120">
+              <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="分值" width="90">
+              <template #default="{ row }">
+                <UiTag :type="row.points > 0 ? 'success' : 'danger'" size="small">
+                  {{ row.points > 0 ? '+' : '' }}{{ row.points }}
+                </UiTag>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn prop="reason" label="原因" min-width="220" show-overflow-tooltip />
+            <UiTableColumn label="时间" width="160">
+              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+            </UiTableColumn>
+          </UiTable>
+        </UiCard>
+      </UiTabPane>
     </UiTabs>
   </div>
+
+  <!-- 追加附加分 -->
+  <UiDialog v-model="showAdjustment" title="追加附加分" width="520px">
+    <UiForm label-width="90px">
+      <UiFormItem label="参赛选手">
+        <UiSelect v-model="adjustmentForm.userId" filterable placeholder="选择选手" style="width: 100%">
+          <UiOption
+            v-for="p in adjustmentCandidates"
+            :key="p.user_id"
+            :label="`${p.username}${p.team_name ? `（${p.team_name}）` : ''}`"
+            :value="p.user_id"
+          />
+        </UiSelect>
+      </UiFormItem>
+      <UiFormItem label="附加分">
+        <UiInputNumber v-model="adjustmentForm.points" :min="-1000000" :max="1000000" :step="1" />
+        <div class="dim">正数加分、负数纠正；0 不允许。</div>
+      </UiFormItem>
+      <UiFormItem label="原因">
+        <UiInput v-model="adjustmentForm.reason" type="textarea" :rows="3" maxlength="512" placeholder="如：AI 辅助附加分 / 申诉纠正" />
+      </UiFormItem>
+    </UiForm>
+    <template #footer>
+      <UiButton @click="showAdjustment = false">取消</UiButton>
+      <UiButton type="primary" :loading="adjustmentSaving" @click="submitAdjustment">追加</UiButton>
+    </template>
+  </UiDialog>
 
   <!-- 绑定/导入题目（从题库勾选 / slug 直填 / 文件粘贴导入 challenge.json） -->
   <UiDialog v-model="showBind" title="绑定 / 导入题目" width="860px">

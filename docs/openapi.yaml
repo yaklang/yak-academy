@@ -615,6 +615,7 @@ components:
         kind: { type: string, enum: [public, invitational], description: public=公开赛（竞赛广场公开展示，用户自助报名）/ invitational=邀请赛（定向导入参赛者，凭邀请码入场）；创建后不可更改 }
         format: { type: string, enum: [ctf, awd, exam], description: 竞赛形式：ctf=解题赛 / awd=攻防赛 / exam=在线考试；创建后不可更改 }
         scoring_mode: { type: string, enum: [dynamic, fixed], description: 仅 CTF 生效：dynamic=按通过人数衰减 / fixed=按题目分值固定计分；开赛后不可切换 }
+        bonus_cap: { type: integer, description: CTF 单人正向附加分上限；0=不限制，仅 CTF 可配置 }
         registration_start: { type: string, format: date-time, nullable: true, description: 公开赛报名开始时间；与 registration_end 同时配置或同时为空（空=报名开放到竞赛结束） }
         registration_end: { type: string, format: date-time, nullable: true, description: 公开赛报名截止时间；不得晚于 end_time }
         description: { type: string, description: 竞赛说明（Markdown） }
@@ -773,6 +774,7 @@ components:
         team_id: { type: integer }
         team_name: { type: string }
         score: { type: integer, description: 队内成员得分合计（事件派生） }
+        bonus: { type: integer, description: 队内成员附加分合计 }
         solved_count: { type: integer, description: 队内成员通关题数 }
         members: { type: array, items: { type: string }, description: 成员用户名列表 }
         last_solve_at: { type: string, nullable: true, description: 最近一次通关时间（同分先达者靠前） }
@@ -789,8 +791,23 @@ components:
           type: string
           nullable: true
         score: { type: integer }
+        bonus: { type: integer, description: 本人附加分合计 }
         solved_count: { type: integer }
         last_solve_at: { type: string, nullable: true, description: 最近一次通关时间（同分先达者靠前） }
+    CtfAdjustment:
+      type: object
+      description: CTF 管理员附加分（append-only 源事实；排行榜总分 = 首通分 + 附加分）
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        user_id: { type: integer }
+        team_id: { type: integer, description: 0=个人参赛 }
+        points: { type: integer, description: 可正可负；正向合计受 bonus_cap 限制 }
+        reason: { type: string }
+        created_by: { type: integer }
+        created_at: { type: string }
+        username: { type: string, description: 仅列表响应填充 }
+        team_name: { type: string, nullable: true, description: 仅列表响应填充 }
     ParticipantImportRequest:
       type: object
       description: |
@@ -2736,6 +2753,7 @@ paths:
                 kind: { type: string, enum: [public, invitational], default: invitational, description: public=公开赛（广场展示+自助报名）/ invitational=邀请赛（定向导入+邀请码入场）；创建后不可更改 }
                 format: { type: string, enum: [ctf, awd, exam], default: ctf, description: 竞赛形式；创建后不可更改 }
                 scoring_mode: { type: string, enum: [dynamic, fixed], default: dynamic, description: 仅 CTF 形式生效；fixed=按题目分值固定计分 }
+                bonus_cap: { type: integer, minimum: 0, description: CTF 单人正向附加分上限（0=不限） }
                 registration_start: { type: string, format: date-time, nullable: true, description: 报名开始时间（与 registration_end 成对配置） }
                 registration_end: { type: string, format: date-time, nullable: true, description: 报名截止时间（不得晚于 end_time） }
                 description: { type: string }
@@ -2787,6 +2805,7 @@ paths:
                 start_time: { type: string, format: date-time }
                 end_time: { type: string, format: date-time }
                 scoring_mode: { type: string, enum: [dynamic, fixed], description: 仅 CTF 且仅 scheduled 可切换 }
+                bonus_cap: { type: integer, minimum: 0, description: 仅 CTF；调整当日即生效，0=不限 }
                 registration_start: { type: string, format: date-time, nullable: true }
                 registration_end: { type: string, format: date-time, nullable: true }
                 clear_registration: { type: boolean, description: 清空报名窗口（与设置字段互斥） }
@@ -3088,6 +3107,49 @@ paths:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/adjustments:
+    get:
+      tags: [admin]
+      summary: CTF 附加分明细（append-only；排行榜总分 = 首通分 + 附加分）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CtfAdjustment' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 追加附加分（仅 CTF；开赛后可用；正向合计受 bonus_cap 限制；写 audit）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, points, reason]
+              properties:
+                user_id: { type: integer }
+                points: { type: integer, description: 非 0；可为负用于纠正 }
+                reason: { type: string, minLength: 2, maxLength: 512 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CtfAdjustment' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions:
     get:

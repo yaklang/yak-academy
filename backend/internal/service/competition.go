@@ -107,12 +107,24 @@ type CompetitionCreate struct {
 	Kind              string
 	Format            string
 	ScoringMode       string
+	BonusCap          int
 	RegistrationStart *time.Time
 	RegistrationEnd   *time.Time
 }
 
 // validateRegistrationWindow 报名窗口必须成对配置、起止有序，且不得晚于
 // 竞赛结束（结束后报名没有意义；未配置 = 沿用旧语义）。
+// validateBonusCap 附加分上限：非负；仅 CTF 支持（AWD/考试的附加分走各自模型）。
+func validateBonusCap(format model.CompetitionFormat, cap int) error {
+	if cap < 0 {
+		return fmt.Errorf("%w: bonus_cap cannot be negative", ErrValidation)
+	}
+	if cap > 0 && format != model.CompetitionFormatCTF {
+		return fmt.Errorf("%w: bonus_cap is only available for ctf competitions", ErrValidation)
+	}
+	return nil
+}
+
 func validateRegistrationWindow(start, end *time.Time, competitionEnd time.Time) (*time.Time, *time.Time, error) {
 	if start == nil && end == nil {
 		return nil, nil, nil
@@ -162,6 +174,9 @@ func (s *CompetitionService) Create(ctx context.Context, in CompetitionCreate) (
 	if f != model.CompetitionFormatCTF && m != model.CompetitionScoringDynamic {
 		return nil, fmt.Errorf("%w: fixed scoring is only available for ctf competitions", ErrValidation)
 	}
+	if err := validateBonusCap(f, in.BonusCap); err != nil {
+		return nil, err
+	}
 	regStart, regEnd, err := validateRegistrationWindow(in.RegistrationStart, in.RegistrationEnd, in.End)
 	if err != nil {
 		return nil, err
@@ -173,6 +188,7 @@ func (s *CompetitionService) Create(ctx context.Context, in CompetitionCreate) (
 	// 失去入场依据或让已有成绩按错误赛制解释。
 	c := &model.Competition{
 		Name: name, Description: in.Description, Kind: k, Format: f, ScoringMode: m,
+		BonusCap:          in.BonusCap,
 		RegistrationStart: regStart, RegistrationEnd: regEnd,
 		StartTime: in.Start.UTC(), EndTime: in.End.UTC(),
 	}
@@ -283,6 +299,7 @@ type CompetitionUpdate struct {
 	StartTime         *time.Time
 	EndTime           *time.Time
 	ScoringMode       *string
+	BonusCap          *int
 	RegistrationStart *time.Time
 	RegistrationEnd   *time.Time
 	ClearRegistration *bool
@@ -294,7 +311,7 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 		return nil, err
 	}
 	if u.Name == nil && u.Description == nil && u.StartTime == nil && u.EndTime == nil &&
-		u.ScoringMode == nil && u.RegistrationStart == nil && u.RegistrationEnd == nil &&
+		u.ScoringMode == nil && u.BonusCap == nil && u.RegistrationStart == nil && u.RegistrationEnd == nil &&
 		u.ClearRegistration == nil {
 		return nil, fmt.Errorf("%w: empty competition update", ErrValidation)
 	}
@@ -331,6 +348,12 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 			return nil, fmt.Errorf("%w: cannot change scoring_mode after competition starts", ErrValidation)
 		}
 		fields["scoring_mode"] = m
+	}
+	if u.BonusCap != nil {
+		if err := validateBonusCap(c.Format, *u.BonusCap); err != nil {
+			return nil, err
+		}
+		fields["bonus_cap"] = *u.BonusCap
 	}
 	// 合成新的起止时间再整体校验区间。
 	start, end := c.StartTime, c.EndTime
@@ -1625,6 +1648,7 @@ type TeamLeaderboardEntry struct {
 	TeamID      uint     `json:"team_id"`
 	TeamName    *string  `json:"team_name"`
 	Score       int      `json:"score"`
+	Bonus       int      `json:"bonus"`
 	SolvedCount int      `json:"solved_count"`
 	Members     []string `json:"members"`
 	LastSolveAt *string  `json:"last_solve_at"`
@@ -1640,6 +1664,7 @@ type CompLeaderboardEntry struct {
 	AccountCode string  `json:"account_code"`
 	TeamName    *string `json:"team_name"`
 	Score       int     `json:"score"`
+	Bonus       int     `json:"bonus"`
 	SolvedCount int     `json:"solved_count"`
 	LastSolveAt *string `json:"last_solve_at"`
 }
@@ -1684,7 +1709,8 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 	// 聚合到个人。
 	type personAgg struct {
 		userID, teamID uint
-		score, solved  int
+		score, bonus   int
+		solved         int
 		last           time.Time
 	}
 	agg := map[uint]*personAgg{}
@@ -1705,6 +1731,21 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 			a.last = sc.SolvedAt
 		}
 	}
+	// 附加分是 append-only 源事实，不和首通分混写 CompetitionScore；
+	// 与首通分同源聚合进个人/队伍总分。
+	adjustments, err := s.comps.ListCtfAdjustments(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, adj := range adjustments {
+		a := agg[adj.UserID]
+		if a == nil {
+			a = &personAgg{userID: adj.UserID, teamID: adj.TeamID}
+			agg[adj.UserID] = a
+		}
+		a.score += adj.Points
+		a.bonus += adj.Points
+	}
 	if mode == "individual" {
 		entries := make([]CompLeaderboardEntry, 0, len(agg))
 		for _, a := range agg {
@@ -1721,7 +1762,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 			}
 			entries = append(entries, CompLeaderboardEntry{
 				UserID: a.userID, Username: userNames[a.userID], AccountCode: userCodes[a.userID],
-				TeamName: teamName, Score: a.score, SolvedCount: a.solved, LastSolveAt: last,
+				TeamName: teamName, Score: a.score, Bonus: a.bonus, SolvedCount: a.solved, LastSolveAt: last,
 			})
 		}
 		sort.Slice(entries, func(i, j int) bool {
@@ -1742,7 +1783,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 		for i, e := range entries {
 			items[i] = TeamLeaderboardEntry{
 				Rank: e.Rank, TeamName: e.TeamName,
-				Score: e.Score, SolvedCount: e.SolvedCount,
+				Score: e.Score, Bonus: e.Bonus, SolvedCount: e.SolvedCount,
 				Members: []string{e.Username}, LastSolveAt: e.LastSolveAt,
 				AccountCode: e.AccountCode,
 			}
@@ -1754,6 +1795,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 		teamID  uint
 		name    *string
 		score   int
+		bonus   int
 		solved  int
 		members []string
 		last    time.Time
@@ -1780,6 +1822,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 		t.members = append(t.members, userNames[p.UserID])
 		if a := agg[p.UserID]; a != nil {
 			t.score += a.score
+			t.bonus += a.bonus
 			t.solved += a.solved
 			if a.last.After(t.last) {
 				t.last = a.last
@@ -1794,7 +1837,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 			last = &ls
 		}
 		entries = append(entries, TeamLeaderboardEntry{
-			TeamID: t.teamID, TeamName: t.name, Score: t.score,
+			TeamID: t.teamID, TeamName: t.name, Score: t.score, Bonus: t.bonus,
 			SolvedCount: t.solved, Members: t.members, LastSolveAt: last,
 		})
 	}
@@ -1897,6 +1940,137 @@ func (s *CompetitionService) StandingsCSV(ctx context.Context, id uint, mode str
 		return nil, "", err
 	}
 	return buf.Bytes(), fmt.Sprintf("competition-%d-standings-%s.csv", id, mode), nil
+}
+
+// CtfAdjustmentCreate 管理端追加附加分入参（用户必须已在本场参赛）。
+type CtfAdjustmentCreate struct {
+	UserID uint   `json:"user_id"`
+	Points int    `json:"points"`
+	Reason string `json:"reason"`
+}
+
+// CtfAdjustmentItem 附加分明细（附用户名/队伍名，便于管理端直接展示）。
+type CtfAdjustmentItem struct {
+	model.CtfAdjustment
+	Username string  `json:"username"`
+	TeamName *string `json:"team_name"`
+}
+
+const maxCtfAdjustmentAbs = 1_000_000
+
+// AddCtfAdjustment 追加一条附加分（append-only；不修改 CompetitionScore）。
+// 仅 CTF；开赛后可用；用户必须已参赛；正向合计受 Competition.BonusCap 限制。
+func (s *CompetitionService) AddCtfAdjustment(ctx context.Context, competitionID, actorID uint, in CtfAdjustmentCreate) (*CtfAdjustmentItem, error) {
+	c, err := s.requireFormat(ctx, competitionID, model.CompetitionFormatCTF)
+	if err != nil {
+		return nil, err
+	}
+	if c.Status(s.now()) == model.CompetitionScheduled {
+		return nil, fmt.Errorf("%w: adjustments are available after competition starts", ErrValidation)
+	}
+	if in.UserID == 0 {
+		return nil, fmt.Errorf("%w: user_id is required", ErrValidation)
+	}
+	if in.Points == 0 {
+		return nil, fmt.Errorf("%w: points cannot be zero", ErrValidation)
+	}
+	if in.Points > maxCtfAdjustmentAbs || in.Points < -maxCtfAdjustmentAbs {
+		return nil, fmt.Errorf("%w: points out of range", ErrValidation)
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if len(reason) < 2 {
+		return nil, fmt.Errorf("%w: reason is required", ErrValidation)
+	}
+	if len(reason) > 512 {
+		return nil, fmt.Errorf("%w: reason is too long", ErrValidation)
+	}
+	part, err := s.comps.FindParticipant(ctx, competitionID, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if part == nil {
+		return nil, fmt.Errorf("%w: user is not a participant of this competition", ErrValidation)
+	}
+	if in.Points > 0 && c.BonusCap > 0 {
+		used, err := s.comps.SumPositiveCtfAdjustments(ctx, competitionID, in.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if used+in.Points > c.BonusCap {
+			return nil, fmt.Errorf("%w: bonus cap %d exceeded (already %d)", ErrValidation, c.BonusCap, used)
+		}
+	}
+	adj := &model.CtfAdjustment{
+		CompetitionID: competitionID, UserID: in.UserID, TeamID: part.TeamID,
+		Points: in.Points, Reason: reason, CreatedBy: actorID, CreatedAt: s.now(),
+	}
+	if err := s.comps.CreateCtfAdjustment(ctx, adj); err != nil {
+		return nil, err
+	}
+	item := &CtfAdjustmentItem{CtfAdjustment: *adj}
+	if u, err := s.users.FindByID(ctx, in.UserID); err == nil && u != nil {
+		item.Username = u.Username
+	}
+	if part.TeamID > 0 {
+		if teams, err := s.comps.ListTeams(ctx, competitionID); err == nil {
+			for _, t := range teams {
+				if t.ID == part.TeamID {
+					name := t.Name
+					item.TeamName = &name
+					break
+				}
+			}
+		}
+	}
+	return item, nil
+}
+
+// ListCtfAdjustments 管理端附加分明细（含用户名/队伍名）。
+func (s *CompetitionService) ListCtfAdjustments(ctx context.Context, competitionID uint) ([]CtfAdjustmentItem, error) {
+	if _, err := s.requireFormat(ctx, competitionID, model.CompetitionFormatCTF); err != nil {
+		return nil, err
+	}
+	adjustments, err := s.comps.ListCtfAdjustments(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	userIDs := make([]uint, 0, len(adjustments))
+	seen := map[uint]bool{}
+	for _, a := range adjustments {
+		if !seen[a.UserID] {
+			seen[a.UserID] = true
+			userIDs = append(userIDs, a.UserID)
+		}
+	}
+	userNames := map[uint]string{}
+	if len(userIDs) > 0 {
+		users, err := s.users.FindByIDs(ctx, userIDs...)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			userNames[u.ID] = u.Username
+		}
+	}
+	teams, err := s.comps.ListTeams(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	teamNames := map[uint]string{}
+	for _, t := range teams {
+		teamNames[t.ID] = t.Name
+	}
+	items := make([]CtfAdjustmentItem, len(adjustments))
+	for i, a := range adjustments {
+		item := CtfAdjustmentItem{CtfAdjustment: a, Username: userNames[a.UserID]}
+		if a.TeamID > 0 {
+			if name, ok := teamNames[a.TeamID]; ok {
+				item.TeamName = &name
+			}
+		}
+		items[i] = item
+	}
+	return items, nil
 }
 
 // ---------- 管理端：警告 / WP / 容器 ----------
