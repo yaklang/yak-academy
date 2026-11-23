@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.6（Phase 2/3 完成 + 竞赛系统（公开/邀请分档）+ 账号编码 + 用户画像管理 + 自助注册与找回密码 + 部署约定）
+> 版本：v0.7（Phase 3 完成 + 三赛制竞赛域（CTF/AWD/考试）+ 晋级/证书/实名名册 + PostgreSQL 并发基线 + 部署约定）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -28,12 +28,10 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 ```
 ┌────────────────────────────────────────────────────────────┐
 │ 表现层  frontend/  Vue3 + TS + Vite                          │
-│   学生端：Topic/Room 教程浏览、题库（题目分组列表+详情）、       │
-│           进度、排行榜、竞赛广场（公开赛报名+入场/做题/双榜/WP）│
-│   管理端：资源管理（教程/题目/容器/竞赛/用户管理）              │
-│           （用户管理为只读画像表格：搜索/过滤/不活跃标记；      │
-│            建号入口在邀请赛「一键生成账号」与自助注册，         │
-│            角色是账号固有属性）                                 │
+│   学生端：Topic/Room 教程浏览、题库、进度、排行榜、竞赛广场；     │
+│           竞赛入口按 format 分发 CTF / AWD / 在线考试视图          │
+│   管理端：教程/题目/容器/竞赛/用户；竞赛详情按 format 分发         │
+│           CTF 详情 / AWD 控制台 / 考试管理，晋级与证书面板共享      │
 ├────────────────────────────────────────────────────────────┤
 │ 服务层  backend/internal/api  REST + JWT + RBAC 中间件        │
 │   ├─ auth        登录 / JWT / 两档角色 RBAC / 自助注册与找回密码│
@@ -42,17 +40,20 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │   ├─ judge       异步判题 worker（恒时比较、动态计分、反作弊）  │
 │   ├─ env         Lab 环境生命周期（docker 驱动 / noop 兜底）   │
 │   ├─ userprogress 进度跟踪 + 事件派生器（含竞赛积分）          │
-│   ├─ competition 竞赛域（赛程/参赛者/入场锁定/双榜/WP）        │
+│   ├─ competition 共享赛务（赛程/参赛者/名册/晋级/证书）         │
+│   ├─ ctf         CTF 域（题目绑定/双榜/WP；由 competition 承载） │
+│   ├─ awd         AWD 独立域（game/服务/回合/攻防/战报/最终排名） │
+│   ├─ exam        考试独立域（试卷/作答/评分/成绩派生）          │
 │   └─ eventbus    进程内 append-only 事件总线 + 派生器           │
 ├────────────────────────────────────────────────────────────┤
-│ 数据层  SQLite + gorm（repo 层接口抽象，可平滑迁 PostgreSQL）    │
-│   业务库：用户/内容/题目/事件/派生表/竞赛                       │
+│ 数据层  SQLite（开发/单机）/ PostgreSQL（生产并发基线）+ gorm   │
+│   业务库：用户/内容/题目/事件/派生表/竞赛/AWD/考试/证书          │
 ├────────────────────────────────────────────────────────────┤
-│ 基础设施（远期）  题目环境容器化：模板镜像+按需实例+空闲回收       │
+│ 基础设施  Docker 单机：题目实例 + AWD 内部网络/靶机/SSH 攻击盒   │
 └────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向（唯一合法）：`api → service → repo → model`。service 横向依赖白名单：`judge→event`、`content→challenge`。
+依赖方向（唯一合法）：`api → service → repo → model`。service 横向依赖白名单：`judge→event`、`content→challenge`。跨赛制能力（晋级/证书）由共享赛务定义 `QualificationRankingSource` / `CertificateRankingSource` 接口，CTF/AWD/考试各自实现，赛务域不 import 三域实现。
 
 ## 3. 模块设计
 
@@ -123,8 +124,11 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 派生器（deriver）订阅事件 → 增量更新 ScoreRecord / Progress / CompetitionScore / 排行榜缓存。
 - Phase 2 可替换为 Redis Stream / MQ，接口不变。
 
-### 3.8 competition — 竞赛域
+### 3.8 competition — 共享赛务与 CTF
 
+- **赛制（format）**：创建时三选一——`ctf`（解题赛）/ `awd`（攻防赛）/ `exam`（在线考试），**创建后不可更改**。共享核心只承载 Competition/Participant/Team/Profile/Qualification/Certificate 与入场锁定；三种赛制的领域模型、服务、路由、管理视图完全独立（AWD 不引用 Challenge/CompetitionScore/judge，CTF 不引用 Awd*）。旧竞赛行迁移按 `format=ctf` 解释。
+- **CTF 计分**：`scoring_mode=dynamic|fixed`（仅 CTF；开赛后锁定）。dynamic 按通过人数衰减，fixed 直接取 `Challenge.Score`；`CtfAdjustment` 是 append-only 附加分源事实（理由+分值，竞赛级 cap 由配置约束），榜单 = 首通分 + 附加分。双榜包含零分参赛者，支持 standings CSV。
+- **报名窗口**：公开赛可配置 `registration_start/end`（成对或同时为空），仅在窗口内允许 `register`；邀请赛不使用。
 - **赛制分档（kind）**：创建时二选一——`public`（公开赛）/ `invitational`（邀请赛，旧库缺省回填），**创建后不可更改**。公开赛不发邀请函：展示在竞赛广场（`GET /competitions`，仅 kind=public），学生自助报名（`POST /competitions/{id}/register`，幂等个人报名；仍生成备用邀请码但不投递），已报名者免邀请码入场。邀请赛不对外展示，参赛者由管理端定向导入或一键生成。
 - **赛程状态机**：`scheduled → running → ended`（派生自 start_time/end_time，非落库列）；运行中的竞赛只允许延后 end_time 与改描述（收紧起止时间会破坏邀请赛已入场者的锁定语义）。
 - **题目绑定**：三种入参统一入口——题目 JSON（对象/数组，复用 content 管线导入后绑定）、`{"slugs": [...]}` 绑定既有题目、zip 题目包；单题失败整体拒绝，已绑定幂等跳过；running 竞赛禁止解绑（榜单已产生，撤题破坏现场）。
@@ -135,6 +139,32 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - **反作弊**：judge 在竞赛提交上执行跨队检测——提交串命中「本竞赛其他队伍成员」的运行中实例 flag（cross_team_flag）等类型写 CheatWarning，只产生管理端警告，不打断提交与判定。
 - **双榜**：队伍榜/个人榜均从 CompetitionScore 派生表只读聚合（派生行由事件派生器在竞赛首通时写入，AddScore 幂等）；竞赛服务不触碰派生表写入（event-sourcing-rules）。
 - **WP（Writeup）**：仅竞赛 ended 后开放；按题目分条提交/覆盖（文字 markdown + 可选脚本 zip ≤20MB），一人一题一份（队伍内各自提交）；管理端可浏览正文与下载 zip 附件。
+
+### 3.9 awd — AWD 独立域
+
+- **实体**：`AwdGame`（competition 一对一，状态 pending/running/paused/ended、回合秒数、竞域单位 team|user、计分 JSON）、`AwdService`（镜像/slug/端口/checker 配置/基础分与权重）、`AwdTeamService`（竞域单位 × 服务的靶机容器/internal host）、`AwdRound`、`AwdFlag`、`AwdCheck`、`AwdAttack`、`AwdScoreEvent`（append-only 得分账本）、`AwdStanding`（派生排名）、`AwdIncident`、`AwdAttackBox`、`AwdReport/Review`。
+- **竞域单位抽象**：个人赛 competitor=user，队伍赛 competitor=team；同一引擎同时支持公告中的个人 AWD 与成熟团队 AWD。团队赛要求全员已编队。
+- **Docker 运行时（单机 v1）**：每场竞赛创建一个 `--internal` 网络；靶机只接入该网络，**不发布宿主端口、不挂载 Docker socket/宿主目录**，资源限额、pids-limit、`cap-drop ALL` + 最小能力集（Web 服务 bind/降权）、`no-new-privileges`。SSH 攻击盒接同一网络并随机发布 SSH 端口；密码随机生成、加密落库，接口只回传连接信息不回传密码明文之外的内部字段。攻击盒/靶机都带 label，`DestroyGame` 按 label 清理容器与网络。
+- **回合引擎**：管理员开启回合时先落 `pending` 回合，再幂等播种确定性 flag（HMAC(seed, teamServiceID:round)）、执行 PUT/GET/CHECK，全部完成后置 `running` 并刷新计时。回合创建/结算/启动恢复按竞赛持有 PostgreSQL advisory lock（SQLite 为进程内键控锁），避免并发重复开回合/结算。进程重启扫描 running 比赛：pending 回合补 flag、只补缺失检查后续跑；已是 running 的回合保留现场不重复检查；同时判定滞留 pending 攻击。
+- **Checkers**：内置 HTTP/TCP/command（RuCTF 退出码 101/102/103/104/110）；检查明细落 `AwdCheck`，失败同步写 incident，输出中的 flag 脱敏。
+- **攻击判定**：提交只入 `AwdAttack.pending` 并写事件；worker 异步校验 flag 存在、未过期、非自攻、未被首杀，条件更新保证恰好一次 accepted；拒绝原因留运营记录。
+- **计分（公式可配置）**：SLA `round(base_score × sla_weight/100 × 成功检查/总检查 × sla_weight_cfg)`；攻击池 `attack_points` 按本轮不同攻击者均分；victim 每服务每回合只扣一次 `defense_loss`；checkdown 每服务每回合扣一次；总分下限 0。所有结果写 `AwdScoreEvent`（`idempotency_key` 唯一），`AwdStanding` 只由 `AwdScoreDeriver` 重放账本重建。
+- **战报与最终排名**：赛后 competitor 提交 Markdown/zip；管理员按 rubric 评审打分。`final = (awd_weight × AWD分/榜首×100 + report_weight × 报告分) / (awd_weight+report_weight)`，默认 70/30；并列比较报告分、最后有效攻击时间、competitor id。权重来自 `scoring_config`，赛前公布。
+- **导出**：最终排名/攻击/告警 CSV；证书与获奖名单复用共享证书域。
+- **边界**：单后端副本、Docker 单机；不承诺 HA，不做浏览器终端/K8s（runtime 接口预留）。
+
+### 3.10 exam — 在线考试独立域
+
+- **实体**：`ExamPaper`（标题/时长/总分/及格线）、`ExamQuestion`（single/multiple/truefalse/code；选项/答案/分值/题序，code 题可绑 Challenge）、`ExamAttempt`（单次尝试、服务端 expires_at、状态）、`ExamAnswer`、`ExamStanding`（派生）。
+- **生命周期**：开始作答时按 `min(start+duration, competition.end)` 计算到期时间并落库；到期由 worker 自动交卷，读取作答时懒判定过期（时间统一 UTC 存储/比较，避免 SQLite 时区偏移误判）。单次尝试、记录 IP；不做摄像头/防切屏。
+- **评分**：客观题交卷即时评分（多选全对才得分）；编程题复用 yak 判题引擎的 `exam` scope（`Submission.ExamAttemptID` + 事件 payload `exam_attempt_id`），全过 AC 得该题满分，全局派生器跳过 XP/竞赛积分，`ExamDeriver` 在 `exam.attempt.graded` 时重建成绩。试题/试卷在开赛前可编辑，开赛后锁定。
+- **结果**：成绩单含未开始/作答中/已交卷/超时状态、客观分/编程分/总分/是否通过，按分数降序、用时升序、交卷时间、用户 ID 排名；支持 CSV。
+
+### 3.11 赛务 — 实名名册 / 晋级 / 证书
+
+- **CompetitionProfile（实名名册）**：competition+user 唯一，字段 real_name/school/student_no/email/phone；选手自助补填，管理员可 CSV 导入；仅管理端可见。名册是证书接收人快照的来源。
+- **QualificationRule/Entry**：来源竞赛榜单（CTF 个人/队伍榜、Exam 成绩单、AWD 最终排名）按 `min_score/top_n/top_percent` 预览，应用到目标**未开始的邀请赛**：导入参赛者并生成邀请码；同一来源竞赛对同一目标只应用一次。AWD 团队排名按队伍展开为成员。
+- **CertificateRule/Certificate**：竞赛结束后按排名/比例/最低分签发；规则与接收人快照只增不改；同一竞赛内证书名称唯一，接收人去重；公开 16 位十六进制验证码 + 无需登录的验证页 + 可打印 HTML；支持证书/获奖名单 CSV 导出。不对接 NISP/AD 等外部认证 API。
 
 ## 4. 数据模型（ER 概览）
 
@@ -158,27 +188,50 @@ Event(id, user_id, type, payload, created_at)   # append-only
 ScoreRecord(派生) / LabInstance(user×challenge, status, expire_at)
 SystemSetting(key, value JSON, updated_by)       # 运行期统一设置（SMTP；密码字段加密落库）
 
-Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域（kind: public|invitational，创建后不可改）
-  ─┬─ CompetitionChallenge(绑定题目+分值快照)
+Competition(name, kind, format: ctf|awd|exam, scoring_mode,     # 共享赛务；format/kind 创建后不可改
+            registration_start/end, start_time, end_time → status 派生)
+  ─┬─ CompetitionChallenge(绑定题目+分值快照)                     # CTF
+   ├─ CtfAdjustment(append-only 附加分)                           # CTF
    ├─ Team(name) ← Participant(user, invite_code, entered_at, last_ip)
-   ├─ CheatWarning(user, team, type, reason)                     # 反作弊警告
-   ├─ Writeup(user×challenge, content_md + zip 附件)             # ended 后提交
-   └─ CompetitionScore(派生: user/team × challenge 首通分值)      # 双榜数据源
+   ├─ CompetitionProfile(competition×user, 实名/学校/学号/邮箱/电话)
+   ├─ CheatWarning(user, team, type, reason)                     # CTF 反作弊警告
+   ├─ Writeup(user×challenge, content_md + zip 附件)             # CTF ended 后提交
+   ├─ CompetitionScore(派生: user/team × challenge 首通分值)      # CTF 双榜数据源
+   ├─ QualificationRule/Entry(来源榜单 → 目标邀请赛参赛者)
+   └─ CertificateRule/Certificate(规则快照 + 接收人快照 + 唯一验证码)
+
+AwdGame(competition 1:1, status, competitor_type, round_seconds, scoring_config)
+  ─┬─ AwdService(镜像/端口/checker/分值权重) ─→ AwdTeamService(competitor×service 靶机)
+   ├─ AwdRound(number, starts_at/ends_at, seed) ─→ AwdFlag(round×teamService)
+   ├─ AwdCheck(round×teamService, action/status/output)
+   ├─ AwdAttack(attacker×victim flag, pending|accepted|rejected)
+   ├─ AwdScoreEvent(append-only 账本, idempotency_key 唯一) → AwdStanding(派生)
+   ├─ AwdIncident / AwdAttackBox(SSH 凭据加密)
+   └─ AwdReport(competitor, Markdown+zip) ─→ AwdReportReview(rubric 分/意见)
+
+ExamPaper(competition 1:1, duration, total, pass_score)
+  ─┬─ ExamQuestion(seq, type, options, answer, score, challenge_id)
+   └─ ExamAttempt(user×paper, started/expires/submitted, status)
+        ─┬─ ExamAnswer(question, answer, objective/code 分)
+        └─ ExamStanding(派生: 分数/通过/用时)
 ```
 
 字段级定义见 `backend/internal/model/`（gorm 实体即数据字典）。
 
 ## 5. 关键数据流
 
-三条主时序（带泳景图见 `docs/data-flow.md`）：
+主要时序（泳道图见 `docs/data-flow.md`）：
 
 1. **教程上传流**：admin 上传教程 zip → content 管线五步 → draft → admin 发布 → 对学生可见；
 2. **题目上传流**：admin 上传 challenge.json → 校验 → upsert 即生效（无 draft/publish）；
 3. **做题判定流**：student 在题目详情页提交 → 入队 pending → worker 恒时比较 → `submission.judged` 事件 → 派生器更新积分/进度/排行榜（题目关联教程时同步发 Room 通关事件；竞赛提交另派生 CompetitionScore 并做跨队反作弊检测）；
 4. **鉴权流**：请求 → JWT 解析 → 角色中间件（student/admin）→ handler；
 5. **注册流**：登录页发码（限频/窗口校验 → SmsCode 落库 → SMTP 投递；管理端设置优先、环境变量兜底，未配置时开发投递器写日志）→ 凭码建号（核销一次性 → 建号角色固定 student → 签发登录 token）；
-6. **竞赛流**：admin 建赛（选公开/邀请，创建后不可改）/绑题/配参赛者（邀请赛：CSV 导入既有账号或一键生成新号，邀请码+站内邀请；公开赛：广场自助报名，免码入场）→ 参赛者入场（邀请赛凭码入场并锁定至比赛结束；公开赛凭报名免码入场、可自由进出）→ 竞赛内做题走同一 judge 管线 → 双榜从 CompetitionScore 聚合 → ended 解锁后按题提交 WP（泳道图见 `docs/data-flow.md`）；
-7. **系统设置流**：admin 保存 SMTP → 校验并构造投递器 → 密码加密写入 `system_settings` → 原子替换 `DynamicEmailSender` 立即生效；校验/落库失败不切换，旧配置继续服务；每次变更记管理审计。
+6. **竞赛流**：admin 建赛（选 kind/format，创建后不可改）→ 按 format 配置（CTF 绑题 / AWD 服务定义与部署 / 考试组卷）→ 配参赛者（邀请赛：CSV/晋级导入或一键生成；公开赛：广场自助报名）→ 参赛者入场（邀请赛锁定至结束）→ CTF 走 judge、AWD 走回合攻防、考试走作答交卷 → 各域派生榜单 → 结束后 WP/战报/证书（泳道图见 `docs/data-flow.md`）；
+7. **AWD 攻防流**：开回合（pending→flag/检查→running）→ 选手提交 flag（pending→worker 判定）→ 结算写 AwdScoreEvent → AwdScoreDeriver 重建排名；
+8. **考试流**：开考（服务端 expires_at）→ 自动保存 → 交卷/到期 → 客观题即时 + 编程题 exam scope 判分 → ExamDeriver 重建成绩；
+9. **赛务流**：实名名册 → 来源榜单预览（CTF/AWD/Exam）→ 应用到目标邀请赛 → 赛后按排名签发证书 → 公开验证；
+10. **系统设置流**：admin 保存 SMTP → 校验并构造投递器 → 密码加密写入 `system_settings` → 原子替换 `DynamicEmailSender` 立即生效；校验/落库失败不切换，旧配置继续服务；每次变更记管理审计。
 
 ## 6. API 契约总览
 
@@ -220,19 +273,25 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 | `GET /admin/users` | admin | 用户管理表格：`q`（用户名/账号编码/邮箱/手机号子串）/`role`/`active`/`no_solves` 过滤，条目附 active（6 个月口径）与 solved_any 标记 |
 | `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（建号入口在邀请赛一键生成与自助注册；API 保留供账号运维） |
 | `POST /admin/users/{id}/reset-password` | admin | 重置用户密码（不校验旧密码，目标用户全部 token 失效；未绑定邮箱/手机号的账号找回入口） |
-| `POST /admin/competitions` 等 14 个 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind，不可改）/题目绑定/参赛者导入（仅邀请赛，编码或用户名引用，missing 回报）/一键生成账号（仅邀请赛，自动组队+初始密码导出）/容器总览/反作弊警告/WP 浏览与 zip 下载/双榜 |
-| `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/题目绑定/提交/WP/容器记录，事件历史保留） |
-| `GET /competitions` / `POST /competitions/{id}/register` | student | 竞赛广场（仅公开赛，含报名状态）/ 公开赛自助报名（幂等；邀请赛拒绝） |
+| `POST /admin/competitions` 等 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind/format/scoring_mode/报名窗口，kind/format 不可改）/题目绑定/参赛者导入/名册 CSV/晋级预览与应用/证书预览签发与 CSV/容器总览/反作弊警告/WP/双榜 |
+| `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/名册/晋级/证书/题目绑定/提交/WP/AWD/考试数据/容器记录，事件历史保留） |
+| `/admin/competitions/{id}/awd/*` | admin | AWD 控制台：配置/服务定义与服务包/部署靶机与攻击盒/回合开启结算/排名/检查攻击告警/战报评审/最终排名与 CSV |
+| `/admin/competitions/{id}/exam/*` | admin | 考试管理：试卷与试题 CRUD/成绩单与 CSV |
+| `/admin/competitions/{id}/roster` | admin | 实名名册 CSV 导入与查询（仅邀请赛；引用既有账号） |
+| `GET /competitions` / `POST /competitions/{id}/register` | student | 竞赛广场（仅公开赛，含报名状态）/ 公开赛自助报名（幂等；邀请赛拒绝；报名窗口校验） |
 | `GET /competitions/me` | student | 本人参赛与锁定状态（仅邀请赛锁定；路由守卫轮询） |
-| `POST /competitions/{id}/enter` | student | 入场：邀请码（两档通用）或公开赛已报名免码（running 限定；仅邀请赛锁定至结束） |
-| `/competitions/{id}/view`、`.../challenges/{slug}/instance`、`.../submissions`、`.../leaderboard`、`.../writeups*` | 参赛者 | 竞赛内做题闭环：题目列表/容器/提交/双榜/WP 提交与覆盖（ended 后） |
+| `POST /competitions/{id}/enter`、`GET|PUT /competitions/{id}/profile` | student | 入场（邀请码/公开赛免码，running 限定）/ 参赛实名信息补填 |
+| `/competitions/{id}/view`、`.../challenges/{slug}/instance`、`.../submissions`、`.../leaderboard`、`.../writeups*` | 参赛者 | CTF 做题闭环：题目列表/容器/提交/双榜/WP 提交与覆盖（ended 后） |
+| `/competitions/{id}/awd`、`.../attacks`、`.../scoreboard`、`.../report*`、`.../final` | 参赛者 | AWD：概览/攻击盒/目标目录/提交 flag/排行榜/赛后战报与最终排名 |
+| `/competitions/{id}/exam`、`.../attempts*` | 参赛者 | 考试：试卷/开始作答/自动保存/交卷/编程题提交/结果 |
+| `GET /certificates/{code}` | public | 无需登录的证书验证页数据（仅接收人/竞赛/奖项快照，不含内部用户 ID） |
 
 ## 7. 技术选型
 
 | 项 | 选型 | 理由 |
 |---|---|---|
 | 后端 | Go 1.22+ / net/http（标准库路由） | 零框架依赖起步，分层清晰 |
-| ORM | gorm + SQLite | 与 yaklang 生态一致；repo 接口抽象便于迁移 |
+| ORM | gorm + SQLite（开发/单机）/ PostgreSQL（生产） | repo 接口抽象；同一迁移与派生路径方言兼容，AWD 锁与并发由 PG advisory lock 承载 |
 | 认证 | golang-jwt/jwt/v5（HS256） | 成熟、无状态 |
 | 前端 | Vue3 + TS + Vite + Pinia + Vue Router | 管理后台开发效率 |
 | API 契约 | OpenAPI 3.0（手写 yaml） | 契约先行，前后端并行 |
@@ -244,10 +303,10 @@ Competition(name, kind, start_time, end_time → status 派生)      # 竞赛域
 | 纯函数单测 | service 内 | 表驱动 + 时钟注入 | `go test` |
 | 服务/仓库单测 | service / repo 同包 | 真实内存 SQLite + 真实 repo，禁止 mock repo | `go test -race ./...` |
 | 契约守卫 | api 包 | contract_test 双向比对 openapi.yaml ↔ 注册路由（集合、角色、公开性），漂移即红 | 同上 |
-| Docker 门控集成 | service | 真实 daemon（`ACADEMY_TEST_DOCKER=1` 门控，无 Docker 自动 Skip） | CI backend-docker job |
-| 并发竞态 | service / judge | 20 goroutine 并发提交，恰好一次结算 | `go test -race` |
+| Docker 门控集成 | service / repo | 真实 daemon（`ACADEMY_TEST_DOCKER=1` 门控，无 Docker 自动 Skip）：Lab 驱动、AWD 靶机隔离/SSH 攻击盒、PostgreSQL 迁移与 advisory lock | CI backend-docker job |
+| 并发竞态 | service / judge / AWD | 并发提交/开回合，恰好一次结算；AWD 回合锁串行 | `go test -race` |
 | 前端单测 | frontend | vitest 纯逻辑 | `npm test` |
-| E2E 旅程 | frontend/e2e | Playwright：双 webServer 自管理（后端 :18080 预编译单二进制 + vite :15173）、整跑全新 DB、管理 API 播种；13 条用户旅程（认证/教程/题目全链路/可见性/账号生命周期），`E2E_DOCKER=1` 追加容器旅程 | `npm run e2e` |
+| E2E 旅程 | frontend/e2e | Playwright：双 webServer 自管理（后端 :18080 预编译单二进制 + vite :15173）、整跑全新 DB、管理 API 播种；覆盖认证/教程/题目全链路/三赛制竞赛（CTF/AWD/考试）与赛季晋级证书旅程，`E2E_DOCKER=1` 追加容器旅程 | `npm run e2e` |
 
 E2E 基建约定（README「环境搭建与镜像加速」详述）：浏览器默认用系统 Chrome/Edge
 channel（零下载），串行 worker（共享 DB 与账号），改全局状态的用例自恢复。
@@ -259,6 +318,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **唯一受支持的部署形态**：Docker Compose 容器化部署于 **Linux 宿主**（amd64，受 vulinbox 基础镜像架构限制）。部署入口为根目录 `docker-compose.yml`（backend + frontend/nginx），配置样例 `deploy/env.example`；生产必改 `ACADEMY_JWT_SECRET` / `ACADEMY_ADMIN_PASSWORD`（启动告警兜底）。数据（SQLite/附件/头像/WP）统一持久化在 `./data` 卷：升级 = 重新 `docker compose up -d --build`，备份 = 备份 `./data`。环境要求 Docker Engine ≥ 20.10（`host-gateway` 支持）+ compose 插件。
 - **题目容器治理**：后端容器内置 docker CLI 并挂载宿主 `/var/run/docker.sock`，题目容器创建在宿主 daemon 上（兄弟容器，非嵌套）；compose 显式 `ACADEMY_ENV_DRIVER=docker`。
 - **检测点回达**：`DockerDriver.Create` 以 `--add-host host.docker.internal:host-gateway` 注入解析，`ACADEMY_PUBLIC_URL` 默认值（`http://host.docker.internal:8080`）在 Linux 宿主开箱即用（Docker Desktop 兼容，显式条目不冲突）；仅当宿主防火墙拦截容器→宿主流量时改为宿主 LAN IP。题目容器端口默认发布宿主 `127.0.0.1`（本地开发，浏览器在宿主上）；`ACADEMY_INSTANCE_PUBLIC_HOST` 设为学员浏览器可达的宿主地址（如内网 IP）时端口发布全网卡、实例 endpoint 用该地址拼装，远程学员可直连靶机。
+- **AWD 运行资产**：攻击盒镜像由 `deploy/build-awd-attackbox.sh` 构建（默认 `yak-awd-attackbox:latest`，auto-update 自动补建）；compose 暴露 `ACADEMY_AWD_ATTACK_IMAGE`/`ACADEMY_AWD_ATTACK_SSH_BIND`/`ACADEMY_AWD_ATTACK_PUBLIC_HOST` 与靶机/攻击盒资源限额。远程比赛必须把 PUBLIC_HOST 设为学员可达的宿主地址，并用宿主防火墙限制 SSH 端口来源；AWD 生产必须 PostgreSQL，且按单后端副本规划（回合锁跨进程，但进程内事件总线不承诺 HA）。
 - **非部署形态**：Docker Desktop（Win/Mac）仅本地体验；裸跑后端二进制（start.sh / start.bat）仅本地开发（env 驱动默认 auto：探测到 Docker 即 docker，否则 noop 501）。
 
 ## 10. 演进路线
@@ -273,7 +333,8 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 3.9** ✅ 已完成：编辑器 yak 化：yakit Monarch 词法移植为 CodeMirror 6 StreamLanguage（关键字/类型/内建函数/标准库前缀、f-string 内插表达式、x-string、反引号原串、heredoc、注释、shebang），替换此前的 Go 近似高亮；暗色编辑器主题（yakit kurior 取色，底 #212428、代码字白）+ 外观美化（gutter/选区/激活行/焦点环/禁用态）。**代码补全**：静态补全表（yakit 走 yak 语言服务器 IPC，浏览器端无通道故改静态）——词汇表提取自 yaklang 源码标准库导出表（Import 表 → yaklib 导出 map，ref 0971cec23d，12 库 835 个真实函数名），词首补全关键字/类型/内建/库前缀（含中文说明）+ 片段（for-range / ACM stdin 模板），`lib.` 成员补全给该库导出函数。纯前端改动，无接口/数据变更。
 - **Phase 3.10** ✅ 已完成：yak 库白名单/黑名单（防高危库执行，见 §3.4 库策略）：题目级 `judge.allowed_libs` 白名单（`acm_judges.allowed_libs` JSON 文本列，空 = 允许全部非黑名单；上传校验未知/黑名单/重复项 422，宇宙 = yaklang Import 注册 135 库）+ 全局黑名单（默认 exec/cli/ssh/file/filesys/filemonitor/fileparser/filescanner，`ACADEMY_YAK_LIB_BLACKLIST` 环境变量可替换）；提交与自测受理前标识符级静态扫描（剥注释/字符串，别名同检）命中即 422、不进引擎；详情页随发扣除黑名单后的白名单与黑名单列表（题面 chips + 补全菜单同源过滤），管理端编辑弹窗可配白名单。
 - **Phase 3.11** ✅ 已完成：判题计时模型修正（时限不含引擎启动/收尾）：`CodeEngine.Run` 接口改为显式传 `limit`；引擎在源码首尾注入 `__ACADEMY_YAK_BOOT__`/`__ACADEMY_YAK_DONE__` 标记行，首标记（用户代码开跑）到末标记（执行完毕）之间才受 `time_limit_s` 约束，末标记即杀进程（省 yak 退出滞留 2~7s/组）；启动+收尾整体受 60s 兜底；stdout/stderr 改自有 `os.Pipe`（`cmd.Wait` 不再被孙辈进程拖住，排空窗口后强制关读端收尾）；自测运行 `time_ms` 汇报执行段毫秒数。回归：`e2e/bugfix-acm-boot-timeout.spec.ts`（1s 时限题正确提交，修复前误 TLE）。同 PR 补引擎未装配守卫：题目详情 judge 段新增 `engine_available`（api 层从 JudgeService 拼装），false 时前端禁用提交/自测入口并警示联系管理员（编辑器仍可编码），代替点击后才收到 internal_error/422 的滞后反馈（服务端拦截仍兜底）。回归：`e2e/bugfix-acm-engine-unconfigured-guard.spec.ts`。
-- **Phase 4** 🔄 进行中：多人规模——SQLite → PostgreSQL（**已落地基础**：`ACADEMY_DB_DSN` 设 `postgres://` 连接串即切 PG，迁移与派生表路径方言兼容、真实 PG 集成测试回归；SQLite 仍为默认。待办：存量数据迁移工具）、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
+- **Phase 3.12** ✅ 已完成：三赛制竞赛域——Competition 增加不可变 `format=ctf|awd|exam`、CTF fixed 计分/附加分/零分榜单/CSV；AWD 独立域（game/服务包/Docker 内部网络靶机/SSH 攻击盒/checker/回合引擎/攻击异步判定/账本结算/战报 rubric/最终排名/CSV）；在线考试独立域（试卷/单次作答/服务端计时/客观题与 yak exam scope 编程题评分/成绩单）；赛务（实名名册/跨赛制晋级/证书规则签发与公开验证页）；AWD 回合锁与启动恢复、Docker 门控集成测试、部署攻击盒镜像；赛季端到端旅程 e2e。
+- **Phase 4** 🔄 进行中：多人规模——SQLite → PostgreSQL（**已落地基础**：`ACADEMY_DB_DSN` 设 `postgres://` 连接串即切 PG，迁移与派生表路径方言兼容、真实 PG 集成测试回归，AWD 回合使用 PG advisory lock；SQLite 仍为默认。待办：存量数据迁移工具）、事件总线外置（Redis Stream/MQ）、排行榜按赛季切片。
 
 ## 11. 当前边界（明确不做）
 
@@ -285,6 +346,9 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - 可观测性为「暴露而不内置」：`/metrics`（Prometheus 文本格式，HTTP 按路由聚合 + 运行时指标，`ACADEMY_METRICS_TOKEN` 令牌门控，未配置即关闭）与 slog 结构化访问日志（`ACADEMY_LOG_JSON=1` 切 JSON 行）；采集、存储、看板与告警由外部 Prometheus + Alertmanager / 日志采集器完成，平台不内置监控栈。`/health` 探针与 `/metrics` 采集不进指标与访问日志（高频探针噪音）。
 - 管理操作审计为独立 append-only 表（`admin_audit_logs`：管理端全部写操作——内容上传/发布/回滚/删除、题目与附件、竞赛、用户与角色、备份等——成功后 best-effort 落一行，查询走 `GET /admin/audit-logs`）：与 Event 学生行为流分工，不进事件总线、不参与积分重放；审计写失败仅服务日志告警不阻断业务响应，无防篡改（单库同卷，与库共生死）。
 - 性能面板（容器管理页，`GET /admin/performance`）为即时快照无历史：数据源 docker info/stats + Linux 宿主 `/proc` 采样（容器内即宿主全局视图）+ 数据卷 statfs；趋势与告警不在平台内置（走外部 Prometheus 栈），非 Linux 开发态宿主占用与数据卷字段为 null。
+- AWD 为 Docker 单机单后端副本方案：不承诺 HA/横向扩展；不做浏览器终端/K8s；攻击盒 SSH 端口默认发布全网卡，必须由部署侧防火墙收敛来源。AWD 不内置题目/服务镜像，服务包只由管理员上传构建。
+- 在线考试不做摄像头/防切屏/人脸核验，仅服务端计时 + 单次尝试 + IP 记录；编程题依赖 `ACADEMY_YAK_BIN`，未装配时按 internal_error 处理并可重试。
+- 证书只生成本平台记录 + 可打印 HTML + CSV，不对接 NISP/AD 等外部认证 API；外部发证由赛务侧办理。
 - 不引入 Casbin / Redis / K8s；数据层默认 SQLite，`ACADEMY_DB_DSN` 可选切 PostgreSQL（Phase 4 已落地的第一步；存量 SQLite 数据不自动迁移）。
 - JWT secret 与初始管理员密码存在开发默认值（本地开发便利）；生产以环境变量覆盖并建议开启严格模式（`ACADEMY_STRICT=1`：凭据为内置默认或低于强度下限、或开启验证码回显时拒绝启动，非严格路径仅启动告警）。邮箱验证码的 SMTP 配置在管理端「系统设置」统一管理（保存后覆盖环境变量默认值）——未配置/停用时严格模式发码返回 501。SMTP 密码加密密钥由 JWT secret 派生，轮换 JWT secret 后需在设置页重新填写 SMTP 密码。
 - 内置训练的 vulinbox 基础镜像构建依赖官方 CDN（`oss-qn.yaklang.com`，离线部署需手工预构建镜像）且仅 amd64；二进制 sha256 锁定在 Dockerfile，上游更新会使导入 422（防靶机行为漂移，更新题集时重新锁定）。
