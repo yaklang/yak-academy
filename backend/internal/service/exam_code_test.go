@@ -85,6 +85,19 @@ func TestExamCodeGrading(t *testing.T) {
 	if attempt.CodeScore != 0 || attempt.TotalScore != 0 {
 		t.Fatalf("pending code must not score: %+v", attempt)
 	}
+	examView, err := svc.Exam(ctx, comp.ID, alice.ID)
+	if err != nil {
+		t.Fatalf("exam view: %v", err)
+	}
+	codeDraft := ""
+	for _, answer := range examView.Answers {
+		if answer.QuestionID == code.ID {
+			codeDraft, _ = answer.Answer.(string)
+		}
+	}
+	if codeDraft != "print(1)" {
+		t.Fatalf("code draft not persisted: %q", codeDraft)
+	}
 	judged := func(submissionID uint, correct bool) {
 		payload, _ := json.Marshal(map[string]any{
 			"exam_attempt_id": attempt.ID, "submission_id": submissionID,

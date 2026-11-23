@@ -1472,6 +1472,82 @@ export const adminExamApi = {
     http.del<{ ok: boolean }>(`/admin/competitions/${id}/exam/questions/${qid}`),
 }
 
+// 考试（Exam）参赛端：服务端计时、单次作答、自动保存、交卷与编程题判定。
+export interface ExamParticipantCompetition {
+  id: number
+  name: string
+  description: string
+  kind: CompetitionKind
+  format: CompetitionFormat
+  status: CompetitionStatus
+  start_time: string
+  end_time: string
+}
+export interface ExamPaperPublic {
+  id: number
+  title: string
+  description: string
+  duration_seconds: number
+  pass_score: number
+  total_score: number
+}
+export interface ExamQuestionPublic {
+  id: number
+  seq: number
+  type: ExamQuestionType
+  title: string
+  content: string
+  options: ExamOption[]
+  score: number
+  challenge_id: number
+  explanation?: string
+}
+export interface ExamAttemptView {
+  id: number
+  status: 'in_progress' | 'submitted' | 'expired'
+  started_at: string
+  expires_at: string
+  submitted_at: string | null
+  auto_submitted: boolean
+  remaining_seconds: number
+  objective_score: number
+  code_score: number
+  total_score: number
+  passed: boolean
+}
+export interface ExamAnswerView {
+  question_id: number
+  answer: unknown
+  graded: boolean
+  correct: boolean
+  score: number
+  code_submission_id: number
+}
+export interface ExamParticipantView {
+  competition: ExamParticipantCompetition
+  paper: ExamPaperPublic
+  attempt: ExamAttemptView | null
+  questions: ExamQuestionPublic[]
+  answers: ExamAnswerView[]
+  server_time: string
+}
+export interface ExamCodeSubmissionView {
+  question_id: number
+  submission_id: number
+  status: 'pending' | 'correct' | 'incorrect'
+  verdict?: string
+}
+export const competitionExamApi = {
+  view: (id: number) => http.get<ExamParticipantView>(`/competitions/${id}/exam`),
+  startAttempt: (id: number) => http.post<ExamParticipantView>(`/competitions/${id}/exam/attempts`),
+  saveAnswer: (id: number, qid: number, answer: unknown) =>
+    http.put<ExamAnswerView>(`/competitions/${id}/exam/attempts/current/answers/${qid}`, { answer }),
+  submitAttempt: (id: number) =>
+    http.post<ExamParticipantView>(`/competitions/${id}/exam/attempts/current/submit`),
+  submitCode: (id: number, qid: number, answer: string) =>
+    http.post<ExamCodeSubmissionView>(`/competitions/${id}/exam/attempts/current/questions/${qid}/code`, { answer }),
+}
+
 // 竞赛管理（管理端）。
 export const adminCompetitionApi = {
   list: (page = 1, pageSize = 20) =>

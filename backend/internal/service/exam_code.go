@@ -12,6 +12,8 @@ import (
 // 考试编程题：复用 judge 的 exam scope（Submission.ExamAttemptID），
 // 判题事件回写 ExamAnswer 并重算考试分；全局 XP/竞赛积分派生跳过该作用域。
 
+const maxExamCodeSource = 64 << 10
+
 type ExamCodeSubmissionView struct {
 	QuestionID   uint                    `json:"question_id"`
 	SubmissionID uint                    `json:"submission_id"`
@@ -25,7 +27,7 @@ func (s *ExamService) SubmitCode(ctx context.Context, competitionID, userID, que
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
+	now := s.nowUTC()
 	if comp.Status(now) != model.CompetitionRunning {
 		return nil, fmt.Errorf("%w: competition is not running", ErrValidation)
 	}
@@ -65,9 +67,10 @@ func (s *ExamService) SubmitCode(ctx context.Context, competitionID, userID, que
 		return nil, err
 	}
 	// 绑定最新一次提交；旧提交的迟到判定会被 UpdateAnswerCodeGrading 的
-	// submission_id 条件拒绝。
+	// submission_id 条件拒绝。answer_json 保存源码草稿供刷新后恢复。
+	sourceJSON, _ := json.Marshal(answer)
 	if err := s.exam.UpsertAnswer(ctx, &model.ExamAnswer{
-		AttemptID: attempt.ID, QuestionID: question.ID,
+		AttemptID: attempt.ID, QuestionID: question.ID, AnswerJSON: string(sourceJSON),
 		CodeSubmissionID: sub.ID, Graded: false, Correct: false, Score: 0,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

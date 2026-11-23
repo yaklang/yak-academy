@@ -124,7 +124,7 @@ func (s *ExamService) Exam(ctx context.Context, competitionID, userID uint) (*Ex
 	if err != nil && !isNotFound(err) {
 		return nil, err
 	}
-	now := s.now()
+	now := s.nowUTC()
 	if attempt != nil && attempt.Status == model.ExamAttemptInProgress && !now.Before(attempt.ExpiresAt) {
 		s.expireAttempt(ctx, attempt, attempt.ExpiresAt)
 		if reload, err := s.exam.FindAttempt(ctx, attempt.ID); err == nil {
@@ -194,7 +194,7 @@ func (s *ExamService) StartAttempt(ctx context.Context, competitionID, userID ui
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
+	now := s.nowUTC()
 	if comp.Status(now) != model.CompetitionRunning {
 		return nil, fmt.Errorf("%w: competition is not running", ErrValidation)
 	}
@@ -255,7 +255,7 @@ func (s *ExamService) SaveAnswer(ctx context.Context, competitionID, userID, que
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
+	now := s.nowUTC()
 	if comp.Status(now) != model.CompetitionRunning {
 		return nil, fmt.Errorf("%w: competition is not running", ErrValidation)
 	}
@@ -378,7 +378,16 @@ func normalizeExamParticipantAnswer(question *model.ExamQuestion, raw json.RawMe
 		encoded, _ := json.Marshal(value)
 		return string(encoded), nil
 	case model.ExamQuestionCode:
-		return "", fmt.Errorf("%w: code questions are submitted through the judge endpoint", ErrValidation)
+		// 编程题草稿：只保存源码文本，判题结果由 exam_code.go 回写。
+		var source string
+		if err := json.Unmarshal(trimmed, &source); err != nil {
+			return "", fmt.Errorf("%w: code answer must be a string", ErrValidation)
+		}
+		if len(source) > maxExamCodeSource {
+			return "", fmt.Errorf("%w: code source exceeds 64KiB", ErrValidation)
+		}
+		encoded, _ := json.Marshal(source)
+		return string(encoded), nil
 	}
 	return "", fmt.Errorf("%w: invalid question type", ErrValidation)
 }
@@ -403,7 +412,7 @@ func (s *ExamService) pollExpiredAttempts(ctx context.Context) {
 
 // ExpireDueAttempts 单轮到期扫描（worker 与测试共用）。
 func (s *ExamService) ExpireDueAttempts(ctx context.Context) (int, error) {
-	now := s.now()
+	now := s.nowUTC()
 	attempts, err := s.exam.ListExpiredAttempts(ctx, now, examExpireBatch)
 	if err != nil {
 		log.Printf("exam: list expired attempts: %v", err)

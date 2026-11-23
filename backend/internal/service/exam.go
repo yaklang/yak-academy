@@ -39,6 +39,11 @@ func (s *ExamService) SetNow(now func() time.Time) {
 	}
 }
 
+// nowUTC 统一考试域落库/比较时钟。SQLite 按字符串比较时间，混用本地
+// 时区（+08:00）与 UTC 会把未来时间误判为已过期；统一 UTC 后与 PostgreSQL
+// 的 timestamptz 语义一致。
+func (s *ExamService) nowUTC() time.Time { return s.now().UTC() }
+
 // SetJudge 注入判题服务（编程题 exam scope 提交）；未注入时编程题不可提交。
 func (s *ExamService) SetJudge(judge *JudgeService) {
 	s.judge = judge
