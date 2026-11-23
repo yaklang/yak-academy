@@ -182,3 +182,11 @@ func (r *awdRepo) HasAcceptedAttack(ctx context.Context, flagID uint) (bool, err
 		Where("flag_id = ? AND status = ?", flagID, model.AwdAttackAccepted).Count(&n).Error
 	return n > 0, err
 }
+
+func (r *awdRepo) CreateCheck(ctx context.Context, check *model.AwdCheck) error {
+	return r.db.WithContext(ctx).Create(check).Error
+}
+
+func (r *awdRepo) CreateIncident(ctx context.Context, incident *model.AwdIncident) error {
+	return r.db.WithContext(ctx).Create(incident).Error
+}

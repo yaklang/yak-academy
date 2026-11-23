@@ -300,6 +300,9 @@ func (s *AwdCompetitionService) CreateService(ctx context.Context, competitionID
 	if err != nil {
 		return nil, err
 	}
+	if _, err := NewAwdChecker(svc.CheckerConfig); err != nil {
+		return nil, err
+	}
 	if err := s.awd.CreateService(ctx, svc); err != nil {
 		return nil, err
 	}
@@ -491,6 +494,9 @@ func (s *AwdCompetitionService) UpdateService(ctx context.Context, competitionID
 	if in.CheckerConfig != nil {
 		checker, err := normalizeChecker(in.CheckerConfig)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := NewAwdChecker(checker); err != nil {
 			return nil, err
 		}
 		fields["checker_config"] = checker
@@ -734,6 +740,72 @@ func (s *AwdCompetitionService) DeployAttackBoxes(ctx context.Context, competiti
 		return result, fmt.Errorf("awd attack boxes: %d failed: %s", len(result.Failed), strings.Join(result.Failed, "; "))
 	}
 	return result, nil
+}
+
+// RunChecker 对单个靶机执行 CHECK/PUT/GET，落 AwdCheck 明细并推进
+// last_check_at；非 ok 同步记 AwdIncident。输出中的 flag 会被脱敏。
+func (s *AwdCompetitionService) RunChecker(ctx context.Context, teamServiceID uint, action, flag string) (*model.AwdCheck, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "check" && action != "put" && action != "get" {
+		return nil, fmt.Errorf("%w: invalid checker action", ErrValidation)
+	}
+	if action != "check" && strings.TrimSpace(flag) == "" {
+		return nil, fmt.Errorf("%w: flag is required for %s", ErrValidation, action)
+	}
+	ts, err := s.awd.FindTeamService(ctx, teamServiceID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	service, err := s.awd.FindService(ctx, ts.ServiceID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	checker, err := NewAwdChecker(service.CheckerConfig)
+	if err != nil {
+		return nil, err
+	}
+	ports, err := parseAwdPorts(ts.PortsJSON)
+	if err != nil {
+		return nil, err
+	}
+	result := checker.Run(ctx, action, AwdCheckTarget{
+		Host: ts.InternalHost, ServiceSlug: service.Slug, Ports: ports, Flag: flag,
+	})
+	output := result.Output
+	if flag != "" {
+		output = strings.ReplaceAll(output, flag, "[flag]")
+	}
+	now := s.now()
+	check := &model.AwdCheck{
+		RoundID: 0, TeamServiceID: ts.ID, Action: action, Status: result.Status,
+		LatencyMS: int(result.Latency / time.Millisecond), Output: output, CreatedAt: now,
+	}
+	// RoundID 由回合执行器补写；单独调用时保持 0（运营态检查）。
+	if err := s.awd.CreateCheck(ctx, check); err != nil {
+		return nil, err
+	}
+	if err := s.awd.UpdateTeamServiceSelective(ctx, ts.ID, map[string]any{"last_check_at": now}); err != nil {
+		return nil, err
+	}
+	if result.Status != AwdCheckOK {
+		_ = s.awd.CreateIncident(ctx, &model.AwdIncident{
+			CompetitionID: service.CompetitionID, CompetitorType: ts.CompetitorType,
+			CompetitorID: ts.CompetitorID, ServiceID: ts.ServiceID,
+			Kind: fmt.Sprintf("%s_%s", action, result.Status), Detail: output, CreatedAt: now,
+		})
+	}
+	return check, nil
+}
+
+func parseAwdPorts(raw string) ([]AwdPort, error) {
+	var ports []AwdPort
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("%w: service ports are empty", ErrValidation)
+	}
+	if err := json.Unmarshal([]byte(raw), &ports); err != nil || len(ports) == 0 {
+		return nil, fmt.Errorf("%w: invalid service ports JSON", ErrValidation)
+	}
+	return ports, nil
 }
 
 // AwdAttackValidation 攻击提交的校验结论（accepted=false 为业务拒绝，不返回 error）。

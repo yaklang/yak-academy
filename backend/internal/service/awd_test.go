@@ -7,6 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -613,5 +619,141 @@ func TestAwdAttackBoxes(t *testing.T) {
 	again, err := awdSvc.DeployAttackBoxes(ctx, comp.ID)
 	if err != nil || again.Created != 0 || again.Reused != 2 {
 		t.Fatalf("idempotent attack boxes: %+v err=%v", again, err)
+	}
+}
+
+func httpAwdTestServer(t *testing.T) (*httptest.Server, *string) {
+	t.Helper()
+	var stored string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/flag", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodPost {
+			var body map[string]string
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			stored = body["flag"]
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if stored == "" {
+			http.Error(w, "no flag", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte("current=" + stored))
+	})
+	return httptest.NewServer(mux), &stored
+}
+
+// TestAwdHttpChecker HTTP checker：CHECK/PUT/GET 成功与 flag 不匹配失败。
+func TestAwdHttpChecker(t *testing.T) {
+	server, _ := httpAwdTestServer(t)
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	host, portRaw, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(portRaw)
+	target := AwdCheckTarget{Host: host, Ports: []AwdPort{{Name: "http", Port: port}}, Flag: "flag{check}"}
+	checker, err := NewAwdChecker(`{"type":"http","check_path":"/health","flag_path":"/flag"}`)
+	if err != nil {
+		t.Fatalf("new checker: %v", err)
+	}
+	check := checker.Run(context.Background(), "check", target)
+	if check.Status != AwdCheckOK {
+		t.Fatalf("check: %+v", check)
+	}
+	put := checker.Run(context.Background(), "put", target)
+	if put.Status != AwdCheckOK {
+		t.Fatalf("put: %+v", put)
+	}
+	get := checker.Run(context.Background(), "get", target)
+	if get.Status != AwdCheckOK {
+		t.Fatalf("get: %+v", get)
+	}
+	bad := checker.Run(context.Background(), "get", AwdCheckTarget{Host: host, Ports: target.Ports, Flag: "flag{other}"})
+	if bad.Status != AwdCheckFail {
+		t.Fatalf("bad flag: %+v", bad)
+	}
+	if _, err := NewAwdChecker(`{"type":"nope"}`); !errors.Is(err, ErrValidation) {
+		t.Fatalf("bad checker type: want ErrValidation, got %v", err)
+	}
+}
+
+// TestAwdRunChecker RunChecker 落检查明细、推进 last_check_at、失败记 incident，
+// 并把输出中的 flag 脱敏。
+func TestAwdRunChecker(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdRepo := repo.NewAwdRepo(e.gdb)
+	server, _ := httpAwdTestServer(t)
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	host, portRaw, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(portRaw)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD checker 赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	awdSvc := NewAwdCompetitionService(awdRepo, repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	checkerCfg := json.RawMessage(`{"type":"http","check_path":"/health","flag_path":"/flag"}`)
+	svc, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: port}},
+		CheckerConfig: checkerCfg,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	ts := &model.AwdTeamService{
+		GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorUser,
+		CompetitorID: 1, InternalHost: host, PortsJSON: svc.PortsJSON, Status: "running",
+	}
+	if err := e.gdb.Create(ts).Error; err != nil {
+		t.Fatalf("seed team service: %v", err)
+	}
+	if _, err := awdSvc.RunChecker(ctx, ts.ID, "put", "flag{secret}"); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	check, err := awdSvc.RunChecker(ctx, ts.ID, "get", "flag{secret}")
+	if err != nil || check.Status != AwdCheckOK {
+		t.Fatalf("get: %+v err=%v", check, err)
+	}
+	if strings.Contains(check.Output, "flag{secret}") {
+		t.Fatalf("flag leaked in check output: %q", check.Output)
+	}
+	var stored model.AwdTeamService
+	if err := e.gdb.First(&stored, ts.ID).Error; err != nil || stored.LastCheckAt == nil {
+		t.Fatalf("last_check_at not updated: %+v err=%v", stored, err)
+	}
+	var checkCount int64
+	e.gdb.Model(&model.AwdCheck{}).Where("team_service_id = ?", ts.ID).Count(&checkCount)
+	if checkCount != 2 {
+		t.Fatalf("check rows = %d, want 2", checkCount)
+	}
+
+	badTS := &model.AwdTeamService{
+		GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorUser,
+		CompetitorID: 2, InternalHost: "127.0.0.1",
+		PortsJSON: `[{"name":"http","port":1,"protocol":"tcp"}]`, Status: "running",
+	}
+	if err := e.gdb.Create(badTS).Error; err != nil {
+		t.Fatalf("seed bad team service: %v", err)
+	}
+	failed, err := awdSvc.RunChecker(ctx, badTS.ID, "check", "")
+	if err != nil || failed.Status == AwdCheckOK {
+		t.Fatalf("unreachable check: %+v err=%v", failed, err)
+	}
+	var incidents int64
+	e.gdb.Model(&model.AwdIncident{}).Where("competitor_id = ?", 2).Count(&incidents)
+	if incidents != 1 {
+		t.Fatalf("incidents = %d, want 1", incidents)
 	}
 }
