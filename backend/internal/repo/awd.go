@@ -120,6 +120,20 @@ func (r *awdRepo) FindActiveRound(ctx context.Context, gameID uint) (*model.AwdR
 	return &round, nil
 }
 
+func (r *awdRepo) ListRoundsByGame(ctx context.Context, gameID uint) ([]model.AwdRound, error) {
+	var list []model.AwdRound
+	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).
+		Order("number asc").Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListAttackBoxes(ctx context.Context, competitionID uint) ([]model.AwdAttackBox, error) {
+	var list []model.AwdAttackBox
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
 func (r *awdRepo) ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error) {
 	var list []model.AwdTeamService
 	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).Order("id asc").Find(&list).Error
@@ -275,6 +289,37 @@ func (r *awdRepo) ListIncidentsByCompetitor(ctx context.Context, competitionID u
 	var list []model.AwdIncident
 	err := r.db.WithContext(ctx).
 		Where("competition_id = ? AND competitor_type = ? AND competitor_id = ?", competitionID, competitorType, competitorID).
+		Order("id desc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListIncidents(ctx context.Context, competitionID uint, limit int) ([]model.AwdIncident, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var list []model.AwdIncident
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id desc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListAttacksByGame(ctx context.Context, gameID uint, limit int) ([]model.AwdAttack, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).
+		Order("id desc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListChecksByGame(ctx context.Context, gameID uint, limit int) ([]model.AwdCheck, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var list []model.AwdCheck
+	err := r.db.WithContext(ctx).
+		Where("round_id IN (?)", r.db.Model(&model.AwdRound{}).Select("id").Where("game_id = ?", gameID)).
 		Order("id desc").Limit(limit).Find(&list).Error
 	return list, err
 }

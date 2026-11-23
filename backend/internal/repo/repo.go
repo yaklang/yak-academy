@@ -415,6 +415,7 @@ type AwdRepo interface {
 	CreateRound(ctx context.Context, round *model.AwdRound) error
 	UpdateRoundSelective(ctx context.Context, id uint, fields map[string]any) error
 	FindActiveRound(ctx context.Context, gameID uint) (*model.AwdRound, error)
+	ListRoundsByGame(ctx context.Context, gameID uint) ([]model.AwdRound, error)
 	ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error)
 	FindTeamService(ctx context.Context, id uint) (*model.AwdTeamService, error)
 	FindTeamServiceByKey(ctx context.Context, gameID, serviceID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdTeamService, error)
@@ -422,6 +423,7 @@ type AwdRepo interface {
 	UpdateTeamServiceSelective(ctx context.Context, id uint, fields map[string]any) error
 
 	FindAttackBoxByKey(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdAttackBox, error)
+	ListAttackBoxes(ctx context.Context, competitionID uint) ([]model.AwdAttackBox, error)
 	CreateAttackBox(ctx context.Context, box *model.AwdAttackBox) error
 	UpdateAttackBoxSelective(ctx context.Context, id uint, fields map[string]any) error
 	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
@@ -431,11 +433,14 @@ type AwdRepo interface {
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
 	HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error)
 	ListPendingAttacks(ctx context.Context, limit int) ([]model.AwdAttack, error)
+	ListAttacksByGame(ctx context.Context, gameID uint, limit int) ([]model.AwdAttack, error)
 	UpdateAttackStatus(ctx context.Context, id uint, status model.AwdAttackStatus, reason string, judgedAt time.Time) (int64, error)
 	CreateCheck(ctx context.Context, check *model.AwdCheck) error
 	ListChecksByRound(ctx context.Context, roundID uint) ([]model.AwdCheck, error)
+	ListChecksByGame(ctx context.Context, gameID uint, limit int) ([]model.AwdCheck, error)
 	FindLastCheckByTeamService(ctx context.Context, teamServiceID uint) (*model.AwdCheck, error)
 	ListIncidentsByCompetitor(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdIncident, error)
+	ListIncidents(ctx context.Context, competitionID uint, limit int) ([]model.AwdIncident, error)
 	ListAttacksByAttacker(ctx context.Context, gameID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdAttack, error)
 	ListAcceptedAttacksByRound(ctx context.Context, roundID uint) ([]model.AwdAttack, error)
 	CreateScoreEvents(ctx context.Context, events []model.AwdScoreEvent) (int64, error)

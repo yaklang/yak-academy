@@ -280,6 +280,68 @@ func (h *Handlers) adminSettleAwdRound(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *Handlers) adminAwdConsole(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.AdminConsole(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminDeployAwdTargets(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.AWD.DeployTargets(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.deploy.targets", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"created": result.Created, "reused": result.Reused})
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) adminDeployAwdAttackBoxes(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.AWD.DeployAttackBoxes(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.deploy.attack_boxes", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"created": result.Created, "reused": result.Reused})
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) adminStartAwdRound(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.AWD.StartRound(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.round.start", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"round_id": result.Round.ID, "number": result.Round.Number, "flags": result.Flags})
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handlers) adminListAwdStandings(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {
