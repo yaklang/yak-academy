@@ -1682,6 +1682,11 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 		last           time.Time
 	}
 	agg := map[uint]*personAgg{}
+	// 先按参赛名册铺设零分行：个人榜必须展示未解出任何题的参赛者，
+	// 否则「未得分」与「未参赛」在榜单上无法区分，也无法用于晋级/证书。
+	for _, p := range parts {
+		agg[p.UserID] = &personAgg{userID: p.UserID, teamID: p.TeamID}
+	}
 	for _, sc := range scores {
 		a := agg[sc.UserID]
 		if a == nil {
