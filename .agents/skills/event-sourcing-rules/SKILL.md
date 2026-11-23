@@ -24,6 +24,9 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 | `awd.attack.judged` | AWD worker 完成攻击判定（accepted/rejected + reason） |
 | `awd.report.submitted` | AWD 赛后代战报提交（Markdown/zip 更新） |
 | `awd.report.reviewed` | AWD 战报 rubric 评审完成（score/comment） |
+| `exam.attempt.started` | 考试开始作答（服务端计时，payload 含 competition/paper/attempt/expires_at） |
+| `exam.attempt.submitted` | 考试交卷（手动或到期自动；payload 含 attempt/auto_submitted） |
+| `exam.attempt.graded` | 考试评分完成（客观题即时 + 编程题 judge 回写；ExamStanding 由此重放） |
 
 每个事件必带：`user_id / type / payload(JSON) / created_at`。
 
