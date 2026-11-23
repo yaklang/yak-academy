@@ -301,3 +301,106 @@ func TestAwdGameLifecycle(t *testing.T) {
 		t.Fatalf("start before competition: want ErrValidation, got %v", err)
 	}
 }
+
+// TestAwdFlagsAndAttackValidation 回合 flag 确定性生成 + 攻击校验：
+// 非自攻/未过期/未首杀接受；自攻、过期、重复首杀拒绝。
+func TestAwdFlagsAndAttackValidation(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdRepo := repo.NewAwdRepo(e.gdb)
+	awdSvc := NewAwdCompetitionService(awdRepo, repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD flag 赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	svc, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: 80}},
+		FlagLifetimeRounds: intPtr(2),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	teamA := &model.AwdTeamService{GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorTeam, CompetitorID: 101, Status: "running"}
+	teamB := &model.AwdTeamService{GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorTeam, CompetitorID: 102, Status: "running"}
+	if err := e.gdb.Create(teamA).Error; err != nil {
+		t.Fatalf("seed team A: %v", err)
+	}
+	if err := e.gdb.Create(teamB).Error; err != nil {
+		t.Fatalf("seed team B: %v", err)
+	}
+	round := &model.AwdRound{GameID: game.ID, Number: 1, Status: model.AwdRoundRunning, StartsAt: e.now, EndsAt: e.now.Add(5 * time.Minute), Seed: "seed-1"}
+	if err := e.gdb.Create(round).Error; err != nil {
+		t.Fatalf("seed round: %v", err)
+	}
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).Updates(map[string]any{
+		"status": model.AwdGameRunning, "current_round": 1,
+	}).Error; err != nil {
+		t.Fatalf("start game: %v", err)
+	}
+
+	flags, err := awdSvc.GenerateFlags(ctx, round.ID)
+	if err != nil || len(flags) != 2 {
+		t.Fatalf("generate flags: %+v err=%v", flags, err)
+	}
+	flagsAgain, err := awdSvc.GenerateFlags(ctx, round.ID)
+	if err != nil || len(flagsAgain) != 2 {
+		t.Fatalf("regenerate flags: %+v err=%v", flagsAgain, err)
+	}
+	if flags[0].Value != flagsAgain[0].Value || flags[1].Value != flagsAgain[1].Value {
+		t.Fatalf("flags are not deterministic: %+v vs %+v", flags, flagsAgain)
+	}
+	var flagA, flagB model.AwdFlag
+	for _, f := range flags {
+		switch f.TeamServiceID {
+		case teamA.ID:
+			flagA = f
+		case teamB.ID:
+			flagB = f
+		}
+	}
+	if flagA.Value == "" || flagA.ValueHash == "" || flagA.ValidUntilRound != 2 {
+		t.Fatalf("flag A: %+v", flagA)
+	}
+
+	got, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 102, flagA.Value)
+	if err != nil || !got.Accepted || got.VictimID != 101 || got.RoundID != round.ID {
+		t.Fatalf("valid attack: %+v err=%v", got, err)
+	}
+	self, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 101, flagA.Value)
+	if err != nil || self.Accepted || self.Reason != "cannot attack your own service" {
+		t.Fatalf("self attack: %+v err=%v", self, err)
+	}
+	unknown, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 102, "flag{nope}")
+	if err != nil || unknown.Accepted || unknown.Reason != "flag not found" {
+		t.Fatalf("unknown flag: %+v err=%v", unknown, err)
+	}
+
+	now := e.now
+	if err := awdRepo.CreateAttack(ctx, &model.AwdAttack{
+		GameID: game.ID, RoundID: round.ID, AttackerType: model.AwdCompetitorTeam, AttackerID: 102,
+		VictimTeamServiceID: teamA.ID, FlagID: flagA.ID, Status: model.AwdAttackAccepted,
+		SubmittedAt: now, JudgedAt: &now,
+	}); err != nil {
+		t.Fatalf("seed accepted attack: %v", err)
+	}
+	captured, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 102, flagA.Value)
+	if err != nil || captured.Accepted || captured.Reason != "flag already captured" {
+		t.Fatalf("captured flag: %+v err=%v", captured, err)
+	}
+
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).Update("current_round", 3).Error; err != nil {
+		t.Fatalf("advance round: %v", err)
+	}
+	expired, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 101, flagB.Value)
+	if err != nil || expired.Accepted || expired.Reason != "flag expired" {
+		t.Fatalf("expired flag: %+v err=%v", expired, err)
+	}
+}

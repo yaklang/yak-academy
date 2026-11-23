@@ -4,6 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -520,6 +523,139 @@ func (s *AwdCompetitionService) DeleteService(ctx context.Context, competitionID
 		return fmt.Errorf("%w: service has deployed targets", ErrValidation)
 	}
 	return s.awd.DeleteService(ctx, serviceID)
+}
+
+// AwdAttackValidation 攻击提交的校验结论（accepted=false 为业务拒绝，不返回 error）。
+type AwdAttackValidation struct {
+	Accepted            bool
+	Reason              string
+	FlagID              uint
+	RoundID             uint
+	VictimTeamServiceID uint
+	VictimType          model.AwdCompetitorType
+	VictimID            uint
+}
+
+// GenerateFlags 为一回合的每个竞域单位服务生成确定性 flag：
+// value = HMAC-SHA256(round.Seed, "<teamServiceID>:<roundNumber>")，
+// 同一回合重复播种得到相同值（repo 唯一索引 + OnConflict 保证幂等）。
+func (s *AwdCompetitionService) GenerateFlags(ctx context.Context, roundID uint) ([]model.AwdFlag, error) {
+	round, err := s.awd.FindRound(ctx, roundID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	if strings.TrimSpace(round.Seed) == "" {
+		return nil, fmt.Errorf("%w: round seed is empty", ErrValidation)
+	}
+	game, err := s.awd.FindGame(ctx, round.GameID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	teamServices, err := s.awd.ListTeamServicesByGame(ctx, game.ID)
+	if err != nil {
+		return nil, err
+	}
+	services, err := s.awd.ListServices(ctx, game.CompetitionID)
+	if err != nil {
+		return nil, err
+	}
+	lifetime := map[uint]int{}
+	for _, svc := range services {
+		lifetime[svc.ID] = svc.FlagLifetimeRounds
+	}
+	placedAt := round.StartsAt
+	if placedAt.IsZero() {
+		placedAt = s.now()
+	}
+	flags := make([]model.AwdFlag, 0, len(teamServices))
+	for _, ts := range teamServices {
+		value := deterministicAwdFlag(round.Seed, ts.ID, round.Number)
+		life := lifetime[ts.ServiceID]
+		if life < 1 {
+			life = 1
+		}
+		flags = append(flags, model.AwdFlag{
+			RoundID: round.ID, TeamServiceID: ts.ID,
+			Value: value, ValueHash: awdFlagHash(value),
+			ValidUntilRound: round.Number + life - 1, PlacedAt: placedAt,
+		})
+	}
+	if err := s.awd.CreateFlags(ctx, flags); err != nil {
+		return nil, err
+	}
+	return flags, nil
+}
+
+// ValidateAttack 校验攻击提交：flag 存在、未过期、非自攻、未被他人首杀。
+// 业务拒绝返回 Accepted=false + Reason；数据库错误才返回 error。
+func (s *AwdCompetitionService) ValidateAttack(ctx context.Context, gameID uint, attackerType model.AwdCompetitorType, attackerID uint, flagValue string) (*AwdAttackValidation, error) {
+	value := strings.TrimSpace(flagValue)
+	if value == "" {
+		return &AwdAttackValidation{Reason: "empty flag"}, nil
+	}
+	if !attackerType.Valid() || attackerID == 0 {
+		return &AwdAttackValidation{Reason: "invalid attacker"}, nil
+	}
+	flag, err := s.awd.FindFlagByHash(ctx, awdFlagHash(value))
+	if err != nil {
+		if isNotFound(err) {
+			return &AwdAttackValidation{Reason: "flag not found"}, nil
+		}
+		return nil, err
+	}
+	ts, err := s.awd.FindTeamService(ctx, flag.TeamServiceID)
+	if err != nil {
+		if isNotFound(err) {
+			return &AwdAttackValidation{Reason: "victim service not found"}, nil
+		}
+		return nil, err
+	}
+	game, err := s.awd.FindGame(ctx, gameID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	if game.Status != model.AwdGameRunning {
+		return &AwdAttackValidation{Reason: "game is not running"}, nil
+	}
+	round, err := s.awd.FindRound(ctx, flag.RoundID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	current := game.CurrentRound
+	if current == 0 {
+		current = round.Number
+	}
+	if round.Number > current {
+		return &AwdAttackValidation{Reason: "flag is not active yet"}, nil
+	}
+	if flag.ValidUntilRound < current {
+		return &AwdAttackValidation{Reason: "flag expired"}, nil
+	}
+	if ts.CompetitorType == attackerType && ts.CompetitorID == attackerID {
+		return &AwdAttackValidation{Reason: "cannot attack your own service"}, nil
+	}
+	stolen, err := s.awd.HasAcceptedAttack(ctx, flag.ID)
+	if err != nil {
+		return nil, err
+	}
+	if stolen {
+		return &AwdAttackValidation{Reason: "flag already captured"}, nil
+	}
+	return &AwdAttackValidation{
+		Accepted: true, FlagID: flag.ID, RoundID: round.ID,
+		VictimTeamServiceID: ts.ID, VictimType: ts.CompetitorType, VictimID: ts.CompetitorID,
+	}, nil
+}
+
+func deterministicAwdFlag(seed string, teamServiceID uint, roundNumber int) string {
+	mac := hmac.New(sha256.New, []byte(seed))
+	fmt.Fprintf(mac, "%d:%d", teamServiceID, roundNumber)
+	return "flag{" + hex.EncodeToString(mac.Sum(nil)[:16]) + "}"
+}
+
+func awdFlagHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func buildAwdService(competitionID uint, slug string, in AwdServiceInput) (*model.AwdService, error) {
