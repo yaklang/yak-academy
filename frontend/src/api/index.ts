@@ -1460,6 +1460,41 @@ export interface ExamQuestionInput {
   score: number
   challenge_id?: number
 }
+export type ExamResultStatus = 'not_started' | 'in_progress' | 'submitted' | 'expired'
+export interface ExamResultRow {
+  rank: number
+  user_id: number
+  username: string
+  entered: boolean
+  status: ExamResultStatus
+  attempt_id: number
+  started_at: string | null
+  submitted_at: string | null
+  duration_seconds: number
+  auto_submitted: boolean
+  objective_score: number
+  code_score: number
+  total_score: number
+  passed: boolean
+}
+export interface ExamResultsSummary {
+  participants: number
+  entered: number
+  started: number
+  in_progress: number
+  submitted: number
+  expired: number
+  passed: number
+  average_score: number
+  highest_score: number
+}
+export interface ExamResultsView {
+  competition_id: number
+  paper: ExamPaperPublic
+  summary: ExamResultsSummary
+  results: ExamResultRow[]
+  generated_at: string
+}
 export const adminExamApi = {
   paper: (id: number) => http.get<ExamPaperView>(`/admin/competitions/${id}/exam`),
   updatePaper: (id: number, body: ExamPaperUpdate) =>
@@ -1470,6 +1505,8 @@ export const adminExamApi = {
     http.patch<ExamQuestionAdmin>(`/admin/competitions/${id}/exam/questions/${qid}`, body),
   deleteQuestion: (id: number, qid: number) =>
     http.del<{ ok: boolean }>(`/admin/competitions/${id}/exam/questions/${qid}`),
+  results: (id: number) => http.get<ExamResultsView>(`/admin/competitions/${id}/exam/results`),
+  resultsCSV: (id: number) => http.download(`/admin/competitions/${id}/exam/results.csv`),
 }
 
 // 考试（Exam）参赛端：服务端计时、单次作答、自动保存、交卷与编程题判定。

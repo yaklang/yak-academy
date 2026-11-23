@@ -14,7 +14,7 @@ import (
 func TestExamAttemptLifecycle(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 	svc.SetEvents(repo.NewEventRepo(e.gdb), nil)
 
@@ -189,7 +189,7 @@ func TestExamExpiryComparesInstantsAcrossTimeZones(t *testing.T) {
 	local := time.FixedZone("E2E-LOCAL", 8*3600)
 	e.now = time.Date(2026, 1, 1, 20, 0, 0, 0, local)
 	e.comps.now = func() time.Time { return e.now }
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 	svc.SetEvents(repo.NewEventRepo(e.gdb), nil)
 
@@ -249,7 +249,7 @@ func TestExamExpiryComparesInstantsAcrossTimeZones(t *testing.T) {
 func TestExamAttemptStartGuards(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 
 	scheduled, err := e.comps.Create(ctx, CompetitionCreate{

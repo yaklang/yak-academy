@@ -1371,6 +1371,57 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ExamAnswerView' }
         server_time: { type: string }
+    ExamPaperPublic:
+      type: object
+      description: 选手/成绩单可见的试卷配置（不含试题答案）
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        duration_seconds: { type: integer }
+        pass_score: { type: integer }
+        total_score: { type: integer }
+    ExamResultRow:
+      type: object
+      description: 管理端成绩单行（未开始也返回，rank=0）
+      properties:
+        rank: { type: integer, description: 仅已交卷/超时交卷排名，其余为 0 }
+        user_id: { type: integer }
+        username: { type: string }
+        entered: { type: boolean }
+        status: { type: string, enum: [not_started, in_progress, submitted, expired] }
+        attempt_id: { type: integer }
+        started_at: { type: string, nullable: true }
+        submitted_at: { type: string, nullable: true }
+        duration_seconds: { type: integer }
+        auto_submitted: { type: boolean }
+        objective_score: { type: integer }
+        code_score: { type: integer }
+        total_score: { type: integer }
+        passed: { type: boolean }
+    ExamResultsSummary:
+      type: object
+      properties:
+        participants: { type: integer }
+        entered: { type: integer }
+        started: { type: integer }
+        in_progress: { type: integer }
+        submitted: { type: integer }
+        expired: { type: integer }
+        passed: { type: integer }
+        average_score: { type: number, description: 已交卷/超时交卷者平均分（2 位小数） }
+        highest_score: { type: integer }
+    ExamResultsView:
+      type: object
+      description: 考试成绩单（按总分降序、用时升序、交卷时间升序排名）
+      properties:
+        competition_id: { type: integer }
+        paper: { $ref: '#/components/schemas/ExamPaperPublic' }
+        summary: { $ref: '#/components/schemas/ExamResultsSummary' }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ExamResultRow' }
+        generated_at: { type: string }
     ExamAnswerInput:
       type: object
       required: [answer]
@@ -4191,6 +4242,38 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExamPaperView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/exam/results:
+    get:
+      tags: [admin]
+      summary: 考试成绩单（全部参赛者、状态与分数、汇总统计）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamResultsView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/exam/results.csv:
+    get:
+      tags: [admin]
+      summary: 考试成绩单 CSV（UTF-8 BOM；含未开始参赛者）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }

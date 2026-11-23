@@ -14,7 +14,7 @@ func setupGradingExam(t *testing.T) (*compEnv, *ExamService, *CompetitionView, *
 	t.Helper()
 	e := newCompEnv(t)
 	ctx := context.Background()
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 	svc.SetEvents(repo.NewEventRepo(e.gdb), nil)
 

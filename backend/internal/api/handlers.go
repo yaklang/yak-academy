@@ -177,6 +177,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/awd/incidents.csv", "admin", h.adminAwdIncidentsCSV)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/awd/incidents", "admin", h.adminCreateAwdIncident)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/exam", "admin", h.adminGetExamPaper)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/exam/results", "admin", h.adminExamResults)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/exam/results.csv", "admin", h.adminExamResultsCSV)
 	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}/exam", "admin", h.adminUpdateExamPaper)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/exam/questions", "admin", h.adminCreateExamQuestion)
 	r.Handle(http.MethodPatch, "/api/v1/admin/competitions/{id}/exam/questions/{qid}", "admin", h.adminUpdateExamQuestion)

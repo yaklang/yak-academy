@@ -25,7 +25,7 @@ func jsonRaw(t *testing.T, value any) json.RawMessage {
 func TestExamPaperManagement(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 
 	comp, err := e.comps.Create(ctx, CompetitionCreate{
@@ -89,7 +89,7 @@ func TestExamPaperManagement(t *testing.T) {
 func TestExamQuestionManagement(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb), repo.NewUserRepo(e.gdb))
 	svc.SetNow(func() time.Time { return e.now })
 
 	comp, err := e.comps.Create(ctx, CompetitionCreate{
