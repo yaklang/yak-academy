@@ -451,7 +451,7 @@ func (s *CompetitionService) Delete(ctx context.Context, id uint) error {
 //
 // 单题失败整体拒绝；已绑定跳过（幂等）。
 func (s *CompetitionService) BindChallenges(ctx context.Context, id uint, raw []byte, importJSON func(ctx context.Context, raw []byte) (imported int, slugs []string, err error)) (*BindResult, error) {
-	if _, err := s.find(ctx, id); err != nil {
+	if _, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	var slugsReq struct {
@@ -521,7 +521,7 @@ func (s *CompetitionService) listBoundItems(ctx context.Context, id uint) ([]Tra
 
 // AdminChallenges 管理端竞赛题目列表。
 func (s *CompetitionService) AdminChallenges(ctx context.Context, id uint) ([]TrainingItem, error) {
-	if _, err := s.find(ctx, id); err != nil {
+	if _, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	return s.listBoundItems(ctx, id)
@@ -529,7 +529,7 @@ func (s *CompetitionService) AdminChallenges(ctx context.Context, id uint) ([]Tr
 
 // UnbindChallenges 解绑题目：running 竞赛不允许（榜单已产生，撤题破坏现场）。
 func (s *CompetitionService) UnbindChallenges(ctx context.Context, id uint, slugs []string) (int64, error) {
-	c, err := s.find(ctx, id)
+	c, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF)
 	if err != nil {
 		return 0, err
 	}
@@ -1348,6 +1348,9 @@ func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*Compet
 	if err != nil {
 		return nil, err
 	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
+		return nil, err
+	}
 	bound, err := s.comps.ListBoundChallengeIDs(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1565,6 +1568,9 @@ func (s *CompetitionService) StartInstance(ctx context.Context, env *EnvService,
 	if err != nil {
 		return nil, err
 	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
+		return nil, err
+	}
 	if c.Status(s.now()) != model.CompetitionRunning {
 		return nil, fmt.Errorf("%w: competition is not running", ErrValidation)
 	}
@@ -1587,6 +1593,9 @@ func (s *CompetitionService) StartInstance(ctx context.Context, env *EnvService,
 func (s *CompetitionService) SubmitFlag(ctx context.Context, judge *JudgeService, userID, id uint, slug, answer, sourceIP string) (*model.Submission, error) {
 	c, _, err := s.requireEntered(ctx, userID, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	if c.Status(s.now()) != model.CompetitionRunning {
@@ -1635,7 +1644,7 @@ type CompLeaderboardEntry struct {
 // individual 按人。排序：score DESC → last_solve_at 早者靠前 → solved_count DESC。
 // 数据源 CompetitionScore（派生表，只读聚合）。
 func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode string) (map[string]any, error) {
-	if _, err := s.find(ctx, id); err != nil {
+	if _, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	scores, err := s.comps.ListScores(ctx, id)
@@ -1835,7 +1844,7 @@ type AdminWarningItem struct {
 }
 
 func (s *CompetitionService) AdminWarnings(ctx context.Context, id uint) ([]AdminWarningItem, error) {
-	if _, err := s.find(ctx, id); err != nil {
+	if _, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	warnings, err := s.comps.ListWarnings(ctx, id)
@@ -1892,7 +1901,7 @@ type AdminWriteupItem struct {
 }
 
 func (s *CompetitionService) AdminWriteups(ctx context.Context, id uint) ([]AdminWriteupItem, error) {
-	if _, err := s.find(ctx, id); err != nil {
+	if _, err := s.requireFormat(ctx, id, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	teams, err := s.comps.ListTeams(ctx, id)
@@ -1955,6 +1964,9 @@ func (s *CompetitionService) AdminWriteups(ctx context.Context, id uint) ([]Admi
 // OpenWriteupZip 管理端下载 WP 附带 zip（打开存储对象；未上传 404）。
 // 返回 (流, 下载展示名, 字节数)；流由调用方关闭。
 func (s *CompetitionService) OpenWriteupZip(ctx context.Context, competitionID, writeupID uint) (io.ReadCloser, string, int64, error) {
+	if _, err := s.requireFormat(ctx, competitionID, model.CompetitionFormatCTF); err != nil {
+		return nil, "", 0, err
+	}
 	w, err := s.comps.FindWriteup(ctx, writeupID)
 	if err != nil {
 		return nil, "", 0, err
@@ -1979,8 +1991,11 @@ type MyWriteupItem struct {
 }
 
 func (s *CompetitionService) MyWriteups(ctx context.Context, userID, id uint) ([]MyWriteupItem, error) {
-	_, part, err := s.requireEntered(ctx, userID, id)
+	c, part, err := s.requireEntered(ctx, userID, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
 		return nil, err
 	}
 	writeups, err := s.comps.ListWriteups(ctx, id)
@@ -2023,6 +2038,9 @@ func (s *CompetitionService) SaveWriteup(ctx context.Context, userID, id, challe
 	if err != nil {
 		return err
 	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
+		return err
+	}
 	if c.Status(s.now()) != model.CompetitionEnded {
 		return fmt.Errorf("%w: writeup is accepted only after competition ends", ErrValidation)
 	}
@@ -2049,6 +2067,9 @@ func (s *CompetitionService) SaveWriteup(ctx context.Context, userID, id, challe
 func (s *CompetitionService) UploadWriteupZip(ctx context.Context, userID, id, challengeID uint, filename string, r io.Reader) (string, error) {
 	c, part, err := s.requireEntered(ctx, userID, id)
 	if err != nil {
+		return "", err
+	}
+	if err := requireCompetitionFormat(c, model.CompetitionFormatCTF); err != nil {
 		return "", err
 	}
 	if c.Status(s.now()) != model.CompetitionEnded {
