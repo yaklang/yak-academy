@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 构建 yak-academy AWD SSH 攻击盒镜像（默认 yak-awd-attackbox:latest）。
 #
-# 攻击盒是每次 AWD 比赛选手 SSH 进入的跳板：只接竞赛内部网络 + 随机 SSH
-# 端口，镜像内含 bash/curl/jq/nc/python3/tcpdump 等常用攻防工具。
+# 攻击盒是每次 AWD 比赛选手 SSH 进入的跳板：接入竞赛 edge 网络（随机 SSH
+# 端口）与内部网络（访问靶机），镜像内含 bash/curl/jq/nc/python3/tcpdump
+# 等常用攻防工具。
 # 控制面按 USER_NAME/USER_PASSWORD 环境变量在容器启动时建号（见 entrypoint）。
 #
 # 环境变量（均可选）：

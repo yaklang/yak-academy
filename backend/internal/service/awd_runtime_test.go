@@ -70,10 +70,10 @@ func TestAwdAttackBoxRunArgsHardening(t *testing.T) {
 		CompetitionID: 12, GameID: 7,
 		CompetitorType: model.AwdCompetitorUser, CompetitorID: 42,
 		SSHUser: "awd42", SSHPassword: "s3cret",
-	}, "yak-awd-12", "yak-awd-box-12-user-42", "192.0.2.10", 22)
+	}, awdEdgeNetworkName(12), "yak-awd-box-12-user-42", "192.0.2.10", 22)
 
 	for _, want := range [][]string{
-		{"--network", "yak-awd-12"},
+		{"--network", "yak-awd-edge-12"},
 		{"-p", "192.0.2.10::22"},
 		{"-e", "USER_NAME=awd42"},
 		{"-e", "USER_PASSWORD=s3cret"},

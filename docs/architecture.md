@@ -144,7 +144,7 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 - **实体**：`AwdGame`（competition 一对一，状态 pending/running/paused/ended、回合秒数、竞域单位 team|user、计分 JSON）、`AwdService`（镜像/slug/端口/checker 配置/基础分与权重）、`AwdTeamService`（竞域单位 × 服务的靶机容器/internal host）、`AwdRound`、`AwdFlag`、`AwdCheck`、`AwdAttack`、`AwdScoreEvent`（append-only 得分账本）、`AwdStanding`（派生排名）、`AwdIncident`、`AwdAttackBox`、`AwdReport/Review`。
 - **竞域单位抽象**：个人赛 competitor=user，队伍赛 competitor=team；同一引擎同时支持公告中的个人 AWD 与成熟团队 AWD。团队赛要求全员已编队。
-- **Docker 运行时（单机 v1）**：每场竞赛创建一个 `--internal` 网络；靶机只接入该网络，**不发布宿主端口、不挂载 Docker socket/宿主目录**，资源限额、pids-limit、`cap-drop ALL` + 最小能力集（Web 服务 bind/降权）、`no-new-privileges`。SSH 攻击盒接同一网络并随机发布 SSH 端口；密码随机生成、加密落库，接口只回传连接信息不回传密码明文之外的内部字段。攻击盒/靶机都带 label，`DestroyGame` 按 label 清理容器与网络。
+- **Docker 运行时（单机 v1）**：每场竞赛创建一个 `--internal` 网络和一个普通 edge 网络；靶机只接入内部网络，**不发布宿主端口、不挂载 Docker socket/宿主目录**，资源限额、pids-limit、`cap-drop ALL` + 最小能力集（Web 服务 bind/降权）、`no-new-privileges`。SSH 攻击盒先创建在 edge 网络以随机发布 SSH 端口，再接入内部网络访问靶机（Docker 不为仅接 `--internal` 网络的容器建立端口发布规则，见 moby#36174）；密码随机生成、加密落库，接口只回传连接信息不回传密码明文之外的内部字段。攻击盒/靶机都带 label，`DestroyGame` 按 label 清理容器与两个网络。
 - **回合引擎**：管理员开启回合时先落 `pending` 回合，再幂等播种确定性 flag（HMAC(seed, teamServiceID:round)）、执行 PUT/GET/CHECK，全部完成后置 `running` 并刷新计时。回合创建/结算/启动恢复按竞赛持有 PostgreSQL advisory lock（SQLite 为进程内键控锁），避免并发重复开回合/结算。进程重启扫描 running 比赛：pending 回合补 flag、只补缺失检查后续跑；已是 running 的回合保留现场不重复检查；同时判定滞留 pending 攻击。
 - **Checkers**：内置 HTTP/TCP/command（RuCTF 退出码 101/102/103/104/110）；检查明细落 `AwdCheck`，失败同步写 incident，输出中的 flag 脱敏。
 - **攻击判定**：提交只入 `AwdAttack.pending` 并写事件；worker 异步校验 flag 存在、未过期、非自攻、未被首杀，条件更新保证恰好一次 accepted；拒绝原因留运营记录。
