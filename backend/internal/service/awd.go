@@ -33,6 +33,7 @@ import (
 type AwdCompetitionService struct {
 	awd     repo.AwdRepo
 	comps   repo.CompetitionRepo
+	users   repo.UserRepo
 	events  repo.EventRepo
 	bus     *eventbus.Bus
 	builder ImageBuilder
@@ -65,6 +66,11 @@ func (s *AwdCompetitionService) SetSecret(secret string) {
 func (s *AwdCompetitionService) SetEvents(events repo.EventRepo, bus *eventbus.Bus) {
 	s.events = events
 	s.bus = bus
+}
+
+// SetUsers 注入用户仓库（参赛者视图解析个人赛用户名；未注入时回退 #id）。
+func (s *AwdCompetitionService) SetUsers(users repo.UserRepo) {
+	s.users = users
 }
 
 // SetNow 测试注入时钟。
@@ -207,6 +213,34 @@ func (s *AwdCompetitionService) requireAwdCompetition(ctx context.Context, compe
 		return nil, fmt.Errorf("%w: competition format is %q, expected awd", ErrValidation, c.Format)
 	}
 	return c, nil
+}
+
+// requireAwdParticipant 校验已入场参赛者并解析竞域单位 ID
+// （team = 战队 ID；user = 用户 ID）。
+func (s *AwdCompetitionService) requireAwdParticipant(ctx context.Context, competitionID, userID uint) (*model.Competition, *model.AwdGame, uint, error) {
+	comp, err := s.requireAwdCompetition(ctx, competitionID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	part, err := s.comps.FindParticipant(ctx, competitionID, userID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if part == nil || part.EnteredAt == nil {
+		return nil, nil, 0, ErrNotFound
+	}
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	competitorID := userID
+	if game.CompetitorType == model.AwdCompetitorTeam {
+		if part.TeamID == 0 {
+			return nil, nil, 0, fmt.Errorf("%w: team AWD requires every participant to join a team", ErrValidation)
+		}
+		competitorID = part.TeamID
+	}
+	return comp, game, competitorID, nil
 }
 
 // EnsureGame 为 AWD 竞赛创建（幂等）比赛配置，默认 team / 300s / {}。
@@ -1085,29 +1119,12 @@ func (s *AwdCompetitionService) SubmitAttack(ctx context.Context, competitionID,
 	if value == "" {
 		return nil, fmt.Errorf("%w: flag is required", ErrValidation)
 	}
-	if _, err := s.requireAwdCompetition(ctx, competitionID); err != nil {
-		return nil, err
-	}
-	part, err := s.comps.FindParticipant(ctx, competitionID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if part == nil || part.EnteredAt == nil {
-		return nil, ErrNotFound
-	}
-	game, err := s.EnsureGame(ctx, competitionID)
+	_, game, attackerID, err := s.requireAwdParticipant(ctx, competitionID, userID)
 	if err != nil {
 		return nil, err
 	}
 	if game.Status != model.AwdGameRunning {
 		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
-	}
-	attackerID := userID
-	if game.CompetitorType == model.AwdCompetitorTeam {
-		if part.TeamID == 0 {
-			return nil, fmt.Errorf("%w: team AWD requires every participant to join a team", ErrValidation)
-		}
-		attackerID = part.TeamID
 	}
 	validation, err := s.ValidateAttack(ctx, game.ID, game.CompetitorType, attackerID, value)
 	if err != nil {

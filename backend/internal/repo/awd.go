@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
@@ -250,6 +251,42 @@ func (r *awdRepo) ListChecksByRound(ctx context.Context, roundID uint) ([]model.
 	var list []model.AwdCheck
 	err := r.db.WithContext(ctx).Where("round_id = ?", roundID).
 		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// FindLastCheckByTeamService 最新一次检查（nil = 尚未检查）。
+func (r *awdRepo) FindLastCheckByTeamService(ctx context.Context, teamServiceID uint) (*model.AwdCheck, error) {
+	var check model.AwdCheck
+	err := r.db.WithContext(ctx).Where("team_service_id = ?", teamServiceID).
+		Order("id desc").First(&check).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &check, nil
+}
+
+func (r *awdRepo) ListIncidentsByCompetitor(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdIncident, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var list []model.AwdIncident
+	err := r.db.WithContext(ctx).
+		Where("competition_id = ? AND competitor_type = ? AND competitor_id = ?", competitionID, competitorType, competitorID).
+		Order("id desc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) ListAttacksByAttacker(ctx context.Context, gameID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdAttack, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).
+		Where("game_id = ? AND attacker_type = ? AND attacker_id = ?", gameID, competitorType, competitorID).
+		Order("id desc").Limit(limit).Find(&list).Error
 	return list, err
 }
 

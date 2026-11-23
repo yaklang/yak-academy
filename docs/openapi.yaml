@@ -1036,6 +1036,109 @@ components:
         standings:
           type: array
           items: { $ref: '#/components/schemas/AwdStandingView' }
+    AwdParticipantView:
+      type: object
+      description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
+      properties:
+        game:
+          type: object
+          properties:
+            id: { type: integer }
+            status: { type: string, enum: [pending, running, paused, ended] }
+            competitor_type: { type: string, enum: [team, user] }
+            round_seconds: { type: integer }
+            current_round: { type: integer }
+            started_at: { type: string, nullable: true }
+            ended_at: { type: string, nullable: true }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        competitor_name: { type: string }
+        round:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            number: { type: integer }
+            status: { type: string, enum: [pending, running, settled] }
+            starts_at: { type: string }
+            ends_at: { type: string }
+            remaining_seconds: { type: integer }
+        my_services:
+          type: array
+          items: { $ref: '#/components/schemas/AwdParticipantService' }
+        targets:
+          type: array
+          items: { $ref: '#/components/schemas/AwdParticipantTarget' }
+        attack_box:
+          type: object
+          nullable: true
+          properties:
+            ssh_host: { type: string }
+            ssh_port: { type: integer }
+            ssh_user: { type: string }
+            ssh_password: { type: string, description: 仅所属竞域单位可见（AES-GCM 存储，按需解密） }
+            ssh_command: { type: string }
+            status: { type: string }
+        standings:
+          type: array
+          items: { $ref: '#/components/schemas/AwdStandingView' }
+        incidents:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              kind: { type: string }
+              service_id: { type: integer }
+              detail: { type: string }
+              created_at: { type: string }
+        attacks:
+          type: array
+          items: { $ref: '#/components/schemas/AwdParticipantAttack' }
+    AwdParticipantService:
+      type: object
+      properties:
+        team_service_id: { type: integer }
+        service_id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        internal_host: { type: string }
+        ports_json: { type: string }
+        status: { type: string }
+        last_check_at: { type: string, nullable: true }
+        last_check:
+          type: object
+          nullable: true
+          properties:
+            action: { type: string }
+            status: { type: string }
+            latency_ms: { type: integer }
+            output: { type: string }
+            created_at: { type: string }
+    AwdParticipantTarget:
+      type: object
+      description: 目标目录条目（其他竞域单位的服务；内部地址经攻击盒访问）
+      properties:
+        team_service_id: { type: integer }
+        service_id: { type: integer }
+        service_slug: { type: string }
+        service_name: { type: string }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        competitor_name: { type: string }
+        internal_host: { type: string }
+        ports_json: { type: string }
+        status: { type: string }
+    AwdParticipantAttack:
+      type: object
+      properties:
+        id: { type: integer }
+        round_id: { type: integer }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        reason: { type: string }
+        victim_team_service_id: { type: integer }
+        submitted_at: { type: string }
+        judged_at: { type: string, nullable: true }
 
   responses:
     ErrorResp:
@@ -3766,6 +3869,41 @@ paths:
               schema: { $ref: '#/components/schemas/Submission' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd:
+    get:
+      tags: [competitions]
+      summary: 参赛者 AWD 首页（需已入场；我的服务/目标目录/攻击盒/排名/事件）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdParticipantView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd/scoreboard:
+    get:
+      tags: [competitions]
+      summary: AWD 排行榜（参赛者可见；未结算参赛者 0 分）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AwdStandingView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/awd/attacks:
     post:

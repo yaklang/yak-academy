@@ -293,3 +293,34 @@ func (h *Handlers) adminListAwdStandings(w http.ResponseWriter, req *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// awdParticipantView 参赛者 AWD 首页（需已入场；只返回本人服务与攻击盒凭据）。
+func (h *Handlers) awdParticipantView(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.AWD.ParticipantView(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) awdParticipantScoreboard(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	items, err := h.AWD.ParticipantScoreboard(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
