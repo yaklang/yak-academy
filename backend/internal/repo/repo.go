@@ -425,6 +425,8 @@ type AwdRepo interface {
 	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
 	HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error)
+	CreateCheck(ctx context.Context, check *model.AwdCheck) error
+	CreateIncident(ctx context.Context, incident *model.AwdIncident) error
 }
 
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
