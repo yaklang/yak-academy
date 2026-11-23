@@ -1181,6 +1181,35 @@ export interface AwdAdminView {
   attacks: AwdAttack[]
   checks: AwdCheck[]
 }
+export interface AwdReportReviewView {
+  id: number
+  reviewer_id: number
+  reviewer_name?: string
+  rubric: Record<string, unknown>
+  score: number
+  comment: string
+  created_at: string
+}
+export interface AwdReportView {
+  id: number
+  competition_id: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  competitor_name?: string
+  content_md: string
+  zip_name: string
+  has_zip: boolean
+  status: 'submitted' | 'reviewed'
+  score: number
+  created_at: string
+  updated_at: string
+  reviews: AwdReportReviewView[]
+}
+export interface AwdReportReviewInput {
+  score: number
+  rubric: Record<string, unknown>
+  comment: string
+}
 export interface AwdCheckView {
   action: string
   status: string
@@ -1273,6 +1302,15 @@ export const competitionAwdApi = {
     http.get<{ items: AwdStandingView[] }>(`/competitions/${id}/awd/scoreboard`),
   submitAttack: (id: number, flag: string) =>
     http.post<AwdAttackReceipt>(`/competitions/${id}/awd/attacks`, { flag }),
+  myReport: (id: number) =>
+    http.get<{ report: AwdReportView | null }>(`/competitions/${id}/awd/report`),
+  saveReport: (id: number, contentMD: string) =>
+    http.put<AwdReportView>(`/competitions/${id}/awd/report`, { content_md: contentMD }),
+  uploadReportZip: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.upload<AwdReportView>(`/competitions/${id}/awd/report/zip`, form)
+  },
 }
 export interface AwdServiceInput {
   slug?: string
@@ -1321,6 +1359,12 @@ export const adminAwdApi = {
     http.post<AwdAttackBoxDeployResult>(`/admin/competitions/${id}/awd/attack-boxes`),
   startRound: (id: number) =>
     http.post<AwdRoundRunResult>(`/admin/competitions/${id}/awd/rounds`),
+  reports: (id: number) =>
+    http.get<{ items: AwdReportView[] }>(`/admin/competitions/${id}/awd/reports`),
+  reviewReport: (id: number, rid: number, body: AwdReportReviewInput) =>
+    http.post<AwdReportView>(`/admin/competitions/${id}/awd/reports/${rid}/reviews`, body),
+  downloadReportZip: (id: number, rid: number) =>
+    http.download(`/admin/competitions/${id}/awd/reports/${rid}/zip`),
 }
 
 // 竞赛管理（管理端）。

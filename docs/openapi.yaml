@@ -1142,6 +1142,42 @@ components:
         incidents: { type: array, items: { $ref: '#/components/schemas/AwdIncident' } }
         attacks: { type: array, items: { $ref: '#/components/schemas/AwdAttack' } }
         checks: { type: array, items: { $ref: '#/components/schemas/AwdCheck' } }
+    AwdReportReviewView:
+      type: object
+      properties:
+        id: { type: integer }
+        reviewer_id: { type: integer }
+        reviewer_name: { type: string }
+        rubric: { type: object }
+        score: { type: integer }
+        comment: { type: string }
+        created_at: { type: string }
+    AwdReportView:
+      type: object
+      description: AWD 赛后代战报（Markdown + 可选 zip；zip 仅返回展示名）
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        competitor_name: { type: string }
+        content_md: { type: string }
+        zip_name: { type: string }
+        has_zip: { type: boolean }
+        status: { type: string, enum: [submitted, reviewed] }
+        score: { type: integer }
+        created_at: { type: string }
+        updated_at: { type: string }
+        reviews:
+          type: array
+          items: { $ref: '#/components/schemas/AwdReportReviewView' }
+    AwdReportReviewInput:
+      type: object
+      required: [score]
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        rubric: { type: object, description: rubric 评分明细 JSON 对象 }
+        comment: { type: string, maxLength: 2000 }
     AwdParticipantView:
       type: object
       description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
@@ -3908,6 +3944,64 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/awd/reports:
+    get:
+      tags: [admin]
+      summary: AWD 战报列表（含历史评审与最终分）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AwdReportView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/reports/{rid}/reviews:
+    post:
+      tags: [admin]
+      summary: 提交 AWD 战报 rubric 评审（保留历史，最终分取最后一条）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: rid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AwdReportReviewInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdReportView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/reports/{rid}/zip:
+    get:
+      tags: [admin]
+      summary: 下载 AWD 战报 zip 附件
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: rid, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: zip 文件
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /competitions:
     get:
       tags: [competitions]
@@ -4105,6 +4199,72 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/AwdStandingView' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd/report:
+    get:
+      tags: [competitions]
+      summary: 我的 AWD 战报（未提交返回 report=null）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    allOf:
+                      - $ref: '#/components/schemas/AwdReportView'
+                    nullable: true
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    put:
+      tags: [competitions]
+      summary: 保存 AWD 战报 Markdown（仅赛后；重新提交重置评审状态）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_md]
+              properties:
+                content_md: { type: string, maxLength: 524288 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdReportView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd/report/zip:
+    post:
+      tags: [competitions]
+      summary: 上传 AWD 战报 zip（仅赛后；≤32MB；先保存 Markdown）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'zip 附件；≤32MB' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdReportView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/awd/attacks:
     post:

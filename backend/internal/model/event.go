@@ -15,6 +15,9 @@ const (
 	// AWD 攻击事实（运营审计）：提交即入 pending 事件，worker 判定后写 judged。
 	EventAwdAttackSubmitted EventType = "awd.attack.submitted"
 	EventAwdAttackJudged    EventType = "awd.attack.judged"
+	// AWD 战报事实：提交/评审各写一条事件。
+	EventAwdReportSubmitted EventType = "awd.report.submitted"
+	EventAwdReportReviewed  EventType = "awd.report.reviewed"
 )
 
 // Event append-only 事件表：只允许 INSERT，禁止任何 UPDATE/DELETE

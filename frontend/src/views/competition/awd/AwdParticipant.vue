@@ -8,6 +8,7 @@ import { formatDateTime } from '@/lib/format'
 import {
   competitionAwdApi,
   type AwdParticipantView,
+  type AwdReportView,
   type AwdStandingView,
 } from '../../../api'
 import { ApiError } from '../../../api/client'
@@ -25,6 +26,11 @@ const loadError = ref('')
 const activeTab = ref('overview')
 const flagInput = ref('')
 const submitting = ref(false)
+const report = ref<AwdReportView | null>(null)
+const reportContent = ref('')
+const reportLoading = ref(false)
+const reportSaving = ref(false)
+const reportFileInput = ref<HTMLInputElement | null>(null)
 const nowTs = ref(Date.now())
 let tick: number | undefined
 let poll: number | undefined
@@ -33,6 +39,7 @@ const comp = computed(() => view.value?.competition ?? null)
 const game = computed(() => view.value?.game ?? null)
 const round = computed(() => view.value?.round ?? null)
 const running = computed(() => comp.value?.status === 'running' && game.value?.status === 'running')
+const reportEditable = computed(() => game.value?.status === 'ended')
 const isAdmin = computed(() => auth.user?.global_role === 'admin')
 const lockedHere = computed(() => running.value && comp.value?.kind === 'invitational' && !isAdmin.value)
 const platformHome = computed(() => (isAdmin.value ? '/admin/tutorials' : '/learn'))
@@ -163,6 +170,56 @@ async function copy(text: string, message: string) {
   } catch {
     notify.error('复制失败，请手动选择文本')
   }
+}
+
+async function loadReport() {
+  reportLoading.value = true
+  try {
+    const resp = await competitionAwdApi.myReport(props.competitionId)
+    report.value = resp.report
+    reportContent.value = resp.report?.content_md ?? ''
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) notify.error((e as Error).message)
+  } finally {
+    reportLoading.value = false
+  }
+}
+
+async function saveReport() {
+  if (!reportContent.value.trim() || reportSaving.value) {
+    if (!reportContent.value.trim()) notify.warning('请填写战报内容')
+    return
+  }
+  reportSaving.value = true
+  try {
+    report.value = await competitionAwdApi.saveReport(props.competitionId, reportContent.value)
+    reportContent.value = report.value.content_md
+    notify.success('战报已保存')
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) notify.error((e as Error).message)
+  } finally {
+    reportSaving.value = false
+  }
+}
+
+async function onReportZip(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || reportSaving.value) return
+  reportSaving.value = true
+  try {
+    report.value = await competitionAwdApi.uploadReportZip(props.competitionId, file)
+    notify.success('战报附件已上传')
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) notify.error((e as Error).message)
+  } finally {
+    reportSaving.value = false
+    input.value = ''
+  }
+}
+
+function onTab(name: string | number) {
+  if (name === 'report' && !report.value && !reportLoading.value) void loadReport()
 }
 
 interface AwdPortView {
@@ -414,7 +471,7 @@ onUnmounted(() => {
         </UiCard>
       </div>
 
-      <UiTabs v-model="activeTab">
+      <UiTabs v-model="activeTab" @tab-change="onTab">
         <UiTabPane label="概览" name="overview">
           <div class="awd-overview">
             <UiCard header="我的服务">
@@ -577,6 +634,70 @@ onUnmounted(() => {
             </UiCard>
           </div>
         </UiTabPane>
+
+        <UiTabPane label="战报" name="report">
+          <UiCard header="赛后代战报">
+            <UiAlert
+              v-if="!reportEditable"
+              type="info"
+              :closable="false"
+              title="赛后开放"
+              description="比赛结束后可提交 Markdown 战报与 zip 附件；管理员按 rubric 评审后显示得分。"
+              class="awd-report-tip"
+            />
+            <UiSkeleton v-if="reportLoading" :rows="4" />
+            <template v-else>
+              <UiInput
+                v-model="reportContent"
+                type="textarea"
+                :rows="12"
+                :disabled="!reportEditable || reportSaving"
+                placeholder="# 战报&#10;&#10;漏洞发现 / 利用 / 修复 / 防守过程…"
+              />
+              <div class="awd-inline awd-report-actions">
+                <UiButton
+                  type="primary"
+                  :loading="reportSaving"
+                  :disabled="!reportEditable || reportSaving"
+                  @click="saveReport"
+                >
+                  保存战报
+                </UiButton>
+                <UiButton
+                  :loading="reportSaving"
+                  :disabled="!reportEditable || reportSaving"
+                  @click="reportFileInput?.click()"
+                >
+                  上传 zip
+                </UiButton>
+                <input ref="reportFileInput" type="file" accept=".zip" class="awd-file" @change="onReportZip" />
+                <span v-if="report?.zip_name" class="awd-dim">附件：{{ report.zip_name }}</span>
+              </div>
+              <p class="awd-hint">支持 Markdown；zip ≤32MB。重新保存会把评审状态重置为待评审。</p>
+              <div v-if="report" class="awd-report-status">
+                <UiTag :type="report.status === 'reviewed' ? 'success' : 'warning'" size="small">
+                  {{ report.status === 'reviewed' ? '已评审' : '待评审' }}
+                </UiTag>
+                <b class="mono">{{ report.score }}</b>
+                <span class="awd-dim">分</span>
+              </div>
+              <div v-if="report?.reviews?.length" class="awd-reviews">
+                <h4>评审历史</h4>
+                <ul class="awd-list">
+                  <li v-for="review in report.reviews" :key="review.id" class="awd-list-item">
+                    <div class="awd-list-main">
+                      <UiTag size="small" type="info">
+                        {{ review.reviewer_name || `#${review.reviewer_id}` }}
+                      </UiTag>
+                      <span class="awd-list-detail">{{ review.comment || '—' }}</span>
+                    </div>
+                    <span class="awd-dim mono">{{ review.score }} 分 · {{ fmt(review.created_at) }}</span>
+                  </li>
+                </ul>
+              </div>
+            </template>
+          </UiCard>
+        </UiTabPane>
       </UiTabs>
     </main>
   </div>
@@ -677,6 +798,13 @@ onUnmounted(() => {
 .awd-list-detail { color: var(--foreground); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .awd-dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 .awd-self-tag { margin-left: var(--space-2); }
+.awd-file { display: none; }
+.awd-report-tip { margin-bottom: var(--space-4); }
+.awd-report-actions { margin-top: var(--space-3); }
+.awd-report-status { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
+.awd-report-status b { font-size: var(--text-xl); }
+.awd-reviews { margin-top: var(--space-5); }
+.awd-reviews h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 600; }
 
 @media (max-width: 1024px) {
   .awd-header-inner { flex-wrap: wrap; }

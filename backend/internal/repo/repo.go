@@ -443,6 +443,14 @@ type AwdRepo interface {
 	ListIncidents(ctx context.Context, competitionID uint, limit int) ([]model.AwdIncident, error)
 	ListAttacksByAttacker(ctx context.Context, gameID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdAttack, error)
 	ListAcceptedAttacksByRound(ctx context.Context, roundID uint) ([]model.AwdAttack, error)
+
+	FindReport(ctx context.Context, id uint) (*model.AwdReport, error)
+	FindReportByKey(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdReport, error)
+	ListReports(ctx context.Context, competitionID uint) ([]model.AwdReport, error)
+	CreateReport(ctx context.Context, report *model.AwdReport) error
+	UpdateReportSelective(ctx context.Context, id uint, fields map[string]any) error
+	CreateReportReview(ctx context.Context, review *model.AwdReportReview) error
+	ListReportReviews(ctx context.Context, reportID uint) ([]model.AwdReportReview, error)
 	CreateScoreEvents(ctx context.Context, events []model.AwdScoreEvent) (int64, error)
 	ListScoreEvents(ctx context.Context, competitionID uint) ([]model.AwdScoreEvent, error)
 	ListStandings(ctx context.Context, competitionID uint) ([]model.AwdStanding, error)
