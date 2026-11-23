@@ -5,7 +5,7 @@
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
-import { competitionApi, type PublicCompetitionItem } from '../api'
+import { competitionApi, FORMAT_LABELS, type CompetitionFormat, type PublicCompetitionItem } from '../api'
 
 const items = ref<PublicCompetitionItem[]>([])
 const total = ref(0)
@@ -53,6 +53,19 @@ function statusLabel(s: PublicCompetitionItem['status']) {
   return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
 }
 
+// 报名窗口（可选）：未配置 = 开放到竞赛结束；已配置则按起止时间判断。
+function registrationOpen(row: PublicCompetitionItem) {
+  const now = Date.now()
+  if (row.registration_start && now < Date.parse(row.registration_start)) return false
+  if (row.registration_end && now > Date.parse(row.registration_end)) return false
+  return true
+}
+
+function registrationHint(row: PublicCompetitionItem) {
+  if (row.registration_start && Date.now() < Date.parse(row.registration_start)) return '报名未开放'
+  return '报名已截止'
+}
+
 function fmt(ts: string) {
   return formatDateTime(ts)
 }
@@ -74,6 +87,13 @@ onMounted(load)
     <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
     <UiTable v-else :data="items" :loading="loading" empty-text="暂无公开竞赛">
       <UiTableColumn prop="name" label="竞赛" min-width="180" />
+      <UiTableColumn label="形式" width="90">
+        <template #default="{ row }">
+          <UiTag size="small" :type="row.format === 'awd' ? 'danger' : row.format === 'exam' ? 'warning' : 'info'">
+            {{ FORMAT_LABELS[row.format as CompetitionFormat] }}
+          </UiTag>
+        </template>
+      </UiTableColumn>
       <UiTableColumn label="状态" width="100">
         <template #default="{ row }">
           <UiTag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</UiTag>
@@ -96,12 +116,13 @@ onMounted(load)
             <span v-else-if="row.status === 'scheduled'" class="dim">开赛后免码入场</span>
           </template>
           <UiButton
-            v-else-if="row.status !== 'ended'"
+            v-else-if="row.status !== 'ended' && registrationOpen(row)"
             size="small"
             type="primary"
             :loading="registering === row.id"
             @click="register(row)"
           >报名</UiButton>
+          <span v-else-if="row.status !== 'ended'" class="dim">{{ registrationHint(row) }}</span>
           <span v-else class="dim">已结束</span>
         </template>
       </UiTableColumn>

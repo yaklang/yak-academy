@@ -11,13 +11,17 @@ import { formatDateTime } from '@/lib/format'
 import {
   adminChallengeApi,
   adminCompetitionApi,
+  FORMAT_LABELS,
   KIND_LABELS,
+  SCORING_MODE_LABELS,
   type AdminLabInstance,
   type ChallengeJSON,
   type CheatWarningItem,
   type Competition,
   type CompetitionDetail,
+  type CompetitionFormat,
   type CompetitionParticipantItem,
+  type CompetitionScoringMode,
   type GenerateUsersResult,
   type ParticipantImportResult,
   type TeamLeaderboardEntry,
@@ -65,16 +69,29 @@ function fmt(ts: string | null | undefined) {
 }
 
 // ---------- 配置 ----------
-const form = ref({ name: '', description: '', start: null as Date | null, end: null as Date | null })
+const form = ref({
+  name: '',
+  description: '',
+  start: null as Date | null,
+  end: null as Date | null,
+  scoringMode: 'dynamic' as CompetitionScoringMode,
+  registrationEnabled: false,
+  registrationRange: null as [Date, Date] | null,
+})
 const saving = ref(false)
 
 function syncForm() {
   if (!detail.value) return
+  const regStart = detail.value.registration_start ? new Date(detail.value.registration_start) : null
+  const regEnd = detail.value.registration_end ? new Date(detail.value.registration_end) : null
   form.value = {
     name: detail.value.name,
     description: detail.value.description,
     start: new Date(detail.value.start_time),
     end: new Date(detail.value.end_time),
+    scoringMode: detail.value.scoring_mode,
+    registrationEnabled: !!(regStart && regEnd),
+    registrationRange: regStart && regEnd ? [regStart, regEnd] : null,
   }
 }
 
@@ -83,14 +100,45 @@ async function saveConfig() {
     notify.warning('名称与起止时间必填')
     return
   }
+  if (form.value.registrationEnabled && !form.value.registrationRange) {
+    notify.warning('请选择报名起止时间，或关闭报名窗口')
+    return
+  }
+  if (form.value.registrationEnabled && form.value.registrationRange) {
+    const [, regEnd] = form.value.registrationRange
+    if (regEnd > form.value.end) {
+      notify.warning('报名截止时间不能晚于竞赛结束时间')
+      return
+    }
+  }
+  const body: {
+    name: string
+    description: string
+    start_time: string
+    end_time: string
+    scoring_mode?: CompetitionScoringMode
+    registration_start?: string | null
+    registration_end?: string | null
+    clear_registration?: boolean
+  } = {
+    name: form.value.name.trim(),
+    description: form.value.description,
+    start_time: form.value.start.toISOString(),
+    end_time: form.value.end.toISOString(),
+  }
+  if (detail.value?.format === 'ctf' && status.value === 'scheduled') {
+    body.scoring_mode = form.value.scoringMode
+  }
+  if (form.value.registrationEnabled && form.value.registrationRange) {
+    body.registration_start = form.value.registrationRange[0].toISOString()
+    body.registration_end = form.value.registrationRange[1].toISOString()
+  } else if (detail.value?.registration_start || detail.value?.registration_end) {
+    body.clear_registration = true
+  }
   saving.value = true
   try {
-    detail.value = await adminCompetitionApi.update(compId, {
-      name: form.value.name.trim(),
-      description: form.value.description,
-      start_time: form.value.start.toISOString(),
-      end_time: form.value.end.toISOString(),
-    })
+    detail.value = await adminCompetitionApi.update(compId, body)
+    syncForm()
     notify.success('配置已保存')
   } catch (e) {
     notify.error((e as Error).message)
@@ -693,12 +741,21 @@ onMounted(async () => {
         <UiTag v-if="detail" :type="detail.kind === 'public' ? 'success' : 'warning'" size="small">
           {{ KIND_LABELS[detail.kind] }}
         </UiTag>
+        <UiTag v-if="detail" size="small" type="info">
+          {{ FORMAT_LABELS[detail.format as CompetitionFormat] }}
+        </UiTag>
+        <UiTag v-if="detail && detail.format === 'ctf'" size="small" type="warning">
+          {{ SCORING_MODE_LABELS[detail.scoring_mode] }}
+        </UiTag>
         <UiTag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</UiTag>
       </h2>
       <router-link to="/admin/panel/competitions"><UiButton size="small">← 返回列表</UiButton></router-link>
     </div>
     <p class="hint">
       {{ fmt(detail?.start_time) }} ~ {{ fmt(detail?.end_time) }}
+      <span v-if="detail?.registration_start && detail?.registration_end">
+        · 报名 {{ fmt(detail.registration_start) }} ~ {{ fmt(detail.registration_end) }}
+      </span>
       <span v-if="detail?.description"> · {{ detail.description }}</span>
     </p>
 
@@ -731,6 +788,26 @@ onMounted(async () => {
             </UiFormItem>
             <UiFormItem label="结束时间">
               <UiDatePicker v-model="form.end" type="datetime" style="width: 100%" />
+            </UiFormItem>
+            <UiFormItem v-if="detail?.format === 'ctf'" label="计分模式">
+              <UiRadioGroup v-model="form.scoringMode" :disabled="status !== 'scheduled'">
+                <UiRadio value="dynamic">动态计分（按通过人数衰减）</UiRadio>
+                <UiRadio value="fixed">固定计分（按题目分值）</UiRadio>
+              </UiRadioGroup>
+              <div class="dim">{{ status === 'scheduled' ? '开赛后不可切换' : '已开赛，计分模式已锁定' }}</div>
+            </UiFormItem>
+            <UiFormItem label="报名窗口">
+              <UiCheckbox v-model="form.registrationEnabled">启用报名起止时间</UiCheckbox>
+              <UiDatePicker
+                v-if="form.registrationEnabled"
+                v-model="form.registrationRange"
+                type="datetimerange"
+                start-placeholder="报名开始"
+                end-placeholder="报名截止"
+                style="width: 100%"
+                class="reg-range"
+              />
+              <div class="dim">公开赛生效；不启用则报名开放到竞赛结束，截止不得晚于竞赛结束。</div>
             </UiFormItem>
             <UiFormItem>
               <UiButton type="primary" :loading="saving" @click="saveConfig">保存配置</UiButton>
@@ -1298,6 +1375,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.reg-range { margin-top: var(--space-2); }
 .head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .hint { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 0; }
 .stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-3) 0 var(--space-5); }

@@ -613,6 +613,10 @@ components:
         id: { type: integer }
         name: { type: string }
         kind: { type: string, enum: [public, invitational], description: public=公开赛（竞赛广场公开展示，用户自助报名）/ invitational=邀请赛（定向导入参赛者，凭邀请码入场）；创建后不可更改 }
+        format: { type: string, enum: [ctf, awd, exam], description: 竞赛形式：ctf=解题赛 / awd=攻防赛 / exam=在线考试；创建后不可更改 }
+        scoring_mode: { type: string, enum: [dynamic, fixed], description: 仅 CTF 生效：dynamic=按通过人数衰减 / fixed=按题目分值固定计分；开赛后不可切换 }
+        registration_start: { type: string, format: date-time, nullable: true, description: 公开赛报名开始时间；与 registration_end 同时配置或同时为空（空=报名开放到竞赛结束） }
+        registration_end: { type: string, format: date-time, nullable: true, description: 公开赛报名截止时间；不得晚于 end_time }
         description: { type: string, description: 竞赛说明（Markdown） }
         start_time: { type: string, format: date-time, description: 开赛时间（RFC3339） }
         end_time: { type: string, format: date-time, description: 结束时间（RFC3339）；结束后解除参赛锁定、开放 WP 提交 }
@@ -861,6 +865,10 @@ components:
         id: { type: integer }
         name: { type: string }
         description: { type: string }
+        format: { type: string, enum: [ctf, awd, exam], description: 竞赛形式（创建后不可更改） }
+        scoring_mode: { type: string, enum: [dynamic, fixed], description: 仅 CTF 生效的计分模式 }
+        registration_start: { type: string, format: date-time, nullable: true, description: 报名开始时间（可选） }
+        registration_end: { type: string, format: date-time, nullable: true, description: 报名截止时间（可选，不得晚于 end_time） }
         start_time: { type: string, format: date-time }
         end_time: { type: string, format: date-time }
         status: { type: string, enum: [scheduled, running, ended] }
@@ -2724,6 +2732,10 @@ paths:
               properties:
                 name: { type: string, minLength: 1 }
                 kind: { type: string, enum: [public, invitational], default: invitational, description: public=公开赛（广场展示+自助报名）/ invitational=邀请赛（定向导入+邀请码入场）；创建后不可更改 }
+                format: { type: string, enum: [ctf, awd, exam], default: ctf, description: 竞赛形式；创建后不可更改 }
+                scoring_mode: { type: string, enum: [dynamic, fixed], default: dynamic, description: 仅 CTF 形式生效；fixed=按题目分值固定计分 }
+                registration_start: { type: string, format: date-time, nullable: true, description: 报名开始时间（与 registration_end 成对配置） }
+                registration_end: { type: string, format: date-time, nullable: true, description: 报名截止时间（不得晚于 end_time） }
                 description: { type: string }
                 start_time: { type: string, format: date-time }
                 end_time: { type: string, format: date-time }
@@ -2753,10 +2765,11 @@ paths:
     patch:
       tags: [admin]
       summary: |
-        修改竞赛配置（name/description/起止时间；至少一项）。
+        修改竞赛配置（name/description/起止时间/计分模式/报名窗口；至少一项）。
         running 期间 start_time 不可改（入场锁定语义依赖开赛时刻）、
         end_time 可延后或缩短；已结束的竞赛起止时间均可重新配置
-        （新窗口落回未来即重新开赛）。
+        （新窗口落回未来即重新开赛）。scoring_mode 仅 CTF 且仅开赛前可切换；
+        报名窗口须与竞赛 end_time 一致（不得晚于结束）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -2771,6 +2784,10 @@ paths:
                 description: { type: string }
                 start_time: { type: string, format: date-time }
                 end_time: { type: string, format: date-time }
+                scoring_mode: { type: string, enum: [dynamic, fixed], description: 仅 CTF 且仅 scheduled 可切换 }
+                registration_start: { type: string, format: date-time, nullable: true }
+                registration_end: { type: string, format: date-time, nullable: true }
+                clear_registration: { type: boolean, description: 清空报名窗口（与设置字段互斥） }
       responses:
         '200':
           description: OK
