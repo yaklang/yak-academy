@@ -777,6 +777,7 @@ export interface Competition {
   kind: CompetitionKind
   format: CompetitionFormat
   scoring_mode: CompetitionScoringMode
+  bonus_cap: number
   registration_start: string | null
   registration_end: string | null
   created_at: string
@@ -852,6 +853,7 @@ export interface TeamLeaderboardEntry {
   team_id: number
   team_name: string | null
   score: number
+  bonus: number
   solved_count: number
   members: string[]
   last_solve_at: string | null
@@ -861,6 +863,18 @@ export interface TeamLeaderboardEntry {
 export interface LeaderboardResp {
   mode: 'team' | 'individual'
   items: TeamLeaderboardEntry[]
+}
+export interface CtfAdjustment {
+  id: number
+  competition_id: number
+  user_id: number
+  team_id: number
+  points: number
+  reason: string
+  created_by: number
+  created_at: string
+  username?: string
+  team_name?: string | null
 }
 // 批量导入请求（仅邀请赛）：队伍 + 个人参赛者。条目按「账号编码或用户名」
 // 引用既有账号，不自动建号——缺失条目在响应 missing 回报（补号走一键生成）。
@@ -972,6 +986,7 @@ export const adminCompetitionApi = {
     kind: CompetitionKind
     format?: CompetitionFormat
     scoring_mode?: CompetitionScoringMode
+    bonus_cap?: number
     registration_start?: string | null
     registration_end?: string | null
   }) => http.post<Competition>('/admin/competitions', body),
@@ -982,6 +997,7 @@ export const adminCompetitionApi = {
     start_time?: string
     end_time?: string
     scoring_mode?: CompetitionScoringMode
+    bonus_cap?: number
     registration_start?: string | null
     registration_end?: string | null
     clear_registration?: boolean
@@ -1018,6 +1034,10 @@ export const adminCompetitionApi = {
   // 榜单 CSV 导出（individual 含账号编码；返回 Blob，前端触发下载）。
   standingsCsv: (id: number, mode: 'team' | 'individual' = 'team') =>
     http.download(`/admin/competitions/${id}/standings.csv?mode=${mode}`),
+  adjustments: (id: number) =>
+    http.get<{ items: CtfAdjustment[] }>(`/admin/competitions/${id}/adjustments`),
+  addAdjustment: (id: number, body: { user_id: number; points: number; reason: string }) =>
+    http.post<CtfAdjustment>(`/admin/competitions/${id}/adjustments`, body),
 }
 
 // 竞赛参赛（学生端）。
