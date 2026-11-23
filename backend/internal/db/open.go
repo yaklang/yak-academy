@@ -50,6 +50,8 @@ func Migrate(db *gorm.DB) error {
 		&model.AwdRound{}, &model.AwdFlag{}, &model.AwdCheck{}, &model.AwdAttack{},
 		&model.AwdScoreEvent{}, &model.AwdStanding{}, &model.AwdIncident{},
 		&model.AwdAttackBox{}, &model.AwdReport{}, &model.AwdReportReview{},
+		&model.ExamPaper{}, &model.ExamQuestion{}, &model.ExamAttempt{},
+		&model.ExamAnswer{}, &model.ExamStanding{},
 		&model.AdminAuditLog{}, &model.SystemSetting{},
 	); err != nil {
 		return err

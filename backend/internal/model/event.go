@@ -18,6 +18,10 @@ const (
 	// AWD 战报事实：提交/评审各写一条事件。
 	EventAwdReportSubmitted EventType = "awd.report.submitted"
 	EventAwdReportReviewed  EventType = "awd.report.reviewed"
+	// 考试作答事实：开始/交卷/评分各写一条事件；ExamStanding 由派生器重建。
+	EventExamAttemptStarted   EventType = "exam.attempt.started"
+	EventExamAttemptSubmitted EventType = "exam.attempt.submitted"
+	EventExamAttemptGraded    EventType = "exam.attempt.graded"
 )
 
 // Event append-only 事件表：只允许 INSERT，禁止任何 UPDATE/DELETE
