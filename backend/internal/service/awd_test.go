@@ -412,6 +412,151 @@ func TestAwdFlagsAndAttackValidation(t *testing.T) {
 	}
 }
 
+// TestAwdSubmitAndJudgeAttack 攻击提交 + 异步判定：合法 flag 入 pending，
+// worker 判定 accepted 并写事件；重复/自攻/未知 flag 同步拒绝并留运营记录；
+// 未入场用户、空 flag、未开赛均拒绝。
+func TestAwdSubmitAndJudgeAttack(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdRepo := repo.NewAwdRepo(e.gdb)
+	awdSvc := NewAwdCompetitionService(awdRepo, repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	awdSvc.SetEvents(repo.NewEventRepo(e.gdb), e.bus)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 攻击赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).
+		Update("competitor_type", model.AwdCompetitorUser).Error; err != nil {
+		t.Fatalf("set individual competitor: %v", err)
+	}
+	svc, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: 80}},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	alice := e.ensureUser(t, "awd-attack-alice")
+	bob := e.ensureUser(t, "awd-attack-bob")
+	carol := e.ensureUser(t, "awd-attack-carol")
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
+		Individuals: []string{alice.Username, bob.Username},
+	}); err != nil {
+		t.Fatalf("import participants: %v", err)
+	}
+	if err := e.gdb.Model(&model.Participant{}).Where("competition_id = ?", comp.ID).
+		Update("entered_at", e.now).Error; err != nil {
+		t.Fatalf("mark entered: %v", err)
+	}
+	teamAlice := &model.AwdTeamService{
+		GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorUser,
+		CompetitorID: alice.ID, Status: "running",
+	}
+	teamBob := &model.AwdTeamService{
+		GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorUser,
+		CompetitorID: bob.ID, Status: "running",
+	}
+	if err := e.gdb.Create(teamAlice).Error; err != nil {
+		t.Fatalf("seed alice service: %v", err)
+	}
+	if err := e.gdb.Create(teamBob).Error; err != nil {
+		t.Fatalf("seed bob service: %v", err)
+	}
+	round := &model.AwdRound{
+		GameID: game.ID, Number: 1, Status: model.AwdRoundRunning,
+		StartsAt: e.now, EndsAt: e.now.Add(5 * time.Minute), Seed: "seed-attack",
+	}
+	if err := e.gdb.Create(round).Error; err != nil {
+		t.Fatalf("seed round: %v", err)
+	}
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).Updates(map[string]any{
+		"status": model.AwdGameRunning, "current_round": 1,
+	}).Error; err != nil {
+		t.Fatalf("start game: %v", err)
+	}
+	flags, err := awdSvc.GenerateFlags(ctx, round.ID)
+	if err != nil || len(flags) != 2 {
+		t.Fatalf("generate flags: %+v err=%v", flags, err)
+	}
+	var flagAlice, flagBob model.AwdFlag
+	for _, f := range flags {
+		switch f.TeamServiceID {
+		case teamAlice.ID:
+			flagAlice = f
+		case teamBob.ID:
+			flagBob = f
+		}
+	}
+
+	if _, err := awdSvc.SubmitAttack(ctx, comp.ID, bob.ID, "  "); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty flag: want ErrValidation, got %v", err)
+	}
+	if _, err := awdSvc.SubmitAttack(ctx, comp.ID, carol.ID, flagAlice.Value); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non participant: want ErrNotFound, got %v", err)
+	}
+
+	pending, err := awdSvc.SubmitAttack(ctx, comp.ID, bob.ID, flagAlice.Value)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if pending.Status != model.AwdAttackPending || pending.Accepted || pending.RoundID != round.ID {
+		t.Fatalf("pending receipt: %+v", pending)
+	}
+	judged, err := awdSvc.JudgePendingAttacks(ctx)
+	if err != nil || judged != 1 {
+		t.Fatalf("judge pending: judged=%d err=%v", judged, err)
+	}
+	var attack model.AwdAttack
+	if err := e.gdb.First(&attack, pending.ID).Error; err != nil ||
+		attack.Status != model.AwdAttackAccepted || attack.JudgedAt == nil {
+		t.Fatalf("accepted attack: %+v err=%v", attack, err)
+	}
+
+	duplicate, err := awdSvc.SubmitAttack(ctx, comp.ID, bob.ID, flagAlice.Value)
+	if err != nil || duplicate.Accepted || duplicate.Status != model.AwdAttackRejected || duplicate.Reason != "flag already captured" {
+		t.Fatalf("duplicate: %+v err=%v", duplicate, err)
+	}
+	self, err := awdSvc.SubmitAttack(ctx, comp.ID, alice.ID, flagAlice.Value)
+	if err != nil || self.Accepted || self.Reason != "cannot attack your own service" {
+		t.Fatalf("self attack: %+v err=%v", self, err)
+	}
+	unknown, err := awdSvc.SubmitAttack(ctx, comp.ID, bob.ID, "flag{nope}")
+	if err != nil || unknown.Accepted || unknown.Reason != "flag not found" {
+		t.Fatalf("unknown flag: %+v err=%v", unknown, err)
+	}
+	if again, err := awdSvc.JudgePendingAttacks(ctx); err != nil || again != 0 {
+		t.Fatalf("no pending after rejections: %d err=%v", again, err)
+	}
+
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).
+		Update("status", model.AwdGameEnded).Error; err != nil {
+		t.Fatalf("end game: %v", err)
+	}
+	if _, err := awdSvc.SubmitAttack(ctx, comp.ID, bob.ID, flagBob.Value); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ended game: want ErrValidation, got %v", err)
+	}
+
+	var submitted, judgedEvents int64
+	if err := e.gdb.Model(&model.Event{}).Where("type = ?", model.EventAwdAttackSubmitted).
+		Count(&submitted).Error; err != nil {
+		t.Fatalf("count submitted events: %v", err)
+	}
+	if err := e.gdb.Model(&model.Event{}).Where("type = ?", model.EventAwdAttackJudged).
+		Count(&judgedEvents).Error; err != nil {
+		t.Fatalf("count judged events: %v", err)
+	}
+	if submitted != 4 || judgedEvents != 4 {
+		t.Fatalf("events submitted=%d judged=%d, want 4/4", submitted, judgedEvents)
+	}
+}
+
 type fakeAwdRuntime struct {
 	network     string
 	created     []AwdTargetSpec

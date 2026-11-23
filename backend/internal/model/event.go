@@ -12,6 +12,9 @@ const (
 	EventRoomCompleted     EventType = "room.completed"
 	EventLabStarted        EventType = "lab.instance.started"
 	EventLabStopped        EventType = "lab.instance.stopped"
+	// AWD 攻击事实（运营审计）：提交即入 pending 事件，worker 判定后写 judged。
+	EventAwdAttackSubmitted EventType = "awd.attack.submitted"
+	EventAwdAttackJudged    EventType = "awd.attack.judged"
 )
 
 // Event append-only 事件表：只允许 INSERT，禁止任何 UPDATE/DELETE
@@ -27,10 +30,10 @@ type Event struct {
 // ScoreRecord 积分（派生表）：只能由派生器从 Event 增量更新，
 // 业务代码禁止直接改写（event-sourcing-rules skill）。
 type ScoreRecord struct {
-	UserID      uint  `gorm:"primaryKey"`
-	Score       int   `json:"score"`
-	SolveCount  int   `json:"solve_count"`
-	UpdatedAt   time.Time
+	UserID     uint `gorm:"primaryKey"`
+	Score      int  `json:"score"`
+	SolveCount int  `json:"solve_count"`
+	UpdatedAt  time.Time
 }
 
 // Progress 学习进度（派生表）：Room/路径完成率，来源同上。

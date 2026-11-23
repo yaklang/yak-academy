@@ -1054,6 +1054,21 @@ export interface AwdGameView {
   game: AwdGame
   services: AwdService[]
 }
+export type AwdAttackStatus = 'pending' | 'accepted' | 'rejected'
+export interface AwdAttackReceipt {
+  id: number
+  status: AwdAttackStatus
+  accepted: boolean
+  reason?: string
+  round_id: number
+  victim_team_service_id: number
+  submitted_at: string
+  judged_at: string | null
+}
+export const competitionAwdApi = {
+  submitAttack: (id: number, flag: string) =>
+    http.post<AwdAttackReceipt>(`/competitions/${id}/awd/attacks`, { flag }),
+}
 export interface AwdServiceInput {
   slug?: string
   name?: string

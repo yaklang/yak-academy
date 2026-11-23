@@ -184,6 +184,7 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/view", "", h.competitionView)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/challenges/{slug}/instance", "", h.competitionStartInstance)
 	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/submissions", "", h.competitionSubmitFlag)
+	r.Handle(http.MethodPost, "/api/v1/competitions/{id}/awd/attacks", "", h.awdSubmitAttack)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/leaderboard", "", h.competitionLeaderboard)
 	r.Handle(http.MethodGet, "/api/v1/competitions/{id}/writeups", "", h.competitionMyWriteups)
 	r.Handle(http.MethodPut, "/api/v1/competitions/{id}/writeups/{challengeId}", "", h.competitionSaveWriteup)
