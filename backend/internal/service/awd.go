@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -742,9 +743,14 @@ func (s *AwdCompetitionService) DeployAttackBoxes(ctx context.Context, competiti
 	return result, nil
 }
 
-// RunChecker 对单个靶机执行 CHECK/PUT/GET，落 AwdCheck 明细并推进
-// last_check_at；非 ok 同步记 AwdIncident。输出中的 flag 会被脱敏。
+// RunChecker 对单个靶机执行 CHECK/PUT/GET（运营态检查，RoundID=0）。
 func (s *AwdCompetitionService) RunChecker(ctx context.Context, teamServiceID uint, action, flag string) (*model.AwdCheck, error) {
+	return s.runChecker(ctx, 0, teamServiceID, action, flag)
+}
+
+// runChecker 回合执行/运营态共用：落 AwdCheck 明细并推进 last_check_at；
+// 非 ok 同步记 AwdIncident。输出中的 flag 会被脱敏。
+func (s *AwdCompetitionService) runChecker(ctx context.Context, roundID, teamServiceID uint, action, flag string) (*model.AwdCheck, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	if action != "check" && action != "put" && action != "get" {
 		return nil, fmt.Errorf("%w: invalid checker action", ErrValidation)
@@ -777,10 +783,9 @@ func (s *AwdCompetitionService) RunChecker(ctx context.Context, teamServiceID ui
 	}
 	now := s.now()
 	check := &model.AwdCheck{
-		RoundID: 0, TeamServiceID: ts.ID, Action: action, Status: result.Status,
+		RoundID: roundID, TeamServiceID: ts.ID, Action: action, Status: result.Status,
 		LatencyMS: int(result.Latency / time.Millisecond), Output: output, CreatedAt: now,
 	}
-	// RoundID 由回合执行器补写；单独调用时保持 0（运营态检查）。
 	if err := s.awd.CreateCheck(ctx, check); err != nil {
 		return nil, err
 	}
@@ -806,6 +811,107 @@ func parseAwdPorts(raw string) ([]AwdPort, error) {
 		return nil, fmt.Errorf("%w: invalid service ports JSON", ErrValidation)
 	}
 	return ports, nil
+}
+
+// AwdRoundRunResult 回合创建/检查执行结果。
+type AwdRoundRunResult struct {
+	Round  model.AwdRound   `json:"round"`
+	Flags  int              `json:"flags"`
+	Checks []model.AwdCheck `json:"checks"`
+	Failed []string         `json:"failed"`
+}
+
+// StartRound 开启下一回合：生成确定性 flags，PUT/GET/CHECK 全部靶机，
+// 记录检查明细；回合保持 running，等待结算（下一 commit）。
+func (s *AwdCompetitionService) StartRound(ctx context.Context, competitionID uint) (*AwdRoundRunResult, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning {
+		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
+	}
+	if active, err := s.awd.FindActiveRound(ctx, game.ID); err == nil && active != nil {
+		return nil, fmt.Errorf("%w: round %d is still active", ErrValidation, active.Number)
+	} else if err != nil && !isNotFound(err) {
+		return nil, err
+	}
+	teamServices, err := s.awd.ListTeamServicesByGame(ctx, game.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(teamServices) == 0 {
+		return nil, fmt.Errorf("%w: no AWD targets deployed", ErrValidation)
+	}
+	now := s.now()
+	round := &model.AwdRound{
+		GameID: game.ID, Number: game.CurrentRound + 1, Status: model.AwdRoundRunning,
+		StartsAt: now, EndsAt: now.Add(time.Duration(game.RoundSeconds) * time.Second),
+		Seed: randomAwdSeed(), CreatedAt: now,
+	}
+	if err := s.awd.CreateRound(ctx, round); err != nil {
+		return nil, err
+	}
+	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{"current_round": round.Number}); err != nil {
+		return nil, err
+	}
+	flags, err := s.GenerateFlags(ctx, round.ID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.RunRoundChecks(ctx, round.ID)
+	if err != nil {
+		return nil, err
+	}
+	result.Round = *round
+	result.Flags = len(flags)
+	return result, nil
+}
+
+// RunRoundChecks 对回合内每个靶机执行 PUT → GET → CHECK，落明细；
+// 单个靶机失败进入 Failed，不阻断其它靶机。
+func (s *AwdCompetitionService) RunRoundChecks(ctx context.Context, roundID uint) (*AwdRoundRunResult, error) {
+	round, err := s.awd.FindRound(ctx, roundID)
+	if err != nil {
+		return nil, mapRecordNotFound(err)
+	}
+	teamServices, err := s.awd.ListTeamServicesByGame(ctx, round.GameID)
+	if err != nil {
+		return nil, err
+	}
+	result := &AwdRoundRunResult{Round: *round, Checks: []model.AwdCheck{}, Failed: []string{}}
+	for _, ts := range teamServices {
+		if ts.Status != "running" {
+			result.Failed = append(result.Failed, fmt.Sprintf("target %d is %s", ts.ID, ts.Status))
+			continue
+		}
+		flag, err := s.awd.FindFlagByRoundTeamService(ctx, round.ID, ts.ID)
+		if err != nil {
+			result.Failed = append(result.Failed, fmt.Sprintf("target %d: flag missing", ts.ID))
+			continue
+		}
+		for _, action := range []string{"put", "get", "check"} {
+			flagValue := flag.Value
+			if action == "check" {
+				flagValue = ""
+			}
+			check, err := s.runChecker(ctx, round.ID, ts.ID, action, flagValue)
+			if err != nil {
+				result.Failed = append(result.Failed, fmt.Sprintf("target %d %s: %v", ts.ID, action, err))
+				continue
+			}
+			result.Checks = append(result.Checks, *check)
+		}
+	}
+	return result, nil
+}
+
+func randomAwdSeed() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("seed-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 // AwdAttackValidation 攻击提交的校验结论（accepted=false 为业务拒绝，不返回 error）。
