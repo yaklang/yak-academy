@@ -13,6 +13,17 @@ import (
 // 参赛者视图：比赛概览、我的服务、目标目录、攻击盒凭据、排名、运营事件与
 // 我的攻击记录。flag 值/checker 配置不返回；攻击盒密码仅解密给所属竞域单位。
 
+type AwdParticipantCompetition struct {
+	ID          uint                    `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Kind        model.CompetitionKind   `json:"kind"`
+	Format      model.CompetitionFormat `json:"format"`
+	Status      model.CompetitionStatus `json:"status"`
+	StartTime   time.Time               `json:"start_time"`
+	EndTime     time.Time               `json:"end_time"`
+}
+
 type AwdParticipantGame struct {
 	ID             uint                    `json:"id"`
 	Status         model.AwdGameStatus     `json:"status"`
@@ -85,23 +96,25 @@ type AwdParticipantAttack struct {
 }
 
 type AwdParticipantView struct {
-	Game           AwdParticipantGame      `json:"game"`
-	CompetitorType model.AwdCompetitorType `json:"competitor_type"`
-	CompetitorID   uint                    `json:"competitor_id"`
-	CompetitorName string                  `json:"competitor_name"`
-	Round          *AwdRoundView           `json:"round,omitempty"`
-	MyServices     []AwdParticipantService `json:"my_services"`
-	Targets        []AwdParticipantTarget  `json:"targets"`
-	AttackBox      *AwdAttackBoxView       `json:"attack_box,omitempty"`
-	Standings      []AwdStandingView       `json:"standings"`
-	Incidents      []model.AwdIncident     `json:"incidents"`
-	Attacks        []AwdParticipantAttack  `json:"attacks"`
+	Competition    AwdParticipantCompetition `json:"competition"`
+	Game           AwdParticipantGame        `json:"game"`
+	CompetitorType model.AwdCompetitorType   `json:"competitor_type"`
+	CompetitorID   uint                      `json:"competitor_id"`
+	CompetitorName string                    `json:"competitor_name"`
+	TeamName       *string                   `json:"team_name"`
+	Round          *AwdRoundView             `json:"round,omitempty"`
+	MyServices     []AwdParticipantService   `json:"my_services"`
+	Targets        []AwdParticipantTarget    `json:"targets"`
+	AttackBox      *AwdAttackBoxView         `json:"attack_box,omitempty"`
+	Standings      []AwdStandingView         `json:"standings"`
+	Incidents      []model.AwdIncident       `json:"incidents"`
+	Attacks        []AwdParticipantAttack    `json:"attacks"`
 }
 
 // ParticipantView 参赛者 AWD 首页：只返回本人可见的服务与攻击盒凭据，
 // 目标目录只包含其他竞域单位的服务（内部地址用于攻击盒内访问）。
 func (s *AwdCompetitionService) ParticipantView(ctx context.Context, competitionID, userID uint) (*AwdParticipantView, error) {
-	_, game, competitorID, err := s.requireAwdParticipant(ctx, competitionID, userID)
+	comp, game, competitorID, err := s.requireAwdParticipant(ctx, competitionID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +206,18 @@ func (s *AwdCompetitionService) ParticipantView(ctx context.Context, competition
 			SubmittedAt:         a.SubmittedAt, JudgedAt: a.JudgedAt,
 		})
 	}
+	var teamName *string
+	if game.CompetitorType == model.AwdCompetitorTeam {
+		if name := names[competitorID]; name != "" {
+			teamName = &name
+		}
+	}
 	return &AwdParticipantView{
+		Competition: AwdParticipantCompetition{
+			ID: comp.ID, Name: comp.Name, Description: comp.Description,
+			Kind: comp.Kind, Format: comp.Format, Status: comp.Status(now),
+			StartTime: comp.StartTime, EndTime: comp.EndTime,
+		},
 		Game: AwdParticipantGame{
 			ID: game.ID, Status: game.Status, CompetitorType: game.CompetitorType,
 			RoundSeconds: game.RoundSeconds, CurrentRound: game.CurrentRound,
@@ -201,6 +225,7 @@ func (s *AwdCompetitionService) ParticipantView(ctx context.Context, competition
 		},
 		CompetitorType: game.CompetitorType, CompetitorID: competitorID,
 		CompetitorName: awdCompetitorName(names, competitorID),
+		TeamName:       teamName,
 		Round:          roundView,
 		MyServices:     myServices,
 		Targets:        targets,

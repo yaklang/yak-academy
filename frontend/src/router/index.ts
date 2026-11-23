@@ -82,7 +82,7 @@ const router = createRouter({
     {
       path: '/competitions/:id',
       name: 'competition-home',
-      component: () => import('../views/CompetitionHome.vue'),
+      component: () => import('../views/competition/CompetitionEntry.vue'),
       meta: { requiresAuth: true },
     },
   ],

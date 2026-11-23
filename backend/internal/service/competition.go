@@ -1367,6 +1367,25 @@ type CompetitionHome struct {
 	WriteupSubmitted bool                       `json:"writeup_submitted"`
 }
 
+// CompetitionEntryView 竞赛入口元数据（格式无关）：参赛者入场后由前端按
+// format 分发到 CTF/AWD/Exam 视图，不返回任何赛制专属数据。
+type CompetitionEntryView struct {
+	Competition CompetitionView `json:"competition"`
+	TeamName    *string         `json:"team_name"`
+}
+
+func (s *CompetitionService) Entry(ctx context.Context, userID, id uint) (*CompetitionEntryView, error) {
+	c, part, err := s.requireEntered(ctx, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	teamName, err := s.participantTeamName(ctx, part)
+	if err != nil {
+		return nil, err
+	}
+	return &CompetitionEntryView{Competition: toView(c, s.now()), TeamName: teamName}, nil
+}
+
 func (s *CompetitionService) View(ctx context.Context, userID, id uint) (*CompetitionHome, error) {
 	c, part, err := s.requireEntered(ctx, userID, id)
 	if err != nil {

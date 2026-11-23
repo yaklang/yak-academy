@@ -60,6 +60,7 @@ type AwdStandingView struct {
 	Rank           int                     `json:"rank"`
 	CompetitorType model.AwdCompetitorType `json:"competitor_type"`
 	CompetitorID   uint                    `json:"competitor_id"`
+	CompetitorName string                  `json:"competitor_name,omitempty"`
 	Score          int                     `json:"score"`
 	AttackScore    int                     `json:"attack_score"`
 	DefenseLoss    int                     `json:"defense_loss"`
@@ -201,13 +202,17 @@ func (s *AwdCompetitionService) SettleRound(ctx context.Context, competitionID, 
 	if err != nil {
 		return nil, err
 	}
+	names, err := s.awdCompetitorNames(ctx, competitionID, game.CompetitorType)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.deriver.Derive(ctx, competitionID, game.CompetitorType, competitors, now)
 	if err != nil {
 		return nil, err
 	}
 	return &AwdSettlementView{
 		RoundID: round.ID, RoundNumber: round.Number, Events: created,
-		Standings: buildAwdStandingViews(game.CompetitorType, competitors, rows),
+		Standings: buildAwdStandingViews(game.CompetitorType, competitors, rows, names),
 	}, nil
 }
 
@@ -221,11 +226,15 @@ func (s *AwdCompetitionService) Standings(ctx context.Context, competitionID uin
 	if err != nil {
 		return nil, err
 	}
+	names, err := s.awdCompetitorNames(ctx, competitionID, game.CompetitorType)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.awd.ListStandings(ctx, competitionID)
 	if err != nil {
 		return nil, err
 	}
-	return buildAwdStandingViews(game.CompetitorType, competitors, rows), nil
+	return buildAwdStandingViews(game.CompetitorType, competitors, rows, names), nil
 }
 
 func (s *AwdCompetitionService) awdStandingCompetitors(ctx context.Context, competitionID uint, game *model.AwdGame) ([]uint, error) {
@@ -249,7 +258,7 @@ func (s *AwdCompetitionService) awdStandingCompetitors(ctx context.Context, comp
 	return competitors, nil
 }
 
-func buildAwdStandingViews(competitorType model.AwdCompetitorType, competitors []uint, rows []model.AwdStanding) []AwdStandingView {
+func buildAwdStandingViews(competitorType model.AwdCompetitorType, competitors []uint, rows []model.AwdStanding, names map[uint]string) []AwdStandingView {
 	byKey := make(map[string]model.AwdStanding, len(rows))
 	for _, r := range rows {
 		byKey[awdCompetitorKey(r.CompetitorType, r.CompetitorID)] = r
@@ -259,7 +268,8 @@ func buildAwdStandingViews(competitorType model.AwdCompetitorType, competitors [
 		r := byKey[awdCompetitorKey(competitorType, id)]
 		views = append(views, AwdStandingView{
 			CompetitorType: competitorType, CompetitorID: id,
-			Score: r.Score, AttackScore: r.AttackScore, DefenseLoss: r.DefenseLoss,
+			CompetitorName: awdCompetitorName(names, id),
+			Score:          r.Score, AttackScore: r.AttackScore, DefenseLoss: r.DefenseLoss,
 			SlaScore: r.SlaScore, LastEventAt: r.LastEventAt,
 		})
 	}
