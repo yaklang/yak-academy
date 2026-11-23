@@ -112,8 +112,10 @@ func TestDockerAwdRuntimeTargetHardening(t *testing.T) {
 	if !containerGone(ctx, t, name) {
 		t.Errorf("target container still exists after destroy")
 	}
-	if err := exec.CommandContext(ctx, "docker", "network", "inspect", network).Run(); err == nil {
-		t.Errorf("awd network still exists after destroy")
+	for _, leftover := range []string{network, awdEdgeNetworkName(competitionID)} {
+		if err := exec.CommandContext(ctx, "docker", "network", "inspect", leftover).Run(); err == nil {
+			t.Errorf("awd network %s still exists after destroy", leftover)
+		}
 	}
 }
 
@@ -179,6 +181,15 @@ func TestDockerAwdRuntimeAttackBoxSSH(t *testing.T) {
 	}
 	if got := dockerInspectFormat(ctx, t, boxName, "{{json .HostConfig.CapAdd}}"); !strings.Contains(got, "SYS_CHROOT") {
 		t.Errorf("attack box cap add = %s, want SYS_CHROOT", got)
+	}
+	networks := dockerInspectFormat(ctx, t, boxName, "{{json .NetworkSettings.Networks}}")
+	for _, want := range []string{awdNetworkName(competitionID), awdEdgeNetworkName(competitionID)} {
+		if !strings.Contains(networks, want) {
+			t.Errorf("attack box networks = %s, want %s", networks, want)
+		}
+	}
+	if got := dockerInspectFormat(ctx, t, awdEdgeNetworkName(competitionID), "{{.Internal}}"); got != "false" {
+		t.Errorf("edge network internal = %s, want false", got)
 	}
 
 	addr := net.JoinHostPort(box.SSHHost, strconv.Itoa(box.SSHPort))

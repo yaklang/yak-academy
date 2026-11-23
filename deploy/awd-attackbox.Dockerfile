@@ -6,7 +6,7 @@
 #
 # 运行时契约（DockerAwdRuntime.CreateAttackBox）：容器监听 22，读取
 # USER_NAME / USER_PASSWORD 创建或更新登录用户；SSH 仅密码认证，禁用 root。
-# 攻击盒只接入竞赛 --internal 网络，SSH 端口由宿主随机发布。
+# 攻击盒先接入竞赛 edge 网络发布随机 SSH 端口，再接入 --internal 网络访问靶机。
 FROM alpine:3.21
 
 ARG HTTP_PROXY

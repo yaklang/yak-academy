@@ -140,6 +140,13 @@ func awdNetworkName(competitionID uint) string {
 	return fmt.Sprintf("yak-awd-%d", competitionID)
 }
 
+// awdEdgeNetworkName 攻击盒的对外网络：Docker 不会为只接入 --internal 网络的
+// 容器建立端口发布规则（moby#36174），因此攻击盒需要同时接入普通 edge 网络
+// 才能发布 SSH 端口；靶机仍然只接内部网络。
+func awdEdgeNetworkName(competitionID uint) string {
+	return fmt.Sprintf("yak-awd-edge-%d", competitionID)
+}
+
 var awdNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func awdContainerName(spec AwdTargetSpec) string {
@@ -165,10 +172,14 @@ func (r *DockerAwdRuntime) run(ctx context.Context, args ...string) (string, err
 	return text, nil
 }
 
-func (r *DockerAwdRuntime) EnsureNetwork(ctx context.Context, competitionID uint) (string, error) {
-	name := awdNetworkName(competitionID)
-	out, err := r.run(ctx, "network", "create", "--internal", "--label",
+func (r *DockerAwdRuntime) ensureNetwork(ctx context.Context, competitionID uint, name string, internal bool) (string, error) {
+	args := []string{"network", "create"}
+	if internal {
+		args = append(args, "--internal")
+	}
+	args = append(args, "--label",
 		fmt.Sprintf("yak-academy.awd.competition=%d", competitionID), name)
+	out, err := r.run(ctx, args...)
 	if err == nil {
 		return name, nil
 	}
@@ -177,6 +188,14 @@ func (r *DockerAwdRuntime) EnsureNetwork(ctx context.Context, competitionID uint
 		return name, nil
 	}
 	return "", err
+}
+
+func (r *DockerAwdRuntime) EnsureNetwork(ctx context.Context, competitionID uint) (string, error) {
+	return r.ensureNetwork(ctx, competitionID, awdNetworkName(competitionID), true)
+}
+
+func (r *DockerAwdRuntime) ensureEdgeNetwork(ctx context.Context, competitionID uint) (string, error) {
+	return r.ensureNetwork(ctx, competitionID, awdEdgeNetworkName(competitionID), false)
 }
 
 // targetRunArgs 靶机 docker run 参数（纯函数便于单测断言加固项）。
@@ -237,12 +256,13 @@ func awdAttackBoxName(spec AwdAttackBoxSpec) string {
 }
 
 // attackBoxRunArgs 攻击盒 docker run 参数（纯函数便于单测断言加固项）。
-func (r *DockerAwdRuntime) attackBoxRunArgs(spec AwdAttackBoxSpec, network, name, bind string, containerPort int) []string {
+// 攻击盒在 edge 网络上创建以发布 SSH 端口，创建后再接入竞赛内部网络。
+func (r *DockerAwdRuntime) attackBoxRunArgs(spec AwdAttackBoxSpec, edgeNetwork, name, bind string, containerPort int) []string {
 	args := []string{
 		"run", "-d",
 		"--name", name,
 		"--hostname", name,
-		"--network", network,
+		"--network", edgeNetwork,
 		"--label", fmt.Sprintf("yak-academy.awd.competition=%d", spec.CompetitionID),
 		"--label", "yak-academy.awd.role=attackbox",
 		"--label", fmt.Sprintf("yak-academy.awd.competitor=%s-%d", spec.CompetitorType, spec.CompetitorID),
@@ -267,7 +287,11 @@ func (r *DockerAwdRuntime) CreateAttackBox(ctx context.Context, spec AwdAttackBo
 	if strings.TrimSpace(spec.SSHUser) == "" || strings.TrimSpace(spec.SSHPassword) == "" {
 		return AwdAttackBoxTarget{}, fmt.Errorf("%w: SSH credentials are required", ErrValidation)
 	}
-	network, err := r.EnsureNetwork(ctx, spec.CompetitionID)
+	gameNetwork, err := r.EnsureNetwork(ctx, spec.CompetitionID)
+	if err != nil {
+		return AwdAttackBoxTarget{}, err
+	}
+	edgeNetwork, err := r.ensureEdgeNetwork(ctx, spec.CompetitionID)
 	if err != nil {
 		return AwdAttackBoxTarget{}, err
 	}
@@ -281,13 +305,18 @@ func (r *DockerAwdRuntime) CreateAttackBox(ctx context.Context, spec AwdAttackBo
 		bind = "0.0.0.0"
 	}
 	_, _ = r.run(ctx, "rm", "-f", name)
-	out, err := r.run(ctx, r.attackBoxRunArgs(spec, network, name, bind, containerPort)...)
+	out, err := r.run(ctx, r.attackBoxRunArgs(spec, edgeNetwork, name, bind, containerPort)...)
 	if err != nil {
 		return AwdAttackBoxTarget{}, err
 	}
 	id := strings.TrimSpace(out)
 	if id == "" {
 		return AwdAttackBoxTarget{}, fmt.Errorf("docker run returned empty attack box container id")
+	}
+	// 创建后再接入竞赛内部网络：既能通过内部 DNS 访问靶机，又保留 edge 上的 SSH 端口发布。
+	if _, err := r.run(ctx, "network", "connect", gameNetwork, name); err != nil {
+		_ = r.DestroyTarget(ctx, id)
+		return AwdAttackBoxTarget{}, fmt.Errorf("connect attack box to game network: %w", err)
 	}
 	portOut, err := r.run(ctx, "port", name, fmt.Sprintf("%d/tcp", containerPort))
 	if err != nil {
@@ -334,9 +363,12 @@ func (r *DockerAwdRuntime) DestroyGame(ctx context.Context, competitionID uint) 
 			return err
 		}
 	}
-	_, err = r.run(ctx, "network", "rm", awdNetworkName(competitionID))
-	if err != nil && !strings.Contains(err.Error(), "not found") {
-		return err
+	var firstErr error
+	for _, network := range []string{awdNetworkName(competitionID), awdEdgeNetworkName(competitionID)} {
+		if _, err := r.run(ctx, "network", "rm", network); err != nil &&
+			!strings.Contains(err.Error(), "not found") && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
