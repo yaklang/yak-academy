@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
@@ -17,6 +18,8 @@ type ExamService struct {
 	exam       repo.ExamRepo
 	comps      repo.CompetitionRepo
 	challenges repo.ChallengeRepo
+	events     repo.EventRepo
+	bus        *eventbus.Bus
 	now        func() time.Time
 }
 

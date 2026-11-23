@@ -8,8 +8,8 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
-// 管理端考试：试卷配置 + 试题 CRUD。考试域接口与 AWD/CTF 完全分离，
-// 仅复用 /admin/competitions 前缀与 admin 鉴权。
+// 管理端考试：试卷配置 + 试题 CRUD；选手端作答生命周期。
+// 考试域接口与 AWD/CTF 完全分离，仅复用 /competitions 前缀与入场校验。
 
 func examQuestionID(req *http.Request) (uint, error) {
 	id, err := strconv.ParseUint(req.PathValue("qid"), 10, 64)
@@ -17,6 +17,65 @@ func examQuestionID(req *http.Request) (uint, error) {
 		return 0, errValidation
 	}
 	return uint(id), nil
+}
+
+func (h *Handlers) examParticipantView(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Exam.Exam(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) examStartAttempt(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Exam.StartAttempt(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "exam.attempt.start", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"attempt_id": view.Attempt.ID})
+	writeJSON(w, http.StatusCreated, view)
+}
+
+func (h *Handlers) examSaveAnswer(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	qid, err := examQuestionID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		Answer json.RawMessage `json:"answer"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	answer, err := h.Exam.SaveAnswer(req.Context(), id, user.ID, qid, body.Answer, sourceIP(req))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 func (h *Handlers) adminGetExamPaper(w http.ResponseWriter, req *http.Request) {

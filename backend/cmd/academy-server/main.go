@@ -169,6 +169,8 @@ func main() {
 	awdSvc.SetReportsDir(cfg.ReportsDir)
 	awdSvc.StartWorker(ctx)
 	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo)
+	examSvc.SetEvents(eventRepo, bus)
+	examSvc.StartWorker(ctx)
 
 	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
 	//（外部 pg_dump），调度与手动创建均拒绝并给出指引。

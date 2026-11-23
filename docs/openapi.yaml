@@ -1285,6 +1285,85 @@ components:
         explanation: { type: string }
         score: { type: integer, minimum: 1, maximum: 1000 }
         challenge_id: { type: integer, description: 编程题必填且必须为 code 类型 Challenge }
+    ExamQuestionPublic:
+      type: object
+      description: 选手端试题（不含标准答案；解析仅交卷后返回）
+      properties:
+        id: { type: integer }
+        seq: { type: integer }
+        type: { type: string, enum: [single, multiple, truefalse, code] }
+        title: { type: string }
+        content: { type: string }
+        options: { type: array, items: { $ref: '#/components/schemas/ExamOption' } }
+        score: { type: integer }
+        challenge_id: { type: integer }
+        explanation: { type: string, description: 交卷后才返回 }
+    ExamAttemptView:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [in_progress, submitted, expired] }
+        started_at: { type: string }
+        expires_at: { type: string }
+        submitted_at: { type: string, nullable: true }
+        auto_submitted: { type: boolean }
+        remaining_seconds: { type: integer }
+        objective_score: { type: integer }
+        code_score: { type: integer }
+        total_score: { type: integer }
+        passed: { type: boolean }
+    ExamAnswerView:
+      type: object
+      properties:
+        question_id: { type: integer }
+        answer:
+          description: 'single: "A"；multiple: ["A","C"]；truefalse: true；未作答 null'
+          nullable: true
+        graded: { type: boolean }
+        correct: { type: boolean }
+        score: { type: integer }
+        code_submission_id: { type: integer }
+    ExamParticipantView:
+      type: object
+      description: 选手考试页（单次作答；服务端计时）
+      properties:
+        competition:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            description: { type: string }
+            kind: { type: string, enum: [public, invitational] }
+            format: { type: string, enum: [ctf, awd, exam] }
+            status: { type: string, enum: [scheduled, running, ended] }
+            start_time: { type: string }
+            end_time: { type: string }
+        paper:
+          type: object
+          properties:
+            id: { type: integer }
+            title: { type: string }
+            description: { type: string }
+            duration_seconds: { type: integer }
+            pass_score: { type: integer }
+            total_score: { type: integer }
+        attempt:
+          allOf:
+            - $ref: '#/components/schemas/ExamAttemptView'
+          nullable: true
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/ExamQuestionPublic' }
+        answers:
+          type: array
+          items: { $ref: '#/components/schemas/ExamAnswerView' }
+        server_time: { type: string }
+    ExamAnswerInput:
+      type: object
+      required: [answer]
+      properties:
+        answer:
+          description: 'single: "A"；multiple: ["A","C"]；truefalse: true；null = 清除'
     AwdParticipantView:
       type: object
       description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
@@ -4562,6 +4641,57 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AwdReportView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/exam:
+    get:
+      tags: [competitions]
+      summary: 选手考试页（题目裁剪、作答状态、剩余秒数；需已入场）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamParticipantView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/exam/attempts:
+    post:
+      tags: [competitions]
+      summary: 开始作答（单次；进行中重复请求幂等返回当前页）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamParticipantView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/exam/attempts/current/answers/{qid}:
+    put:
+      tags: [competitions]
+      summary: 自动保存一道题答案（到期返回 422；code 题走判题接口）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: qid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamAnswerInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamAnswerView' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
