@@ -11,12 +11,20 @@ import (
 )
 
 type awdRepo struct {
-	db *gorm.DB
+	db    *gorm.DB
+	locks *awdKeyedLock
 }
 
 // NewAwdRepo AWD 独立域仓库（repo 层唯一允许直接持有 gorm 的位置）。
 func NewAwdRepo(db *gorm.DB) AwdRepo {
-	return &awdRepo{db: db}
+	return &awdRepo{db: db, locks: newAwdKeyedLock()}
+}
+
+// ListGamesByStatus 按生命周期状态列出比赛（启动恢复扫描 running 场次）。
+func (r *awdRepo) ListGamesByStatus(ctx context.Context, status model.AwdGameStatus) ([]model.AwdGame, error) {
+	var list []model.AwdGame
+	err := r.db.WithContext(ctx).Where("status = ?", status).Order("id asc").Find(&list).Error
+	return list, err
 }
 
 func (r *awdRepo) FindGameByCompetition(ctx context.Context, competitionID uint) (*model.AwdGame, error) {
@@ -109,10 +117,12 @@ func (r *awdRepo) UpdateRoundSelective(ctx context.Context, id uint, fields map[
 	return r.db.WithContext(ctx).Model(&model.AwdRound{}).Where("id = ?", id).Updates(fields).Error
 }
 
-// FindActiveRound 当前 running 回合（nil + record not found = 无）。
+// FindActiveRound 当前未结算回合（pending 或 running；nil + record not found = 无）。
+// pending 是回合创建/检查进行中的中间态，启动恢复据此续跑。
 func (r *awdRepo) FindActiveRound(ctx context.Context, gameID uint) (*model.AwdRound, error) {
 	var round model.AwdRound
-	err := r.db.WithContext(ctx).Where("game_id = ? AND status = ?", gameID, model.AwdRoundRunning).
+	err := r.db.WithContext(ctx).
+		Where("game_id = ? AND status IN ?", gameID, []model.AwdRoundStatus{model.AwdRoundPending, model.AwdRoundRunning}).
 		Order("number desc").First(&round).Error
 	if err != nil {
 		return nil, err

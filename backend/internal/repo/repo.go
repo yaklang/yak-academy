@@ -418,8 +418,11 @@ type CompetitionRepo interface {
 type AwdRepo interface {
 	FindGameByCompetition(ctx context.Context, competitionID uint) (*model.AwdGame, error)
 	FindGame(ctx context.Context, id uint) (*model.AwdGame, error)
+	ListGamesByStatus(ctx context.Context, status model.AwdGameStatus) ([]model.AwdGame, error)
 	CreateGame(ctx context.Context, g *model.AwdGame) error
 	UpdateGameSelective(ctx context.Context, gameID uint, fields map[string]any) error
+	// WithAwdLock 同一 key 串行执行（PostgreSQL advisory lock / SQLite 进程内锁）。
+	WithAwdLock(ctx context.Context, key string, fn func(context.Context) error) error
 
 	ListServices(ctx context.Context, competitionID uint) ([]model.AwdService, error)
 	FindService(ctx context.Context, id uint) (*model.AwdService, error)
