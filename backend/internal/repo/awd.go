@@ -110,6 +110,29 @@ func (r *awdRepo) FindTeamService(ctx context.Context, id uint) (*model.AwdTeamS
 	return &ts, nil
 }
 
+func (r *awdRepo) FindTeamServiceByKey(ctx context.Context, gameID, serviceID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdTeamService, error) {
+	var ts model.AwdTeamService
+	err := r.db.WithContext(ctx).Where(
+		"game_id = ? AND service_id = ? AND competitor_type = ? AND competitor_id = ?",
+		gameID, serviceID, competitorType, competitorID,
+	).First(&ts).Error
+	if err != nil {
+		return nil, err
+	}
+	return &ts, nil
+}
+
+func (r *awdRepo) CreateTeamService(ctx context.Context, ts *model.AwdTeamService) error {
+	return r.db.WithContext(ctx).Create(ts).Error
+}
+
+func (r *awdRepo) UpdateTeamServiceSelective(ctx context.Context, id uint, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.AwdTeamService{}).Where("id = ?", id).Updates(fields).Error
+}
+
 // CreateFlags 批量写回合 flag；唯一索引冲突（重复播种）静默跳过，保证重放幂等。
 func (r *awdRepo) CreateFlags(ctx context.Context, flags []model.AwdFlag) error {
 	if len(flags) == 0 {
