@@ -8,8 +8,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
-// 管理端证书：赛后按排名/分数预览与签发；证书快照只增不改。
-// 公开验证页在后续提交加入（GET /certificates/{code}）。
+// 证书：管理端赛后按排名/分数预览与签发；公开端凭验证码读取证书快照。
 
 func (h *Handlers) adminListCertificates(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
@@ -64,4 +63,14 @@ func (h *Handlers) adminIssueCertificates(w http.ResponseWriter, req *http.Reque
 	h.audit(req, "competition.certificate.issue", "competition", strconv.FormatUint(uint64(id), 10),
 		map[string]any{"rule_id": result.Rule.ID, "title": result.Rule.Title, "issued": len(result.Certificates)})
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// verifyCertificate 公开验证（无需登录；只返回证书快照，不含账号标识）。
+func (h *Handlers) verifyCertificate(w http.ResponseWriter, req *http.Request) {
+	view, err := h.Certificates.VerifyCertificate(req.Context(), req.PathValue("code"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }

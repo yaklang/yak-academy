@@ -983,6 +983,22 @@ export interface CertificateIssueResult {
   certificates: CompetitionCertificate[]
   preview: CertificatePreview
 }
+export interface CertificateVerificationView {
+  valid: boolean
+  code: string
+  title: string
+  level: string
+  competition_name: string
+  recipient_name: string
+  rank: number
+  score: number
+  issued_at: string | null
+}
+// 公开证书验证（无需登录；只返回证书快照，不含账号标识）。
+export const certificateApi = {
+  verify: (code: string) =>
+    http.get<CertificateVerificationView>(`/certificates/${encodeURIComponent(code)}`),
+}
 // 批量导入请求（仅邀请赛）：队伍 + 个人参赛者。条目按「账号编码或用户名」
 // 引用既有账号，不自动建号——缺失条目在响应 missing 回报（补号走一键生成）。
 export interface ParticipantImportRequest {
