@@ -4085,6 +4085,36 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/certificates.csv:
+    get:
+      tags: [admin]
+      summary: 证书明细 CSV（UTF-8 BOM；含验证码与验证路径）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awards.csv:
+    get:
+      tags: [admin]
+      summary: 获奖名单 CSV（UTF-8 BOM；不含验证码，供公示张贴）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/competitions/{id}/certificates/preview:
     post:
       tags: [admin]

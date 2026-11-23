@@ -74,3 +74,38 @@ func (h *Handlers) verifyCertificate(w http.ResponseWriter, req *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, view)
 }
+
+func (h *Handlers) adminCertificatesCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.Certificates.CertificateCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeCertificateCSV(w, data, filename)
+}
+
+func (h *Handlers) adminAwardsCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.Certificates.AwardCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeCertificateCSV(w, data, filename)
+}
+
+func writeCertificateCSV(w http.ResponseWriter, data []byte, filename string) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}

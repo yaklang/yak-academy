@@ -1134,6 +1134,23 @@ function certificateThresholdLabel(mode: QualificationMode) {
   return 'N 名'
 }
 
+async function exportCertificates(kind: 'certificates' | 'awards') {
+  try {
+    const blob = kind === 'certificates'
+      ? await adminCompetitionApi.certificatesCSV(compId)
+      : await adminCompetitionApi.awardsCSV(compId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `competition-${compId}-${kind}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    notify.success(kind === 'certificates' ? '证书 CSV 已导出' : '获奖名单 CSV 已导出')
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '导出失败')
+  }
+}
+
 async function onTab(name: string | number) {
   // 懒加载：进入对应标签页时拉取数据。
   if (name === 'challenges' && !challenges.value.length) await loadChallenges()
@@ -1449,7 +1466,15 @@ onMounted(async () => {
           <template #header>
             <div class="card-head">
               <span>已签发证书（{{ certificateData?.total ?? 0 }}）</span>
-              <UiButton size="small" :loading="certificateLoading" @click="loadCertificates">刷新</UiButton>
+              <div class="actions">
+                <UiButton size="small" :disabled="!certificateData?.total" @click="exportCertificates('awards')">
+                  导出获奖名单 CSV
+                </UiButton>
+                <UiButton size="small" :disabled="!certificateData?.total" @click="exportCertificates('certificates')">
+                  导出证书 CSV
+                </UiButton>
+                <UiButton size="small" :loading="certificateLoading" @click="loadCertificates">刷新</UiButton>
+              </div>
             </div>
           </template>
           <UiLoadError v-if="certificateError" compact :message="certificateError" @retry="loadCertificates" class="block" />

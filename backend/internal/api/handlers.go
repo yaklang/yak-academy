@@ -201,6 +201,8 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/certificates", "admin", h.adminListCertificates)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/certificates/preview", "admin", h.adminPreviewCertificates)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/certificates", "admin", h.adminIssueCertificates)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/certificates.csv", "admin", h.adminCertificatesCSV)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/awards.csv", "admin", h.adminAwardsCSV)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/qualifications", "admin", h.adminListQualifications)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/preview", "admin", h.adminPreviewQualification)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/apply", "admin", h.adminApplyQualification)
