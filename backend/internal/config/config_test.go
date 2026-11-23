@@ -74,6 +74,49 @@ func TestLoadSMTPEnvs(t *testing.T) {
 	}
 }
 
+func TestLoadAwdRuntimeEnvs(t *testing.T) {
+	t.Setenv("ACADEMY_AWD_ATTACK_IMAGE", "registry.local/awd/attack:1")
+	t.Setenv("ACADEMY_AWD_ATTACK_SSH_BIND", "192.0.2.10")
+	t.Setenv("ACADEMY_AWD_ATTACK_PUBLIC_HOST", "awd.example.com")
+	t.Setenv("ACADEMY_AWD_TARGET_MEMORY", "256m")
+	t.Setenv("ACADEMY_AWD_TARGET_CPUS", "0.25")
+	t.Setenv("ACADEMY_AWD_ATTACK_MEMORY", "128m")
+	t.Setenv("ACADEMY_AWD_ATTACK_CPUS", "0.1")
+
+	cfg := Load()
+	if cfg.AwdAttackImage != "registry.local/awd/attack:1" ||
+		cfg.AwdAttackSSHBind != "192.0.2.10" ||
+		cfg.AwdAttackPublicHost != "awd.example.com" {
+		t.Fatalf("awd attack options: %+v", cfg)
+	}
+	if cfg.AwdTargetMemory != "256m" || cfg.AwdTargetCPUs != "0.25" ||
+		cfg.AwdAttackMemory != "128m" || cfg.AwdAttackCPUs != "0.1" {
+		t.Fatalf("awd resource limits: %+v", cfg)
+	}
+
+	for _, key := range []string{
+		"ACADEMY_AWD_ATTACK_IMAGE",
+		"ACADEMY_AWD_ATTACK_SSH_BIND",
+		"ACADEMY_AWD_ATTACK_PUBLIC_HOST",
+		"ACADEMY_AWD_TARGET_MEMORY",
+		"ACADEMY_AWD_TARGET_CPUS",
+		"ACADEMY_AWD_ATTACK_MEMORY",
+		"ACADEMY_AWD_ATTACK_CPUS",
+	} {
+		t.Setenv(key, "")
+	}
+	defaults := Load()
+	if defaults.AwdAttackImage != "yak-awd-attackbox:latest" ||
+		defaults.AwdAttackSSHBind != "0.0.0.0" ||
+		defaults.AwdAttackPublicHost != "127.0.0.1" {
+		t.Fatalf("awd attack defaults: %+v", defaults)
+	}
+	if defaults.AwdTargetMemory != "512m" || defaults.AwdTargetCPUs != "0.5" ||
+		defaults.AwdAttackMemory != "256m" || defaults.AwdAttackCPUs != "0.25" {
+		t.Fatalf("awd resource defaults: %+v", defaults)
+	}
+}
+
 func TestLoadWriteupStoreEnvs(t *testing.T) {
 	t.Setenv("ACADEMY_WRITEUPS_STORE", "s3")
 	t.Setenv("ACADEMY_WRITEUPS_S3_ENDPOINT", "https://minio.example.com:9000")

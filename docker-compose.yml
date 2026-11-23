@@ -48,9 +48,20 @@ services:
       ACADEMY_ATTACHMENTS_DIR: /data/attachments # 题目附件与 SQLite 一起随 ./data 卷持久化
       ACADEMY_AVATARS_DIR: /data/avatars # 用户头像（容器重建不丢）
       ACADEMY_WRITEUPS_DIR: /data/writeups # 竞赛 WP zip 附件（容器重建不丢）
+      ACADEMY_REPORTS_DIR: /data/awd-reports # AWD 战报 zip（随数据卷持久化）
       ACADEMY_INSTANCE_MEMORY: ${ACADEMY_INSTANCE_MEMORY:-512m} # 题目容器资源限额（docker --memory）
       ACADEMY_INSTANCE_CPUS: ${ACADEMY_INSTANCE_CPUS:-0.5} # 题目容器 CPU 限额（docker --cpus）
       ACADEMY_INSTANCE_PUBLIC_HOST: ${ACADEMY_INSTANCE_PUBLIC_HOST:-} # 实例 endpoint 主机名：空=127.0.0.1 仅回环（本地）；服务器部署设学员可达的宿主地址，端口随之发全网卡
+      # AWD 运行（docker 单机）：攻击盒镜像由 deploy/build-awd-attackbox.sh 构建；
+      # SSH 端口默认发全网卡随机端口，远程比赛必须把 PUBLIC_HOST 设为学员可达
+      # 的宿主地址/域名，并配合防火墙限制来源网段。资源限额按并发竞域单位估算。
+      ACADEMY_AWD_ATTACK_IMAGE: ${ACADEMY_AWD_ATTACK_IMAGE:-yak-awd-attackbox:latest}
+      ACADEMY_AWD_ATTACK_SSH_BIND: ${ACADEMY_AWD_ATTACK_SSH_BIND:-0.0.0.0}
+      ACADEMY_AWD_ATTACK_PUBLIC_HOST: ${ACADEMY_AWD_ATTACK_PUBLIC_HOST:-127.0.0.1}
+      ACADEMY_AWD_TARGET_MEMORY: ${ACADEMY_AWD_TARGET_MEMORY:-512m}
+      ACADEMY_AWD_TARGET_CPUS: ${ACADEMY_AWD_TARGET_CPUS:-0.5}
+      ACADEMY_AWD_ATTACK_MEMORY: ${ACADEMY_AWD_ATTACK_MEMORY:-256m}
+      ACADEMY_AWD_ATTACK_CPUS: ${ACADEMY_AWD_ATTACK_CPUS:-0.25}
       ACADEMY_SHOW_VERIFICATION_CODE: ${ACADEMY_SHOW_VERIFICATION_CODE:-} # 验证码回显：默认关闭；本地演示设 1，严格模式禁止开启
       # 邮箱验证码投递（首次启动默认值）：管理端「系统设置」保存后数据库配置优先，
       # 无需改这里。SMTP 地址（host:port）、账号、密码、发件人，以及 TLS 模式

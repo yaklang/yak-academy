@@ -166,7 +166,18 @@ func main() {
 	awdSvc.SetImageBuilder(builder)
 	var awdRuntime service.AwdRuntime = service.NewNoopAwdRuntime()
 	if useDocker {
-		awdRuntime = service.NewDockerAwdRuntime()
+		dockerAwd := service.NewDockerAwdRuntime()
+		dockerAwd.AttackImage = cfg.AwdAttackImage
+		dockerAwd.SSHBindHost = cfg.AwdAttackSSHBind
+		dockerAwd.PublicHost = cfg.AwdAttackPublicHost
+		dockerAwd.TargetMemory = cfg.AwdTargetMemory
+		dockerAwd.TargetCPUs = cfg.AwdTargetCPUs
+		dockerAwd.AttackMemory = cfg.AwdAttackMemory
+		dockerAwd.AttackCPUs = cfg.AwdAttackCPUs
+		awdRuntime = dockerAwd
+		log.Printf("awd runtime: docker (attack_image=%s ssh_bind=%s public_host=%s target=%s/%s attack=%s/%s)",
+			cfg.AwdAttackImage, cfg.AwdAttackSSHBind, cfg.AwdAttackPublicHost,
+			cfg.AwdTargetMemory, cfg.AwdTargetCPUs, cfg.AwdAttackMemory, cfg.AwdAttackCPUs)
 	}
 	awdSvc.SetRuntime(awdRuntime)
 	awdSvc.SetSecret(cfg.JWTSecret)

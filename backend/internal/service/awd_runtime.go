@@ -92,13 +92,48 @@ type DockerAwdRuntime struct {
 	SSHBindHost string
 	// PublicHost 返回给选手的 SSH 主机名（默认 127.0.0.1）。
 	PublicHost string
+	// TargetMemory/TargetCPUs 靶机资源限额（docker --memory/--cpus 语法）。
+	TargetMemory string
+	TargetCPUs   string
+	// AttackMemory/AttackCPUs 攻击盒资源限额。
+	AttackMemory string
+	AttackCPUs   string
+}
+
+// awdTargetCaps 靶机最小能力集：cap-drop ALL 后只保留运行常见 Web 服务所需
+// （bind 80、nginx/apache 降权到非 root）。不开放其他能力。
+var awdTargetCaps = []string{"NET_BIND_SERVICE", "SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE"}
+
+// awdAttackBoxCaps SSH 攻击盒额外能力：sshd 登录需要切换用户、chroot、pty
+// 属主调整与 wtmp 写入；选手侧工具（tcpdump/nmap SYN 扫描）需要 NET_RAW。
+// 仍 cap-drop ALL 后按最小集逐项加回。
+var awdAttackBoxCaps = []string{
+	"NET_BIND_SERVICE", "SETUID", "SETGID", "CHOWN", "FOWNER", "DAC_OVERRIDE",
+	"SYS_CHROOT", "KILL", "AUDIT_WRITE", "NET_RAW",
 }
 
 func NewDockerAwdRuntime() *DockerAwdRuntime {
 	return &DockerAwdRuntime{
 		Binary: "docker", AttackImage: "yak-awd-attackbox:latest", AttackSSHPort: 22,
 		SSHBindHost: "0.0.0.0", PublicHost: "127.0.0.1",
+		TargetMemory: "512m", TargetCPUs: "0.5",
+		AttackMemory: "256m", AttackCPUs: "0.25",
 	}
+}
+
+func awdDefault(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func awdCapArgs(caps []string) []string {
+	args := []string{"--cap-drop", "ALL"}
+	for _, capability := range caps {
+		args = append(args, "--cap-add", capability)
+	}
+	return args
 }
 
 func awdNetworkName(competitionID uint) string {
@@ -144,6 +179,27 @@ func (r *DockerAwdRuntime) EnsureNetwork(ctx context.Context, competitionID uint
 	return "", err
 }
 
+// targetRunArgs 靶机 docker run 参数（纯函数便于单测断言加固项）。
+func (r *DockerAwdRuntime) targetRunArgs(spec AwdTargetSpec, network, name string) []string {
+	args := []string{
+		"run", "-d",
+		"--name", name,
+		"--hostname", name,
+		"--network", network,
+		"--network-alias", name,
+		"--label", fmt.Sprintf("yak-academy.awd.competition=%d", spec.CompetitionID),
+		"--label", fmt.Sprintf("yak-academy.awd.game=%d", spec.GameID),
+		"--label", fmt.Sprintf("yak-academy.awd.service=%d", spec.ServiceID),
+		"--label", fmt.Sprintf("yak-academy.awd.competitor=%s-%d", spec.CompetitorType, spec.CompetitorID),
+		"--memory", awdDefault(r.TargetMemory, "512m"),
+		"--cpus", awdDefault(r.TargetCPUs, "0.5"),
+		"--pids-limit", "256",
+	}
+	args = append(args, awdCapArgs(awdTargetCaps)...)
+	args = append(args, "--security-opt", "no-new-privileges", "--restart", "no", spec.Image)
+	return args
+}
+
 func (r *DockerAwdRuntime) CreateTarget(ctx context.Context, spec AwdTargetSpec) (AwdTarget, error) {
 	network, err := r.EnsureNetwork(ctx, spec.CompetitionID)
 	if err != nil {
@@ -155,24 +211,7 @@ func (r *DockerAwdRuntime) CreateTarget(ctx context.Context, spec AwdTargetSpec)
 	}
 	// 同名旧容器先清理（失败忽略：不存在/已停止）。
 	_, _ = r.run(ctx, "rm", "-f", name)
-	out, err := r.run(ctx,
-		"run", "-d",
-		"--name", name,
-		"--hostname", name,
-		"--network", network,
-		"--network-alias", name,
-		"--label", fmt.Sprintf("yak-academy.awd.competition=%d", spec.CompetitionID),
-		"--label", fmt.Sprintf("yak-academy.awd.game=%d", spec.GameID),
-		"--label", fmt.Sprintf("yak-academy.awd.service=%d", spec.ServiceID),
-		"--label", fmt.Sprintf("yak-academy.awd.competitor=%s-%d", spec.CompetitorType, spec.CompetitorID),
-		"--memory", "512m",
-		"--cpus", "0.5",
-		"--pids-limit", "256",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"--restart", "no",
-		spec.Image,
-	)
+	out, err := r.run(ctx, r.targetRunArgs(spec, network, name)...)
 	if err != nil {
 		return AwdTarget{}, err
 	}
@@ -197,6 +236,30 @@ func awdAttackBoxName(spec AwdAttackBoxSpec) string {
 	return strings.Trim(name, "-")
 }
 
+// attackBoxRunArgs 攻击盒 docker run 参数（纯函数便于单测断言加固项）。
+func (r *DockerAwdRuntime) attackBoxRunArgs(spec AwdAttackBoxSpec, network, name, bind string, containerPort int) []string {
+	args := []string{
+		"run", "-d",
+		"--name", name,
+		"--hostname", name,
+		"--network", network,
+		"--label", fmt.Sprintf("yak-academy.awd.competition=%d", spec.CompetitionID),
+		"--label", "yak-academy.awd.role=attackbox",
+		"--label", fmt.Sprintf("yak-academy.awd.competitor=%s-%d", spec.CompetitorType, spec.CompetitorID),
+		"-p", fmt.Sprintf("%s::%d", bind, containerPort),
+		"-e", "PASSWORD_ACCESS=true",
+		"-e", "SUDO_ACCESS=false",
+		"-e", "USER_NAME=" + spec.SSHUser,
+		"-e", "USER_PASSWORD=" + spec.SSHPassword,
+		"--memory", awdDefault(r.AttackMemory, "256m"),
+		"--cpus", awdDefault(r.AttackCPUs, "0.25"),
+		"--pids-limit", "128",
+	}
+	args = append(args, awdCapArgs(awdAttackBoxCaps)...)
+	args = append(args, "--security-opt", "no-new-privileges", "--restart", "no", r.AttackImage)
+	return args
+}
+
 func (r *DockerAwdRuntime) CreateAttackBox(ctx context.Context, spec AwdAttackBoxSpec) (AwdAttackBoxTarget, error) {
 	if r.AttackImage == "" {
 		return AwdAttackBoxTarget{}, fmt.Errorf("%w: AWD attack box image is not configured", ErrValidation)
@@ -218,27 +281,7 @@ func (r *DockerAwdRuntime) CreateAttackBox(ctx context.Context, spec AwdAttackBo
 		bind = "0.0.0.0"
 	}
 	_, _ = r.run(ctx, "rm", "-f", name)
-	out, err := r.run(ctx,
-		"run", "-d",
-		"--name", name,
-		"--hostname", name,
-		"--network", network,
-		"--label", fmt.Sprintf("yak-academy.awd.competition=%d", spec.CompetitionID),
-		"--label", "yak-academy.awd.role=attackbox",
-		"--label", fmt.Sprintf("yak-academy.awd.competitor=%s-%d", spec.CompetitorType, spec.CompetitorID),
-		"-p", fmt.Sprintf("%s::%d", bind, containerPort),
-		"-e", "PASSWORD_ACCESS=true",
-		"-e", "SUDO_ACCESS=false",
-		"-e", "USER_NAME="+spec.SSHUser,
-		"-e", "USER_PASSWORD="+spec.SSHPassword,
-		"--memory", "256m",
-		"--cpus", "0.25",
-		"--pids-limit", "128",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"--restart", "no",
-		r.AttackImage,
-	)
+	out, err := r.run(ctx, r.attackBoxRunArgs(spec, network, name, bind, containerPort)...)
 	if err != nil {
 		return AwdAttackBoxTarget{}, err
 	}

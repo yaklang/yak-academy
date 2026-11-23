@@ -67,6 +67,31 @@ ensure_vulinbox() {
   return 0
 }
 
+# 构建/确保 AWD SSH 攻击盒镜像；缺失或 Dockerfile/entrypoint 变更时重建。
+ensure_awd_attackbox() {
+  local force="${1:-0}"
+  local build_script="$MAIN/deploy/build-awd-attackbox.sh"
+  if [ -f "$build_script" ] && [ ! -x "$build_script" ]; then
+    chmod +x "$build_script"
+  fi
+  if [ ! -f "$build_script" ]; then
+    log "WARN: 缺少 $build_script，跳过攻击盒构建"
+    return 0
+  fi
+  if [ "$force" = 1 ]; then
+    log "awd-attackbox: 强制构建 $ATTACK_TAG"
+    ACADEMY_FORCE_ATTACKBOX=1 ACADEMY_AWD_ATTACK_IMAGE="$ATTACK_TAG" \
+      bash "$build_script" >>"$LOG" 2>&1 \
+      || { log "FAIL: 攻击盒镜像构建失败"; return 1; }
+  else
+    log "awd-attackbox: 确保 $ATTACK_TAG 存在"
+    ACADEMY_AWD_ATTACK_IMAGE="$ATTACK_TAG" bash "$build_script" >>"$LOG" 2>&1 \
+      || { log "FAIL: 攻击盒镜像构建失败"; return 1; }
+  fi
+  log "awd-attackbox: OK"
+  return 0
+}
+
 # 从两个 Dockerfile 的 FROM 行提取基础镜像，缺失时从镜像源拉取并 retag。
 ensure_base_images() {
   local dockerfile image remote
@@ -126,6 +151,7 @@ MIRROR="${ACADEMY_DOCKER_MIRROR:-$(env_get ACADEMY_DOCKER_MIRROR)}"
 MIRROR="${MIRROR:-docker.1ms.run}"
 BACK_IMAGE="yak-academy/backend:$TAG"
 FRONT_IMAGE="yak-academy/frontend:$TAG"
+ATTACK_TAG=$(env_get ACADEMY_AWD_ATTACK_IMAGE); ATTACK_TAG=${ATTACK_TAG:-yak-awd-attackbox:latest}
 
 # 守卫（对应 legion git_switch_main）：main 树只允许本脚本推进；
 # 出现本地改动说明有人在树上开发，跳过等待人工处理。
@@ -153,11 +179,15 @@ if [ "$REMOTE" != "$LOCAL" ]; then
   fi
 fi
 
-# 已部署最新时：仍检查靶场镜像是否被 prune 掉，缺失则补建后退出。
+# 已部署最新时：仍检查靶场/攻击盒镜像是否被 prune 掉，缺失则补建后退出。
 if [ "$DEPLOYED" = "$LOCAL" ]; then
   if ! docker image inspect "$VULIN_TAG" >/dev/null 2>&1; then
     log "vulinbox: 已部署但镜像缺失，补建"
     ensure_vulinbox 1 || exit 0
+  fi
+  if ! docker image inspect "$ATTACK_TAG" >/dev/null 2>&1; then
+    log "awd-attackbox: 已部署但镜像缺失，补建"
+    ensure_awd_attackbox 1 || exit 0
   fi
   exit 0
 fi
@@ -166,16 +196,18 @@ log "部署 main@${LOCAL:0:12}（deployed=${DEPLOYED:0:12}）"
 
 # 变更面探测（baseline = 已部署提交）。
 BASE="$DEPLOYED"
-BACK_CHG=""; FRONT_CHG=""; VULIN_CHG=""
+BACK_CHG=""; FRONT_CHG=""; VULIN_CHG=""; ATTACK_CHG=""
 if [ "$BASE" != none ]; then
   # vulinbox image/ 变更不算 backend 服务镜像，单独走 vulinbox 构建。
   BACK_CHG=$(git diff --name-only "$BASE" "$LOCAL" -- backend/ ':!backend/internal/service/builtin/vulinbox/image/' deploy/backend.Dockerfile docker-compose.yml)
   FRONT_CHG=$(git diff --name-only "$BASE" "$LOCAL" -- frontend/ deploy/frontend.Dockerfile deploy/nginx.conf docker-compose.yml)
   VULIN_CHG=$(git diff --name-only "$BASE" "$LOCAL" -- backend/internal/service/builtin/vulinbox/image/ deploy/build-vulinbox-image.sh)
+  ATTACK_CHG=$(git diff --name-only "$BASE" "$LOCAL" -- deploy/awd-attackbox.Dockerfile deploy/awd-attackbox/ deploy/build-awd-attackbox.sh)
 else
   BACK_CHG="first-deploy"
   FRONT_CHG="first-deploy"
   VULIN_CHG="first-deploy"
+  ATTACK_CHG="first-deploy"
 fi
 
 BUILD=()
@@ -197,6 +229,12 @@ if [ -n "$VULIN_CHG" ]; then
   ensure_vulinbox 1 || { log "FAIL: vulinbox 构建失败，保留现网，下轮重试"; exit 0; }
 else
   ensure_vulinbox 0 || { log "FAIL: vulinbox 构建失败，保留现网，下轮重试"; exit 0; }
+fi
+
+if [ -n "$ATTACK_CHG" ]; then
+  ensure_awd_attackbox 1 || { log "FAIL: 攻击盒镜像构建失败，保留现网，下轮重试"; exit 0; }
+else
+  ensure_awd_attackbox 0 || { log "FAIL: 攻击盒镜像构建失败，保留现网，下轮重试"; exit 0; }
 fi
 
 if ! docker compose up -d >>"$LOG" 2>&1; then
