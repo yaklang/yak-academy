@@ -1002,6 +1002,18 @@ components:
         services:
           type: array
           items: { $ref: '#/components/schemas/AwdService' }
+    AwdAttackReceipt:
+      type: object
+      description: AWD 攻击提交回执（pending = 已入队；rejected = 预校验拒绝）
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        accepted: { type: boolean }
+        reason: { type: string }
+        round_id: { type: integer }
+        victim_team_service_id: { type: integer }
+        submitted_at: { type: string }
+        judged_at: { type: string, nullable: true }
 
   responses:
     ErrorResp:
@@ -3693,6 +3705,36 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd/attacks:
+    post:
+      tags: [competitions]
+      summary: AWD 提交 flag（入队异步判定；业务拒绝返回 200 + accepted=false）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flag]
+              properties:
+                flag: { type: string }
+      responses:
+        '200':
+          description: 业务拒绝（flag 不存在/过期/自攻/已被首杀）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdAttackReceipt' }
+        '202':
+          description: 已入队（pending，worker 异步判定）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdAttackReceipt' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 

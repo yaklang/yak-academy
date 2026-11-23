@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/service"
 )
 
@@ -218,4 +220,32 @@ func (h *Handlers) adminDeleteAwdService(w http.ResponseWriter, req *http.Reques
 	h.audit(req, "awd.service.delete", "competition", strconv.FormatUint(uint64(id), 10),
 		map[string]any{"service_id": sid})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// awdSubmitAttack 参赛者提交 flag：通过入队（202 pending），业务拒绝返回
+// 200 + accepted=false（运营记录仍落库，便于赛后审计）。
+func (h *Handlers) awdSubmitAttack(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		Flag string `json:"flag"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || strings.TrimSpace(body.Flag) == "" {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	receipt, err := h.AWD.SubmitAttack(req.Context(), id, user.ID, body.Flag)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	status := http.StatusAccepted
+	if receipt.Status == model.AwdAttackRejected {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, receipt)
 }

@@ -20,6 +20,8 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 | `hint.unlocked` | 用户扣分解锁提示 |
 | `room.completed` | Room 通关 |
 | `lab.instance.started / stopped` | 题目环境生命周期 |
+| `awd.attack.submitted` | AWD 攻击提交入队（运营审计；payload 含 competition/attack/round/attacker/victim） |
+| `awd.attack.judged` | AWD worker 完成攻击判定（accepted/rejected + reason） |
 
 每个事件必带：`user_id / type / payload(JSON) / created_at`。
 

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,9 +21,11 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/yaklang/yak-academy/backend/internal/eventbus"
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
+	"github.com/yaklang/yak-academy/backend/internal/safego"
 )
 
 // AWD 独立域服务：只依赖 AwdRepo + CompetitionRepo，不引用 CTF Challenge/
@@ -30,6 +33,8 @@ import (
 type AwdCompetitionService struct {
 	awd     repo.AwdRepo
 	comps   repo.CompetitionRepo
+	events  repo.EventRepo
+	bus     *eventbus.Bus
 	builder ImageBuilder
 	runtime AwdRuntime
 	secret  string
@@ -53,6 +58,12 @@ func (s *AwdCompetitionService) SetRuntime(runtime AwdRuntime) {
 // SetSecret 注入攻击盒 SSH 密码加密密钥（主程序用 JWT secret 派生）。
 func (s *AwdCompetitionService) SetSecret(secret string) {
 	s.secret = secret
+}
+
+// SetEvents 注入事件表与总线（攻击提交/判定审计）。未注入时只落运营表。
+func (s *AwdCompetitionService) SetEvents(events repo.EventRepo, bus *eventbus.Bus) {
+	s.events = events
+	s.bus = bus
 }
 
 // SetNow 测试注入时钟。
@@ -992,6 +1003,12 @@ func (s *AwdCompetitionService) ValidateAttack(ctx context.Context, gameID uint,
 		}
 		return nil, err
 	}
+	return s.validateAttackFlag(ctx, gameID, attackerType, attackerID, flag)
+}
+
+// validateAttackFlag 已定位 flag 后的校验（同步提交与异步 worker 共用）：
+// 目标服务存在、比赛进行中、回合已激活未过期、非自攻、未被首杀。
+func (s *AwdCompetitionService) validateAttackFlag(ctx context.Context, gameID uint, attackerType model.AwdCompetitorType, attackerID uint, flag *model.AwdFlag) (*AwdAttackValidation, error) {
 	ts, err := s.awd.FindTeamService(ctx, flag.TeamServiceID)
 	if err != nil {
 		if isNotFound(err) {
@@ -1034,6 +1051,215 @@ func (s *AwdCompetitionService) ValidateAttack(ctx context.Context, gameID uint,
 		Accepted: true, FlagID: flag.ID, RoundID: round.ID,
 		VictimTeamServiceID: ts.ID, VictimType: ts.CompetitorType, VictimID: ts.CompetitorID,
 	}, nil
+}
+
+// AwdAttackReceipt 攻击提交回执：pending = 已入队等待 worker 判定；
+// rejected = 同步预校验拒绝（运营表留痕，便于赛后审计）。
+type AwdAttackReceipt struct {
+	ID                  uint                  `json:"id"`
+	Status              model.AwdAttackStatus `json:"status"`
+	Accepted            bool                  `json:"accepted"`
+	Reason              string                `json:"reason,omitempty"`
+	RoundID             uint                  `json:"round_id"`
+	VictimTeamServiceID uint                  `json:"victim_team_service_id"`
+	SubmittedAt         time.Time             `json:"submitted_at"`
+	JudgedAt            *time.Time            `json:"judged_at,omitempty"`
+}
+
+func attackReceipt(attack *model.AwdAttack) *AwdAttackReceipt {
+	return &AwdAttackReceipt{
+		ID: attack.ID, Status: attack.Status,
+		Accepted: attack.Status == model.AwdAttackAccepted,
+		Reason:   attack.Reason, RoundID: attack.RoundID,
+		VictimTeamServiceID: attack.VictimTeamServiceID,
+		SubmittedAt:         attack.SubmittedAt, JudgedAt: attack.JudgedAt,
+	}
+}
+
+// SubmitAttack 参赛者提交 flag：入场校验 + 竞域单位映射 + 预校验。
+// 通过 → 写 pending 攻击（worker 异步判定）；拒绝 → 直接落 rejected 运营记录。
+// 每个 flag 只允许首个 accepted，重复/自攻/过期均由 validateAttackFlag 判定。
+func (s *AwdCompetitionService) SubmitAttack(ctx context.Context, competitionID, userID uint, flagValue string) (*AwdAttackReceipt, error) {
+	value := strings.TrimSpace(flagValue)
+	if value == "" {
+		return nil, fmt.Errorf("%w: flag is required", ErrValidation)
+	}
+	if _, err := s.requireAwdCompetition(ctx, competitionID); err != nil {
+		return nil, err
+	}
+	part, err := s.comps.FindParticipant(ctx, competitionID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if part == nil || part.EnteredAt == nil {
+		return nil, ErrNotFound
+	}
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning {
+		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
+	}
+	attackerID := userID
+	if game.CompetitorType == model.AwdCompetitorTeam {
+		if part.TeamID == 0 {
+			return nil, fmt.Errorf("%w: team AWD requires every participant to join a team", ErrValidation)
+		}
+		attackerID = part.TeamID
+	}
+	validation, err := s.ValidateAttack(ctx, game.ID, game.CompetitorType, attackerID, value)
+	if err != nil {
+		return nil, err
+	}
+	attack := &model.AwdAttack{
+		GameID: game.ID, RoundID: validation.RoundID,
+		AttackerType: game.CompetitorType, AttackerID: attackerID,
+		VictimTeamServiceID: validation.VictimTeamServiceID, FlagID: validation.FlagID,
+		Status: model.AwdAttackPending, SubmittedAt: s.now(),
+	}
+	if !validation.Accepted {
+		attack.Status = model.AwdAttackRejected
+		attack.Reason = validation.Reason
+		judgedAt := s.now()
+		attack.JudgedAt = &judgedAt
+	}
+	if err := s.awd.CreateAttack(ctx, attack); err != nil {
+		return nil, err
+	}
+	s.appendEvent(ctx, userID, model.EventAwdAttackSubmitted, map[string]any{
+		"competition_id": competitionID, "attack_id": attack.ID,
+		"round_id": attack.RoundID, "attacker_type": attack.AttackerType,
+		"attacker_id": attack.AttackerID, "victim_team_service_id": attack.VictimTeamServiceID,
+		"status": attack.Status, "reason": attack.Reason,
+	})
+	if attack.Status == model.AwdAttackRejected {
+		s.appendEvent(ctx, userID, model.EventAwdAttackJudged, map[string]any{
+			"competition_id": competitionID, "attack_id": attack.ID,
+			"status": attack.Status, "reason": attack.Reason,
+		})
+	}
+	return attackReceipt(attack), nil
+}
+
+// JudgePendingAttacks 处理 pending 攻击（持久队列 = AwdAttack 表）：逐条重校验，
+// 条件更新保证并发/重放下只有一次 accepted。返回本轮判定条数。
+func (s *AwdCompetitionService) JudgePendingAttacks(ctx context.Context) (int, error) {
+	attacks, err := s.awd.ListPendingAttacks(ctx, 100)
+	if err != nil {
+		return 0, err
+	}
+	judged := 0
+	for i := range attacks {
+		ok, err := s.judgeAttack(ctx, &attacks[i])
+		if err != nil {
+			return judged, err
+		}
+		if ok {
+			judged++
+		}
+	}
+	return judged, nil
+}
+
+func (s *AwdCompetitionService) judgeAttack(ctx context.Context, attack *model.AwdAttack) (bool, error) {
+	flag, err := s.awd.FindFlagByID(ctx, attack.FlagID)
+	if err != nil {
+		if isNotFound(err) {
+			return s.rejectAttack(ctx, attack, "flag not found")
+		}
+		return false, err
+	}
+	validation, err := s.validateAttackFlag(ctx, attack.GameID, attack.AttackerType, attack.AttackerID, flag)
+	if err != nil {
+		return false, err
+	}
+	if !validation.Accepted {
+		return s.rejectAttack(ctx, attack, validation.Reason)
+	}
+	judgedAt := s.now()
+	rows, err := s.awd.UpdateAttackStatus(ctx, attack.ID, model.AwdAttackAccepted, "", judgedAt)
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, nil // 已被其它 worker/重放判定，跳过。
+	}
+	attack.Status = model.AwdAttackAccepted
+	attack.JudgedAt = &judgedAt
+	s.appendEvent(ctx, 0, model.EventAwdAttackJudged, map[string]any{
+		"competition_id": attack.GameID, "attack_id": attack.ID,
+		"round_id": attack.RoundID, "attacker_type": attack.AttackerType,
+		"attacker_id": attack.AttackerID, "victim_team_service_id": attack.VictimTeamServiceID,
+		"status": attack.Status,
+	})
+	return true, nil
+}
+
+func (s *AwdCompetitionService) rejectAttack(ctx context.Context, attack *model.AwdAttack, reason string) (bool, error) {
+	judgedAt := s.now()
+	rows, err := s.awd.UpdateAttackStatus(ctx, attack.ID, model.AwdAttackRejected, reason, judgedAt)
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, nil
+	}
+	attack.Status = model.AwdAttackRejected
+	attack.Reason = reason
+	attack.JudgedAt = &judgedAt
+	s.appendEvent(ctx, 0, model.EventAwdAttackJudged, map[string]any{
+		"competition_id": attack.GameID, "attack_id": attack.ID,
+		"round_id": attack.RoundID, "attacker_type": attack.AttackerType,
+		"attacker_id": attack.AttackerID, "victim_team_service_id": attack.VictimTeamServiceID,
+		"status": attack.Status, "reason": reason,
+	})
+	return true, nil
+}
+
+// awdJudgeInterval 攻击判定轮询周期（持久队列兜底：重启滞留的 pending 攻击）。
+const awdJudgeInterval = 2 * time.Second
+
+// StartWorker 启动攻击判定 worker：先即时扫描一次（覆盖重启滞留），之后周期轮询。
+func (s *AwdCompetitionService) StartWorker(ctx context.Context) {
+	safego.Go("awd.judgePending", func() { s.pollPendingAttacks(ctx) })
+}
+
+func (s *AwdCompetitionService) pollPendingAttacks(ctx context.Context) {
+	safego.Run("awd.judgePending", func() {
+		if _, err := s.JudgePendingAttacks(ctx); err != nil {
+			log.Printf("awd: judge pending attacks: %v", err)
+		}
+	})
+	ticker := time.NewTicker(awdJudgeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			safego.Run("awd.judgePending", func() {
+				if _, err := s.JudgePendingAttacks(ctx); err != nil {
+					log.Printf("awd: judge pending attacks: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func (s *AwdCompetitionService) appendEvent(ctx context.Context, userID uint, t model.EventType, payload map[string]any) {
+	if s.events == nil {
+		return
+	}
+	raw, _ := json.Marshal(payload)
+	ev := model.Event{UserID: userID, Type: t, Payload: string(raw)}
+	if err := s.events.Append(ctx, &ev); err != nil {
+		log.Printf("awd: append event %s: %v", t, err)
+		return
+	}
+	if s.bus != nil {
+		s.bus.Publish(ctx, ev)
+	}
 }
 
 func deterministicAwdFlag(seed string, teamServiceID uint, roundNumber int) string {

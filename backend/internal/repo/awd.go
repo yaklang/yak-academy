@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
@@ -203,6 +204,14 @@ func (r *awdRepo) FindFlagByRoundTeamService(ctx context.Context, roundID, teamS
 	return &f, nil
 }
 
+func (r *awdRepo) FindFlagByID(ctx context.Context, id uint) (*model.AwdFlag, error) {
+	var f model.AwdFlag
+	if err := r.db.WithContext(ctx).First(&f, id).Error; err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
 func (r *awdRepo) CreateAttack(ctx context.Context, attack *model.AwdAttack) error {
 	return r.db.WithContext(ctx).Create(attack).Error
 }
@@ -212,6 +221,25 @@ func (r *awdRepo) HasAcceptedAttack(ctx context.Context, flagID uint) (bool, err
 	err := r.db.WithContext(ctx).Model(&model.AwdAttack{}).
 		Where("flag_id = ? AND status = ?", flagID, model.AwdAttackAccepted).Count(&n).Error
 	return n > 0, err
+}
+
+func (r *awdRepo) ListPendingAttacks(ctx context.Context, limit int) ([]model.AwdAttack, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).Where("status = ?", model.AwdAttackPending).
+		Order("submitted_at asc, id asc").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+// UpdateAttackStatus 条件更新（仅 pending → accepted/rejected）：
+// 并发/重放时只有一次生效，返回受影响行数。
+func (r *awdRepo) UpdateAttackStatus(ctx context.Context, id uint, status model.AwdAttackStatus, reason string, judgedAt time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.AwdAttack{}).
+		Where("id = ? AND status = ?", id, model.AwdAttackPending).
+		Updates(map[string]any{"status": status, "reason": reason, "judged_at": judgedAt})
+	return res.RowsAffected, res.Error
 }
 
 func (r *awdRepo) CreateCheck(ctx context.Context, check *model.AwdCheck) error {

@@ -426,9 +426,12 @@ type AwdRepo interface {
 	UpdateAttackBoxSelective(ctx context.Context, id uint, fields map[string]any) error
 	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
 	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
+	FindFlagByID(ctx context.Context, id uint) (*model.AwdFlag, error)
 	FindFlagByRoundTeamService(ctx context.Context, roundID, teamServiceID uint) (*model.AwdFlag, error)
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
 	HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error)
+	ListPendingAttacks(ctx context.Context, limit int) ([]model.AwdAttack, error)
+	UpdateAttackStatus(ctx context.Context, id uint, status model.AwdAttackStatus, reason string, judgedAt time.Time) (int64, error)
 	CreateCheck(ctx context.Context, check *model.AwdCheck) error
 	CreateIncident(ctx context.Context, incident *model.AwdIncident) error
 }
