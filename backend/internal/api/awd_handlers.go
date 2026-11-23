@@ -358,6 +358,20 @@ func (h *Handlers) adminListAwdStandings(w http.ResponseWriter, req *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (h *Handlers) adminAwdFinalRanking(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.FinalRanking(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func awdReportID(req *http.Request) (uint, error) {
 	id, err := strconv.ParseUint(req.PathValue("rid"), 10, 64)
 	if err != nil || id == 0 {
@@ -521,4 +535,19 @@ func (h *Handlers) awdParticipantScoreboard(w http.ResponseWriter, req *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handlers) awdFinalRanking(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.AWD.ParticipantFinalRanking(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }

@@ -1087,6 +1087,29 @@ export interface AwdSettlementView {
   events: number
   standings: AwdStandingView[]
 }
+export interface AwdFinalWeights {
+  awd_weight: number
+  report_weight: number
+}
+export interface AwdFinalStandingView {
+  rank: number
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  competitor_name?: string
+  awd_score: number
+  report_score: number
+  final_score: number
+  last_attack_at: string | null
+  last_event_at: string | null
+}
+export interface AwdFinalRankingView {
+  competition_id: number
+  status: AwdGameStatus
+  finalized: boolean
+  max_awd_score: number
+  weights: AwdFinalWeights
+  items: AwdFinalStandingView[]
+}
 export interface AwdRound {
   id: number
   game_id: number
@@ -1300,6 +1323,8 @@ export const competitionAwdApi = {
   view: (id: number) => http.get<AwdParticipantView>(`/competitions/${id}/awd`),
   scoreboard: (id: number) =>
     http.get<{ items: AwdStandingView[] }>(`/competitions/${id}/awd/scoreboard`),
+  finalRanking: (id: number) =>
+    http.get<AwdFinalRankingView>(`/competitions/${id}/awd/final`),
   submitAttack: (id: number, flag: string) =>
     http.post<AwdAttackReceipt>(`/competitions/${id}/awd/attacks`, { flag }),
   myReport: (id: number) =>
@@ -1352,6 +1377,8 @@ export const adminAwdApi = {
     http.post<AwdSettlementView>(`/admin/competitions/${id}/awd/rounds/${rid}/settle`),
   standings: (id: number) =>
     http.get<{ items: AwdStandingView[] }>(`/admin/competitions/${id}/awd/standings`),
+  finalRanking: (id: number) =>
+    http.get<AwdFinalRankingView>(`/admin/competitions/${id}/awd/final`),
   console: (id: number) => http.get<AwdAdminView>(`/admin/competitions/${id}/awd/console`),
   deployTargets: (id: number) =>
     http.post<AwdDeployResult>(`/admin/competitions/${id}/awd/deploy`),

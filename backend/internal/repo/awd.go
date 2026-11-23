@@ -343,6 +343,15 @@ func (r *awdRepo) ListAcceptedAttacksByRound(ctx context.Context, roundID uint) 
 	return list, err
 }
 
+// ListAcceptedAttacksByGame 整场有效攻击（最终排名并列时比较最后有效攻击时间）。
+func (r *awdRepo) ListAcceptedAttacksByGame(ctx context.Context, gameID uint) ([]model.AwdAttack, error) {
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).
+		Where("game_id = ? AND status = ?", gameID, model.AwdAttackAccepted).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
 // CreateScoreEvents 批量追加得分事件；idempotency_key 冲突（重复结算）
 // 静默跳过，返回实际新增条数。
 func (r *awdRepo) CreateScoreEvents(ctx context.Context, events []model.AwdScoreEvent) (int64, error) {
