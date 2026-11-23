@@ -67,6 +67,66 @@ func awdServiceID(req *http.Request) (uint, error) {
 	return uint(id), nil
 }
 
+func (h *Handlers) adminStartAwdGame(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.Start(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.game.start", "competition", strconv.FormatUint(uint64(id), 10), nil)
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminPauseAwdGame(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.Pause(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.game.pause", "competition", strconv.FormatUint(uint64(id), 10), nil)
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminResumeAwdGame(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.Resume(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.game.resume", "competition", strconv.FormatUint(uint64(id), 10), nil)
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminEndAwdGame(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.AWD.End(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.game.end", "competition", strconv.FormatUint(uint64(id), 10), nil)
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (h *Handlers) adminUploadAwdServicePackage(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {

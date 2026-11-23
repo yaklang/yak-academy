@@ -1073,6 +1073,10 @@ export const adminAwdApi = {
     id: number,
     body: { competitor_type?: AwdCompetitorType; round_seconds?: number; scoring_config?: Record<string, unknown> },
   ) => http.patch<AwdGameView>(`/admin/competitions/${id}/awd`, body),
+  start: (id: number) => http.post<AwdGameView>(`/admin/competitions/${id}/awd/start`),
+  pause: (id: number) => http.post<AwdGameView>(`/admin/competitions/${id}/awd/pause`),
+  resume: (id: number) => http.post<AwdGameView>(`/admin/competitions/${id}/awd/resume`),
+  end: (id: number) => http.post<AwdGameView>(`/admin/competitions/${id}/awd/end`),
   services: (id: number) =>
     http.get<{ items: AwdService[] }>(`/admin/competitions/${id}/awd/services`),
   createService: (id: number, body: AwdServiceInput) =>
