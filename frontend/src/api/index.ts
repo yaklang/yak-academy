@@ -1081,7 +1081,85 @@ export interface AwdSettlementView {
   events: number
   standings: AwdStandingView[]
 }
+export interface AwdCheckView {
+  action: string
+  status: string
+  latency_ms: number
+  output: string
+  created_at: string
+}
+export interface AwdParticipantService {
+  team_service_id: number
+  service_id: number
+  slug: string
+  name: string
+  internal_host: string
+  ports_json: string
+  status: string
+  last_check_at: string | null
+  last_check?: AwdCheckView
+}
+export interface AwdParticipantTarget {
+  team_service_id: number
+  service_id: number
+  service_slug: string
+  service_name: string
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  competitor_name: string
+  internal_host: string
+  ports_json: string
+  status: string
+}
+export interface AwdAttackBoxView {
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  ssh_password: string
+  ssh_command: string
+  status: string
+}
+export interface AwdParticipantAttack {
+  id: number
+  round_id: number
+  status: AwdAttackStatus
+  reason?: string
+  victim_team_service_id: number
+  submitted_at: string
+  judged_at: string | null
+}
+export interface AwdParticipantView {
+  game: {
+    id: number
+    status: AwdGameStatus
+    competitor_type: AwdCompetitorType
+    round_seconds: number
+    current_round: number
+    started_at: string | null
+    ended_at: string | null
+  }
+  competitor_type: AwdCompetitorType
+  competitor_id: number
+  competitor_name: string
+  round: {
+    id: number
+    number: number
+    status: 'pending' | 'running' | 'settled'
+    starts_at: string
+    ends_at: string
+    remaining_seconds: number
+  } | null
+  my_services: AwdParticipantService[]
+  targets: AwdParticipantTarget[]
+  attack_box: AwdAttackBoxView | null
+  standings: AwdStandingView[]
+  incidents: { id: number; kind: string; service_id: number; detail: string; created_at: string }[]
+  attacks: AwdParticipantAttack[]
+}
 export const competitionAwdApi = {
+  view: (id: number) => http.get<AwdParticipantView>(`/competitions/${id}/awd`),
+  scoreboard: (id: number) =>
+    http.get<{ items: AwdStandingView[] }>(`/competitions/${id}/awd/scoreboard`),
   submitAttack: (id: number, flag: string) =>
     http.post<AwdAttackReceipt>(`/competitions/${id}/awd/attacks`, { flag }),
 }

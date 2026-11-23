@@ -434,6 +434,9 @@ type AwdRepo interface {
 	UpdateAttackStatus(ctx context.Context, id uint, status model.AwdAttackStatus, reason string, judgedAt time.Time) (int64, error)
 	CreateCheck(ctx context.Context, check *model.AwdCheck) error
 	ListChecksByRound(ctx context.Context, roundID uint) ([]model.AwdCheck, error)
+	FindLastCheckByTeamService(ctx context.Context, teamServiceID uint) (*model.AwdCheck, error)
+	ListIncidentsByCompetitor(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdIncident, error)
+	ListAttacksByAttacker(ctx context.Context, gameID uint, competitorType model.AwdCompetitorType, competitorID uint, limit int) ([]model.AwdAttack, error)
 	ListAcceptedAttacksByRound(ctx context.Context, roundID uint) ([]model.AwdAttack, error)
 	CreateScoreEvents(ctx context.Context, events []model.AwdScoreEvent) (int64, error)
 	ListScoreEvents(ctx context.Context, competitionID uint) ([]model.AwdScoreEvent, error)

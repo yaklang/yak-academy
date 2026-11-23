@@ -164,6 +164,7 @@ func main() {
 	awdSvc.SetRuntime(awdRuntime)
 	awdSvc.SetSecret(cfg.JWTSecret)
 	awdSvc.SetEvents(eventRepo, bus)
+	awdSvc.SetUsers(userRepo)
 	awdSvc.StartWorker(ctx)
 
 	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
