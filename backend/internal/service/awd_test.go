@@ -1,6 +1,8 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -131,3 +133,93 @@ func TestAwdGameAndServiceDefinitions(t *testing.T) {
 }
 
 func strPtr(v string) *string { return &v }
+
+func awdZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("zip write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestAwdServicePackageUpload 服务包：解析 awd-service.json + Dockerfile，
+// 构建镜像后按 slug upsert；重复上传更新同一条记录；缺 Dockerfile/坏 zip/
+// 已开赛均拒绝。
+func TestAwdServicePackageUpload(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	builder := &fakeImageBuilder{}
+	awdSvc := NewAwdCompetitionService(repo.NewAwdRepo(e.gdb), repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	awdSvc.SetImageBuilder(builder)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 服务包赛", Start: e.now.Add(time.Hour), End: e.now.Add(3 * time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	spec := `{"slug":"web","name":"Web","ports":[{"name":"http","port":80}],"checker_config":{"type":"http","path":"/"},"base_score":150}`
+	pkg := awdZip(t, map[string]string{
+		"awd-service.json": spec,
+		"Dockerfile":       "FROM alpine:3.20\nCMD [\"sleep\",\"infinity\"]\n",
+	})
+	svc, err := awdSvc.UploadServicePackage(ctx, comp.ID, bytes.NewReader(pkg))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	wantTag := "yak-awd-" + itoa(comp.ID) + "-web"
+	if svc.Image != wantTag || svc.BaseScore != 150 || svc.Name != "Web" {
+		t.Fatalf("uploaded service: %+v", svc)
+	}
+	if len(builder.tags) != 1 || builder.tags[0] != wantTag {
+		t.Fatalf("builder tags: %+v", builder.tags)
+	}
+	if len(builder.dirs) != 1 || builder.dirs[0] == "" {
+		t.Fatalf("builder context dirs: %+v", builder.dirs)
+	}
+
+	spec2 := `{"slug":"web","name":"Web 2","ports":[{"name":"http","port":8080}],"base_score":200}`
+	pkg2 := awdZip(t, map[string]string{
+		"awd-service.json": spec2,
+		"Dockerfile":       "FROM alpine:3.20\n",
+	})
+	updated, err := awdSvc.UploadServicePackage(ctx, comp.ID, bytes.NewReader(pkg2))
+	if err != nil {
+		t.Fatalf("re-upload: %v", err)
+	}
+	if updated.ID != svc.ID || updated.BaseScore != 200 || updated.Name != "Web 2" {
+		t.Fatalf("re-upload should update same service: %+v", updated)
+	}
+	list, err := awdSvc.Game(ctx, comp.ID)
+	if err != nil || len(list.Services) != 1 {
+		t.Fatalf("service count after upsert: %+v err=%v", list, err)
+	}
+
+	if _, err := awdSvc.UploadServicePackage(ctx, comp.ID, bytes.NewReader(awdZip(t, map[string]string{
+		"awd-service.json": spec,
+	}))); !errors.Is(err, ErrValidation) {
+		t.Fatalf("missing dockerfile: want ErrValidation, got %v", err)
+	}
+	if _, err := awdSvc.UploadServicePackage(ctx, comp.ID, bytes.NewReader([]byte("not zip"))); !errors.Is(err, ErrValidation) {
+		t.Fatalf("bad zip: want ErrValidation, got %v", err)
+	}
+
+	if err := e.gdb.Model(&model.AwdGame{}).Where("competition_id = ?", comp.ID).Update("status", model.AwdGameRunning).Error; err != nil {
+		t.Fatalf("start game: %v", err)
+	}
+	if _, err := awdSvc.UploadServicePackage(ctx, comp.ID, bytes.NewReader(pkg)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("running game package: want ErrValidation, got %v", err)
+	}
+}

@@ -9,6 +9,7 @@ package pathutil
 
 import (
 	"errors"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -52,5 +53,10 @@ func SafeJoin(base, name string) (string, error) {
 // Join 拼接服务端自有路径段（slug、ID 等非用户可控内容）。
 // 语义同 filepath.Join，收口到一处便于统一演进（长度上限、大小写折叠等）。
 func Join(elems ...string) string { return filepath.Join(elems...) }
+
+// Base / Dir 用于已 CleanEntry 的归档虚拟路径（/ 分隔，与 OS 无关）。
+func Base(p string) string { return path.Base(p) }
+
+func Dir(p string) string { return path.Dir(p) }
 
 func isLetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }

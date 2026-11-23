@@ -1,10 +1,15 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -12,19 +17,26 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
+	"github.com/yaklang/yak-academy/backend/internal/pathutil"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 )
 
 // AWD 独立域服务：只依赖 AwdRepo + CompetitionRepo，不引用 CTF Challenge/
 // CompetitionScore/JudgeService（AWD 与 CTF 独立）。
 type AwdCompetitionService struct {
-	awd   repo.AwdRepo
-	comps repo.CompetitionRepo
-	now   func() time.Time
+	awd     repo.AwdRepo
+	comps   repo.CompetitionRepo
+	builder ImageBuilder
+	now     func() time.Time
 }
 
 func NewAwdCompetitionService(awd repo.AwdRepo, comps repo.CompetitionRepo) *AwdCompetitionService {
 	return &AwdCompetitionService{awd: awd, comps: comps, now: time.Now}
+}
+
+// SetImageBuilder 注入服务包镜像构建器（docker / noop）。
+func (s *AwdCompetitionService) SetImageBuilder(builder ImageBuilder) {
+	s.builder = builder
 }
 
 // SetNow 测试注入时钟。
@@ -70,6 +82,13 @@ type AwdServiceInput struct {
 }
 
 var awdSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// MaxAwdServicePackageBytes 服务包 zip 上传上限（32MB；解包后另限 64MB）。
+const MaxAwdServicePackageBytes = 32 << 20
+
+const maxAwdServiceUncompressed = 64 << 20
+
+const maxAwdServiceFiles = 2000
 
 func (s *AwdCompetitionService) requireAwdCompetition(ctx context.Context, competitionID uint) (*model.Competition, error) {
 	c, err := s.comps.FindByID(ctx, competitionID)
@@ -192,7 +211,156 @@ func (s *AwdCompetitionService) CreateService(ctx context.Context, competitionID
 	return svc, nil
 }
 
-// UpdateService 修改服务定义（slug 不可变；仅 pending）。
+// UploadServicePackage 上传 AWD 服务包（zip）：
+//
+//	awd-service.json   服务定义（slug/name/ports/checker_config/计分参数）
+//	Dockerfile         镜像构建文件（与 json 同目录）
+//	checker/...        可选 checker 二进制/脚本，随镜像一起构建
+//
+// 解包到临时目录 → docker build -t yak-awd-<competition>-<slug> → 按 slug
+// upsert 服务定义。仅 pending 可上传；构建失败不动 DB。
+func (s *AwdCompetitionService) UploadServicePackage(ctx context.Context, competitionID uint, r io.Reader) (*model.AwdService, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGamePending {
+		return nil, fmt.Errorf("%w: AWD services can only be uploaded before the game starts", ErrValidation)
+	}
+	if s.builder == nil {
+		return nil, fmt.Errorf("%w: image builder is not configured", ErrValidation)
+	}
+	data, err := io.ReadAll(io.LimitReader(r, MaxAwdServicePackageBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: read package", ErrValidation)
+	}
+	if len(data) > MaxAwdServicePackageBytes {
+		return nil, fmt.Errorf("%w: package exceeds %d bytes", ErrValidation, MaxAwdServicePackageBytes)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid zip package", ErrValidation)
+	}
+	if len(zr.File) == 0 || len(zr.File) > maxAwdServiceFiles {
+		return nil, fmt.Errorf("%w: invalid package file count", ErrValidation)
+	}
+	var specEntry *zip.File
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name, err := pathutil.CleanEntry(f.Name)
+		if err != nil {
+			return nil, fmt.Errorf("%w: unsafe package entry %q", ErrValidation, f.Name)
+		}
+		if pathutil.Base(name) == "awd-service.json" {
+			if specEntry != nil {
+				return nil, fmt.Errorf("%w: multiple awd-service.json", ErrValidation)
+			}
+			specEntry = f
+		}
+	}
+	if specEntry == nil {
+		return nil, fmt.Errorf("%w: awd-service.json is required", ErrValidation)
+	}
+	specName, _ := pathutil.CleanEntry(specEntry.Name)
+	contextRel := pathutil.Dir(specName)
+	specReader, err := specEntry.Open()
+	if err != nil {
+		return nil, fmt.Errorf("%w: open awd-service.json", ErrValidation)
+	}
+	specBytes, err := io.ReadAll(io.LimitReader(specReader, 1<<20))
+	specReader.Close()
+	if err != nil {
+		return nil, fmt.Errorf("%w: read awd-service.json", ErrValidation)
+	}
+	var in AwdServiceInput
+	if err := json.Unmarshal(specBytes, &in); err != nil {
+		return nil, fmt.Errorf("%w: parse awd-service.json: %v", ErrValidation, err)
+	}
+	in.Slug = strings.TrimSpace(in.Slug)
+	if !awdSlugRe.MatchString(in.Slug) {
+		return nil, fmt.Errorf("%w: awd-service.json slug is invalid", ErrValidation)
+	}
+	hasDockerfile := false
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name, err := pathutil.CleanEntry(f.Name)
+		if err != nil {
+			continue
+		}
+		if pathutil.Dir(name) == contextRel && pathutil.Base(name) == "Dockerfile" {
+			hasDockerfile = true
+			break
+		}
+	}
+	if !hasDockerfile {
+		return nil, fmt.Errorf("%w: Dockerfile is required next to awd-service.json", ErrValidation)
+	}
+	tmp, err := os.MkdirTemp("", "academy-awd-package-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := extractAwdPackage(zr, tmp); err != nil {
+		return nil, err
+	}
+	contextDir := pathutil.Join(tmp, contextRel)
+	tag := fmt.Sprintf("yak-awd-%d-%s", competitionID, in.Slug)
+	if err := s.builder.Build(ctx, tag, contextDir); err != nil {
+		return nil, err
+	}
+	in.Image = tag
+	existing, err := s.awd.FindServiceBySlug(ctx, competitionID, in.Slug)
+	if err == nil && existing != nil {
+		return s.UpdateService(ctx, competitionID, existing.ID, in)
+	}
+	if err != nil && !isNotFound(err) {
+		return nil, err
+	}
+	return s.CreateService(ctx, competitionID, in)
+}
+
+func extractAwdPackage(zr *zip.Reader, dest string) error {
+	var total uint64
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		target, err := pathutil.SafeJoin(dest, f.Name)
+		if err != nil {
+			return fmt.Errorf("%w: unsafe package entry %q", ErrValidation, f.Name)
+		}
+		total += f.UncompressedSize64
+		if total > maxAwdServiceUncompressed {
+			return fmt.Errorf("%w: package uncompressed size exceeds limit", ErrValidation)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		src, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("%w: open package entry", ErrValidation)
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			src.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, io.LimitReader(src, int64(f.UncompressedSize64)+1))
+		closeErr := out.Close()
+		src.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
+}
 func (s *AwdCompetitionService) UpdateService(ctx context.Context, competitionID, serviceID uint, in AwdServiceInput) (*model.AwdService, error) {
 	game, err := s.EnsureGame(ctx, competitionID)
 	if err != nil {
