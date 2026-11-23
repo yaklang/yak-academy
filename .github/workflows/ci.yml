@@ -114,6 +114,12 @@ jobs:
         env:
           ACADEMY_TEST_DOCKER: '1'
 
+      # PostgreSQL 方言/迁移兼容 + AWD advisory lock（真实 PG 容器）
+      - name: PostgreSQL integration tests
+        run: go test ./internal/repo/ -run Postgres -count=1 -v
+        env:
+          ACADEMY_TEST_DOCKER: '1'
+
   contract:
     name: API contract (openapi.yaml)
     runs-on: ubuntu-latest

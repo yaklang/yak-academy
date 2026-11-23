@@ -38,6 +38,23 @@ type Config struct {
 	InstanceMemory string
 	InstanceCPUs   string
 
+	// AWD 运行时部署参数：
+	// AwdAttackImage SSH 攻击盒镜像（默认 yak-awd-attackbox:latest，部署侧
+	// 用 deploy/build-awd-attackbox.sh 构建）。
+	AwdAttackImage string
+	// AwdAttackSSHBind 攻击盒 SSH 端口在宿主的发布地址（默认 0.0.0.0；
+	// 生产应配合宿主防火墙限制来源网段）。
+	AwdAttackSSHBind string
+	// AwdAttackPublicHost 返回给选手的 SSH 主机名（默认 127.0.0.1；远程
+	// 比赛必须设为学员可达的宿主地址/域名）。
+	AwdAttackPublicHost string
+	// AwdTargetMemory/AwdTargetCPUs 每竞域单位每服务靶机的资源限额。
+	AwdTargetMemory string
+	AwdTargetCPUs   string
+	// AwdAttackMemory/AwdAttackCPUs 每个 SSH 攻击盒的资源限额。
+	AwdAttackMemory string
+	AwdAttackCPUs   string
+
 	// PublicURL 平台对外可达地址：注入题目容器的 CHECKPOINT_URL 前缀
 	// （容器内经 host.docker.internal 回达宿主；Linux 宿主由 DockerDriver
 	// 的 --add-host host-gateway 注入解析，默认值开箱即用）。
@@ -141,6 +158,13 @@ func Load() *Config {
 		ReportsDir:           getenv("ACADEMY_REPORTS_DIR", "awd-reports"),
 		InstanceMemory:       getenv("ACADEMY_INSTANCE_MEMORY", "512m"),
 		InstanceCPUs:         getenv("ACADEMY_INSTANCE_CPUS", "0.5"),
+		AwdAttackImage:       getenv("ACADEMY_AWD_ATTACK_IMAGE", "yak-awd-attackbox:latest"),
+		AwdAttackSSHBind:     getenv("ACADEMY_AWD_ATTACK_SSH_BIND", "0.0.0.0"),
+		AwdAttackPublicHost:  getenv("ACADEMY_AWD_ATTACK_PUBLIC_HOST", "127.0.0.1"),
+		AwdTargetMemory:      getenv("ACADEMY_AWD_TARGET_MEMORY", "512m"),
+		AwdTargetCPUs:        getenv("ACADEMY_AWD_TARGET_CPUS", "0.5"),
+		AwdAttackMemory:      getenv("ACADEMY_AWD_ATTACK_MEMORY", "256m"),
+		AwdAttackCPUs:        getenv("ACADEMY_AWD_ATTACK_CPUS", "0.25"),
 		PublicURL:            getenv("ACADEMY_PUBLIC_URL", "http://host.docker.internal:8080"),
 		InstancePublicHost:   getenv("ACADEMY_INSTANCE_PUBLIC_HOST", ""),
 		YakBin:               getenv("ACADEMY_YAK_BIN", ""),
