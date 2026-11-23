@@ -417,6 +417,10 @@ type AwdRepo interface {
 	FindTeamServiceByKey(ctx context.Context, gameID, serviceID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdTeamService, error)
 	CreateTeamService(ctx context.Context, ts *model.AwdTeamService) error
 	UpdateTeamServiceSelective(ctx context.Context, id uint, fields map[string]any) error
+
+	FindAttackBoxByKey(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdAttackBox, error)
+	CreateAttackBox(ctx context.Context, box *model.AwdAttackBox) error
+	UpdateAttackBoxSelective(ctx context.Context, id uint, fields map[string]any) error
 	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
 	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
