@@ -476,6 +476,18 @@ type ExamRepo interface {
 	CreateQuestion(ctx context.Context, question *model.ExamQuestion) error
 	UpdateQuestionSelective(ctx context.Context, id uint, fields map[string]any) error
 	DeleteQuestion(ctx context.Context, id uint) error
+
+	FindAttemptByKey(ctx context.Context, paperID, userID uint) (*model.ExamAttempt, error)
+	FindAttempt(ctx context.Context, id uint) (*model.ExamAttempt, error)
+	CreateAttempt(ctx context.Context, attempt *model.ExamAttempt) error
+	UpdateAttemptSelective(ctx context.Context, id uint, fields map[string]any) error
+	// ExpireAttempt 条件更新 in_progress → expired（返回受影响行数，0 = 已被处理）。
+	ExpireAttempt(ctx context.Context, id uint, at time.Time) (int64, error)
+	ListExpiredAttempts(ctx context.Context, now time.Time, limit int) ([]model.ExamAttempt, error)
+
+	FindAnswer(ctx context.Context, attemptID, questionID uint) (*model.ExamAnswer, error)
+	ListAnswers(ctx context.Context, attemptID uint) ([]model.ExamAnswer, error)
+	UpsertAnswer(ctx context.Context, answer *model.ExamAnswer) error
 }
 
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
