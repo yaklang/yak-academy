@@ -95,6 +95,13 @@ test.describe('AWD 战报', () => {
     await expect(page.getByText('战报评审已提交')).toBeVisible()
     await expect(page.getByRole('cell', { name: '90' })).toBeVisible()
 
+    // 最终排名 = AWD 分归一化 × 70% + 战报分 × 30%；本场无回合得分，
+    // 因此最终分为 90 × 30 / 100 = 27.00。
+    await page.getByRole('tab', { name: '最终排名' }).click()
+    await expect(page.getByText('最终计分')).toBeVisible()
+    await expect(page.getByRole('cell', { name: E2E.student.username })).toBeVisible()
+    await expect(page.getByRole('cell', { name: '27.00' })).toBeVisible()
+
     await logout(page)
     await loginAsStudent(page)
     await page.goto(`/competitions/${compId}`)
@@ -103,5 +110,9 @@ test.describe('AWD 战报', () => {
     await expect(page.locator('.awd-report-status')).toContainText('90')
     await expect(page.getByText('漏洞覆盖完整，修复说明清晰')).toBeVisible()
     await expect(content).toHaveValue(/# 战报 E2E/)
+
+    await page.getByRole('tab', { name: '最终排名' }).click()
+    await expect(page.getByText('最终计分')).toBeVisible()
+    await expect(page.getByRole('cell', { name: '27.00' })).toBeVisible()
   })
 })

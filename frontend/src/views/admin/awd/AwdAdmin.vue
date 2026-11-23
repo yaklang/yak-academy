@@ -10,6 +10,8 @@ import {
   KIND_LABELS,
   type AwdAdminView,
   type AwdCompetitorType,
+  type AwdFinalRankingView,
+  type AwdFinalStandingView,
   type AwdService,
   type AwdServiceInput,
   type AwdStandingView,
@@ -55,6 +57,9 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const reports = ref<AwdReportView[]>([])
 const reportsLoading = ref(false)
 const reportsError = ref('')
+const finalRanking = ref<AwdFinalRankingView | null>(null)
+const finalLoading = ref(false)
+const finalError = ref('')
 const showReview = ref(false)
 const reviewTarget = ref<AwdReportView | null>(null)
 const reviewSaving = ref(false)
@@ -402,6 +407,29 @@ function reportName(row: AwdReportView) {
   return row.competitor_name || `#${row.competitor_id}`
 }
 
+function finalName(row: AwdFinalStandingView) {
+  return row.competitor_name || `#${row.competitor_id}`
+}
+
+const finalFormula = computed(() => {
+  const weights = finalRanking.value?.weights
+  const awd = weights?.awd_weight ?? 70
+  const report = weights?.report_weight ?? 30
+  return `最终分 = (${awd} × AWD 分 / 榜首 AWD 分 × 100 + ${report} × 战报分) / ${awd + report}；并列依次比较战报分、最后有效攻击时间。`
+})
+
+async function loadFinalRanking() {
+  finalLoading.value = true
+  finalError.value = ''
+  try {
+    finalRanking.value = await adminAwdApi.finalRanking(props.competitionId)
+  } catch (e) {
+    finalError.value = errorMessage(e, '最终排名加载失败')
+  } finally {
+    finalLoading.value = false
+  }
+}
+
 async function loadReports() {
   reportsLoading.value = true
   reportsError.value = ''
@@ -442,6 +470,7 @@ async function saveReview() {
     notify.success('战报评审已提交')
     showReview.value = false
     await loadReports()
+    if (finalRanking.value) await loadFinalRanking()
   } catch (e) {
     notify.error(errorMessage(e, '评审提交失败'))
   } finally {
@@ -465,6 +494,7 @@ async function downloadReportZip(row: AwdReportView) {
 
 function onTab(name: string | number) {
   if (name === 'reports') void loadReports()
+  if (name === 'final') void loadFinalRanking()
 }
 
 onMounted(loadConsole)
@@ -782,6 +812,51 @@ onMounted(loadConsole)
             </UiTableColumn>
           </UiTable>
         </UiTabPane>
+
+        <UiTabPane label="最终排名" name="final">
+          <UiAlert
+            type="info"
+            :closable="false"
+            title="最终计分"
+            :description="finalFormula"
+            class="final-tip"
+          />
+          <UiAlert
+            v-if="finalRanking && !finalRanking.finalized"
+            type="warning"
+            :closable="false"
+            title="比赛未结束"
+            description="当前为预览；结束比赛并完成战报评审后即为最终结果。"
+            class="final-tip"
+          />
+          <UiAlert v-if="finalError" type="error" :closable="false" :title="finalError" class="load-error">
+            <UiButton size="small" @click="loadFinalRanking">重试</UiButton>
+          </UiAlert>
+          <UiTable
+            :data="finalRanking?.items ?? []"
+            row-key="competitor_id"
+            empty-text="暂无最终排名"
+            :loading="finalLoading"
+          >
+            <UiTableColumn prop="rank" label="名次" width="80" align="center" />
+            <UiTableColumn label="竞域单位" min-width="180" align="left">
+              <template #default="{ row }">{{ finalName(row) }}</template>
+            </UiTableColumn>
+            <UiTableColumn prop="awd_score" label="AWD 分" width="100" align="right" />
+            <UiTableColumn prop="report_score" label="战报分" width="100" align="right" />
+            <UiTableColumn label="最终分" width="110" align="right">
+              <template #default="{ row }">
+                <b class="mono">{{ row.final_score.toFixed(2) }}</b>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="最后有效攻击" min-width="170" align="left">
+              <template #default="{ row }">{{ fmt(row.last_attack_at) }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="最后得分事件" min-width="170" align="left">
+              <template #default="{ row }">{{ fmt(row.last_event_at) }}</template>
+            </UiTableColumn>
+          </UiTable>
+        </UiTabPane>
       </UiTabs>
     </template>
 
@@ -861,6 +936,7 @@ onMounted(loadConsole)
 .head h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-xl); font-weight: 600; }
 .hint { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); line-height: 1.6; }
 .load-error { max-width: 720px; }
+.final-tip { margin-bottom: var(--space-4); }
 .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-3); }
 .stat {
   display: grid;

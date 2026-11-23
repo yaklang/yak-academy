@@ -323,6 +323,9 @@ func (s *AwdCompetitionService) UpdateGame(ctx context.Context, competitionID ui
 		if err != nil {
 			return nil, err
 		}
+		if err := validateAwdScoringConfig(normalized); err != nil {
+			return nil, err
+		}
 		fields["scoring_config"] = normalized
 	}
 	if err := s.awd.UpdateGameSelective(ctx, game.ID, fields); err != nil {

@@ -7,6 +7,8 @@ import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
 import {
   competitionAwdApi,
+  type AwdFinalRankingView,
+  type AwdFinalStandingView,
   type AwdParticipantView,
   type AwdReportView,
   type AwdStandingView,
@@ -31,6 +33,9 @@ const reportContent = ref('')
 const reportLoading = ref(false)
 const reportSaving = ref(false)
 const reportFileInput = ref<HTMLInputElement | null>(null)
+const finalRanking = ref<AwdFinalRankingView | null>(null)
+const finalLoading = ref(false)
+const finalError = ref('')
 const nowTs = ref(Date.now())
 let tick: number | undefined
 let poll: number | undefined
@@ -87,6 +92,12 @@ const statusType = computed(() => {
   }
 })
 const kindLabel = computed(() => (comp.value?.kind === 'public' ? '公开赛' : '邀请赛'))
+const finalFormula = computed(() => {
+  const weights = finalRanking.value?.weights
+  const awd = weights?.awd_weight ?? 70
+  const report = weights?.report_weight ?? 30
+  return `最终分 = (${awd} × AWD 分 / 榜首 AWD 分 × 100 + ${report} × 战报分) / ${awd + report}；同分依次比较战报分、最后有效攻击时间。`
+})
 
 function formatDuration(seconds: number) {
   if (seconds <= 0) return '00:00'
@@ -117,6 +128,9 @@ async function loadView(silent = false) {
   try {
     view.value = await competitionAwdApi.view(props.competitionId)
     if (lockedHere.value) compStore.lock(props.competitionId)
+    if (view.value.game.status === 'ended' && !finalRanking.value && !finalLoading.value) {
+      void loadFinalRanking()
+    }
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return
     if (!silent || !view.value) {
@@ -185,6 +199,20 @@ async function loadReport() {
   }
 }
 
+async function loadFinalRanking() {
+  finalLoading.value = true
+  finalError.value = ''
+  try {
+    finalRanking.value = await competitionAwdApi.finalRanking(props.competitionId)
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) {
+      finalError.value = e instanceof Error ? e.message : '最终排名加载失败'
+    }
+  } finally {
+    finalLoading.value = false
+  }
+}
+
 async function saveReport() {
   if (!reportContent.value.trim() || reportSaving.value) {
     if (!reportContent.value.trim()) notify.warning('请填写战报内容')
@@ -220,6 +248,7 @@ async function onReportZip(event: Event) {
 
 function onTab(name: string | number) {
   if (name === 'report' && !report.value && !reportLoading.value) void loadReport()
+  if (name === 'final' && !finalLoading.value) void loadFinalRanking()
 }
 
 interface AwdPortView {
@@ -286,6 +315,14 @@ function standingName(row: AwdStandingView) {
 }
 
 function isMe(row: AwdStandingView) {
+  return row.competitor_type === view.value?.competitor_type && row.competitor_id === view.value?.competitor_id
+}
+
+function finalName(row: AwdFinalStandingView) {
+  return row.competitor_name || `#${row.competitor_id}`
+}
+
+function isMeFinal(row: AwdFinalStandingView) {
   return row.competitor_type === view.value?.competitor_type && row.competitor_id === view.value?.competitor_id
 }
 
@@ -698,6 +735,44 @@ onUnmounted(() => {
             </template>
           </UiCard>
         </UiTabPane>
+
+        <UiTabPane v-if="game?.status === 'ended'" label="最终排名" name="final">
+          <UiAlert
+            type="info"
+            :closable="false"
+            title="最终计分"
+            :description="finalFormula"
+            class="awd-final-tip"
+          />
+          <UiAlert
+            v-if="finalError"
+            type="error"
+            :closable="false"
+            :title="finalError"
+            class="awd-final-error"
+          >
+            <UiButton size="small" @click="loadFinalRanking">重试</UiButton>
+          </UiAlert>
+          <UiTable :data="finalRanking?.items ?? []" row-key="competitor_id" empty-text="暂无最终排名" :loading="finalLoading">
+            <UiTableColumn prop="rank" label="名次" width="80" align="center" />
+            <UiTableColumn label="竞域单位" min-width="180" align="left">
+              <template #default="{ row }">
+                <span>{{ finalName(row) }}</span>
+                <UiTag v-if="isMeFinal(row)" size="small" type="success" class="awd-self-tag">我</UiTag>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn prop="awd_score" label="AWD 分" width="100" align="right" />
+            <UiTableColumn prop="report_score" label="战报分" width="100" align="right" />
+            <UiTableColumn label="最终分" width="110" align="right">
+              <template #default="{ row }">
+                <b class="mono">{{ row.final_score.toFixed(2) }}</b>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="最后有效攻击" min-width="170" align="left">
+              <template #default="{ row }">{{ fmt(row.last_attack_at) }}</template>
+            </UiTableColumn>
+          </UiTable>
+        </UiTabPane>
       </UiTabs>
     </main>
   </div>
@@ -800,6 +875,8 @@ onUnmounted(() => {
 .awd-self-tag { margin-left: var(--space-2); }
 .awd-file { display: none; }
 .awd-report-tip { margin-bottom: var(--space-4); }
+.awd-final-tip { margin-bottom: var(--space-4); }
+.awd-final-error { margin-bottom: var(--space-4); }
 .awd-report-actions { margin-top: var(--space-3); }
 .awd-report-status { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .awd-report-status b { font-size: var(--text-xl); }

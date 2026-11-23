@@ -1037,6 +1037,37 @@ components:
         standings:
           type: array
           items: { $ref: '#/components/schemas/AwdStandingView' }
+    AwdFinalWeights:
+      type: object
+      description: 最终排名权重（原始配置值，默认 70/30；计算时按两者之和归一）
+      properties:
+        awd_weight: { type: number }
+        report_weight: { type: number }
+    AwdFinalStandingView:
+      type: object
+      description: 最终排名条目（AWD 分归一化 × 权重 + 战报分 × 权重）
+      properties:
+        rank: { type: integer }
+        competitor_type: { type: string, enum: [team, user] }
+        competitor_id: { type: integer }
+        competitor_name: { type: string }
+        awd_score: { type: integer }
+        report_score: { type: integer }
+        final_score: { type: number, description: 保留两位小数 }
+        last_attack_at: { type: string, nullable: true, description: 最后有效攻击判定时间（并列比较用） }
+        last_event_at: { type: string, nullable: true }
+    AwdFinalRankingView:
+      type: object
+      description: 最终排名（未结束时管理端可预览，finalized=false；参赛者赛后可见）
+      properties:
+        competition_id: { type: integer }
+        status: { type: string, enum: [pending, running, paused, ended] }
+        finalized: { type: boolean }
+        max_awd_score: { type: integer, description: 榜首 AWD 分（归一化基准；0 表示尚无得分） }
+        weights: { $ref: '#/components/schemas/AwdFinalWeights' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AwdFinalStandingView' }
     AwdRound:
       type: object
       properties:
@@ -3880,6 +3911,21 @@ paths:
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/awd/final:
+    get:
+      tags: [admin]
+      summary: AWD 最终排名（AWD 分归一化 × 权重 + 战报分 × 权重；未结束为预览）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdFinalRankingView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/competitions/{id}/awd/console:
     get:
       tags: [admin]
@@ -4199,6 +4245,21 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/AwdStandingView' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/awd/final:
+    get:
+      tags: [competitions]
+      summary: AWD 最终排名（仅赛后；AWD 分归一化 × 权重 + 战报分 × 权重）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdFinalRankingView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/awd/report:
     get:

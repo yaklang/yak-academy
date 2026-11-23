@@ -28,12 +28,27 @@ type awdScoringWeights struct {
 	AttackWeight    *float64 `json:"attack_weight"`
 	DefenseWeight   *float64 `json:"defense_weight"`
 	CheckdownWeight *float64 `json:"checkdown_weight"`
+	// FinalAwdWeight/FinalReportWeight 最终排名权重（默认 70/30，按两者之和归一）。
+	FinalAwdWeight    *float64 `json:"final_awd_weight"`
+	FinalReportWeight *float64 `json:"final_report_weight"`
 }
 
 func (w awdScoringWeights) sla() float64       { return awdWeightOrDefault(w.SLAWeight) }
 func (w awdScoringWeights) attack() float64    { return awdWeightOrDefault(w.AttackWeight) }
 func (w awdScoringWeights) defense() float64   { return awdWeightOrDefault(w.DefenseWeight) }
 func (w awdScoringWeights) checkdown() float64 { return awdWeightOrDefault(w.CheckdownWeight) }
+
+// finalWeights 最终排名权重：AWD 分权重默认 70，战报权重默认 30。
+func (w awdScoringWeights) finalWeights() (float64, float64) {
+	awd, report := 70.0, 30.0
+	if w.FinalAwdWeight != nil && *w.FinalAwdWeight >= 0 {
+		awd = *w.FinalAwdWeight
+	}
+	if w.FinalReportWeight != nil && *w.FinalReportWeight >= 0 {
+		report = *w.FinalReportWeight
+	}
+	return awd, report
+}
 
 func awdWeightOrDefault(v *float64) float64 {
 	if v == nil {
@@ -53,6 +68,36 @@ func parseAwdScoringWeights(raw string) awdScoringWeights {
 	// 解析失败回退默认权重（配置在写入时已校验为对象）。
 	_ = json.Unmarshal([]byte(raw), &w)
 	return w
+}
+
+// validateAwdScoringConfig 校验最终排名权重：0..1000 且不能同时为 0。
+// 其余计分权重保持向后兼容，不做额外限制。
+func validateAwdScoringConfig(raw string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return fmt.Errorf("%w: scoring_config must be a JSON object", ErrValidation)
+	}
+	total := 0.0
+	for _, key := range []string{"final_awd_weight", "final_report_weight"} {
+		value, ok := fields[key]
+		if !ok {
+			continue
+		}
+		var weight float64
+		if err := json.Unmarshal(value, &weight); err != nil {
+			return fmt.Errorf("%w: %s must be a number", ErrValidation, key)
+		}
+		if weight < 0 || weight > 1000 {
+			return fmt.Errorf("%w: %s must be in 0..1000", ErrValidation, key)
+		}
+		total += weight
+	}
+	if _, awdSet := fields["final_awd_weight"]; awdSet {
+		if _, reportSet := fields["final_report_weight"]; reportSet && total == 0 {
+			return fmt.Errorf("%w: final ranking weights cannot both be 0", ErrValidation)
+		}
+	}
+	return nil
 }
 
 // AwdStandingView 排行榜条目（rank 由服务端计算；同分并列）。
