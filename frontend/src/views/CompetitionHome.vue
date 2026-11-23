@@ -13,11 +13,13 @@ import {
   CATEGORY_LABELS,
   DIFFICULTY_LABELS,
   FORMAT_LABELS,
+  SCORING_MODE_LABELS,
   competitionApi,
   instanceApi,
   type CompetitionChallengeItem,
   type CompetitionFormat,
   type CompetitionHomeView,
+  type CompetitionScoringMode,
   type LabInstance,
   type MyWriteupItem,
   type TeamLeaderboardEntry,
@@ -68,6 +70,11 @@ const elapsedPercent = computed(() => {
 })
 const kindLabel = computed(() => (comp.value?.kind === 'public' ? '公开赛' : '邀请赛'))
 const formatLabel = computed(() => (comp.value ? FORMAT_LABELS[comp.value.format as CompetitionFormat] : ''))
+const fixedScoringLabel = computed(() =>
+  comp.value?.scoring_mode === 'fixed'
+    ? SCORING_MODE_LABELS[comp.value.scoring_mode as CompetitionScoringMode]
+    : '',
+)
 // 当前页面是否处于「锁定」态：仅进行中的邀请赛锁普通参赛者；公开赛与管理员不锁。
 const isAdmin = computed(() => auth.user?.global_role === 'admin')
 const lockedHere = computed(() => running.value && comp.value?.kind === 'invitational' && !isAdmin.value)
@@ -427,6 +434,7 @@ onUnmounted(() => {
               </UiTag>
               <UiTag v-if="comp" size="small" type="info">{{ kindLabel }}</UiTag>
               <UiTag v-if="comp" size="small" type="warning">{{ formatLabel }}</UiTag>
+              <UiTag v-if="fixedScoringLabel" size="small" type="info">{{ fixedScoringLabel }}</UiTag>
             </div>
             <p v-if="comp" class="comp-window mono">{{ shortDateTime(comp.start_time) }} → {{ shortDateTime(comp.end_time) }}</p>
           </div>

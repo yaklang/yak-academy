@@ -65,11 +65,11 @@ func NewJudgeService(sub repo.SubmissionRepo, chal repo.ChallengeRepo, instances
 		events:       ev,
 		competitions: comp,
 		bus:          bus,
-		queue:       make(chan uint, 256),
-		runs:        newRunStore(),
-		yakOSSBase:  defaultYakOSSBase,
-		dl:          &yakDownloadJob{state: yakDLIdle},
-		now:         time.Now,
+		queue:        make(chan uint, 256),
+		runs:         newRunStore(),
+		yakOSSBase:   defaultYakOSSBase,
+		dl:           &yakDownloadJob{state: yakDLIdle},
+		now:          time.Now,
 	}
 }
 
@@ -420,7 +420,7 @@ type CodeGroupResult struct {
 	Sample  bool   `json:"sample"`
 	Passed  bool   `json:"passed"`
 	Verdict string `json:"verdict,omitempty"` // 失败组的判定（wa/tle/re）
-	Score   int    `json:"score"`              // 组权重（配置分值；非实得分）
+	Score   int    `json:"score"`             // 组权重（配置分值；非实得分）
 }
 
 // partialScore 部分得分换算：全过 = 题面全额；部分过 = 全额 × 通过权重/总权重，
@@ -554,12 +554,22 @@ func matchAnyFlag(flags []model.Flag, answer string) bool {
 	return false
 }
 
-// dynamicScore linear 衰减：value = max(initial - decay*n, minimum)，
-// n 为该题在指定作用域的已通过人数（solve_count 按竞赛分组）。
+// dynamicScore 竞赛积分：fixed 模式直接返回题目分值；dynamic 模式按该题在
+// 指定作用域的已通过人数线性衰减（value = max(initial - decay*n, minimum)）。
+// 训练场（competitionID=0）始终使用动态衰减。
 func (s *JudgeService) dynamicScore(ctx context.Context, challengeID, competitionID uint) (int, error) {
 	chal, err := s.challenges.FindByID(ctx, challengeID)
 	if err != nil {
 		return 0, err
+	}
+	if competitionID > 0 && s.competitions != nil {
+		comp, err := s.competitions.FindByID(ctx, competitionID)
+		if err != nil {
+			return 0, err
+		}
+		if comp.ScoringMode == model.CompetitionScoringFixed {
+			return chal.Score, nil
+		}
 	}
 	var n int64
 	if competitionID > 0 {
