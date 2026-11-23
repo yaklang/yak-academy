@@ -81,7 +81,27 @@ test.describe('AWD 管理端', () => {
     // 回合/排名/告警标签均可访问（空态明确）。
     await page.getByRole('tab', { name: '回合' }).click()
     await expect(page.getByText('尚未开启回合')).toBeVisible()
-    await page.getByRole('tab', { name: '排名' }).click()
+    await page.getByRole('tab', { name: '排名', exact: true }).click()
+    await expect(page.getByRole('cell', { name: E2E.student.username })).toBeVisible()
+
+    // 手工登记运营告警并导出审计 CSV。
+    await page.getByRole('tab', { name: '检查 / 攻击 / 告警' }).click()
+    await page.getByRole('button', { name: '登记告警' }).click()
+    const incidentDialog = page.getByRole('dialog')
+    await incidentDialog.getByLabel('类型').fill('manual')
+    await incidentDialog.getByLabel('详情').fill('现场巡检记录')
+    await incidentDialog.getByRole('button', { name: '登记' }).click()
+    await expect(page.getByText('运营告警已登记')).toBeVisible()
+    await expect(page.getByText('现场巡检记录')).toBeVisible()
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出告警 CSV' }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toContain('awd-incidents.csv')
+
+    // 最终排名页在比赛进行中显示为预览。
+    await page.getByRole('tab', { name: '最终排名' }).click()
+    await expect(page.getByText('比赛未结束')).toBeVisible()
     await expect(page.getByRole('cell', { name: E2E.student.username })).toBeVisible()
   })
 })

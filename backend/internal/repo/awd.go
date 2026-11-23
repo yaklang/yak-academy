@@ -303,6 +303,14 @@ func (r *awdRepo) ListIncidents(ctx context.Context, competitionID uint, limit i
 	return list, err
 }
 
+// ListAllIncidents 运营告警审计导出（不分页）。
+func (r *awdRepo) ListAllIncidents(ctx context.Context, competitionID uint) ([]model.AwdIncident, error) {
+	var list []model.AwdIncident
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
 func (r *awdRepo) ListAttacksByGame(ctx context.Context, gameID uint, limit int) ([]model.AwdAttack, error) {
 	if limit <= 0 {
 		limit = 100
@@ -348,6 +356,14 @@ func (r *awdRepo) ListAcceptedAttacksByGame(ctx context.Context, gameID uint) ([
 	var list []model.AwdAttack
 	err := r.db.WithContext(ctx).
 		Where("game_id = ? AND status = ?", gameID, model.AwdAttackAccepted).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// ListAllAttacksByGame 整场攻击审计（导出用，不分页）。
+func (r *awdRepo) ListAllAttacksByGame(ctx context.Context, gameID uint) ([]model.AwdAttack, error) {
+	var list []model.AwdAttack
+	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).
 		Order("id asc").Find(&list).Error
 	return list, err
 }

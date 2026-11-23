@@ -1115,6 +1115,15 @@ components:
         kind: { type: string }
         detail: { type: string }
         created_at: { type: string }
+    AwdIncidentCreate:
+      type: object
+      required: [kind, detail]
+      properties:
+        competitor_type: { type: string, enum: [team, user], description: 缺省为比赛竞域单位类型 }
+        competitor_id: { type: integer, description: 0 = 竞赛级告警 }
+        service_id: { type: integer, description: 0 = 不关联服务 }
+        kind: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,31}$' }
+        detail: { type: string, maxLength: 2000 }
     AwdAttack:
       type: object
       properties:
@@ -3925,6 +3934,72 @@ paths:
               schema: { $ref: '#/components/schemas/AwdFinalRankingView' }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/final.csv:
+    get:
+      tags: [admin]
+      summary: 导出 AWD 最终排名 CSV（UTF-8 BOM）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/attacks.csv:
+    get:
+      tags: [admin]
+      summary: 导出 AWD 攻击审计 CSV（含被拒绝提交）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/incidents.csv:
+    get:
+      tags: [admin]
+      summary: 导出 AWD 运营告警审计 CSV
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/incidents:
+    post:
+      tags: [admin]
+      summary: 管理端手工登记运营告警（append-only 审计）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AwdIncidentCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdIncident' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /admin/competitions/{id}/awd/console:
     get:

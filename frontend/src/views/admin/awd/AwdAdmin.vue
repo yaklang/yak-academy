@@ -60,6 +60,9 @@ const reportsError = ref('')
 const finalRanking = ref<AwdFinalRankingView | null>(null)
 const finalLoading = ref(false)
 const finalError = ref('')
+const showIncident = ref(false)
+const incidentSaving = ref(false)
+const incidentForm = ref({ kind: 'manual', detail: '', competitorID: 0, serviceID: 0 })
 const showReview = ref(false)
 const reviewTarget = ref<AwdReportView | null>(null)
 const reviewSaving = ref(false)
@@ -430,6 +433,55 @@ async function loadFinalRanking() {
   }
 }
 
+async function downloadCSV(kind: 'final' | 'attacks' | 'incidents') {
+  const loaders = {
+    final: adminAwdApi.finalRankingCSV,
+    attacks: adminAwdApi.attacksCSV,
+    incidents: adminAwdApi.incidentsCSV,
+  }
+  try {
+    const blob = await loaders[kind](props.competitionId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `competition-${props.competitionId}-awd-${kind}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    notify.error(errorMessage(e, '导出失败'))
+  }
+}
+
+function openIncident() {
+  incidentForm.value = { kind: 'manual', detail: '', competitorID: 0, serviceID: 0 }
+  showIncident.value = true
+}
+
+async function saveIncident() {
+  const kind = incidentForm.value.kind.trim()
+  const detail = incidentForm.value.detail.trim()
+  if (!kind || !detail) {
+    notify.warning('请填写告警类型与详情')
+    return
+  }
+  incidentSaving.value = true
+  try {
+    await adminAwdApi.createIncident(props.competitionId, {
+      kind,
+      detail,
+      competitor_id: incidentForm.value.competitorID || 0,
+      service_id: incidentForm.value.serviceID || 0,
+    })
+    notify.success('运营告警已登记')
+    showIncident.value = false
+    await refresh()
+  } catch (e) {
+    notify.error(errorMessage(e, '登记失败'))
+  } finally {
+    incidentSaving.value = false
+  }
+}
+
 async function loadReports() {
   reportsLoading.value = true
   reportsError.value = ''
@@ -725,6 +777,11 @@ onMounted(loadConsole)
         </UiTabPane>
 
         <UiTabPane label="检查 / 攻击 / 告警" name="events">
+          <div class="toolbar">
+            <UiButton size="small" @click="downloadCSV('attacks')">导出攻击 CSV</UiButton>
+            <UiButton size="small" @click="downloadCSV('incidents')">导出告警 CSV</UiButton>
+            <UiButton size="small" type="primary" @click="openIncident">登记告警</UiButton>
+          </div>
           <div class="events">
             <UiCard header="最近检查">
               <UiTable :data="consoleData.checks" row-key="id" empty-text="暂无检查记录">
@@ -814,6 +871,9 @@ onMounted(loadConsole)
         </UiTabPane>
 
         <UiTabPane label="最终排名" name="final">
+          <div class="toolbar">
+            <UiButton size="small" @click="downloadCSV('final')">导出最终排名 CSV</UiButton>
+          </div>
           <UiAlert
             type="info"
             :closable="false"
@@ -925,6 +985,32 @@ onMounted(loadConsole)
       <template #footer>
         <UiButton @click="showReview = false">取消</UiButton>
         <UiButton type="primary" :loading="reviewSaving" :disabled="reviewSaving" @click="saveReview">提交评审</UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog v-model="showIncident" title="登记运营告警" width="640px">
+      <UiForm label-width="120px">
+        <UiFormItem label="类型">
+          <UiInput v-model="incidentForm.kind" placeholder="manual" maxlength="32" />
+          <div class="dim">小写字母/数字/下划线/连字符，如 manual、flag_leak。</div>
+        </UiFormItem>
+        <UiFormItem label="详情">
+          <UiInput v-model="incidentForm.detail" type="textarea" :rows="4" maxlength="2000" />
+        </UiFormItem>
+        <UiFormItem label="竞域单位 ID">
+          <UiInputNumber v-model="incidentForm.competitorID" :min="0" />
+          <div class="dim">0 = 竞赛级告警（不关联具体竞域单位）。</div>
+        </UiFormItem>
+        <UiFormItem label="服务 ID">
+          <UiInputNumber v-model="incidentForm.serviceID" :min="0" />
+          <div class="dim">0 = 不关联服务；否则必须属于本场比赛。</div>
+        </UiFormItem>
+      </UiForm>
+      <template #footer>
+        <UiButton @click="showIncident = false">取消</UiButton>
+        <UiButton type="primary" :loading="incidentSaving" :disabled="incidentSaving" @click="saveIncident">
+          登记
+        </UiButton>
       </template>
     </UiDialog>
   </div>

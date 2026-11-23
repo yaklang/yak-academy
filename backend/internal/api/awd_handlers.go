@@ -372,6 +372,76 @@ func (h *Handlers) adminAwdFinalRanking(w http.ResponseWriter, req *http.Request
 	writeJSON(w, http.StatusOK, view)
 }
 
+func writeAwdCSV(w http.ResponseWriter, data []byte, filename string) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (h *Handlers) adminAwdFinalRankingCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.AWD.FinalRankingCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeAwdCSV(w, data, filename)
+}
+
+func (h *Handlers) adminAwdAttacksCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.AWD.AttacksCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeAwdCSV(w, data, filename)
+}
+
+func (h *Handlers) adminAwdIncidentsCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.AWD.IncidentsCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeAwdCSV(w, data, filename)
+}
+
+func (h *Handlers) adminCreateAwdIncident(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body service.AwdIncidentCreate
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	incident, err := h.AWD.CreateIncident(req.Context(), id, body)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.incident.create", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"incident_id": incident.ID, "kind": incident.Kind})
+	writeJSON(w, http.StatusCreated, incident)
+}
+
 func awdReportID(req *http.Request) (uint, error) {
 	id, err := strconv.ParseUint(req.PathValue("rid"), 10, 64)
 	if err != nil || id == 0 {

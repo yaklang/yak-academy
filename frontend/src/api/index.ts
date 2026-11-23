@@ -1379,6 +1379,19 @@ export const adminAwdApi = {
     http.get<{ items: AwdStandingView[] }>(`/admin/competitions/${id}/awd/standings`),
   finalRanking: (id: number) =>
     http.get<AwdFinalRankingView>(`/admin/competitions/${id}/awd/final`),
+  finalRankingCSV: (id: number) => http.download(`/admin/competitions/${id}/awd/final.csv`),
+  attacksCSV: (id: number) => http.download(`/admin/competitions/${id}/awd/attacks.csv`),
+  incidentsCSV: (id: number) => http.download(`/admin/competitions/${id}/awd/incidents.csv`),
+  createIncident: (
+    id: number,
+    body: {
+      competitor_type?: AwdCompetitorType
+      competitor_id?: number
+      service_id?: number
+      kind: string
+      detail: string
+    },
+  ) => http.post<AwdIncident>(`/admin/competitions/${id}/awd/incidents`, body),
   console: (id: number) => http.get<AwdAdminView>(`/admin/competitions/${id}/awd/console`),
   deployTargets: (id: number) =>
     http.post<AwdDeployResult>(`/admin/competitions/${id}/awd/deploy`),
