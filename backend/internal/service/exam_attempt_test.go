@@ -181,6 +181,71 @@ func TestExamAttemptLifecycle(t *testing.T) {
 	}
 }
 
+// 回归：本地时区（+08:00）的“现在”不能把 UTC 存储的未来到期时间误判为过期。
+// SQLite 按字符串比较时间，混用偏移量会让 12:20+00:00 看起来早于 20:00+08:00。
+func TestExamExpiryComparesInstantsAcrossTimeZones(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	local := time.FixedZone("E2E-LOCAL", 8*3600)
+	e.now = time.Date(2026, 1, 1, 20, 0, 0, 0, local)
+	e.comps.now = func() time.Time { return e.now }
+	svc := NewExamService(repo.NewExamRepo(e.gdb), repo.NewCompetitionRepo(e.gdb), repo.NewChallengeRepo(e.gdb))
+	svc.SetNow(func() time.Time { return e.now })
+	svc.SetEvents(repo.NewEventRepo(e.gdb), nil)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "跨时区到期", Start: e.now.Add(time.Hour), End: e.now.Add(2 * time.Hour), Format: "exam",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	if _, err := svc.UpdatePaper(ctx, comp.ID, ExamPaperUpdate{DurationSeconds: intPtr(1800)}); err != nil {
+		t.Fatalf("update paper: %v", err)
+	}
+	if _, err := svc.CreateQuestion(ctx, comp.ID, ExamQuestionInput{
+		Seq: 1, Type: "single", Title: "题目",
+		Options: []ExamOption{{Key: "A", Text: "A"}, {Key: "B", Text: "B"}},
+		Answer:  jsonRaw(t, "A"), Score: 10,
+	}); err != nil {
+		t.Fatalf("create question: %v", err)
+	}
+	alice := e.ensureUser(t, "exam-tz-alice")
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
+		Individuals: []string{alice.Username},
+	}); err != nil {
+		t.Fatalf("import participants: %v", err)
+	}
+	if err := e.gdb.Model(&model.Participant{}).Where("competition_id = ?", comp.ID).
+		Update("entered_at", e.now).Error; err != nil {
+		t.Fatalf("mark entered: %v", err)
+	}
+	// 开赛，但竞赛剩余时间（20 分钟）短于试卷时长（30 分钟）：到期时间取
+	// 竞赛结束时刻，且由竞赛服务按 UTC 落库。
+	start, end := e.now.Add(-time.Hour), e.now.Add(20*time.Minute)
+	if _, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{StartTime: &start, EndTime: &end}); err != nil {
+		t.Fatalf("start competition: %v", err)
+	}
+	started, err := svc.StartAttempt(ctx, comp.ID, alice.ID)
+	if err != nil || started.Attempt == nil {
+		t.Fatalf("start attempt: %+v err=%v", started, err)
+	}
+
+	expired, err := svc.ExpireDueAttempts(ctx)
+	if err != nil || expired != 0 {
+		t.Fatalf("future attempt must not expire: expired=%d err=%v", expired, err)
+	}
+	fresh, err := svc.exam.FindAttempt(ctx, started.Attempt.ID)
+	if err != nil || fresh.Status != model.ExamAttemptInProgress {
+		t.Fatalf("attempt status: %+v err=%v", fresh, err)
+	}
+
+	e.now = started.Attempt.ExpiresAt
+	expired, err = svc.ExpireDueAttempts(ctx)
+	if err != nil || expired != 1 {
+		t.Fatalf("due attempt should expire: expired=%d err=%v", expired, err)
+	}
+}
+
 func TestExamAttemptStartGuards(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()

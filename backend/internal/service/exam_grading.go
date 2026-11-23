@@ -35,7 +35,7 @@ func (s *ExamService) SubmitAttempt(ctx context.Context, competitionID, userID u
 	if attempt.Status.Terminal() {
 		return s.Exam(ctx, competitionID, userID)
 	}
-	now := s.now()
+	now := s.nowUTC()
 	at := now
 	status := model.ExamAttemptSubmitted
 	auto := false
@@ -152,7 +152,7 @@ func (s *ExamService) recomputeExamAttemptScores(ctx context.Context, attempt *m
 	}
 	total := objectiveScore + codeScore
 	passed := total >= paper.PassScore
-	now := s.now()
+	now := s.nowUTC()
 	if err := s.exam.UpdateAttemptSelective(ctx, attempt.ID, map[string]any{
 		"objective_score": objectiveScore, "code_score": codeScore,
 		"total_score": total, "passed": passed, "updated_at": now,

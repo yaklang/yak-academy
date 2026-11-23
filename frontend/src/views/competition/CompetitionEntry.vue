@@ -7,6 +7,7 @@ import { competitionApi, type CompetitionEntryView } from '../../api'
 import { ApiError } from '../../api/client'
 import CompetitionHome from '../CompetitionHome.vue'
 import AwdParticipant from './awd/AwdParticipant.vue'
+import ExamParticipant from './exam/ExamParticipant.vue'
 
 const route = useRoute()
 const compId = Number(route.params.id)
@@ -41,13 +42,14 @@ onMounted(load)
     <router-link class="entry-link" :to="`/competitions/enter/${compId}`">前往竞赛入场页</router-link>
   </div>
   <AwdParticipant v-else-if="entry?.competition.format === 'awd'" :competition-id="compId" />
+  <ExamParticipant v-else-if="entry?.competition.format === 'exam'" :competition-id="compId" />
   <CompetitionHome v-else-if="entry?.competition.format === 'ctf'" />
   <div v-else class="entry-unsupported">
     <UiAlert
       type="warning"
       :closable="false"
       title="该竞赛形式尚未接入参赛端"
-      description="在线考试的参赛页面将在后续版本提供；当前可进入 CTF 与 AWD 竞赛。"
+      description="当前可进入 CTF、AWD 与在线考试竞赛。"
     />
     <router-link class="entry-link" to="/competitions">返回竞赛广场</router-link>
   </div>
