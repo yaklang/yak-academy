@@ -31,16 +31,17 @@ import (
 // AWD 独立域服务：只依赖 AwdRepo + CompetitionRepo，不引用 CTF Challenge/
 // CompetitionScore/JudgeService（AWD 与 CTF 独立）。
 type AwdCompetitionService struct {
-	awd     repo.AwdRepo
-	comps   repo.CompetitionRepo
-	users   repo.UserRepo
-	events  repo.EventRepo
-	bus     *eventbus.Bus
-	builder ImageBuilder
-	runtime AwdRuntime
-	secret  string
-	deriver *AwdScoreDeriver
-	now     func() time.Time
+	awd        repo.AwdRepo
+	comps      repo.CompetitionRepo
+	users      repo.UserRepo
+	events     repo.EventRepo
+	bus        *eventbus.Bus
+	builder    ImageBuilder
+	runtime    AwdRuntime
+	secret     string
+	reportsDir string
+	deriver    *AwdScoreDeriver
+	now        func() time.Time
 }
 
 func NewAwdCompetitionService(awd repo.AwdRepo, comps repo.CompetitionRepo) *AwdCompetitionService {
@@ -60,6 +61,11 @@ func (s *AwdCompetitionService) SetRuntime(runtime AwdRuntime) {
 // SetSecret 注入攻击盒 SSH 密码加密密钥（主程序用 JWT secret 派生）。
 func (s *AwdCompetitionService) SetSecret(secret string) {
 	s.secret = secret
+}
+
+// SetReportsDir 注入 AWD 战报 zip 落盘根目录。
+func (s *AwdCompetitionService) SetReportsDir(dir string) {
+	s.reportsDir = dir
 }
 
 // SetEvents 注入事件表与总线（攻击提交/判定审计）。未注入时只落运营表。

@@ -13,6 +13,7 @@ import {
   type AwdService,
   type AwdServiceInput,
   type AwdStandingView,
+  type AwdReportView,
   type CompetitionDetail,
   type CompetitionFormat,
 } from '../../../api'
@@ -51,6 +52,13 @@ const serviceEditingId = ref<number | null>(null)
 const serviceForm = ref<ServiceForm>(emptyServiceForm())
 const packageUploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const reports = ref<AwdReportView[]>([])
+const reportsLoading = ref(false)
+const reportsError = ref('')
+const showReview = ref(false)
+const reviewTarget = ref<AwdReportView | null>(null)
+const reviewSaving = ref(false)
+const reviewForm = ref({ score: 0, rubricJSON: '{"vulnerability":0,"exploit":0,"defense":0,"report":0}', comment: '' })
 
 function emptyServiceForm(): ServiceForm {
   return {
@@ -390,6 +398,75 @@ function standingName(row: AwdStandingView) {
   return row.competitor_name || `#${row.competitor_id}`
 }
 
+function reportName(row: AwdReportView) {
+  return row.competitor_name || `#${row.competitor_id}`
+}
+
+async function loadReports() {
+  reportsLoading.value = true
+  reportsError.value = ''
+  try {
+    const resp = await adminAwdApi.reports(props.competitionId)
+    reports.value = resp.items
+  } catch (e) {
+    reportsError.value = errorMessage(e, '战报列表加载失败')
+  } finally {
+    reportsLoading.value = false
+  }
+}
+
+function openReview(row: AwdReportView) {
+  reviewTarget.value = row
+  reviewForm.value = {
+    score: row.score || 0,
+    rubricJSON: '{"vulnerability":0,"exploit":0,"defense":0,"report":0}',
+    comment: '',
+  }
+  showReview.value = true
+}
+
+async function saveReview() {
+  if (!reviewTarget.value) return
+  const rubric = parseJSON(reviewForm.value.rubricJSON, 'rubric')
+  if (rubric === null || typeof rubric !== 'object' || Array.isArray(rubric)) {
+    if (rubric !== null) notify.error('rubric 必须是 JSON 对象')
+    return
+  }
+  reviewSaving.value = true
+  try {
+    await adminAwdApi.reviewReport(props.competitionId, reviewTarget.value.id, {
+      score: reviewForm.value.score ?? 0,
+      rubric: rubric as Record<string, unknown>,
+      comment: reviewForm.value.comment.trim(),
+    })
+    notify.success('战报评审已提交')
+    showReview.value = false
+    await loadReports()
+  } catch (e) {
+    notify.error(errorMessage(e, '评审提交失败'))
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+async function downloadReportZip(row: AwdReportView) {
+  try {
+    const blob = await adminAwdApi.downloadReportZip(props.competitionId, row.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = row.zip_name || `report-${row.id}.zip`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    notify.error(errorMessage(e, '下载失败'))
+  }
+}
+
+function onTab(name: string | number) {
+  if (name === 'reports') void loadReports()
+}
+
 onMounted(loadConsole)
 </script>
 
@@ -474,7 +551,7 @@ onMounted(loadConsole)
         <UiButton :disabled="!!actionLoading" @click="refresh(false)">刷新</UiButton>
       </div>
 
-      <UiTabs v-model="activeTab">
+      <UiTabs v-model="activeTab" @tab-change="onTab">
         <UiTabPane label="配置" name="config">
           <UiCard header="AWD 比赛配置">
             <UiForm label-width="120px" class="config-form">
@@ -672,6 +749,39 @@ onMounted(loadConsole)
             </UiCard>
           </div>
         </UiTabPane>
+
+        <UiTabPane label="战报评审" name="reports">
+          <UiAlert v-if="reportsError" type="error" :closable="false" :title="reportsError" class="load-error">
+            <UiButton size="small" @click="loadReports">重试</UiButton>
+          </UiAlert>
+          <UiTable :data="reports" row-key="id" empty-text="暂无战报提交" :loading="reportsLoading">
+            <UiTableColumn label="竞域单位" min-width="150" align="left">
+              <template #default="{ row }">{{ reportName(row) }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="状态" width="100" align="center">
+              <template #default="{ row }">
+                <UiTag :type="row.status === 'reviewed' ? 'success' : 'warning'" size="small">
+                  {{ row.status === 'reviewed' ? '已评审' : '待评审' }}
+                </UiTag>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn prop="score" label="分数" width="90" align="right" />
+            <UiTableColumn label="附件" width="110" align="center">
+              <template #default="{ row }">
+                <UiButton v-if="row.has_zip" size="small" variant="ghost" @click="downloadReportZip(row)">下载 zip</UiButton>
+                <span v-else class="dim">—</span>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="提交时间" min-width="160" align="left">
+              <template #default="{ row }">{{ fmt(row.updated_at) }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="操作" width="110" align="right">
+              <template #default="{ row }">
+                <UiButton size="small" type="primary" @click="openReview(row)">评审</UiButton>
+              </template>
+            </UiTableColumn>
+          </UiTable>
+        </UiTabPane>
       </UiTabs>
     </template>
 
@@ -717,6 +827,29 @@ onMounted(loadConsole)
       <template #footer>
         <UiButton @click="showService = false">取消</UiButton>
         <UiButton type="primary" :loading="serviceSaving" :disabled="serviceSaving" @click="saveService">保存</UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog v-model="showReview" title="战报评审" width="680px">
+      <UiForm label-width="100px">
+        <UiFormItem label="竞域单位">
+          <UiInput :model-value="reviewTarget ? reportName(reviewTarget) : ''" disabled />
+        </UiFormItem>
+        <UiFormItem label="得分">
+          <UiInputNumber v-model="reviewForm.score" :min="0" :max="100" />
+          <div class="dim">0..100；保留每次评审，最终分取最后一条。</div>
+        </UiFormItem>
+        <UiFormItem label="rubric JSON">
+          <UiInput v-model="reviewForm.rubricJSON" type="textarea" :rows="5" class="mono" />
+          <div class="dim">示例：{&quot;vulnerability&quot;:30,&quot;exploit&quot;:20,&quot;defense&quot;:20,&quot;report&quot;:18}</div>
+        </UiFormItem>
+        <UiFormItem label="评审意见">
+          <UiInput v-model="reviewForm.comment" type="textarea" :rows="3" maxlength="2000" />
+        </UiFormItem>
+      </UiForm>
+      <template #footer>
+        <UiButton @click="showReview = false">取消</UiButton>
+        <UiButton type="primary" :loading="reviewSaving" :disabled="reviewSaving" @click="saveReview">提交评审</UiButton>
       </template>
     </UiDialog>
   </div>

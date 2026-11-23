@@ -383,3 +383,55 @@ func (r *awdRepo) ReplaceStandings(ctx context.Context, competitionID uint, stan
 func (r *awdRepo) CreateIncident(ctx context.Context, incident *model.AwdIncident) error {
 	return r.db.WithContext(ctx).Create(incident).Error
 }
+
+func (r *awdRepo) FindReport(ctx context.Context, id uint) (*model.AwdReport, error) {
+	var report model.AwdReport
+	if err := r.db.WithContext(ctx).First(&report, id).Error; err != nil {
+		return nil, err
+	}
+	return &report, nil
+}
+
+// FindReportByKey 某竞域单位的战报（nil = 尚未提交）。
+func (r *awdRepo) FindReportByKey(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdReport, error) {
+	var report model.AwdReport
+	err := r.db.WithContext(ctx).
+		Where("competition_id = ? AND competitor_type = ? AND competitor_id = ?", competitionID, competitorType, competitorID).
+		First(&report).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &report, nil
+}
+
+func (r *awdRepo) ListReports(ctx context.Context, competitionID uint) ([]model.AwdReport, error) {
+	var list []model.AwdReport
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) CreateReport(ctx context.Context, report *model.AwdReport) error {
+	return r.db.WithContext(ctx).Create(report).Error
+}
+
+func (r *awdRepo) UpdateReportSelective(ctx context.Context, id uint, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.AwdReport{}).Where("id = ?", id).Updates(fields).Error
+}
+
+func (r *awdRepo) CreateReportReview(ctx context.Context, review *model.AwdReportReview) error {
+	return r.db.WithContext(ctx).Create(review).Error
+}
+
+func (r *awdRepo) ListReportReviews(ctx context.Context, reportID uint) ([]model.AwdReportReview, error) {
+	var list []model.AwdReportReview
+	err := r.db.WithContext(ctx).Where("report_id = ?", reportID).
+		Order("id asc").Find(&list).Error
+	return list, err
+}

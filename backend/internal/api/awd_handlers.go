@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -354,6 +356,140 @@ func (h *Handlers) adminListAwdStandings(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func awdReportID(req *http.Request) (uint, error) {
+	id, err := strconv.ParseUint(req.PathValue("rid"), 10, 64)
+	if err != nil || id == 0 {
+		return 0, errValidation
+	}
+	return uint(id), nil
+}
+
+// awdGetReport 参赛者自己的战报（未提交返回 report=null）。
+func (h *Handlers) awdGetReport(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	report, err := h.AWD.MyReport(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report": report})
+}
+
+func (h *Handlers) awdSaveReport(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		ContentMD string `json:"content_md"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	report, err := h.AWD.SaveReport(req.Context(), id, user.ID, body.ContentMD)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (h *Handlers) awdUploadReportZip(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := req.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	file, _, err := req.FormFile("file")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	user := UserFrom(req.Context())
+	report, err := h.AWD.UploadReportZip(req.Context(), id, user.ID, file)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, report)
+}
+
+func (h *Handlers) adminListAwdReports(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	items, err := h.AWD.ListReports(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handlers) adminReviewAwdReport(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	rid, err := awdReportID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body service.AwdReportReviewInput
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	report, err := h.AWD.ReviewReport(req.Context(), id, rid, user.ID, body)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.report.review", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"report_id": rid, "score": body.Score})
+	writeJSON(w, http.StatusCreated, report)
+}
+
+func (h *Handlers) adminDownloadAwdReportZip(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	rid, err := awdReportID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	path, name, err := h.AWD.ReportZipPath(req.Context(), id, rid)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(name)})
+	w.Header().Set("Content-Disposition", disposition)
+	w.Header().Set("Content-Type", "application/zip")
+	http.ServeFile(w, req, path)
 }
 
 // awdParticipantView 参赛者 AWD 首页（需已入场；只返回本人服务与攻击盒凭据）。
