@@ -55,6 +55,7 @@ func (h *Handlers) Register(r *Router) {
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset/code", h.sendPasswordResetCode)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset", h.passwordReset)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
+	r.HandlePublic(http.MethodGet, "/api/v1/certificates/{code}", h.verifyCertificate)
 	r.HandlePublic(http.MethodGet, "/health", h.health)
 	// /metrics：token 门控的采集端点（见 metrics.go；不在 observe 包装内——
 	// 采集高频，不进指标与访问日志）。路由恒注册保持契约一致。

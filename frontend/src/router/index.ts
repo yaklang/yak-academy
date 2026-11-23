@@ -16,6 +16,13 @@ const router = createRouter({
       name: 'login',
       component: () => import('../views/Login.vue'),
     },
+    // 公开证书验证/打印页（凭验证码访问，无需登录；不进入参赛锁定）。
+    {
+      path: '/certificates/:code',
+      name: 'certificate-verify',
+      component: () => import('../views/CertificateVerify.vue'),
+      meta: { public: true },
+    },
     {
       path: '/',
       component: () => import('../layouts/StudentLayout.vue'),
@@ -90,7 +97,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (to.name === 'login') return true
+  if (to.meta.public || to.name === 'login') return true
   if (to.name === 'landing' && !auth.token) return true
   if (!auth.token) {
     return { name: 'login', query: { redirect: to.fullPath } }

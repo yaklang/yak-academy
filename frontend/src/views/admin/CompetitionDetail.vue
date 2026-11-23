@@ -1476,7 +1476,11 @@ onMounted(async () => {
               <UiTableColumn prop="rank" label="名次" width="70" align="right" />
               <UiTableColumn prop="score" label="分数" width="70" align="right" />
               <UiTableColumn label="验证码" width="160">
-                <template #default="{ row }"><code>{{ row.code }}</code></template>
+                <template #default="{ row }">
+                  <router-link :to="`/certificates/${row.code}`" target="_blank" class="cert-code-link">
+                    <code>{{ row.code }}</code>
+                  </router-link>
+                </template>
               </UiTableColumn>
               <UiTableColumn label="签发时间" width="170">
                 <template #default="{ row }">{{ fmt(row.created_at) }}</template>
@@ -2177,6 +2181,7 @@ onMounted(async () => {
 .card-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .qualification-actions { margin-top: var(--space-3); }
 .cert-subtitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); font-weight: 600; }
+.cert-code-link { color: var(--accent-foreground); text-underline-offset: 3px; text-decoration: underline; }
 .cert-subtitle:first-child { margin-top: 0; }
 .qualification-history { margin-top: var(--space-5); }
 .qualification-history h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }

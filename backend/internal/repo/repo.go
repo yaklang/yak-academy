@@ -406,6 +406,8 @@ type CompetitionRepo interface {
 	ListCertificates(ctx context.Context, competitionID uint) ([]model.Certificate, error)
 	// FindCertificateByCode 验证码解析（nil = 不存在）。
 	FindCertificateByCode(ctx context.Context, code string) (*model.Certificate, error)
+	// FindCertificateRule 单条签发规则（公开验证页取证书名称）。
+	FindCertificateRule(ctx context.Context, id uint) (*model.CertificateRule, error)
 
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)

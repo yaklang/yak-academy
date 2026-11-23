@@ -430,3 +430,12 @@ func (r *competitionRepo) FindCertificateByCode(ctx context.Context, code string
 	}
 	return &cert, nil
 }
+
+// FindCertificateRule 单条签发规则（公开验证页取证书名称）。
+func (r *competitionRepo) FindCertificateRule(ctx context.Context, id uint) (*model.CertificateRule, error) {
+	var rule model.CertificateRule
+	if err := r.db.WithContext(ctx).First(&rule, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}

@@ -101,6 +101,19 @@ func TestCertificateIssueRules(t *testing.T) {
 	if err != nil || view.Total != 1 || len(view.Rules) != 1 || view.Rules[0].IssuedCount != 1 {
 		t.Fatalf("admin view: %+v err=%v", view, err)
 	}
+	verified, err := certSvc.VerifyCertificate(ctx, strings.ToLower(cert.Code))
+	if err != nil {
+		t.Fatalf("verify certificate: %v", err)
+	}
+	if !verified.Valid || verified.Code != cert.Code || verified.Title != "一等奖" ||
+		verified.Level != "一等奖" || verified.CompetitionName != comp.Name ||
+		verified.RecipientName != "张三" || verified.Rank != 1 || verified.Score != 100 ||
+		verified.IssuedAt == nil {
+		t.Fatalf("verified certificate: %+v", verified)
+	}
+	if _, err := certSvc.VerifyCertificate(ctx, "FFFFFFFFFFFFFFFF"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown code: want ErrNotFound, got %v", err)
+	}
 
 	// 同标题重复签发拒绝。
 	if _, err := certSvc.IssueCertificates(ctx, 1, comp.ID, CertificateRuleInput{

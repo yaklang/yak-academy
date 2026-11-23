@@ -92,6 +92,31 @@ test.describe('竞赛证书', () => {
     await expect(page.getByRole('cell', { name: 'E2E 一等奖' })).toBeVisible()
     await expect(page.getByText('证书明细（1）')).toBeVisible()
     await expect(page.getByRole('cell', { name: '张三' })).toBeVisible()
-    await expect(page.getByRole('cell', { name: /^[A-F0-9]{16}$/ })).toBeVisible()
+    const codeCell = page.getByRole('cell', { name: /^[A-F0-9]{16}$/ })
+    await expect(codeCell).toBeVisible()
+    const code = (await codeCell.innerText()).trim()
+
+    // 公开验证接口无需登录；页面凭验证码展示姓名/奖项/名次快照并支持打印。
+    const verified = await request.get(`${E2E.apiURL}/api/v1/certificates/${code}`)
+    expect(verified.ok()).toBeTruthy()
+    const payload = (await verified.json()) as {
+      valid: boolean
+      recipient_name: string
+      competition_name: string
+      title: string
+      rank: number
+      score: number
+    }
+    expect(payload.valid).toBeTruthy()
+    expect(payload.recipient_name).toBe('张三')
+    expect(payload.title).toBe('E2E 一等奖')
+    expect(payload.rank).toBe(1)
+    expect(payload.score).toBeGreaterThan(0)
+
+    await page.goto(`/certificates/${code}`)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('张三')
+    await expect(page.getByText('已验证 · 证书有效')).toBeVisible()
+    await expect(page.getByText('E2E 一等奖')).toBeVisible()
+    await expect(page.getByRole('button', { name: '打印 / 保存 PDF' })).toBeVisible()
   })
 })

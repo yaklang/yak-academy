@@ -925,6 +925,19 @@ components:
         rules: { type: array, items: { $ref: '#/components/schemas/CertificateRuleSummary' } }
         certificates: { type: array, items: { $ref: '#/components/schemas/CompetitionCertificate' } }
         total: { type: integer }
+    CertificateVerificationView:
+      type: object
+      description: 公开证书验证结果（不含账号 ID/用户名）
+      properties:
+        valid: { type: boolean }
+        code: { type: string }
+        title: { type: string }
+        level: { type: string }
+        competition_name: { type: string }
+        recipient_name: { type: string }
+        rank: { type: integer }
+        score: { type: integer }
+        issued_at: { type: string, nullable: true }
     CertificateIssueResult:
       type: object
       properties:
@@ -4693,6 +4706,21 @@ paths:
             application/zip:
               schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /certificates/{code}:
+    get:
+      tags: [public]
+      security: []
+      summary: 公开证书验证（无需登录；code 大小写不敏感，仅返回证书快照）
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateVerificationView' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions:
