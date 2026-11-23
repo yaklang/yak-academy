@@ -5,6 +5,7 @@ import (
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type awdRepo struct {
@@ -19,6 +20,14 @@ func NewAwdRepo(db *gorm.DB) AwdRepo {
 func (r *awdRepo) FindGameByCompetition(ctx context.Context, competitionID uint) (*model.AwdGame, error) {
 	var g model.AwdGame
 	if err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).First(&g).Error; err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func (r *awdRepo) FindGame(ctx context.Context, id uint) (*model.AwdGame, error) {
+	var g model.AwdGame
+	if err := r.db.WithContext(ctx).First(&g, id).Error; err != nil {
 		return nil, err
 	}
 	return &g, nil
@@ -77,4 +86,53 @@ func (r *awdRepo) CountTeamServices(ctx context.Context, serviceID uint) (int64,
 	var n int64
 	err := r.db.WithContext(ctx).Model(&model.AwdTeamService{}).Where("service_id = ?", serviceID).Count(&n).Error
 	return n, err
+}
+
+func (r *awdRepo) FindRound(ctx context.Context, id uint) (*model.AwdRound, error) {
+	var round model.AwdRound
+	if err := r.db.WithContext(ctx).First(&round, id).Error; err != nil {
+		return nil, err
+	}
+	return &round, nil
+}
+
+func (r *awdRepo) ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error) {
+	var list []model.AwdTeamService
+	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).Order("id asc").Find(&list).Error
+	return list, err
+}
+
+func (r *awdRepo) FindTeamService(ctx context.Context, id uint) (*model.AwdTeamService, error) {
+	var ts model.AwdTeamService
+	if err := r.db.WithContext(ctx).First(&ts, id).Error; err != nil {
+		return nil, err
+	}
+	return &ts, nil
+}
+
+// CreateFlags 批量写回合 flag；唯一索引冲突（重复播种）静默跳过，保证重放幂等。
+func (r *awdRepo) CreateFlags(ctx context.Context, flags []model.AwdFlag) error {
+	if len(flags) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&flags).Error
+}
+
+func (r *awdRepo) FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error) {
+	var f model.AwdFlag
+	if err := r.db.WithContext(ctx).Where("value_hash = ?", valueHash).First(&f).Error; err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (r *awdRepo) CreateAttack(ctx context.Context, attack *model.AwdAttack) error {
+	return r.db.WithContext(ctx).Create(attack).Error
+}
+
+func (r *awdRepo) HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.AwdAttack{}).
+		Where("flag_id = ? AND status = ?", flagID, model.AwdAttackAccepted).Count(&n).Error
+	return n > 0, err
 }

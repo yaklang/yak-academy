@@ -399,6 +399,7 @@ type CompetitionRepo interface {
 // 排名/攻击盒/战报。不引用 Challenge/CompetitionScore（AWD 与 CTF 独立）。
 type AwdRepo interface {
 	FindGameByCompetition(ctx context.Context, competitionID uint) (*model.AwdGame, error)
+	FindGame(ctx context.Context, id uint) (*model.AwdGame, error)
 	CreateGame(ctx context.Context, g *model.AwdGame) error
 	UpdateGameSelective(ctx context.Context, gameID uint, fields map[string]any) error
 
@@ -409,6 +410,14 @@ type AwdRepo interface {
 	UpdateServiceSelective(ctx context.Context, id uint, fields map[string]any) error
 	DeleteService(ctx context.Context, id uint) error
 	CountTeamServices(ctx context.Context, serviceID uint) (int64, error)
+
+	FindRound(ctx context.Context, id uint) (*model.AwdRound, error)
+	ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error)
+	FindTeamService(ctx context.Context, id uint) (*model.AwdTeamService, error)
+	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
+	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
+	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
+	HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error)
 }
 
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
