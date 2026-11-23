@@ -395,6 +395,22 @@ type CompetitionRepo interface {
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
 }
 
+// AwdRepo AWD 独立域仓库：比赛配置、服务定义、回合/flag/检查/攻击/账本/
+// 排名/攻击盒/战报。不引用 Challenge/CompetitionScore（AWD 与 CTF 独立）。
+type AwdRepo interface {
+	FindGameByCompetition(ctx context.Context, competitionID uint) (*model.AwdGame, error)
+	CreateGame(ctx context.Context, g *model.AwdGame) error
+	UpdateGameSelective(ctx context.Context, gameID uint, fields map[string]any) error
+
+	ListServices(ctx context.Context, competitionID uint) ([]model.AwdService, error)
+	FindService(ctx context.Context, id uint) (*model.AwdService, error)
+	FindServiceBySlug(ctx context.Context, competitionID uint, slug string) (*model.AwdService, error)
+	CreateService(ctx context.Context, s *model.AwdService) error
+	UpdateServiceSelective(ctx context.Context, id uint, fields map[string]any) error
+	DeleteService(ctx context.Context, id uint) error
+	CountTeamServices(ctx context.Context, serviceID uint) (int64, error)
+}
+
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
 // JSON）。Get 未命中返回 (nil, nil)，与 gorm.ErrRecordNotFound 区分开。
 type SettingsRepo interface {

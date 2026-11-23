@@ -1012,6 +1012,77 @@ export interface CompetitionHomeView {
   writeup_submitted: boolean
 }
 
+// AWD（独立于 CTF Challenge/积分）：比赛配置 + 服务定义。
+export type AwdCompetitorType = 'team' | 'user'
+export type AwdGameStatus = 'pending' | 'running' | 'paused' | 'ended'
+export interface AwdPort {
+  name: string
+  port: number
+  protocol?: 'tcp' | 'udp'
+}
+export interface AwdService {
+  id: number
+  competition_id: number
+  slug: string
+  name: string
+  image: string
+  ports_json: string
+  checker_config: string
+  base_score: number
+  sla_weight: number
+  attack_points: number
+  defense_loss: number
+  checkdown_penalty: number
+  flag_lifetime_rounds: number
+  created_at: string
+  updated_at: string
+}
+export interface AwdGame {
+  id: number
+  competition_id: number
+  status: AwdGameStatus
+  competitor_type: AwdCompetitorType
+  round_seconds: number
+  current_round: number
+  scoring_config: string
+  started_at: string | null
+  ended_at: string | null
+  created_at: string
+  updated_at: string
+}
+export interface AwdGameView {
+  game: AwdGame
+  services: AwdService[]
+}
+export interface AwdServiceInput {
+  slug?: string
+  name?: string
+  image?: string
+  ports?: AwdPort[]
+  checker_config?: Record<string, unknown>
+  base_score?: number
+  sla_weight?: number
+  attack_points?: number
+  defense_loss?: number
+  checkdown_penalty?: number
+  flag_lifetime_rounds?: number
+}
+export const adminAwdApi = {
+  game: (id: number) => http.get<AwdGameView>(`/admin/competitions/${id}/awd`),
+  updateGame: (
+    id: number,
+    body: { competitor_type?: AwdCompetitorType; round_seconds?: number; scoring_config?: Record<string, unknown> },
+  ) => http.patch<AwdGameView>(`/admin/competitions/${id}/awd`, body),
+  services: (id: number) =>
+    http.get<{ items: AwdService[] }>(`/admin/competitions/${id}/awd/services`),
+  createService: (id: number, body: AwdServiceInput) =>
+    http.post<AwdService>(`/admin/competitions/${id}/awd/services`, body),
+  updateService: (id: number, sid: number, body: AwdServiceInput) =>
+    http.patch<AwdService>(`/admin/competitions/${id}/awd/services/${sid}`, body),
+  deleteService: (id: number, sid: number) =>
+    http.del<{ ok: boolean }>(`/admin/competitions/${id}/awd/services/${sid}`),
+}
+
 // 竞赛管理（管理端）。
 export const adminCompetitionApi = {
   list: (page = 1, pageSize = 20) =>

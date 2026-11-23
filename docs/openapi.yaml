@@ -954,6 +954,54 @@ components:
           type: string
           nullable: true
           description: 所属战队（个人参赛为 null）
+    AwdPort:
+      type: object
+      required: [name, port]
+      properties:
+        name: { type: string }
+        port: { type: integer }
+        protocol: { type: string, enum: [tcp, udp], default: tcp }
+    AwdService:
+      type: object
+      description: AWD 靶机服务定义（独立于 CTF Challenge）
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        image: { type: string }
+        ports_json: { type: string, description: '端口列表 JSON：AwdPort[]' }
+        checker_config: { type: string, description: checker 配置 JSON }
+        base_score: { type: integer }
+        sla_weight: { type: integer, description: SLA 权重百分比 0..100 }
+        attack_points: { type: integer, description: 每回合攻击分池 }
+        defense_loss: { type: integer, description: 每个受害服务每回合扣分 }
+        checkdown_penalty: { type: integer }
+        flag_lifetime_rounds: { type: integer }
+        created_at: { type: string }
+        updated_at: { type: string }
+    AwdGame:
+      type: object
+      description: AWD 比赛配置与生命周期（一场 format=awd 的 Competition 一条）
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        status: { type: string, enum: [pending, running, paused, ended] }
+        competitor_type: { type: string, enum: [team, user] }
+        round_seconds: { type: integer, description: 单回合秒数 30..86400 }
+        current_round: { type: integer }
+        scoring_config: { type: string, description: 计分参数 JSON }
+        started_at: { type: string, nullable: true }
+        ended_at: { type: string, nullable: true }
+        created_at: { type: string }
+        updated_at: { type: string }
+    AwdGameView:
+      type: object
+      properties:
+        game: { $ref: '#/components/schemas/AwdGame' }
+        services:
+          type: array
+          items: { $ref: '#/components/schemas/AwdService' }
 
   responses:
     ErrorResp:
@@ -3265,6 +3313,151 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/QualificationApplyResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd:
+    get:
+      tags: [admin]
+      summary: AWD 比赛配置 + 服务定义（不存在时自动创建 pending 配置）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdGameView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    patch:
+      tags: [admin]
+      summary: 修改 AWD 比赛配置（仅 pending；competitor_type/round_seconds/scoring_config）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                competitor_type: { type: string, enum: [team, user] }
+                round_seconds: { type: integer, minimum: 30, maximum: 86400 }
+                scoring_config: { type: object }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdGameView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/services:
+    get:
+      tags: [admin]
+      summary: AWD 服务定义列表
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AwdService' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: 新增 AWD 服务定义（仅 pending；slug 竞赛内唯一；至少一个端口）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, image, ports]
+              properties:
+                slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' }
+                name: { type: string }
+                image: { type: string }
+                ports: { type: array, items: { $ref: '#/components/schemas/AwdPort' } }
+                checker_config: { type: object }
+                base_score: { type: integer }
+                sla_weight: { type: integer, minimum: 0, maximum: 100 }
+                attack_points: { type: integer }
+                defense_loss: { type: integer }
+                checkdown_penalty: { type: integer }
+                flag_lifetime_rounds: { type: integer, minimum: 1, maximum: 20 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdService' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/awd/services/{sid}:
+    patch:
+      tags: [admin]
+      summary: 修改 AWD 服务定义（仅 pending；slug 不可变）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: sid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                image: { type: string }
+                ports: { type: array, items: { $ref: '#/components/schemas/AwdPort' } }
+                checker_config: { type: object }
+                base_score: { type: integer }
+                sla_weight: { type: integer, minimum: 0, maximum: 100 }
+                attack_points: { type: integer }
+                defense_loss: { type: integer }
+                checkdown_penalty: { type: integer }
+                flag_lifetime_rounds: { type: integer, minimum: 1, maximum: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdService' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [admin]
+      summary: 删除 AWD 服务定义（仅 pending 且无已部署靶机）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: sid, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
