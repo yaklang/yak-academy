@@ -21,6 +21,7 @@ type ExamService struct {
 	events     repo.EventRepo
 	bus        *eventbus.Bus
 	deriver    *ExamDeriver
+	judge      *JudgeService
 	now        func() time.Time
 }
 
@@ -36,6 +37,11 @@ func (s *ExamService) SetNow(now func() time.Time) {
 	if now != nil {
 		s.now = now
 	}
+}
+
+// SetJudge 注入判题服务（编程题 exam scope 提交）；未注入时编程题不可提交。
+func (s *ExamService) SetJudge(judge *JudgeService) {
+	s.judge = judge
 }
 
 func (s *ExamService) requireExamCompetition(ctx context.Context, competitionID uint) (*model.Competition, error) {

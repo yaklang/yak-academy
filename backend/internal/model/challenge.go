@@ -36,17 +36,17 @@ const (
 // Challenge 独立题目资源（管理员经 challenge.json / challenge.yml 上传）。
 // tutorial_slug 可选关联教程 Room；不关联的纯题目也合法。
 type Challenge struct {
-	ID       uint          `gorm:"primaryKey" json:"id"`
-	Slug     string        `gorm:"uniqueIndex;size:128" json:"slug"`
-	Title    string        `gorm:"size:256" json:"title"`
-	Category string        `gorm:"index;size:128" json:"category"` // 分类 slug，题库页分组键
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Slug     string `gorm:"uniqueIndex;size:128" json:"slug"`
+	Title    string `gorm:"size:256" json:"title"`
+	Category string `gorm:"index;size:128" json:"category"` // 分类 slug，题库页分组键
 	// Bank 题库 tab（tutorial/ctf/acm）；历史行迁移时由列默认值补 tutorial。
-	Bank      ChallengeBank `gorm:"index;size:16;default:tutorial" json:"bank"`
-	Difficulty Difficulty `gorm:"size:16" json:"difficulty"`
+	Bank       ChallengeBank `gorm:"index;size:16;default:tutorial" json:"bank"`
+	Difficulty Difficulty    `gorm:"size:16" json:"difficulty"`
 	// Description 题目描述 Markdown（背景/任务目标）。
-	Description string `gorm:"type:text" json:"description_md"`
-	Type      ChallengeType `gorm:"size:16" json:"type"`
-	Score     int           `json:"score"` // 初始分值，动态计分基于 solve_count 派生
+	Description string        `gorm:"type:text" json:"description_md"`
+	Type        ChallengeType `gorm:"size:16" json:"type"`
+	Score       int           `json:"score"` // 初始分值，动态计分基于 solve_count 派生
 	// FlagMode shared|instance；instance 时 Flag.Value 为含 {token} 的模板。
 	FlagMode FlagMode `gorm:"size:16;default:shared" json:"flag_mode"`
 	// 容器环境定义（challenge.json env 段，可选）。Image 非空表示该题有容器环境。
@@ -66,7 +66,7 @@ type Challenge struct {
 	IsBuiltin bool `gorm:"default:false" json:"is_builtin"`
 	// ReleaseAt 定时发布时间（nil = 不限，立即语义；未来时间学生端隐藏，到期自动可见）。
 	ReleaseAt *time.Time `json:"release_at"`
-	CreatedAt time.Time      `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // Published 当前时刻对学生端是否可见（is_visible 且已到发布时间）。
@@ -103,11 +103,11 @@ type Flag struct {
 // ACMJudge ACM 编程题判定配置（type=code 专用；与 Flag 行互斥）。
 // 学生提交 yak 源码，worker 用引擎对每组 JudgeTestdata 运行比对（ICPC 模型）。
 type ACMJudge struct {
-	ID          uint   `gorm:"primaryKey" json:"-"`
-	ChallengeID uint   `gorm:"uniqueIndex" json:"-"`
-	Engine      string `gorm:"size:16" json:"engine"`        // 判题引擎：yak
-	TimeLimitS  int    `json:"time_limit_s"`                 // 单组数据时限（秒）
-	MemoryLimitMB int  `json:"memory_limit_mb"`              // 单组数据内存上限（MB）
+	ID            uint   `gorm:"primaryKey" json:"-"`
+	ChallengeID   uint   `gorm:"uniqueIndex" json:"-"`
+	Engine        string `gorm:"size:16" json:"engine"` // 判题引擎：yak
+	TimeLimitS    int    `json:"time_limit_s"`          // 单组数据时限（秒）
+	MemoryLimitMB int    `json:"memory_limit_mb"`       // 单组数据内存上限（MB）
 	// AllowedLibs yak 库白名单（JSON 数组文本列，同 Challenge.Links 模式）；
 	// 空 = 未配置（允许全部非黑名单库）。提交/自测受理前按此静态扫描拦截
 	//（service/yak_libpolicy.go）。
@@ -120,9 +120,9 @@ type JudgeTestdata struct {
 	ID          uint   `gorm:"primaryKey" json:"-"`
 	ChallengeID uint   `gorm:"index:idx_judge_testdata" json:"-"`
 	Name        string `gorm:"index:idx_judge_testdata;size:64" json:"name"` // 组名（包内文件去扩展名）
-	Input       string `gorm:"type:text" json:"input"`                      // 输入数据全文
-	Answer      string `gorm:"type:text" json:"output"`                     // 期望输出全文
-	Sample      bool   `gorm:"default:false" json:"sample"`                 // 样例组（学生可见）
+	Input       string `gorm:"type:text" json:"input"`                       // 输入数据全文
+	Answer      string `gorm:"type:text" json:"output"`                      // 期望输出全文
+	Sample      bool   `gorm:"default:false" json:"sample"`                  // 样例组（学生可见）
 	// Score 组分值（部分得分制）：0 = 未配置，按组数均分题面分值；>0 时
 	// 各组按比例分摊题面分值（总题分不随配置变化）。ACM 语义：通过组即得该组分。
 	Score int `gorm:"default:0" json:"score"`
@@ -141,9 +141,9 @@ type Hint struct {
 type SubmissionStatus string
 
 const (
-	SubmissionPending    SubmissionStatus = "pending"
-	SubmissionCorrect    SubmissionStatus = "correct"
-	SubmissionIncorrect  SubmissionStatus = "incorrect"
+	SubmissionPending   SubmissionStatus = "pending"
+	SubmissionCorrect   SubmissionStatus = "correct"
+	SubmissionIncorrect SubmissionStatus = "incorrect"
 )
 
 // SubmissionVerdict ACM 编程题判定细分（flag 判定题为空串，JSON 输出 null）：
@@ -151,32 +151,35 @@ const (
 type SubmissionVerdict string
 
 const (
-	VerdictNone           SubmissionVerdict = ""                // flag 判定题
-	VerdictAC             SubmissionVerdict = "ac"              // 全部测试数据通过
-	VerdictWA             SubmissionVerdict = "wa"             // 输出不匹配
-	VerdictTLE            SubmissionVerdict = "tle"            // 超时
-	VerdictRE             SubmissionVerdict = "re"             // 运行错误/内存超限
-	VerdictInternalError  SubmissionVerdict = "internal_error" // 平台侧失败（引擎不可用等）
+	VerdictNone          SubmissionVerdict = ""               // flag 判定题
+	VerdictAC            SubmissionVerdict = "ac"             // 全部测试数据通过
+	VerdictWA            SubmissionVerdict = "wa"             // 输出不匹配
+	VerdictTLE           SubmissionVerdict = "tle"            // 超时
+	VerdictRE            SubmissionVerdict = "re"             // 运行错误/内存超限
+	VerdictInternalError SubmissionVerdict = "internal_error" // 平台侧失败（引擎不可用等）
 )
 
 // Submission 一次答案提交。判定由 worker 异步完成，HTTP 路径禁止同步判定。
 type Submission struct {
-	ID          uint             `gorm:"primaryKey" json:"id"`
-	UserID      uint             `gorm:"index" json:"user_id"`
-	ChallengeID uint             `gorm:"index" json:"challenge_id"`
+	ID          uint `gorm:"primaryKey" json:"id"`
+	UserID      uint `gorm:"index" json:"user_id"`
+	ChallengeID uint `gorm:"index" json:"challenge_id"`
 	// CompetitionID 竞赛提交的作用域（0 = 训练场）：防重复计分/动态计分/
 	// 竞赛排行榜派生均按此分组，竞赛首通不影响训练场首通判定。
 	CompetitionID uint `gorm:"index;default:0" json:"competition_id"`
+	// ExamAttemptID 考试作答提交的作用域（0 = 非考试）：判定事件据此回写
+	// ExamAnswer/ExamAttempt，且全局派生器跳过 XP/竞赛积分（考试独立计分）。
+	ExamAttemptID uint `gorm:"index;default:0" json:"-"`
 	// SourceIP 提交来源 IP（竞赛反作弊 IP 异常检测用；训练场提交不记录）。
-	SourceIP string             `gorm:"size:64" json:"-"`
-	Answer   string             `json:"-"`
-	Status   SubmissionStatus   `gorm:"size:16;index" json:"status"`
+	SourceIP string           `gorm:"size:64" json:"-"`
+	Answer   string           `json:"-"`
+	Status   SubmissionStatus `gorm:"size:16;index" json:"status"`
 	// Verdict ACM 判定细分（ac/wa/tle/re/internal_error；flag 判定题为空串 → JSON null）。
 	Verdict SubmissionVerdict `gorm:"size:16" json:"verdict"`
 	Score   int               `json:"score"` // 判定通过后写入（submission.judged 事件派生）
 	// Groups ACM 逐组判定明细（JSON，CodeGroupResult[]；部分得分制学生端反馈，
 	// 与 submission.judged 事件 payload.groups 同源）。flag 判定题为空串 → JSON null。
-	Groups    string     `gorm:"type:text" json:"groups"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	Groups    string    `gorm:"type:text" json:"groups"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

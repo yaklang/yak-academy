@@ -308,6 +308,7 @@ type judgedPayload struct {
 	SubmissionID  uint   `json:"submission_id"`
 	ChallengeID   uint   `json:"challenge_id"`
 	CompetitionID uint   `json:"competition_id"`
+	ExamAttemptID uint   `json:"exam_attempt_id"`
 	SourceIP      string `json:"source_ip"`
 }
 
@@ -335,6 +336,10 @@ func (d *Deriver) Handle(ctx context.Context, ev model.Event) {
 		}
 		if !p.Correct || p.Score <= 0 {
 			return // 零分（重复通关）不计入派生表
+		}
+		// 考试编程题：分值计入 ExamStanding，不进入全局 XP / 竞赛积分。
+		if p.ExamAttemptID > 0 {
+			return
 		}
 		if err := d.scores.UpdateScore(ctx, ev.UserID, p.Score, 1); err != nil {
 			log.Printf("deriver: update score: %v", err)

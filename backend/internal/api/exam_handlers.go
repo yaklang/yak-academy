@@ -95,6 +95,33 @@ func (h *Handlers) examSubmitAttempt(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *Handlers) examSubmitCode(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	qid, err := examQuestionID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		Answer string `json:"answer"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Exam.SubmitCode(req.Context(), id, user.ID, qid, body.Answer, sourceIP(req))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, view)
+}
+
 func (h *Handlers) adminGetExamPaper(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {

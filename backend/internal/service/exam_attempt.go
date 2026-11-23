@@ -447,4 +447,8 @@ func (s *ExamService) appendEvent(ctx context.Context, userID uint, t model.Even
 func (s *ExamService) SetEvents(events repo.EventRepo, bus *eventbus.Bus) {
 	s.events = events
 	s.bus = bus
+	if bus != nil {
+		// 编程题判定回写：只消费 submission.judged 中 exam_attempt_id > 0 的事件。
+		bus.Subscribe(s.HandleJudgeEvent)
+	}
 }
