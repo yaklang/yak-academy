@@ -986,7 +986,7 @@ async function loadQualifications() {
       adminCompetitionApi.qualifications(compId),
     ])
     qualificationSources.value = list.items.filter(
-      (c) => c.id !== compId && c.format === 'ctf' && c.status !== 'scheduled',
+      (c) => c.id !== compId && c.status !== 'scheduled',
     )
     qualificationHistory.value = history.items
   } catch (e) {
@@ -1703,7 +1703,7 @@ onMounted(async () => {
         </UiCard>
       </UiTabPane>
 
-      <!-- 晋级（仅邀请赛；来源 CTF 榜单 → 本场参赛名单） -->
+      <!-- 晋级（仅邀请赛；来源 CTF/AWD/考试排名 → 本场参赛名单） -->
       <UiTabPane v-if="detail?.kind === 'invitational'" label="晋级" name="qualifications">
         <UiCard shadow="never">
           <template #header>
@@ -1716,11 +1716,11 @@ onMounted(async () => {
           <template v-else>
             <UiForm label-width="110px" style="max-width: 620px">
               <UiFormItem label="来源竞赛">
-                <UiSelect v-model="qualificationForm.sourceId" filterable placeholder="选择已开赛的 CTF 竞赛" style="width: 100%">
+                <UiSelect v-model="qualificationForm.sourceId" filterable placeholder="选择已开赛的竞赛（CTF/AWD/考试）" style="width: 100%">
                   <UiOption
                     v-for="c in qualificationSources"
                     :key="c.id"
-                    :label="`${c.name}（${c.status === 'ended' ? '已结束' : '进行中'}）`"
+                    :label="`${c.name}（${FORMAT_LABELS[c.format]}·${c.status === 'ended' ? '已结束' : '进行中'}）`"
                     :value="c.id"
                   />
                 </UiSelect>
