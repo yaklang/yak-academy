@@ -173,6 +173,12 @@ func main() {
 	awdSvc.SetEvents(eventRepo, bus)
 	awdSvc.SetUsers(userRepo)
 	awdSvc.SetReportsDir(cfg.ReportsDir)
+	if recovered, err := awdSvc.Recover(ctx); err != nil {
+		log.Printf("awd recovery: %v", err)
+	} else if len(recovered.ResumedRounds) > 0 || recovered.JudgedAttacks > 0 {
+		log.Printf("awd recovery: %d running games, resumed rounds %v, judged attacks %d",
+			recovered.RunningGames, recovered.ResumedRounds, recovered.JudgedAttacks)
+	}
 	awdSvc.StartWorker(ctx)
 	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo, userRepo)
 	examSvc.SetJudge(judgeSvc)

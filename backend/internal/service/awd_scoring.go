@@ -197,8 +197,22 @@ func aggregateAwdStandings(competitionID uint, competitorType model.AwdCompetito
 	return rows
 }
 
-// SettleRound 结算一个回合：幂等（账本 idempotency_key 唯一）并可重复调用。
+// SettleRound 结算一个回合：幂等（账本 idempotency_key 唯一）并可重复调用；
+// 与开回合共用竞赛级锁，避免结算与仍在进行的开回合/另一路结算交错。
 func (s *AwdCompetitionService) SettleRound(ctx context.Context, competitionID, roundID uint) (*AwdSettlementView, error) {
+	var view *AwdSettlementView
+	err := s.withRoundLock(ctx, competitionID, func(ctx context.Context) error {
+		var err error
+		view, err = s.settleRoundLocked(ctx, competitionID, roundID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func (s *AwdCompetitionService) settleRoundLocked(ctx context.Context, competitionID, roundID uint) (*AwdSettlementView, error) {
 	if _, err := s.requireAwdCompetition(ctx, competitionID); err != nil {
 		return nil, err
 	}

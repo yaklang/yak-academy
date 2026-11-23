@@ -877,8 +877,29 @@ type AwdRoundRunResult struct {
 }
 
 // StartRound 开启下一回合：生成确定性 flags，PUT/GET/CHECK 全部靶机，
-// 记录检查明细；回合保持 running，等待结算（下一 commit）。
+// 记录检查明细；回合保持 running，等待结算。
+// 回合先在 pending 状态落库，检查完成后才置 running：中途失败时再次
+// StartRound 或重启 Recover 都从 pending 续跑，不会留下不可恢复现场。
 func (s *AwdCompetitionService) StartRound(ctx context.Context, competitionID uint) (*AwdRoundRunResult, error) {
+	var result *AwdRoundRunResult
+	err := s.withRoundLock(ctx, competitionID, func(ctx context.Context) error {
+		var err error
+		result, err = s.startRoundLocked(ctx, competitionID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// withRoundLock 同一竞赛的回合创建/结算/恢复串行（PostgreSQL advisory lock
+// 跨进程，SQLite 进程内），避免并发请求重复开回合或重复结算。
+func (s *AwdCompetitionService) withRoundLock(ctx context.Context, competitionID uint, fn func(context.Context) error) error {
+	return s.awd.WithAwdLock(ctx, fmt.Sprintf("awd:round:%d", competitionID), fn)
+}
+
+func (s *AwdCompetitionService) startRoundLocked(ctx context.Context, competitionID uint) (*AwdRoundRunResult, error) {
 	game, err := s.EnsureGame(ctx, competitionID)
 	if err != nil {
 		return nil, err
@@ -887,6 +908,10 @@ func (s *AwdCompetitionService) StartRound(ctx context.Context, competitionID ui
 		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
 	}
 	if active, err := s.awd.FindActiveRound(ctx, game.ID); err == nil && active != nil {
+		if active.Status == model.AwdRoundPending {
+			// 上次开回合在检查阶段失败：锁内安全续跑，无需等进程重启。
+			return s.resumeRoundLocked(ctx, game, active)
+		}
 		return nil, fmt.Errorf("%w: round %d is still active", ErrValidation, active.Number)
 	} else if err != nil && !isNotFound(err) {
 		return nil, err
@@ -900,24 +925,40 @@ func (s *AwdCompetitionService) StartRound(ctx context.Context, competitionID ui
 	}
 	now := s.now()
 	round := &model.AwdRound{
-		GameID: game.ID, Number: game.CurrentRound + 1, Status: model.AwdRoundRunning,
+		GameID: game.ID, Number: game.CurrentRound + 1, Status: model.AwdRoundPending,
 		StartsAt: now, EndsAt: now.Add(time.Duration(game.RoundSeconds) * time.Second),
 		Seed: randomAwdSeed(), CreatedAt: now,
 	}
 	if err := s.awd.CreateRound(ctx, round); err != nil {
 		return nil, err
 	}
-	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{"current_round": round.Number}); err != nil {
-		return nil, err
-	}
+	return s.resumeRoundLocked(ctx, game, round)
+}
+
+// resumeRoundLocked 续跑 pending 回合：补 flag、只补缺失检查、置 running
+// 并刷新回合计时/当前回合号。调用方必须持有竞赛级回合锁。
+func (s *AwdCompetitionService) resumeRoundLocked(ctx context.Context, game *model.AwdGame, round *model.AwdRound) (*AwdRoundRunResult, error) {
 	flags, err := s.GenerateFlags(ctx, round.ID)
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.RunRoundChecks(ctx, round.ID)
+	result, err := s.runRoundChecks(ctx, round.ID, true)
 	if err != nil {
 		return nil, err
 	}
+	startedAt := s.now()
+	endsAt := startedAt.Add(time.Duration(game.RoundSeconds) * time.Second)
+	if err := s.awd.UpdateRoundSelective(ctx, round.ID, map[string]any{
+		"status": model.AwdRoundRunning, "starts_at": startedAt, "ends_at": endsAt,
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{"current_round": round.Number}); err != nil {
+		return nil, err
+	}
+	round.Status = model.AwdRoundRunning
+	round.StartsAt = startedAt
+	round.EndsAt = endsAt
 	result.Round = *round
 	result.Flags = len(flags)
 	return result, nil
@@ -926,6 +967,12 @@ func (s *AwdCompetitionService) StartRound(ctx context.Context, competitionID ui
 // RunRoundChecks 对回合内每个靶机执行 PUT → GET → CHECK，落明细；
 // 单个靶机失败进入 Failed，不阻断其它靶机。
 func (s *AwdCompetitionService) RunRoundChecks(ctx context.Context, roundID uint) (*AwdRoundRunResult, error) {
+	return s.runRoundChecks(ctx, roundID, false)
+}
+
+// runRoundChecks resume=true 时跳过已落库的 (靶机, 动作) 检查，供启动恢复
+// 续跑 pending 回合：已完成的检查不重复执行，避免污染 SLA 分母。
+func (s *AwdCompetitionService) runRoundChecks(ctx context.Context, roundID uint, resume bool) (*AwdRoundRunResult, error) {
 	round, err := s.awd.FindRound(ctx, roundID)
 	if err != nil {
 		return nil, mapRecordNotFound(err)
@@ -933,6 +980,16 @@ func (s *AwdCompetitionService) RunRoundChecks(ctx context.Context, roundID uint
 	teamServices, err := s.awd.ListTeamServicesByGame(ctx, round.GameID)
 	if err != nil {
 		return nil, err
+	}
+	done := map[string]bool{}
+	if resume {
+		checks, err := s.awd.ListChecksByRound(ctx, roundID)
+		if err != nil {
+			return nil, err
+		}
+		for _, check := range checks {
+			done[fmt.Sprintf("%d:%s", check.TeamServiceID, check.Action)] = true
+		}
 	}
 	result := &AwdRoundRunResult{Round: *round, Checks: []model.AwdCheck{}, Failed: []string{}}
 	for _, ts := range teamServices {
@@ -946,6 +1003,9 @@ func (s *AwdCompetitionService) RunRoundChecks(ctx context.Context, roundID uint
 			continue
 		}
 		for _, action := range []string{"put", "get", "check"} {
+			if done[fmt.Sprintf("%d:%s", ts.ID, action)] {
+				continue
+			}
 			flagValue := flag.Value
 			if action == "check" {
 				flagValue = ""
