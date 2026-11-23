@@ -356,6 +356,12 @@ type CompetitionRepo interface {
 	MarkEntered(ctx context.Context, id uint) (int64, error)
 	// UpdateParticipantIP 记录最近提交来源 IP（IP 异常检测基线）。
 	UpdateParticipantIP(ctx context.Context, competitionID, userID uint, ip string) error
+	// UpsertProfile 按竞赛+用户写入/覆盖身份名册（外部报名 CSV 导入与选手补填）。
+	UpsertProfile(ctx context.Context, profile *model.CompetitionProfile) error
+	// FindProfile 单人身份名册（nil = 尚未填写）。
+	FindProfile(ctx context.Context, competitionID, userID uint) (*model.CompetitionProfile, error)
+	// ListProfiles 竞赛全部身份名册（user_id 升序）。
+	ListProfiles(ctx context.Context, competitionID uint) ([]model.CompetitionProfile, error)
 
 	// BindChallenges 幂等绑定题目（已绑定跳过），返回新增数。
 	BindChallenges(ctx context.Context, competitionID uint, challengeIDs []uint) (int64, error)

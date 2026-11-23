@@ -42,7 +42,7 @@ func Migrate(db *gorm.DB) error {
 		&model.ChallengeAttachment{}, &model.ACMJudge{}, &model.JudgeTestdata{},
 		&model.Event{}, &model.ScoreRecord{}, &model.Progress{},
 		&model.LabInstance{}, &model.InstanceLog{},
-		&model.Competition{}, &model.Team{}, &model.Participant{},
+		&model.Competition{}, &model.Team{}, &model.Participant{}, &model.CompetitionProfile{},
 		&model.CompetitionChallenge{}, &model.CheatWarning{}, &model.Writeup{},
 		&model.CompetitionScore{}, &model.CtfAdjustment{}, &model.SmsCode{},
 		&model.QualificationRule{}, &model.QualificationEntry{},

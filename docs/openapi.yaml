@@ -889,6 +889,70 @@ components:
           type: array
           items: { type: string }
           description: 未匹配到账号的条目原文（账号编码或用户名均未命中）
+    CompetitionProfileInput:
+      type: object
+      required: [real_name]
+      properties:
+        real_name: { type: string, maxLength: 64 }
+        school: { type: string, maxLength: 128 }
+        student_no: { type: string, maxLength: 64 }
+        email: { type: string, maxLength: 128 }
+        phone: { type: string, maxLength: 32 }
+    CompetitionProfileView:
+      type: object
+      description: 竞赛身份名册（未填写时 has_profile=false，仍返回账号信息）
+      properties:
+        competition_id: { type: integer }
+        user_id: { type: integer }
+        username: { type: string }
+        account_code: { type: string }
+        has_profile: { type: boolean }
+        real_name: { type: string }
+        school: { type: string }
+        student_no: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        updated_at: { type: string, nullable: true }
+    CompetitionRosterRow:
+      allOf:
+        - $ref: '#/components/schemas/CompetitionProfileView'
+        - type: object
+          properties:
+            team_name: { type: string, nullable: true }
+            entered: { type: boolean }
+    CompetitionRosterEntry:
+      type: object
+      required: [entry, real_name]
+      properties:
+        entry: { type: string, description: 账号编码或用户名（引用既有账号；缺失在 missing 回报） }
+        real_name: { type: string, maxLength: 64 }
+        school: { type: string, maxLength: 128 }
+        student_no: { type: string, maxLength: 64 }
+        email: { type: string, maxLength: 128 }
+        phone: { type: string, maxLength: 32 }
+    CompetitionRosterImportRequest:
+      type: object
+      required: [entries]
+      properties:
+        entries: { type: array, minItems: 1, maxItems: 1000, items: { $ref: '#/components/schemas/CompetitionRosterEntry' } }
+    CompetitionRosterImportResult:
+      type: object
+      properties:
+        imported: { type: integer }
+        profiles:
+          type: array
+          items: { $ref: '#/components/schemas/CompetitionProfileView' }
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              username: { type: string }
+              account_code: { type: string }
+              team_name: { type: string, nullable: true }
+              invite_code: { type: string }
+              mail_delivered: { type: boolean }
+        missing: { type: array, items: { type: string }, description: 未匹配到账号的条目原文 }
     GenerateUsersRequest:
       type: object
       required: [prefix, count]
@@ -3634,6 +3698,44 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/roster:
+    get:
+      tags: [admin]
+      summary: 身份名册（全部参赛者；未填写名册的 has_profile=false）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/CompetitionRosterRow' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    post:
+      tags: [admin]
+      summary: CSV 名册导入（仅邀请赛；引用既有账号，命中者写入实名并导入参赛）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompetitionRosterImportRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionRosterImportResult' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/competitions/{id}/instances:
     get:
       tags: [admin]
@@ -4546,6 +4648,38 @@ paths:
                   competition: { $ref: '#/components/schemas/Competition' }
                   team_name: { type: string, nullable: true }
         '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/profile:
+    get:
+      tags: [competitions]
+      summary: 参赛者本人身份名册（未填写返回 has_profile=false）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionProfileView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+    put:
+      tags: [competitions]
+      summary: 参赛者补填/修改本人名册（竞赛结束后冻结）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompetitionProfileInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompetitionProfileView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
 
   /competitions/{id}/view:
     get:

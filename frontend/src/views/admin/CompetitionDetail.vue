@@ -21,6 +21,9 @@ import {
   type CompetitionDetail,
   type CompetitionFormat,
   type CompetitionParticipantItem,
+  type CompetitionRosterEntry,
+  type CompetitionRosterImportResult,
+  type CompetitionRosterRow,
   type CompetitionScoringMode,
   type CtfAdjustment,
   type GenerateUsersResult,
@@ -402,6 +405,12 @@ async function unbind(item: TrainingItem) {
 
 // ---------- 参赛人员 ----------
 const participants = ref<CompetitionParticipantItem[]>([])
+const rosterRows = ref<CompetitionRosterRow[]>([])
+const rosterByUser = computed(() => {
+  const map: Record<number, CompetitionRosterRow> = {}
+  for (const row of rosterRows.value) map[row.user_id] = row
+  return map
+})
 const teams = ref<TeamLeaderboardEntry[]>([])
 const partTotal = ref(0)
 const partPage = ref(1)
@@ -415,10 +424,14 @@ async function loadParticipants() {
   teams.value = []
   partTotal.value = 0
   try {
-    const resp = await adminCompetitionApi.participants(compId, partPage.value)
+    const [resp, roster] = await Promise.all([
+      adminCompetitionApi.participants(compId, partPage.value),
+      adminCompetitionApi.roster(compId),
+    ])
     participants.value = resp.items
     teams.value = resp.teams
     partTotal.value = resp.total
+    rosterRows.value = roster.items
   } catch (e) {
     partError.value = e instanceof Error ? e.message : '参赛人员加载失败，请稍后重试'
   } finally {
@@ -524,6 +537,149 @@ async function submitImport() {
     notify.error((e as Error).message)
   } finally {
     importing.value = false
+  }
+}
+
+// ---------- 身份名册 CSV 导入（仅邀请赛） ----------
+// 列支持中英文表头；条目引用既有账号，缺失条目不阻断并在结果中列出。
+const showRoster = ref(false)
+const importingRoster = ref(false)
+const stagedRoster = ref<CompetitionRosterEntry[]>([])
+const rosterResult = ref<CompetitionRosterImportResult | null>(null)
+const showRosterResult = ref(false)
+
+const ROSTER_HEADER_ALIASES: Record<string, keyof CompetitionRosterEntry> = {
+  entry: 'entry',
+  account: 'entry',
+  username: 'entry',
+  账号: 'entry',
+  账号编码: 'entry',
+  用户名: 'entry',
+  realname: 'real_name',
+  name: 'real_name',
+  姓名: 'real_name',
+  真实姓名: 'real_name',
+  school: 'school',
+  学校: 'school',
+  单位: 'school',
+  studentno: 'student_no',
+  学号: 'student_no',
+  email: 'email',
+  邮箱: 'email',
+  phone: 'phone',
+  手机: 'phone',
+  手机号: 'phone',
+  电话: 'phone',
+}
+
+function openRoster() {
+  stagedRoster.value = []
+  rosterResult.value = null
+  showRoster.value = true
+}
+
+function normalizeRosterHeader(value: string) {
+  return value.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/\s+/g, '')
+}
+
+// 支持双引号包裹（含逗号）的简化 CSV 行解析；空行由调用方跳过。
+function parseRosterCsvLine(line: string): string[] {
+  const cells: string[] = []
+  let current = ''
+  let quoted = false
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if (quoted) {
+      if (char === '"' && line[i + 1] === '"') {
+        current += '"'
+        i += 1
+      } else if (char === '"') {
+        quoted = false
+      } else {
+        current += char
+      }
+    } else if (char === '"') {
+      quoted = true
+    } else if (char === ',' || char === '，') {
+      cells.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+function parseRosterCsv(text: string): CompetitionRosterEntry[] {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim())
+  if (!lines.length) return []
+  const headerCells = parseRosterCsvLine(lines[0])
+  const mapped = headerCells.map((cell) => ROSTER_HEADER_ALIASES[normalizeRosterHeader(cell)])
+  const hasHeader = mapped.some(Boolean)
+  const columns: Array<keyof CompetitionRosterEntry | null> = hasHeader
+    ? mapped
+    : ['entry', 'real_name', 'school', 'student_no', 'email', 'phone']
+  const entries: CompetitionRosterEntry[] = []
+  for (const line of lines.slice(hasHeader ? 1 : 0)) {
+    const cells = parseRosterCsvLine(line)
+    const entry: CompetitionRosterEntry = {
+      entry: '',
+      real_name: '',
+      school: '',
+      student_no: '',
+      email: '',
+      phone: '',
+    }
+    columns.forEach((column, index) => {
+      if (!column) return
+      entry[column] = cells[index]?.trim() ?? ''
+    })
+    if (entry.entry) entries.push(entry)
+  }
+  return entries
+}
+
+async function onRosterFile(file: File) {
+  const parsed = parseRosterCsv(await file.text())
+  const valid = parsed.filter((entry) => entry.real_name)
+  const skipped = parsed.length - valid.length
+  const merged = new Map(stagedRoster.value.map((entry) => [entry.entry, entry]))
+  for (const entry of valid) merged.set(entry.entry, entry)
+  stagedRoster.value = Array.from(merged.values())
+  if (skipped) notify.warning(`已跳过 ${skipped} 行缺少姓名的记录`)
+  if (!parsed.length) notify.warning('未解析到名册数据，请检查表头或编码')
+  return false
+}
+
+function downloadRosterTemplate() {
+  const content =
+    '\uFEFF账号编码,姓名,学校,学号,邮箱,手机\n' +
+    'YA26-00001,张三,示例大学,2026001,zhangsan@example.com,13800000000\n'
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = '竞赛身份名册.csv'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+async function submitRoster() {
+  if (!stagedRoster.value.length) {
+    notify.warning('请先上传名册 CSV')
+    return
+  }
+  importingRoster.value = true
+  try {
+    rosterResult.value = await adminCompetitionApi.importRoster(compId, stagedRoster.value)
+    showRoster.value = false
+    showRosterResult.value = true
+    await loadParticipants()
+  } catch (e) {
+    notify.error((e as Error).message)
+  } finally {
+    importingRoster.value = false
   }
 }
 
@@ -1051,6 +1207,7 @@ onMounted(async () => {
             <div class="card-head">
               <span>参赛人员</span>
               <div v-if="invitational">
+                <UiButton size="small" @click="openRoster">导入身份名册</UiButton>
                 <UiButton size="small" @click="openGenerate">一键生成账号</UiButton>
                 <UiButton type="primary" size="small" @click="openImport">表格导入队伍 / 人员</UiButton>
               </div>
@@ -1067,6 +1224,18 @@ onMounted(async () => {
           <UiLoadError v-if="partError" compact :message="partError" @retry="loadParticipants" class="block" />
           <UiTable v-else :data="participants" :loading="partLoading" empty-text="尚无参赛人员">
             <UiTableColumn prop="username" label="用户" width="130" fixed="left" />
+            <UiTableColumn label="姓名" width="110">
+              <template #default="{ row }">
+                <span v-if="rosterByUser[row.user_id]?.has_profile">{{ rosterByUser[row.user_id]?.real_name }}</span>
+                <span v-else class="dim">未填写</span>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="学校 / 单位" min-width="150">
+              <template #default="{ row }">{{ rosterByUser[row.user_id]?.school || '-' }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="学号" width="120">
+              <template #default="{ row }">{{ rosterByUser[row.user_id]?.student_no || '-' }}</template>
+            </UiTableColumn>
             <UiTableColumn label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
             </UiTableColumn>
@@ -1624,6 +1793,81 @@ onMounted(async () => {
     </UiTable>
     <template #footer>
       <UiButton @click="showResult = false">关闭</UiButton>
+    </template>
+  </UiDialog>
+
+  <!-- 身份名册 CSV 导入（仅邀请赛） -->
+  <UiDialog v-model="showRoster" title="导入身份名册" width="820px">
+    <p class="dim">
+      列：账号编码/用户名、姓名、学校、学号、邮箱、手机（中英文表头均可；姓名必填）。
+      条目引用既有账号，未命中条目在结果中列出；命中者写入实名信息并导入本场参赛者。
+    </p>
+    <div class="stage-actions">
+      <div class="tpl-row">
+        <UiUpload accept=".csv,text/csv" :show-file-list="false" :before-upload="onRosterFile" :disabled="importingRoster">
+          <UiButton size="small">选择 CSV 文件</UiButton>
+        </UiUpload>
+        <UiButton size="small" link type="primary" @click="downloadRosterTemplate">下载模板</UiButton>
+        <span class="dim tpl-hint">支持双引号包裹含逗号的字段；可多次上传合并。</span>
+      </div>
+    </div>
+    <UiTable v-if="stagedRoster.length" :data="stagedRoster" size="small" max-height="320" row-key="entry">
+      <UiTableColumn prop="entry" label="账号" width="120" />
+      <UiTableColumn prop="real_name" label="姓名" width="90" />
+      <UiTableColumn prop="school" label="学校" min-width="140" />
+      <UiTableColumn prop="student_no" label="学号" width="110" />
+      <UiTableColumn prop="email" label="邮箱" min-width="170" />
+      <UiTableColumn prop="phone" label="手机" width="120" />
+      <UiTableColumn label="操作" width="70">
+        <template #default="{ row }">
+          <UiButton size="small" type="danger" link @click="stagedRoster = stagedRoster.filter((item) => item.entry !== row.entry)">
+            移除
+          </UiButton>
+        </template>
+      </UiTableColumn>
+    </UiTable>
+    <p v-else class="dim">尚未解析到名册：选择 CSV 文件后在此预览。</p>
+    <template #footer>
+      <UiButton @click="showRoster = false">取消</UiButton>
+      <UiButton
+        type="primary"
+        :loading="importingRoster"
+        :disabled="importingRoster || !stagedRoster.length"
+        @click="submitRoster"
+      >
+        导入名册（{{ stagedRoster.length }} 人）
+      </UiButton>
+    </template>
+  </UiDialog>
+
+  <!-- 身份名册导入结果 -->
+  <UiDialog v-model="showRosterResult" title="名册导入结果" width="820px">
+    <template v-if="rosterResult">
+      <UiAlert
+        v-if="rosterResult.missing.length"
+        type="warning"
+        :closable="false"
+        class="block"
+        :title="`以下 ${rosterResult.missing.length} 个条目未匹配到账号，未导入：`"
+        :description="rosterResult.missing.join('、') + '。可修正后重导，或先用「一键生成账号」补号。'"
+      />
+      <UiAlert
+        type="success"
+        :closable="false"
+        class="block"
+        :title="`已导入 ${rosterResult.imported} 人名册，并确保其为参赛者。`"
+      />
+      <UiTable :data="rosterResult.profiles" size="small" max-height="320" empty-text="无名册记录">
+        <UiTableColumn prop="username" label="用户名" width="120" />
+        <UiTableColumn prop="real_name" label="姓名" width="90" />
+        <UiTableColumn prop="school" label="学校" min-width="140" />
+        <UiTableColumn prop="student_no" label="学号" width="110" />
+        <UiTableColumn prop="email" label="邮箱" min-width="170" />
+        <UiTableColumn prop="phone" label="手机" width="120" />
+      </UiTable>
+    </template>
+    <template #footer>
+      <UiButton @click="showRosterResult = false">关闭</UiButton>
     </template>
   </UiDialog>
 

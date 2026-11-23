@@ -937,6 +937,35 @@ export interface ParticipantImportResult {
   // 未匹配到账号的条目原文（账号编码与用户名均未命中），排序返回。
   missing: string[]
 }
+// 竞赛身份名册：外部报名 CSV 导入 + 参赛者补填（仅管理端看全量）。
+export interface CompetitionProfileInput {
+  real_name: string
+  school: string
+  student_no: string
+  email: string
+  phone: string
+}
+export interface CompetitionProfileView extends CompetitionProfileInput {
+  competition_id: number
+  user_id: number
+  username: string
+  account_code: string
+  has_profile: boolean
+  updated_at: string | null
+}
+export interface CompetitionRosterRow extends CompetitionProfileView {
+  team_name: string | null
+  entered: boolean
+}
+export interface CompetitionRosterEntry extends CompetitionProfileInput {
+  entry: string
+}
+export interface CompetitionRosterImportResult {
+  imported: number
+  profiles: CompetitionProfileView[]
+  participants: InvitedParticipant[]
+  missing: string[]
+}
 // 一键生成参赛账号（仅邀请赛）：用户名 = 前缀-零填充序号，可配置自动组队
 // 与初始密码（默认 123456）。initial_password 仅新建账号返回，供导出分发；
 // 复用既有同名账号为 null（沿用原密码）。
@@ -1632,6 +1661,10 @@ export const adminCompetitionApi = {
   // 一键生成参赛账号（仅邀请赛）：生成 + 自动组队 + 导入参赛者一步完成。
   generateUsers: (id: number, body: GenerateUsersRequest) =>
     http.post<GenerateUsersResult>(`/admin/competitions/${id}/generate-users`, body),
+  roster: (id: number) =>
+    http.get<{ total: number; items: CompetitionRosterRow[] }>(`/admin/competitions/${id}/roster`),
+  importRoster: (id: number, entries: CompetitionRosterEntry[]) =>
+    http.post<CompetitionRosterImportResult>(`/admin/competitions/${id}/roster`, { entries }),
   instances: (id: number, page = 1, pageSize = 20) =>
     http.get<Paged<AdminLabInstance>>(`/admin/competitions/${id}/instances?page=${page}&page_size=${pageSize}`),
   warnings: (id: number) =>
@@ -1673,6 +1706,9 @@ export const competitionApi = {
   enter: (id: number, inviteCode?: string) =>
     http.post<MyCompetitionEntry>(`/competitions/${id}/enter`, inviteCode ? { invite_code: inviteCode } : {}),
   entry: (id: number) => http.get<CompetitionEntryView>(`/competitions/${id}/entry`),
+  profile: (id: number) => http.get<CompetitionProfileView>(`/competitions/${id}/profile`),
+  updateProfile: (id: number, body: CompetitionProfileInput) =>
+    http.put<CompetitionProfileView>(`/competitions/${id}/profile`, body),
   view: (id: number) => http.get<CompetitionHomeView>(`/competitions/${id}/view`),
   startInstance: (id: number, slug: string) =>
     http.post<LabInstance>(`/competitions/${id}/challenges/${slug}/instance`),

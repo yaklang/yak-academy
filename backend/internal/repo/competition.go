@@ -6,6 +6,7 @@ import (
 
 	"github.com/yaklang/yak-academy/backend/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // CompetitionRepo 竞赛域 sqlite 实现（competition/team/participant/
@@ -67,7 +68,7 @@ func (r *competitionRepo) UpdateSelective(ctx context.Context, id uint, fields m
 func (r *competitionRepo) DeleteCascade(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, m := range []any{
-			&model.Participant{}, &model.Team{}, &model.CompetitionChallenge{},
+			&model.Participant{}, &model.CompetitionProfile{}, &model.Team{}, &model.CompetitionChallenge{},
 			&model.CheatWarning{}, &model.Writeup{}, &model.CompetitionScore{},
 			&model.Submission{}, &model.LabInstance{},
 		} {
@@ -134,6 +135,38 @@ func (r *competitionRepo) FindParticipantByCode(ctx context.Context, code string
 }
 
 // ListParticipants 竞赛参赛者分页（id 升序，与导入顺序一致）。
+// UpsertProfile 竞赛+用户唯一键覆盖写：重复导入更新实名信息，不产生新行。
+func (r *competitionRepo) UpsertProfile(ctx context.Context, profile *model.CompetitionProfile) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "competition_id"}, {Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"real_name", "school", "student_no", "email", "phone", "updated_at",
+		}),
+	}).Create(profile).Error
+}
+
+// FindProfile 单人身份名册（nil = 尚未填写）。
+func (r *competitionRepo) FindProfile(ctx context.Context, competitionID, userID uint) (*model.CompetitionProfile, error) {
+	var profile model.CompetitionProfile
+	err := r.db.WithContext(ctx).
+		First(&profile, "competition_id = ? AND user_id = ?", competitionID, userID).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// ListProfiles 竞赛全部身份名册（user_id 升序）。
+func (r *competitionRepo) ListProfiles(ctx context.Context, competitionID uint) ([]model.CompetitionProfile, error) {
+	var list []model.CompetitionProfile
+	err := r.db.WithContext(ctx).Where("competition_id = ?", competitionID).
+		Order("user_id").Find(&list).Error
+	return list, err
+}
+
 func (r *competitionRepo) ListParticipants(ctx context.Context, competitionID uint, offset, limit int) ([]model.Participant, int64, error) {
 	var (
 		list  []model.Participant
