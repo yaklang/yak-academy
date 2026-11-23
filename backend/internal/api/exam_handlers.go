@@ -222,3 +222,34 @@ func (h *Handlers) adminDeleteExamQuestion(w http.ResponseWriter, req *http.Requ
 		map[string]any{"question_id": qid})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
+
+func (h *Handlers) adminExamResults(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	view, err := h.Exam.AdminResults(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h *Handlers) adminExamResultsCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.Exam.ResultsCSV(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}

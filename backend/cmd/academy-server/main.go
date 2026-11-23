@@ -174,7 +174,7 @@ func main() {
 	awdSvc.SetUsers(userRepo)
 	awdSvc.SetReportsDir(cfg.ReportsDir)
 	awdSvc.StartWorker(ctx)
-	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo)
+	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo, userRepo)
 	examSvc.SetJudge(judgeSvc)
 	examSvc.SetEvents(eventRepo, bus)
 	examSvc.StartWorker(ctx)

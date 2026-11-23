@@ -18,6 +18,7 @@ type ExamService struct {
 	exam       repo.ExamRepo
 	comps      repo.CompetitionRepo
 	challenges repo.ChallengeRepo
+	users      repo.UserRepo
 	events     repo.EventRepo
 	bus        *eventbus.Bus
 	deriver    *ExamDeriver
@@ -25,9 +26,9 @@ type ExamService struct {
 	now        func() time.Time
 }
 
-func NewExamService(exam repo.ExamRepo, comps repo.CompetitionRepo, challenges repo.ChallengeRepo) *ExamService {
+func NewExamService(exam repo.ExamRepo, comps repo.CompetitionRepo, challenges repo.ChallengeRepo, users repo.UserRepo) *ExamService {
 	return &ExamService{
-		exam: exam, comps: comps, challenges: challenges,
+		exam: exam, comps: comps, challenges: challenges, users: users,
 		deriver: NewExamDeriver(exam), now: time.Now,
 	}
 }

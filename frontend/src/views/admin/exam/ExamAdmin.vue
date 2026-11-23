@@ -15,6 +15,8 @@ import {
   type ExamQuestionAdmin,
   type ExamQuestionInput,
   type ExamQuestionType,
+  type ExamResultStatus,
+  type ExamResultsView,
 } from '../../../api'
 
 const props = defineProps<{ competitionId: number; detail: CompetitionDetail }>()
@@ -23,6 +25,10 @@ const data = ref<ExamPaperView | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const savingPaper = ref(false)
+const results = ref<ExamResultsView | null>(null)
+const resultsLoading = ref(false)
+const resultsError = ref('')
+const exporting = ref(false)
 const paperForm = ref({ title: '', description: '', durationSeconds: 5400, passScore: 60 })
 
 const showQuestion = ref(false)
@@ -50,6 +56,20 @@ const TYPE_LABELS: Record<ExamQuestionType, string> = {
 const locked = computed(() => props.detail.status !== 'scheduled')
 const questions = computed(() => data.value?.questions ?? [])
 const totalScore = computed(() => data.value?.paper.total_score ?? 0)
+const resultRows = computed(() => results.value?.results ?? [])
+const summary = computed(() => results.value?.summary ?? null)
+const RESULT_STATUS_LABELS: Record<ExamResultStatus, string> = {
+  not_started: '未开始',
+  in_progress: '作答中',
+  submitted: '已交卷',
+  expired: '超时交卷',
+}
+const RESULT_STATUS_TYPES: Record<ExamResultStatus, 'info' | 'warning' | 'success'> = {
+  not_started: 'info',
+  in_progress: 'warning',
+  submitted: 'success',
+  expired: 'warning',
+}
 const answerHint = computed(() => {
   switch (questionForm.value.type) {
     case 'single':
@@ -86,6 +106,57 @@ async function load() {
     loadError.value = errorMessage(e, '考试试卷加载失败，请稍后重试')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadResults() {
+  resultsLoading.value = true
+  resultsError.value = ''
+  try {
+    results.value = await adminExamApi.results(props.competitionId)
+  } catch (e) {
+    resultsError.value = errorMessage(e, '成绩单加载失败，请稍后重试')
+  } finally {
+    resultsLoading.value = false
+  }
+}
+
+function fmtDuration(seconds: number) {
+  if (!seconds) return '—'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`
+}
+
+function resultStatusLabel(status: ExamResultStatus) {
+  return RESULT_STATUS_LABELS[status] ?? status
+}
+
+function resultStatusType(status: ExamResultStatus) {
+  return RESULT_STATUS_TYPES[status] ?? 'info'
+}
+
+async function exportResults() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const blob = await adminExamApi.resultsCSV(props.competitionId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `competition-${props.competitionId}-exam-results.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    notify.success('成绩单 CSV 已导出')
+  } catch (e) {
+    notify.error(errorMessage(e, '导出失败'))
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -244,7 +315,10 @@ function answerLabel(row: ExamQuestionAdmin) {
   return row.answer === null || row.answer === '' ? '—' : String(row.answer)
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await loadResults()
+})
 </script>
 
 <template>
@@ -331,6 +405,86 @@ onMounted(load)
           </UiTableColumn>
         </UiTable>
       </UiCard>
+
+      <UiCard header="成绩单">
+        <div class="toolbar">
+          <div class="result-head">
+            <span class="hint">按总分降序、用时升序排名；未交卷不参与排名。</span>
+            <span v-if="summary" class="dim">
+              参赛 {{ summary.participants }} · 已开始 {{ summary.started }} · 已交卷
+              {{ summary.submitted }} · 超时 {{ summary.expired }} · 通过 {{ summary.passed }}
+            </span>
+          </div>
+          <div class="actions">
+            <UiButton size="small" :loading="resultsLoading" :disabled="resultsLoading" @click="loadResults">
+              刷新
+            </UiButton>
+            <UiButton size="small" type="primary" :loading="exporting" :disabled="exporting || !results" @click="exportResults">
+              导出成绩 CSV
+            </UiButton>
+          </div>
+        </div>
+        <div v-if="summary" class="result-stats">
+          <div class="result-stat">
+            <span>参赛人数</span>
+            <b>{{ summary.participants }}</b>
+          </div>
+          <div class="result-stat">
+            <span>已交卷</span>
+            <b>{{ summary.submitted + summary.expired }}</b>
+          </div>
+          <div class="result-stat">
+            <span>通过人数</span>
+            <b>{{ summary.passed }}</b>
+          </div>
+          <div class="result-stat">
+            <span>平均分</span>
+            <b>{{ summary.average_score || 0 }}</b>
+          </div>
+          <div class="result-stat">
+            <span>最高分</span>
+            <b>{{ summary.highest_score }}</b>
+          </div>
+        </div>
+        <UiAlert v-if="resultsError" type="error" :closable="false" :title="resultsError" class="results-error">
+          <UiButton size="small" @click="loadResults">重试</UiButton>
+        </UiAlert>
+        <UiSkeleton v-if="resultsLoading && !results" :rows="5" />
+        <UiTable v-else :data="resultRows" row-key="user_id" empty-text="暂无参赛者成绩">
+          <UiTableColumn prop="rank" label="排名" width="70" align="center">
+            <template #default="{ row }">{{ row.rank || '—' }}</template>
+          </UiTableColumn>
+          <UiTableColumn prop="username" label="参赛者" min-width="140" align="left" />
+          <UiTableColumn label="状态" width="110" align="center">
+            <template #default="{ row }">
+              <UiTag size="small" :type="resultStatusType(row.status as ExamResultStatus)">
+                {{ resultStatusLabel(row.status as ExamResultStatus) }}
+              </UiTag>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn prop="total_score" label="总分" width="80" align="right" />
+          <UiTableColumn prop="objective_score" label="客观题" width="80" align="right" />
+          <UiTableColumn prop="code_score" label="编程题" width="80" align="right" />
+          <UiTableColumn label="是否通过" width="90" align="center">
+            <template #default="{ row }">
+              <UiTag
+                v-if="row.status === 'submitted' || row.status === 'expired'"
+                size="small"
+                :type="row.passed ? 'success' : 'warning'"
+              >
+                {{ row.passed ? '通过' : '未通过' }}
+              </UiTag>
+              <span v-else class="dim">—</span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn label="用时" width="90" align="right">
+            <template #default="{ row }">{{ fmtDuration(row.duration_seconds) }}</template>
+          </UiTableColumn>
+          <UiTableColumn label="交卷时间" min-width="170" align="left">
+            <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
+          </UiTableColumn>
+        </UiTable>
+      </UiCard>
     </template>
 
     <UiDialog v-model="showQuestion" :title="editingId ? '编辑试题' : '新增试题'" width="760px">
@@ -396,4 +550,25 @@ onMounted(load)
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .dim { color: var(--muted-foreground); font-size: var(--text-xs); }
+.result-head { display: grid; gap: var(--space-1); }
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.result-stat {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+}
+.result-stat span { font-size: var(--text-xs); color: var(--muted-foreground); }
+.result-stat b { font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.results-error { margin-bottom: var(--space-3); }
+@media (max-width: 900px) {
+  .result-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>
