@@ -3410,6 +3410,31 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /admin/competitions/{id}/awd/services/package:
+    post:
+      tags: [admin]
+      summary: 上传 AWD 服务包 zip（awd-service.json + Dockerfile；构建镜像后按 slug upsert）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'zip：awd-service.json + Dockerfile + 可选 checker 文件；≤32MB' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AwdService' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /admin/competitions/{id}/awd/services/{sid}:
     patch:
       tags: [admin]

@@ -67,6 +67,32 @@ func awdServiceID(req *http.Request) (uint, error) {
 	return uint(id), nil
 }
 
+func (h *Handlers) adminUploadAwdServicePackage(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	if err := req.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	file, _, err := req.FormFile("file")
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	defer file.Close()
+	svc, err := h.AWD.UploadServicePackage(req.Context(), id, file)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "awd.service.package", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"service_id": svc.ID, "slug": svc.Slug, "image": svc.Image})
+	writeJSON(w, http.StatusCreated, svc)
+}
+
 func (h *Handlers) adminCreateAwdService(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {

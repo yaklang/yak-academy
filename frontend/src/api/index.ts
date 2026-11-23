@@ -1077,6 +1077,11 @@ export const adminAwdApi = {
     http.get<{ items: AwdService[] }>(`/admin/competitions/${id}/awd/services`),
   createService: (id: number, body: AwdServiceInput) =>
     http.post<AwdService>(`/admin/competitions/${id}/awd/services`, body),
+  uploadServicePackage: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.upload<AwdService>(`/admin/competitions/${id}/awd/services/package`, form)
+  },
   updateService: (id: number, sid: number, body: AwdServiceInput) =>
     http.patch<AwdService>(`/admin/competitions/${id}/awd/services/${sid}`, body),
   deleteService: (id: number, sid: number) =>
