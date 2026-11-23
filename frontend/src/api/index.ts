@@ -1407,6 +1407,71 @@ export const adminAwdApi = {
     http.download(`/admin/competitions/${id}/awd/reports/${rid}/zip`),
 }
 
+// 考试（Exam）管理端：试卷/试题。题型答案 JSON 只在管理端返回。
+export type ExamQuestionType = 'single' | 'multiple' | 'truefalse' | 'code'
+export interface ExamPaper {
+  id: number
+  competition_id: number
+  title: string
+  description: string
+  duration_seconds: number
+  pass_score: number
+  total_score: number
+  created_at: string
+  updated_at: string
+}
+export interface ExamOption {
+  key: string
+  text: string
+}
+export interface ExamQuestionAdmin {
+  id: number
+  paper_id: number
+  seq: number
+  type: ExamQuestionType
+  title: string
+  content: string
+  options: ExamOption[]
+  answer: string | string[] | boolean | null
+  explanation: string
+  score: number
+  challenge_id: number
+  created_at: string
+  updated_at: string
+}
+export interface ExamPaperView {
+  paper: ExamPaper
+  questions: ExamQuestionAdmin[]
+}
+export interface ExamPaperUpdate {
+  title?: string
+  description?: string
+  duration_seconds?: number
+  pass_score?: number
+}
+export interface ExamQuestionInput {
+  seq: number
+  type: ExamQuestionType
+  title: string
+  content: string
+  options?: ExamOption[]
+  answer?: unknown
+  explanation?: string
+  score: number
+  challenge_id?: number
+}
+export const adminExamApi = {
+  paper: (id: number) => http.get<ExamPaperView>(`/admin/competitions/${id}/exam`),
+  updatePaper: (id: number, body: ExamPaperUpdate) =>
+    http.patch<ExamPaperView>(`/admin/competitions/${id}/exam`, body),
+  createQuestion: (id: number, body: ExamQuestionInput) =>
+    http.post<ExamQuestionAdmin>(`/admin/competitions/${id}/exam/questions`, body),
+  updateQuestion: (id: number, qid: number, body: ExamQuestionInput) =>
+    http.patch<ExamQuestionAdmin>(`/admin/competitions/${id}/exam/questions/${qid}`, body),
+  deleteQuestion: (id: number, qid: number) =>
+    http.del<{ ok: boolean }>(`/admin/competitions/${id}/exam/questions/${qid}`),
+}
+
 // 竞赛管理（管理端）。
 export const adminCompetitionApi = {
   list: (page = 1, pageSize = 20) =>

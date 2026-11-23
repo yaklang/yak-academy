@@ -1218,6 +1218,73 @@ components:
         score: { type: integer, minimum: 0, maximum: 100 }
         rubric: { type: object, description: rubric 评分明细 JSON 对象 }
         comment: { type: string, maxLength: 2000 }
+    ExamOption:
+      type: object
+      required: [key, text]
+      properties:
+        key: { type: string, description: 选项标识（大写字母/数字，1-8 位） }
+        text: { type: string, maxLength: 500 }
+    ExamPaper:
+      type: object
+      description: 考试试卷（一场 format=exam 竞赛一份）
+      properties:
+        id: { type: integer }
+        competition_id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        duration_seconds: { type: integer, description: 300..86400 }
+        pass_score: { type: integer }
+        total_score: { type: integer, description: 试题分值之和（服务端维护） }
+        created_at: { type: string }
+        updated_at: { type: string }
+    ExamQuestionAdmin:
+      type: object
+      description: 管理端试题视图（含选项与标准答案，仅 admin 接口返回）
+      properties:
+        id: { type: integer }
+        paper_id: { type: integer }
+        seq: { type: integer }
+        type: { type: string, enum: [single, multiple, truefalse, code] }
+        title: { type: string }
+        content: { type: string }
+        options: { type: array, items: { $ref: '#/components/schemas/ExamOption' } }
+        answer:
+          description: 'single: "A"；multiple: ["A","C"]；truefalse: true；code: null'
+          nullable: true
+        explanation: { type: string }
+        score: { type: integer }
+        challenge_id: { type: integer, description: 编程题绑定的 Challenge ID（0 = 未绑定） }
+        created_at: { type: string }
+        updated_at: { type: string }
+    ExamPaperView:
+      type: object
+      properties:
+        paper: { $ref: '#/components/schemas/ExamPaper' }
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/ExamQuestionAdmin' }
+    ExamPaperUpdate:
+      type: object
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        duration_seconds: { type: integer, minimum: 300, maximum: 86400 }
+        pass_score: { type: integer, minimum: 0, maximum: 100000 }
+    ExamQuestionInput:
+      type: object
+      required: [seq, type, title, score]
+      properties:
+        seq: { type: integer, minimum: 1, maximum: 999 }
+        type: { type: string, enum: [single, multiple, truefalse, code] }
+        title: { type: string, maxLength: 200 }
+        content: { type: string }
+        options: { type: array, items: { $ref: '#/components/schemas/ExamOption' } }
+        answer:
+          description: 'single: "A"；multiple: ["A","C"]；truefalse: true；code 忽略'
+          nullable: true
+        explanation: { type: string }
+        score: { type: integer, minimum: 1, maximum: 1000 }
+        challenge_id: { type: integer, description: 编程题必填且必须为 code 类型 Challenge }
     AwdParticipantView:
       type: object
       description: 参赛者 AWD 首页（仅本人服务与攻击盒凭据；flag/checker 配置不返回）
@@ -3997,6 +4064,102 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AwdIncident' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/exam:
+    get:
+      tags: [admin]
+      summary: 考试试卷与试题（不存在时自动创建；仅 admin 返回标准答案）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamPaperView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    patch:
+      tags: [admin]
+      summary: 修改试卷配置（竞赛开始后锁定）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamPaperUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamPaperView' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/exam/questions:
+    post:
+      tags: [admin]
+      summary: 新增试题（题序唯一；开赛后锁定）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamQuestionInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamQuestionAdmin' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/exam/questions/{qid}:
+    patch:
+      tags: [admin]
+      summary: 整题替换（开赛后锁定）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: qid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamQuestionInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamQuestionAdmin' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+    delete:
+      tags: [admin]
+      summary: 删除试题并重算试卷总分（开赛后锁定）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: qid, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
