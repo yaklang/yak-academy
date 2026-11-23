@@ -686,6 +686,7 @@ const boardMode = ref<'team' | 'individual'>('team')
 const board = ref<TeamLeaderboardEntry[]>([])
 const boardLoading = ref(true)
 const boardError = ref('')
+const boardExporting = ref(false)
 
 async function loadBoard() {
   boardLoading.value = true
@@ -703,6 +704,23 @@ async function loadBoard() {
 
 async function onBoardModeChange() {
   await loadBoard()
+}
+
+async function exportBoard() {
+  boardExporting.value = true
+  try {
+    const blob = await adminCompetitionApi.standingsCsv(compId, boardMode.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `竞赛榜单-${boardMode.value === 'team' ? '战队' : '个人'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '榜单导出失败，请稍后重试')
+  } finally {
+    boardExporting.value = false
+  }
 }
 
 async function onTab(name: string | number) {
@@ -1049,10 +1067,13 @@ onMounted(async () => {
           <template #header>
             <div class="card-head">
               <span>竞赛排行榜</span>
-              <UiRadioGroup v-model="boardMode" size="small" @change="onBoardModeChange">
-                <UiRadioButton value="team">战队榜</UiRadioButton>
-                <UiRadioButton value="individual">个人榜</UiRadioButton>
-              </UiRadioGroup>
+              <div class="card-actions">
+                <UiRadioGroup v-model="boardMode" size="small" @change="onBoardModeChange">
+                  <UiRadioButton value="team">战队榜</UiRadioButton>
+                  <UiRadioButton value="individual">个人榜</UiRadioButton>
+                </UiRadioGroup>
+                <UiButton size="small" :loading="boardExporting" @click="exportBoard">导出 CSV</UiButton>
+              </div>
             </div>
           </template>
           <UiLoadError v-if="boardError" compact :message="boardError" @retry="loadBoard" class="block" />
@@ -1388,6 +1409,7 @@ onMounted(async () => {
 .stat span { color: var(--muted-foreground); font-size: var(--text-xs); }
 .stat.warn b { color: var(--destructive); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.card-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .block { margin-bottom: var(--space-5); }
 .dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 .pager { margin-top: var(--space-4); }

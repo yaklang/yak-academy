@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1627,6 +1628,8 @@ type TeamLeaderboardEntry struct {
 	SolvedCount int      `json:"solved_count"`
 	Members     []string `json:"members"`
 	LastSolveAt *string  `json:"last_solve_at"`
+	// AccountCode 仅 individual 模式填充（榜单导出/证书定位账号）；team 模式为空。
+	AccountCode string `json:"account_code,omitempty"`
 }
 
 // CompLeaderboardEntry 个人榜条目（同分并列，先达者靠前）。
@@ -1634,6 +1637,7 @@ type CompLeaderboardEntry struct {
 	Rank        int     `json:"rank"`
 	UserID      uint    `json:"user_id"`
 	Username    string  `json:"username"`
+	AccountCode string  `json:"account_code"`
 	TeamName    *string `json:"team_name"`
 	Score       int     `json:"score"`
 	SolvedCount int     `json:"solved_count"`
@@ -1668,8 +1672,10 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 		return nil, err
 	}
 	userNames := map[uint]string{}
+	userCodes := map[uint]string{}
 	for _, u := range users {
 		userNames[u.ID] = u.Username
+		userCodes[u.ID] = u.AccountCode
 	}
 	teamNames := map[uint]string{}
 	for _, t := range teams {
@@ -1714,8 +1720,8 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 				last = &ls
 			}
 			entries = append(entries, CompLeaderboardEntry{
-				UserID: a.userID, Username: userNames[a.userID], TeamName: teamName,
-				Score: a.score, SolvedCount: a.solved, LastSolveAt: last,
+				UserID: a.userID, Username: userNames[a.userID], AccountCode: userCodes[a.userID],
+				TeamName: teamName, Score: a.score, SolvedCount: a.solved, LastSolveAt: last,
 			})
 		}
 		sort.Slice(entries, func(i, j int) bool {
@@ -1738,6 +1744,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 				Rank: e.Rank, TeamName: e.TeamName,
 				Score: e.Score, SolvedCount: e.SolvedCount,
 				Members: []string{e.Username}, LastSolveAt: e.LastSolveAt,
+				AccountCode: e.AccountCode,
 			}
 		}
 		return map[string]any{"mode": "individual", "items": items}, nil
@@ -1836,6 +1843,60 @@ func rankTeamEntries(entries []TeamLeaderboardEntry) {
 		}
 		entries[i].Rank = rank
 	}
+}
+
+// StandingsCSV 导出竞赛榜单 CSV（管理端）。individual 列：排名/用户名/账号编码/
+// 队伍/得分/解题数/最近通关；team 列：排名/队伍/成员/得分/解题数/最近通关。
+// 输出带 UTF-8 BOM，兼容 Excel 直接打开中文。
+func (s *CompetitionService) StandingsCSV(ctx context.Context, id uint, mode string) ([]byte, string, error) {
+	board, err := s.Leaderboard(ctx, id, mode)
+	if err != nil {
+		return nil, "", err
+	}
+	items, _ := board["items"].([]TeamLeaderboardEntry)
+	var buf bytes.Buffer
+	buf.WriteString("\xEF\xBB\xBF")
+	w := csv.NewWriter(&buf)
+	lastSolve := func(item TeamLeaderboardEntry) string {
+		if item.LastSolveAt == nil {
+			return ""
+		}
+		return *item.LastSolveAt
+	}
+	if mode == "individual" {
+		_ = w.Write([]string{"排名", "用户名", "账号编码", "队伍", "得分", "解题数", "最近通关"})
+		for _, item := range items {
+			team := ""
+			if item.TeamName != nil {
+				team = *item.TeamName
+			}
+			username := ""
+			if len(item.Members) > 0 {
+				username = item.Members[0]
+			}
+			_ = w.Write([]string{
+				strconv.Itoa(item.Rank), username, item.AccountCode, team,
+				strconv.Itoa(item.Score), strconv.Itoa(item.SolvedCount), lastSolve(item),
+			})
+		}
+	} else {
+		_ = w.Write([]string{"排名", "队伍", "成员", "得分", "解题数", "最近通关"})
+		for _, item := range items {
+			team := ""
+			if item.TeamName != nil {
+				team = *item.TeamName
+			}
+			_ = w.Write([]string{
+				strconv.Itoa(item.Rank), team, strings.Join(item.Members, "、"),
+				strconv.Itoa(item.Score), strconv.Itoa(item.SolvedCount), lastSolve(item),
+			})
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), fmt.Sprintf("competition-%d-standings-%s.csv", id, mode), nil
 }
 
 // ---------- 管理端：警告 / WP / 容器 ----------
