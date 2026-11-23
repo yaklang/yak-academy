@@ -34,23 +34,32 @@ func (h *Handlers) adminListCompetitions(w http.ResponseWriter, req *http.Reques
 // adminCreateCompetition 创建竞赛（kind 创建后不可更改）。
 func (h *Handlers) adminCreateCompetition(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		Kind        string    `json:"kind"`
-		StartTime   time.Time `json:"start_time"`
-		EndTime     time.Time `json:"end_time"`
+		Name              string     `json:"name"`
+		Description       string     `json:"description"`
+		Kind              string     `json:"kind"`
+		Format            string     `json:"format"`
+		ScoringMode       string     `json:"scoring_mode"`
+		RegistrationStart *time.Time `json:"registration_start"`
+		RegistrationEnd   *time.Time `json:"registration_end"`
+		StartTime         time.Time  `json:"start_time"`
+		EndTime           time.Time  `json:"end_time"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Name == "" {
 		writeError(w, errValidation)
 		return
 	}
-	comp, err := h.Competitions.Create(req.Context(), body.Name, body.Description, body.StartTime, body.EndTime, body.Kind)
+	comp, err := h.Competitions.Create(req.Context(), service.CompetitionCreate{
+		Name: body.Name, Description: body.Description,
+		Start: body.StartTime, End: body.EndTime, Kind: body.Kind,
+		Format: body.Format, ScoringMode: body.ScoringMode,
+		RegistrationStart: body.RegistrationStart, RegistrationEnd: body.RegistrationEnd,
+	})
 	if err != nil {
 		mapError(w, err)
 		return
 	}
 	h.audit(req, "competition.create", "competition", strconv.FormatUint(uint64(comp.ID), 10),
-		map[string]any{"name": body.Name, "kind": comp.Kind})
+		map[string]any{"name": body.Name, "kind": comp.Kind, "format": comp.Format})
 	writeJSON(w, http.StatusCreated, comp)
 }
 
@@ -85,10 +94,14 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 		return
 	}
 	var body struct {
-		Name        *string    `json:"name"`
-		Description *string    `json:"description"`
-		StartTime   *time.Time `json:"start_time"`
-		EndTime     *time.Time `json:"end_time"`
+		Name              *string    `json:"name"`
+		Description       *string    `json:"description"`
+		StartTime         *time.Time `json:"start_time"`
+		EndTime           *time.Time `json:"end_time"`
+		ScoringMode       *string    `json:"scoring_mode"`
+		RegistrationStart *time.Time `json:"registration_start"`
+		RegistrationEnd   *time.Time `json:"registration_end"`
+		ClearRegistration *bool      `json:"clear_registration"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeError(w, errValidation)
@@ -97,6 +110,9 @@ func (h *Handlers) adminUpdateCompetition(w http.ResponseWriter, req *http.Reque
 	detail, err := h.Competitions.Update(req.Context(), id, service.CompetitionUpdate{
 		Name: body.Name, Description: body.Description,
 		StartTime: body.StartTime, EndTime: body.EndTime,
+		ScoringMode:       body.ScoringMode,
+		RegistrationStart: body.RegistrationStart, RegistrationEnd: body.RegistrationEnd,
+		ClearRegistration: body.ClearRegistration,
 	})
 	if err != nil {
 		mapError(w, err)

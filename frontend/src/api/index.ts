@@ -754,6 +754,19 @@ export const KIND_LABELS: Record<CompetitionKind, string> = {
   public: '公开赛',
   invitational: '邀请赛',
 }
+// 竞赛形式（创建后不可更改）：ctf=解题赛 / awd=攻防赛 / exam=在线考试。
+export type CompetitionFormat = 'ctf' | 'awd' | 'exam'
+export const FORMAT_LABELS: Record<CompetitionFormat, string> = {
+  ctf: 'CTF',
+  awd: 'AWD',
+  exam: '考试',
+}
+// CTF 计分模式：dynamic=按通过人数衰减 / fixed=按题目分值固定计分。
+export type CompetitionScoringMode = 'dynamic' | 'fixed'
+export const SCORING_MODE_LABELS: Record<CompetitionScoringMode, string> = {
+  dynamic: '动态计分',
+  fixed: '固定计分',
+}
 export interface Competition {
   id: number
   name: string
@@ -762,6 +775,10 @@ export interface Competition {
   end_time: string
   status: CompetitionStatus
   kind: CompetitionKind
+  format: CompetitionFormat
+  scoring_mode: CompetitionScoringMode
+  registration_start: string | null
+  registration_end: string | null
   created_at: string
 }
 export interface CompetitionDetail extends Competition {
@@ -886,6 +903,10 @@ export interface PublicCompetitionItem {
   id: number
   name: string
   description: string
+  format: CompetitionFormat
+  scoring_mode: CompetitionScoringMode
+  registration_start: string | null
+  registration_end: string | null
   start_time: string
   end_time: string
   status: CompetitionStatus
@@ -941,11 +962,28 @@ export interface CompetitionHomeView {
 export const adminCompetitionApi = {
   list: (page = 1, pageSize = 20) =>
     http.get<Paged<Competition>>(`/admin/competitions?page=${page}&page_size=${pageSize}`),
-  create: (body: { name: string; description?: string; start_time: string; end_time: string; kind: CompetitionKind }) =>
-    http.post<Competition>('/admin/competitions', body),
+  create: (body: {
+    name: string
+    description?: string
+    start_time: string
+    end_time: string
+    kind: CompetitionKind
+    format?: CompetitionFormat
+    scoring_mode?: CompetitionScoringMode
+    registration_start?: string | null
+    registration_end?: string | null
+  }) => http.post<Competition>('/admin/competitions', body),
   detail: (id: number) => http.get<CompetitionDetail>(`/admin/competitions/${id}`),
-  update: (id: number, body: { name?: string; description?: string; start_time?: string; end_time?: string }) =>
-    http.patch<CompetitionDetail>(`/admin/competitions/${id}`, body),
+  update: (id: number, body: {
+    name?: string
+    description?: string
+    start_time?: string
+    end_time?: string
+    scoring_mode?: CompetitionScoringMode
+    registration_start?: string | null
+    registration_end?: string | null
+    clear_registration?: boolean
+  }) => http.patch<CompetitionDetail>(`/admin/competitions/${id}`, body),
   // 手动结束竞赛（仅 running；end_time 置为当前时刻。结束后起止时间可重新配置再开赛）。
   end: (id: number) => http.post<CompetitionDetail>(`/admin/competitions/${id}/end`),
   // 删除竞赛（running 422 拒绝——先手动结束）；级联清理参赛者/题目绑定/提交/WP（含 zip 落盘）/容器。

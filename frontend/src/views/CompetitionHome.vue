@@ -12,9 +12,11 @@ import { marked } from 'marked'
 import {
   CATEGORY_LABELS,
   DIFFICULTY_LABELS,
+  FORMAT_LABELS,
   competitionApi,
   instanceApi,
   type CompetitionChallengeItem,
+  type CompetitionFormat,
   type CompetitionHomeView,
   type LabInstance,
   type MyWriteupItem,
@@ -65,6 +67,7 @@ const elapsedPercent = computed(() => {
   return Math.min(100, Math.max(0, Math.round(p)))
 })
 const kindLabel = computed(() => (comp.value?.kind === 'public' ? '公开赛' : '邀请赛'))
+const formatLabel = computed(() => (comp.value ? FORMAT_LABELS[comp.value.format as CompetitionFormat] : ''))
 // 当前页面是否处于「锁定」态：仅进行中的邀请赛锁普通参赛者；公开赛与管理员不锁。
 const isAdmin = computed(() => auth.user?.global_role === 'admin')
 const lockedHere = computed(() => running.value && comp.value?.kind === 'invitational' && !isAdmin.value)
@@ -423,6 +426,7 @@ onUnmounted(() => {
                 {{ running ? '进行中' : ended ? '已结束' : '未开始' }}
               </UiTag>
               <UiTag v-if="comp" size="small" type="info">{{ kindLabel }}</UiTag>
+              <UiTag v-if="comp" size="small" type="warning">{{ formatLabel }}</UiTag>
             </div>
             <p v-if="comp" class="comp-window mono">{{ shortDateTime(comp.start_time) }} → {{ shortDateTime(comp.end_time) }}</p>
           </div>
@@ -460,7 +464,16 @@ onUnmounted(() => {
       <UiButton size="small" @click="loadView">重试</UiButton>
     </UiAlert>
 
-    <main class="comp-body">
+    <main v-if="view && comp?.format !== 'ctf'" class="comp-body">
+      <UiAlert
+        type="warning"
+        :closable="false"
+        title="该竞赛形式尚未接入参赛端"
+        description="AWD 攻防赛与在线考试的参赛页面将在后续版本提供；当前仅 CTF 竞赛可进入。"
+      />
+    </main>
+
+    <main v-else class="comp-body">
       <UiTabs v-model="activeTab" @tab-change="onTab">
         <!-- 概览：KPI + 图表，首屏先回答"我现在什么位置、还剩多少时间" -->
         <UiTabPane label="概览" name="overview">

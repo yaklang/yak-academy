@@ -6,7 +6,7 @@
 import { onMounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
-import { adminCompetitionApi, KIND_LABELS, type Competition, type CompetitionKind } from '../../api'
+import { adminCompetitionApi, FORMAT_LABELS, KIND_LABELS, SCORING_MODE_LABELS, type Competition, type CompetitionFormat, type CompetitionKind, type CompetitionScoringMode } from '../../api'
 
 const items = ref<Competition[]>([])
 const total = ref(0)
@@ -21,11 +21,22 @@ const form = ref({
   name: '',
   description: '',
   kind: 'invitational' as CompetitionKind,
+  format: 'ctf' as CompetitionFormat,
+  scoringMode: 'dynamic' as CompetitionScoringMode,
   range: null as [Date, Date] | null,
+  registrationRange: null as [Date, Date] | null,
 })
 
 function openCreate() {
-  form.value = { name: '', description: '', kind: 'invitational', range: null }
+  form.value = {
+    name: '',
+    description: '',
+    kind: 'invitational',
+    format: 'ctf',
+    scoringMode: 'dynamic',
+    range: null,
+    registrationRange: null,
+  }
   showCreate.value = true
 }
 
@@ -46,6 +57,17 @@ async function submitCreate() {
     notify.warning('请选择起止时间')
     return
   }
+  const [regStart, regEnd] = form.value.registrationRange ?? []
+  const regStartTime = toRfc3339(regStart)
+  const regEndTime = toRfc3339(regEnd)
+  if ((regStartTime && !regEndTime) || (!regStartTime && regEndTime)) {
+    notify.warning('报名窗口需同时选择开始与截止时间')
+    return
+  }
+  if (regEndTime && new Date(regEndTime) > new Date(endTime)) {
+    notify.warning('报名截止时间不能晚于竞赛结束时间')
+    return
+  }
   creating.value = true
   try {
     await adminCompetitionApi.create({
@@ -54,6 +76,10 @@ async function submitCreate() {
       start_time: startTime,
       end_time: endTime,
       kind: form.value.kind,
+      format: form.value.format,
+      scoring_mode: form.value.format === 'ctf' ? form.value.scoringMode : 'dynamic',
+      registration_start: regStartTime,
+      registration_end: regEndTime,
     })
     notify.success('竞赛已创建')
     showCreate.value = false
@@ -171,8 +197,16 @@ onMounted(load)
     <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
     <UiTable v-else :data="items" :loading="loading" empty-text="暂无竞赛">
       <UiTableColumn prop="id" label="ID" width="70" />
+      <UiTableColumn label="形式" width="90">
+        <template #default="{ row }">
+          <UiTag
+            size="small"
+            :type="row.format === 'awd' ? 'danger' : row.format === 'exam' ? 'warning' : 'info'"
+          >{{ FORMAT_LABELS[row.format as CompetitionFormat] }}</UiTag>
+        </template>
+      </UiTableColumn>
       <UiTableColumn prop="name" label="名称" min-width="160" show-overflow-tooltip />
-      <UiTableColumn label="赛制" width="100">
+      <UiTableColumn label="报名模式" width="100">
         <template #default="{ row }">
           <UiTag :type="row.kind === 'public' ? 'success' : 'warning'" size="small">
             {{ KIND_LABELS[row.kind as CompetitionKind] }}
@@ -225,7 +259,7 @@ onMounted(load)
     />
   </UiCard>
 
-  <UiDialog v-model="showCreate" title="创建竞赛" width="560px">
+  <UiDialog v-model="showCreate" title="创建竞赛" width="640px">
     <UiForm label-width="90px">
       <UiFormItem label="竞赛名称" required>
         <UiInput v-model="form.name" placeholder="如：2026 春季新生赛" maxlength="100" />
@@ -233,12 +267,27 @@ onMounted(load)
       <UiFormItem label="竞赛说明">
         <UiInput v-model="form.description" type="textarea" :rows="3" placeholder="展示给参赛者的说明（Markdown，可选）" />
       </UiFormItem>
-      <UiFormItem label="赛制" required>
+      <UiFormItem label="竞赛形式" required>
+        <UiRadioGroup v-model="form.format">
+          <UiRadio value="ctf">CTF 解题赛</UiRadio>
+          <UiRadio value="awd">AWD 攻防赛</UiRadio>
+          <UiRadio value="exam">在线考试</UiRadio>
+        </UiRadioGroup>
+        <div class="dim">竞赛形式创建后不可更改。</div>
+      </UiFormItem>
+      <UiFormItem v-if="form.format === 'ctf'" label="计分模式">
+        <UiRadioGroup v-model="form.scoringMode">
+          <UiRadio value="dynamic">动态计分（按通过人数衰减）</UiRadio>
+          <UiRadio value="fixed">固定计分（按题目分值）</UiRadio>
+        </UiRadioGroup>
+        <div class="dim">{{ SCORING_MODE_LABELS[form.scoringMode] }}；开赛后不可切换。</div>
+      </UiFormItem>
+      <UiFormItem label="报名模式" required>
         <UiRadioGroup v-model="form.kind">
           <UiRadio value="invitational">邀请赛（定向导入/生成参赛者，凭邀请码入场）</UiRadio>
           <UiRadio value="public">公开赛（竞赛广场自助报名，已报名者免码入场）</UiRadio>
         </UiRadioGroup>
-        <div class="dim">赛制创建后不可更改。</div>
+        <div class="dim">报名模式创建后不可更改。</div>
       </UiFormItem>
       <UiFormItem label="起止时间" required>
         <UiDatePicker
@@ -248,6 +297,16 @@ onMounted(load)
           end-placeholder="结束时间"
           style="width: 100%"
         />
+      </UiFormItem>
+      <UiFormItem label="报名窗口">
+        <UiDatePicker
+          v-model="form.registrationRange"
+          type="datetimerange"
+          start-placeholder="报名开始（可选）"
+          end-placeholder="报名截止（可选）"
+          style="width: 100%"
+        />
+        <div class="dim">公开赛可选；不填则报名开放到竞赛结束。截止不得晚于竞赛结束。</div>
       </UiFormItem>
     </UiForm>
     <template #footer>

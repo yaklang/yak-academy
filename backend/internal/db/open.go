@@ -49,6 +49,9 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := migrateCompetitionFormat(db); err != nil {
+		return err
+	}
 	if err := migrateCompetitionScoreIndex(db); err != nil {
 		return err
 	}
@@ -71,6 +74,19 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	return migrateUserAccountCode(db)
+}
+
+// migrateCompetitionFormat 一次性回填：竞赛格式/计分模式列加入前已存在的行
+// 统一按 CTF + 动态计分解释（与旧行为一致）。幂等：无空值行时为空操作。
+func migrateCompetitionFormat(db *gorm.DB) error {
+	if err := db.Model(&model.Competition{}).
+		Where("format IS NULL OR format = ''").
+		Update("format", model.CompetitionFormatCTF).Error; err != nil {
+		return err
+	}
+	return db.Model(&model.Competition{}).
+		Where("scoring_mode IS NULL OR scoring_mode = ''").
+		Update("scoring_mode", model.CompetitionScoringDynamic).Error
 }
 
 // migrateUserAccountCode 一次性回填：账号编码列加入前已存在的用户按

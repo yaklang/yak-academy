@@ -104,7 +104,7 @@ func (e *compEnv) createComp(t *testing.T, name, kind string) *CompetitionView {
 	t.Helper()
 	start := e.now.Add(-time.Hour)
 	end := e.now.Add(2 * time.Hour)
-	comp, err := e.comps.Create(context.Background(), name, "", start, end, kind)
+	comp, err := e.comps.Create(context.Background(), CompetitionCreate{Name: name, Start: start, End: end, Kind: kind})
 	if err != nil {
 		t.Fatalf("create competition: %v", err)
 	}
@@ -160,10 +160,10 @@ func (e *compEnv) drainJudge() {
 func TestCompetitionCreateValidatesTimes(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
-	if _, err := e.comps.Create(ctx, "倒时间赛", "", e.now.Add(time.Hour), e.now, ""); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Create(ctx, CompetitionCreate{Name: "倒时间赛", Start: e.now.Add(time.Hour), End: e.now}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("end before start: want ErrValidation, got %v", err)
 	}
-	if _, err := e.comps.Create(ctx, "  ", "", e.now, e.now.Add(time.Hour), ""); !errors.Is(err, ErrValidation) {
+	if _, err := e.comps.Create(ctx, CompetitionCreate{Name: "  ", Start: e.now, End: e.now.Add(time.Hour)}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty name: want ErrValidation, got %v", err)
 	}
 	comp := e.createRunningComp(t, "合法赛")
@@ -183,6 +183,113 @@ func TestCompetitionCreateValidatesTimes(t *testing.T) {
 	ne := e.now.Add(3 * time.Hour)
 	if _, err := e.comps.Update(ctx, comp.ID, CompetitionUpdate{EndTime: &ne}); err != nil {
 		t.Fatalf("extend end: %v", err)
+	}
+}
+
+// TestCompetitionFormatScoringAndRegistrationWindow 竞赛形式/计分模式/报名窗口：
+// 默认值、非法枚举、窗口成对与范围校验、公开赛报名窗口生效、固定计分仅
+// CTF 且开赛前可切换。
+func TestCompetitionFormatScoringAndRegistrationWindow(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	base := e.now
+	start := base.Add(-time.Hour)
+	end := base.Add(4 * time.Hour)
+
+	def, err := e.comps.Create(ctx, CompetitionCreate{Name: "默认赛", Start: start, End: end})
+	if err != nil {
+		t.Fatalf("create default: %v", err)
+	}
+	if def.Format != model.CompetitionFormatCTF || def.ScoringMode != model.CompetitionScoringDynamic {
+		t.Fatalf("defaults = format:%s scoring:%s", def.Format, def.ScoringMode)
+	}
+	if def.RegistrationStart != nil || def.RegistrationEnd != nil {
+		t.Fatalf("default registration window should be nil: %+v", def)
+	}
+
+	for _, in := range []CompetitionCreate{
+		{Name: "bad format", Start: start, End: end, Format: "jeopardy"},
+		{Name: "bad scoring", Start: start, End: end, ScoringMode: "elo"},
+		{Name: "awd fixed", Start: start, End: end, Format: "awd", ScoringMode: "fixed"},
+	} {
+		if _, err := e.comps.Create(ctx, in); !errors.Is(err, ErrValidation) {
+			t.Fatalf("create %+v: want ErrValidation, got %v", in, err)
+		}
+	}
+
+	regStart := base.Add(time.Hour)
+	regEnd := base.Add(2 * time.Hour)
+	lateEnd := base.Add(5 * time.Hour)
+	if _, err := e.comps.Create(ctx, CompetitionCreate{Name: "单侧窗口", Start: start, End: end, RegistrationStart: &regStart}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("one-sided window: want ErrValidation, got %v", err)
+	}
+	if _, err := e.comps.Create(ctx, CompetitionCreate{Name: "倒窗口", Start: start, End: end, RegistrationStart: &regEnd, RegistrationEnd: &regStart}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("reversed window: want ErrValidation, got %v", err)
+	}
+	if _, err := e.comps.Create(ctx, CompetitionCreate{Name: "窗口超赛程", Start: start, End: base.Add(2 * time.Hour), RegistrationStart: &regStart, RegistrationEnd: &lateEnd}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("window after end: want ErrValidation, got %v", err)
+	}
+
+	pub, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "窗口公开赛", Kind: "public", Start: start, End: base.Add(4 * time.Hour),
+		RegistrationStart: &regStart, RegistrationEnd: &regEnd,
+	})
+	if err != nil {
+		t.Fatalf("create public with window: %v", err)
+	}
+	early := e.ensureUser(t, "window-early")
+	if _, err := e.comps.Register(ctx, early.ID, pub.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("register before window: want ErrValidation, got %v", err)
+	}
+	e.now = regStart.Add(time.Minute)
+	insider := e.ensureUser(t, "window-insider")
+	if item, err := e.comps.Register(ctx, insider.ID, pub.ID); err != nil || !item.Registered {
+		t.Fatalf("register inside window: %+v err=%v", item, err)
+	}
+	e.now = regEnd.Add(time.Minute)
+	late := e.ensureUser(t, "window-late")
+	if _, err := e.comps.Register(ctx, late.ID, pub.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("register after window: want ErrValidation, got %v", err)
+	}
+
+	// 报名窗口可清空；清空与设置不能同时出现。
+	windowed, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "可清窗口", Start: base.Add(3 * time.Hour), End: base.Add(4 * time.Hour),
+		RegistrationStart: &regStart, RegistrationEnd: &regEnd,
+	})
+	if err != nil {
+		t.Fatalf("create windowed: %v", err)
+	}
+	clear := true
+	cleared, err := e.comps.Update(ctx, windowed.ID, CompetitionUpdate{ClearRegistration: &clear})
+	if err != nil || cleared.RegistrationStart != nil || cleared.RegistrationEnd != nil {
+		t.Fatalf("clear window: %+v err=%v", cleared, err)
+	}
+	if _, err := e.comps.Update(ctx, windowed.ID, CompetitionUpdate{ClearRegistration: &clear, RegistrationStart: &regStart}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("clear+set window: want ErrValidation, got %v", err)
+	}
+
+	// 固定计分仅 CTF，且 running 后不可切换。
+	e.now = base
+	sched, err := e.comps.Create(ctx, CompetitionCreate{Name: "计分切换", Start: base.Add(2 * time.Hour), End: base.Add(4 * time.Hour)})
+	if err != nil {
+		t.Fatalf("create scheduled ctf: %v", err)
+	}
+	fixed := "fixed"
+	updated, err := e.comps.Update(ctx, sched.ID, CompetitionUpdate{ScoringMode: &fixed})
+	if err != nil || updated.ScoringMode != model.CompetitionScoringFixed {
+		t.Fatalf("switch fixed: %+v err=%v", updated, err)
+	}
+	awd, err := e.comps.Create(ctx, CompetitionCreate{Name: "AWD 赛", Start: base.Add(2 * time.Hour), End: base.Add(4 * time.Hour), Format: "awd"})
+	if err != nil {
+		t.Fatalf("create awd: %v", err)
+	}
+	if _, err := e.comps.Update(ctx, awd.ID, CompetitionUpdate{ScoringMode: &fixed}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("awd fixed: want ErrValidation, got %v", err)
+	}
+	e.now = sched.StartTime.Add(time.Minute)
+	if _, err := e.comps.Update(ctx, sched.ID, CompetitionUpdate{ScoringMode: &fixed}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("switch scoring after start: want ErrValidation, got %v", err)
 	}
 }
 
@@ -235,7 +342,7 @@ func TestEndCompetitionManually(t *testing.T) {
 	// scheduled：未开赛不存在"结束"，422。
 	futureStart := e.now.Add(time.Hour)
 	futureEnd := e.now.Add(3 * time.Hour)
-	scheduled, err := e.comps.Create(ctx, "未开赛赛", "", futureStart, futureEnd, "")
+	scheduled, err := e.comps.Create(ctx, CompetitionCreate{Name: "未开赛赛", Start: futureStart, End: futureEnd})
 	if err != nil {
 		t.Fatalf("create scheduled: %v", err)
 	}
@@ -545,7 +652,7 @@ func TestLockOnlyInvitational(t *testing.T) {
 	e := newCompEnv(t)
 	ctx := context.Background()
 	start := e.now.Add(-time.Hour)
-	pubView, err := e.comps.Create(ctx, "公开自由进出赛", "", start, e.now.Add(4*time.Hour), "public")
+	pubView, err := e.comps.Create(ctx, CompetitionCreate{Name: "公开自由进出赛", Start: start, End: e.now.Add(4 * time.Hour), Kind: "public"})
 	if err != nil {
 		t.Fatalf("create public competition: %v", err)
 	}

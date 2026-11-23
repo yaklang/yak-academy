@@ -97,26 +97,84 @@ func toView(c *model.Competition, now time.Time) CompetitionView {
 	return CompetitionView{Competition: *c, Status: c.Status(now)}
 }
 
-func (s *CompetitionService) Create(ctx context.Context, name, description string, start, end time.Time, kind string) (*CompetitionView, error) {
-	name = strings.TrimSpace(name)
+// CompetitionCreate 创建竞赛入参：kind/format 创建后不可更改。
+type CompetitionCreate struct {
+	Name              string
+	Description       string
+	Start             time.Time
+	End               time.Time
+	Kind              string
+	Format            string
+	ScoringMode       string
+	RegistrationStart *time.Time
+	RegistrationEnd   *time.Time
+}
+
+// validateRegistrationWindow 报名窗口必须成对配置、起止有序，且不得晚于
+// 竞赛结束（结束后报名没有意义；未配置 = 沿用旧语义）。
+func validateRegistrationWindow(start, end *time.Time, competitionEnd time.Time) (*time.Time, *time.Time, error) {
+	if start == nil && end == nil {
+		return nil, nil, nil
+	}
+	if start == nil || end == nil {
+		return nil, nil, fmt.Errorf("%w: registration_start and registration_end must be set together", ErrValidation)
+	}
+	s, e := start.UTC(), end.UTC()
+	if !e.After(s) {
+		return nil, nil, fmt.Errorf("%w: registration_end must be after registration_start", ErrValidation)
+	}
+	if e.After(competitionEnd.UTC()) {
+		return nil, nil, fmt.Errorf("%w: registration_end must not be after end_time", ErrValidation)
+	}
+	return &s, &e, nil
+}
+
+func (s *CompetitionService) Create(ctx context.Context, in CompetitionCreate) (*CompetitionView, error) {
+	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrValidation)
 	}
-	if !end.After(start) {
+	if !in.End.After(in.Start) {
 		return nil, fmt.Errorf("%w: end_time must be after start_time", ErrValidation)
 	}
-	k := model.CompetitionKind(strings.TrimSpace(kind))
+	k := model.CompetitionKind(strings.TrimSpace(in.Kind))
 	if k == "" {
 		k = model.CompetitionInvitational
 	}
 	if !k.Valid() {
 		return nil, fmt.Errorf("%w: invalid competition kind", ErrValidation)
 	}
+	f := model.CompetitionFormat(strings.TrimSpace(in.Format))
+	if f == "" {
+		f = model.CompetitionFormatCTF
+	}
+	if !f.Valid() {
+		return nil, fmt.Errorf("%w: invalid competition format", ErrValidation)
+	}
+	m := model.CompetitionScoringMode(strings.TrimSpace(in.ScoringMode))
+	if m == "" {
+		m = model.CompetitionScoringDynamic
+	}
+	if !m.Valid() {
+		return nil, fmt.Errorf("%w: invalid competition scoring mode", ErrValidation)
+	}
+	if f != model.CompetitionFormatCTF && m != model.CompetitionScoringDynamic {
+		return nil, fmt.Errorf("%w: fixed scoring is only available for ctf competitions", ErrValidation)
+	}
+	regStart, regEnd, err := validateRegistrationWindow(in.RegistrationStart, in.RegistrationEnd, in.End)
+	if err != nil {
+		return nil, err
+	}
 	// 起止时间统一以 UTC 落库：SQLite 按文本比较时间，混用时区偏移会导致
 	// ActiveCompetitions 的区间判定失真（锁定/入场窗口错判）。
-	// kind 创建后不可更改：Update 白名单不含 kind，两条参赛通路（报名/导入）
-	// 的语义都以档位为前提，中途切换会让既有参赛者失去入场依据。
-	c := &model.Competition{Name: name, Description: description, Kind: k, StartTime: start.UTC(), EndTime: end.UTC()}
+	// kind/format 创建后不可更改：Update 白名单不含二者，两条参赛通路
+	// （报名/导入）与赛制实现的语义都以它们为前提，中途切换会让既有参赛者
+	// 失去入场依据或让已有成绩按错误赛制解释。
+	c := &model.Competition{
+		Name: name, Description: in.Description, Kind: k, Format: f, ScoringMode: m,
+		RegistrationStart: regStart, RegistrationEnd: regEnd,
+		StartTime: in.Start.UTC(), EndTime: in.End.UTC(),
+	}
 	if err := s.comps.Create(ctx, c); err != nil {
 		return nil, mapRecordNotFound(err)
 	}
@@ -219,10 +277,14 @@ func (s *CompetitionService) buildDetail(ctx context.Context, c *model.Competiti
 // 语义依赖开赛时刻）；已结束的竞赛起止时间均可重新配置（新窗口落回未来
 // 即重新开赛，锁定派生自"已入场 ∧ running"，随新窗口自动恢复）。
 type CompetitionUpdate struct {
-	Name        *string
-	Description *string
-	StartTime   *time.Time
-	EndTime     *time.Time
+	Name              *string
+	Description       *string
+	StartTime         *time.Time
+	EndTime           *time.Time
+	ScoringMode       *string
+	RegistrationStart *time.Time
+	RegistrationEnd   *time.Time
+	ClearRegistration *bool
 }
 
 func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionUpdate) (*CompetitionDetail, error) {
@@ -230,7 +292,9 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 	if err != nil {
 		return nil, err
 	}
-	if u.Name == nil && u.Description == nil && u.StartTime == nil && u.EndTime == nil {
+	if u.Name == nil && u.Description == nil && u.StartTime == nil && u.EndTime == nil &&
+		u.ScoringMode == nil && u.RegistrationStart == nil && u.RegistrationEnd == nil &&
+		u.ClearRegistration == nil {
 		return nil, fmt.Errorf("%w: empty competition update", ErrValidation)
 	}
 	fields := map[string]any{}
@@ -252,6 +316,21 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 			return nil, fmt.Errorf("%w: cannot change start_time while competition is running", ErrValidation)
 		}
 	}
+	// 计分模式只属于 CTF，且只在未开赛时允许切换：开赛后再切换会让已有
+	// 首通分按另一套规则解释，破坏榜单可审计性。
+	if u.ScoringMode != nil {
+		if c.Format != model.CompetitionFormatCTF {
+			return nil, fmt.Errorf("%w: scoring_mode is only configurable for ctf competitions", ErrValidation)
+		}
+		m := model.CompetitionScoringMode(strings.TrimSpace(*u.ScoringMode))
+		if !m.Valid() {
+			return nil, fmt.Errorf("%w: invalid competition scoring mode", ErrValidation)
+		}
+		if c.Status(now) != model.CompetitionScheduled {
+			return nil, fmt.Errorf("%w: cannot change scoring_mode after competition starts", ErrValidation)
+		}
+		fields["scoring_mode"] = m
+	}
 	// 合成新的起止时间再整体校验区间。
 	start, end := c.StartTime, c.EndTime
 	if u.StartTime != nil {
@@ -268,6 +347,34 @@ func (s *CompetitionService) Update(ctx context.Context, id uint, u CompetitionU
 	}
 	if u.EndTime != nil {
 		fields["end_time"] = end.UTC()
+	}
+	// 报名窗口：clear_registration=true 清空；否则请求里只给一侧时沿用库内
+	// 另一侧，整体校验后再落库。
+	regStart, regEnd := c.RegistrationStart, c.RegistrationEnd
+	if u.ClearRegistration != nil && *u.ClearRegistration {
+		if u.RegistrationStart != nil || u.RegistrationEnd != nil {
+			return nil, fmt.Errorf("%w: cannot clear and set registration window together", ErrValidation)
+		}
+		fields["registration_start"] = nil
+		fields["registration_end"] = nil
+	} else if u.RegistrationStart != nil || u.RegistrationEnd != nil {
+		if u.RegistrationStart != nil {
+			regStart = u.RegistrationStart
+		}
+		if u.RegistrationEnd != nil {
+			regEnd = u.RegistrationEnd
+		}
+		validStart, validEnd, err := validateRegistrationWindow(regStart, regEnd, end)
+		if err != nil {
+			return nil, err
+		}
+		fields["registration_start"] = validStart
+		fields["registration_end"] = validEnd
+	} else if c.RegistrationStart != nil || c.RegistrationEnd != nil {
+		// 改了 end_time 时，既有报名窗口仍须落在新赛程内。
+		if _, _, err := validateRegistrationWindow(c.RegistrationStart, c.RegistrationEnd, end); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.comps.UpdateSelective(ctx, id, fields); err != nil {
 		return nil, err
@@ -905,14 +1012,18 @@ func (s *CompetitionService) LockedCompetition(ctx context.Context, userID uint)
 
 // PublicCompetitionItem 竞赛广场条目（仅公开赛；邀请赛定向，不对外展示）。
 type PublicCompetitionItem struct {
-	ID           uint                    `json:"id"`
-	Name         string                  `json:"name"`
-	Description  string                  `json:"description"`
-	StartTime    time.Time               `json:"start_time"`
-	EndTime      time.Time               `json:"end_time"`
-	Status       model.CompetitionStatus `json:"status"`
-	Registered   bool                    `json:"registered"`
-	Participants int64                   `json:"participants"`
+	ID                uint                         `json:"id"`
+	Name              string                       `json:"name"`
+	Description       string                       `json:"description"`
+	Format            model.CompetitionFormat      `json:"format"`
+	ScoringMode       model.CompetitionScoringMode `json:"scoring_mode"`
+	RegistrationStart *time.Time                   `json:"registration_start"`
+	RegistrationEnd   *time.Time                   `json:"registration_end"`
+	StartTime         time.Time                    `json:"start_time"`
+	EndTime           time.Time                    `json:"end_time"`
+	Status            model.CompetitionStatus      `json:"status"`
+	Registered        bool                         `json:"registered"`
+	Participants      int64                        `json:"participants"`
 }
 
 // ListPublic 竞赛广场（学生侧）：分页列出公开赛，标注当前用户报名状态与
@@ -938,6 +1049,8 @@ func (s *CompetitionService) ListPublic(ctx context.Context, userID uint, page, 
 		}
 		items[i] = PublicCompetitionItem{
 			ID: c.ID, Name: c.Name, Description: c.Description,
+			Format: c.Format, ScoringMode: c.ScoringMode,
+			RegistrationStart: c.RegistrationStart, RegistrationEnd: c.RegistrationEnd,
 			StartTime: c.StartTime, EndTime: c.EndTime, Status: c.Status(now),
 			Registered: registered, Participants: pTotal,
 		}
@@ -956,8 +1069,12 @@ func (s *CompetitionService) Register(ctx context.Context, userID, id uint) (*Pu
 	if c.Kind != model.CompetitionPublic {
 		return nil, fmt.Errorf("%w: cannot register for an invitational competition", ErrValidation)
 	}
-	if c.Status(s.now()) == model.CompetitionEnded {
+	now := s.now()
+	if c.Status(now) == model.CompetitionEnded {
 		return nil, fmt.Errorf("%w: competition has ended", ErrValidation)
+	}
+	if !c.RegistrationOpen(now) {
+		return nil, fmt.Errorf("%w: competition registration is not open", ErrValidation)
 	}
 	part, err := s.comps.FindParticipant(ctx, id, userID)
 	if err != nil {
@@ -990,6 +1107,8 @@ func (s *CompetitionService) publicItem(ctx context.Context, c *model.Competitio
 	}
 	return &PublicCompetitionItem{
 		ID: c.ID, Name: c.Name, Description: c.Description,
+		Format: c.Format, ScoringMode: c.ScoringMode,
+		RegistrationStart: c.RegistrationStart, RegistrationEnd: c.RegistrationEnd,
 		StartTime: c.StartTime, EndTime: c.EndTime, Status: c.Status(s.now()),
 		Registered: registered, Participants: pTotal,
 	}, nil

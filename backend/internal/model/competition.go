@@ -27,6 +27,36 @@ func (k CompetitionKind) Valid() bool {
 	return k == CompetitionPublic || k == CompetitionInvitational
 }
 
+// CompetitionFormat 竞赛形式（创建时选定，此后不可更改）：
+// ctf = 解题赛（现有 Challenge/Submission 形态）；
+// awd = 攻防赛（独立 Awd* 域）；exam = 在线考试（独立 Exam* 域）。
+type CompetitionFormat string
+
+const (
+	CompetitionFormatCTF  CompetitionFormat = "ctf"
+	CompetitionFormatAWD  CompetitionFormat = "awd"
+	CompetitionFormatExam CompetitionFormat = "exam"
+)
+
+// Valid 是否合法竞赛形式。
+func (f CompetitionFormat) Valid() bool {
+	return f == CompetitionFormatCTF || f == CompetitionFormatAWD || f == CompetitionFormatExam
+}
+
+// CompetitionScoringMode CTF 计分模式（非 CTF 形式忽略）：
+// dynamic = 现有按通过人数线性衰减；fixed = 按题目分值固定计分（固定分赛制）。
+type CompetitionScoringMode string
+
+const (
+	CompetitionScoringDynamic CompetitionScoringMode = "dynamic"
+	CompetitionScoringFixed   CompetitionScoringMode = "fixed"
+)
+
+// Valid 是否合法计分模式。
+func (m CompetitionScoringMode) Valid() bool {
+	return m == CompetitionScoringDynamic || m == CompetitionScoringFixed
+}
+
 // Competition 竞赛实体：管理员创建并配置起止时间。
 // 状态全程由时间派生；结束前已入场的邀请赛参赛者被锁定在竞赛入口
 // （公开赛报名入场不锁定，可自由进出，见 Participant）。
@@ -36,11 +66,31 @@ type Competition struct {
 	Description string `gorm:"size:2000" json:"description"`
 	// Kind 公开/邀请两档（见 CompetitionKind）；旧库行为 AutoMigrate 默认
 	// 补 invitational（改动前创建的竞赛全部走定向导入语义）。
-	Kind      CompetitionKind `gorm:"size:16;index;default:invitational" json:"kind"`
-	StartTime time.Time       `gorm:"index" json:"start_time"`
-	EndTime   time.Time       `gorm:"index" json:"end_time"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Kind CompetitionKind `gorm:"size:16;index;default:invitational" json:"kind"`
+	// Format 竞赛形式（见 CompetitionFormat）；旧库行默认补 ctf。
+	Format CompetitionFormat `gorm:"size:16;index;default:ctf" json:"format"`
+	// ScoringMode 仅 CTF 形式生效；旧库行默认补 dynamic。
+	ScoringMode CompetitionScoringMode `gorm:"size:16;index;default:dynamic" json:"scoring_mode"`
+	// RegistrationStart/RegistrationEnd 可选报名窗口（公开赛自助报名用；
+	// 两者必须同时配置或同时为空；为空 = 沿用旧语义，报名开放到竞赛结束）。
+	RegistrationStart *time.Time `json:"registration_start"`
+	RegistrationEnd   *time.Time `json:"registration_end"`
+	StartTime         time.Time  `gorm:"index" json:"start_time"`
+	EndTime           time.Time  `gorm:"index" json:"end_time"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// RegistrationOpen 当前时刻是否在可报名窗口内（未配置窗口 = 不限制，
+// 由 Register 另行校验竞赛未结束）。
+func (c *Competition) RegistrationOpen(now time.Time) bool {
+	if c.RegistrationStart != nil && now.Before(*c.RegistrationStart) {
+		return false
+	}
+	if c.RegistrationEnd != nil && now.After(*c.RegistrationEnd) {
+		return false
+	}
+	return true
 }
 
 // Status 当前时刻的派生状态。
