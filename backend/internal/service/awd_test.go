@@ -757,3 +757,69 @@ func TestAwdRunChecker(t *testing.T) {
 		t.Fatalf("incidents = %d, want 1", incidents)
 	}
 }
+
+// TestAwdStartRound 回合调度：生成 flag、PUT/GET/CHECK 全跑、落明细、
+// 更新 current_round；活跃回合存在时拒绝再开。
+func TestAwdStartRound(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdRepo := repo.NewAwdRepo(e.gdb)
+	awdSvc := NewAwdCompetitionService(awdRepo, repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	server, _ := httpAwdTestServer(t)
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	host, portRaw, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(portRaw)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 回合赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	svc, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: port}},
+		CheckerConfig: json.RawMessage(`{"type":"http","check_path":"/health","flag_path":"/flag"}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	ts := &model.AwdTeamService{
+		GameID: game.ID, ServiceID: svc.ID, CompetitorType: model.AwdCompetitorUser,
+		CompetitorID: 1, InternalHost: host, PortsJSON: svc.PortsJSON, Status: "running",
+	}
+	if err := e.gdb.Create(ts).Error; err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := e.gdb.Model(&model.AwdGame{}).Where("id = ?", game.ID).Update("status", model.AwdGameRunning).Error; err != nil {
+		t.Fatalf("start game: %v", err)
+	}
+	result, err := awdSvc.StartRound(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("start round: %v", err)
+	}
+	if result.Round.Number != 1 || result.Flags != 1 || len(result.Checks) != 3 || len(result.Failed) != 0 {
+		t.Fatalf("round result: %+v", result)
+	}
+	for _, check := range result.Checks {
+		if check.Status != AwdCheckOK || check.RoundID != result.Round.ID {
+			t.Fatalf("check: %+v", check)
+		}
+	}
+	var stored model.AwdGame
+	if err := e.gdb.First(&stored, game.ID).Error; err != nil || stored.CurrentRound != 1 {
+		t.Fatalf("current round: %+v err=%v", stored, err)
+	}
+	if _, err := awdSvc.StartRound(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("second active round: want ErrValidation, got %v", err)
+	}
+	again, err := awdSvc.RunRoundChecks(ctx, result.Round.ID)
+	if err != nil || len(again.Checks) != 3 {
+		t.Fatalf("rerun checks: %+v err=%v", again, err)
+	}
+}

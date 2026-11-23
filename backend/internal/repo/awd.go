@@ -96,6 +96,28 @@ func (r *awdRepo) FindRound(ctx context.Context, id uint) (*model.AwdRound, erro
 	return &round, nil
 }
 
+func (r *awdRepo) CreateRound(ctx context.Context, round *model.AwdRound) error {
+	return r.db.WithContext(ctx).Create(round).Error
+}
+
+func (r *awdRepo) UpdateRoundSelective(ctx context.Context, id uint, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.AwdRound{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// FindActiveRound 当前 running 回合（nil + record not found = 无）。
+func (r *awdRepo) FindActiveRound(ctx context.Context, gameID uint) (*model.AwdRound, error) {
+	var round model.AwdRound
+	err := r.db.WithContext(ctx).Where("game_id = ? AND status = ?", gameID, model.AwdRoundRunning).
+		Order("number desc").First(&round).Error
+	if err != nil {
+		return nil, err
+	}
+	return &round, nil
+}
+
 func (r *awdRepo) ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error) {
 	var list []model.AwdTeamService
 	err := r.db.WithContext(ctx).Where("game_id = ?", gameID).Order("id asc").Find(&list).Error
@@ -167,6 +189,15 @@ func (r *awdRepo) CreateFlags(ctx context.Context, flags []model.AwdFlag) error 
 func (r *awdRepo) FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error) {
 	var f model.AwdFlag
 	if err := r.db.WithContext(ctx).Where("value_hash = ?", valueHash).First(&f).Error; err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (r *awdRepo) FindFlagByRoundTeamService(ctx context.Context, roundID, teamServiceID uint) (*model.AwdFlag, error) {
+	var f model.AwdFlag
+	err := r.db.WithContext(ctx).Where("round_id = ? AND team_service_id = ?", roundID, teamServiceID).First(&f).Error
+	if err != nil {
 		return nil, err
 	}
 	return &f, nil

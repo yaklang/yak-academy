@@ -412,6 +412,9 @@ type AwdRepo interface {
 	CountTeamServices(ctx context.Context, serviceID uint) (int64, error)
 
 	FindRound(ctx context.Context, id uint) (*model.AwdRound, error)
+	CreateRound(ctx context.Context, round *model.AwdRound) error
+	UpdateRoundSelective(ctx context.Context, id uint, fields map[string]any) error
+	FindActiveRound(ctx context.Context, gameID uint) (*model.AwdRound, error)
 	ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error)
 	FindTeamService(ctx context.Context, id uint) (*model.AwdTeamService, error)
 	FindTeamServiceByKey(ctx context.Context, gameID, serviceID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdTeamService, error)
@@ -423,6 +426,7 @@ type AwdRepo interface {
 	UpdateAttackBoxSelective(ctx context.Context, id uint, fields map[string]any) error
 	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
 	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
+	FindFlagByRoundTeamService(ctx context.Context, roundID, teamServiceID uint) (*model.AwdFlag, error)
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
 	HasAcceptedAttack(ctx context.Context, flagID uint) (bool, error)
 	CreateCheck(ctx context.Context, check *model.AwdCheck) error
