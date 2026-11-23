@@ -31,6 +31,7 @@ type AwdCompetitionService struct {
 	comps   repo.CompetitionRepo
 	builder ImageBuilder
 	runtime AwdRuntime
+	secret  string
 	now     func() time.Time
 }
 
@@ -46,6 +47,11 @@ func (s *AwdCompetitionService) SetImageBuilder(builder ImageBuilder) {
 // SetRuntime 注入 AWD 靶机运行时（docker / noop/fake）。
 func (s *AwdCompetitionService) SetRuntime(runtime AwdRuntime) {
 	s.runtime = runtime
+}
+
+// SetSecret 注入攻击盒 SSH 密码加密密钥（主程序用 JWT secret 派生）。
+func (s *AwdCompetitionService) SetSecret(secret string) {
+	s.secret = secret
 }
 
 // SetNow 测试注入时钟。
@@ -539,26 +545,7 @@ type AwdDeployResult struct {
 	Failed  []string `json:"failed"`
 }
 
-// DeployTargets 为每个竞域单位 × 每个服务部署靶机（幂等：running 且已有容器
-// 的跳过）。团队赛要求所有参赛者已编队；个人赛每个参赛者一个 competitor。
-func (s *AwdCompetitionService) DeployTargets(ctx context.Context, competitionID uint) (*AwdDeployResult, error) {
-	game, err := s.EnsureGame(ctx, competitionID)
-	if err != nil {
-		return nil, err
-	}
-	if game.Status != model.AwdGameRunning {
-		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
-	}
-	if s.runtime == nil {
-		return nil, fmt.Errorf("%w: AWD runtime is not configured", ErrValidation)
-	}
-	services, err := s.awd.ListServices(ctx, competitionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(services) == 0 {
-		return nil, fmt.Errorf("%w: at least one AWD service is required", ErrValidation)
-	}
+func (s *AwdCompetitionService) awdCompetitors(ctx context.Context, competitionID uint, game *model.AwdGame) ([]uint, error) {
 	participants, _, err := s.comps.ListParticipants(ctx, competitionID, 0, 1<<30)
 	if err != nil {
 		return nil, err
@@ -580,6 +567,33 @@ func (s *AwdCompetitionService) DeployTargets(ctx context.Context, competitionID
 			seen[id] = true
 			competitors = append(competitors, id)
 		}
+	}
+	return competitors, nil
+}
+
+// DeployTargets 为每个竞域单位 × 每个服务部署靶机（幂等：running 且已有容器
+// 的跳过）。团队赛要求所有参赛者已编队；个人赛每个参赛者一个 competitor。
+func (s *AwdCompetitionService) DeployTargets(ctx context.Context, competitionID uint) (*AwdDeployResult, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning {
+		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
+	}
+	if s.runtime == nil {
+		return nil, fmt.Errorf("%w: AWD runtime is not configured", ErrValidation)
+	}
+	services, err := s.awd.ListServices(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(services) == 0 {
+		return nil, fmt.Errorf("%w: at least one AWD service is required", ErrValidation)
+	}
+	competitors, err := s.awdCompetitors(ctx, competitionID, game)
+	if err != nil {
+		return nil, err
 	}
 	network, err := s.runtime.EnsureNetwork(ctx, competitionID)
 	if err != nil {
@@ -631,6 +645,93 @@ func (s *AwdCompetitionService) DeployTargets(ctx context.Context, competitionID
 	}
 	if len(result.Failed) > 0 {
 		return result, fmt.Errorf("awd deploy: %d target(s) failed: %s", len(result.Failed), strings.Join(result.Failed, "; "))
+	}
+	return result, nil
+}
+
+// AwdAttackBoxDeployResult 攻击盒部署结果。
+type AwdAttackBoxDeployResult struct {
+	Created int      `json:"created"`
+	Reused  int      `json:"reused"`
+	Failed  []string `json:"failed"`
+}
+
+// DeployAttackBoxes 为每个竞域单位部署 SSH 攻击盒：随机密码加密落库，
+// 运行时返回宿主/端口；重复部署对 running 的攻击盒幂等复用。
+func (s *AwdCompetitionService) DeployAttackBoxes(ctx context.Context, competitionID uint) (*AwdAttackBoxDeployResult, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning {
+		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
+	}
+	if s.runtime == nil {
+		return nil, fmt.Errorf("%w: AWD runtime is not configured", ErrValidation)
+	}
+	if s.secret == "" {
+		return nil, fmt.Errorf("%w: AWD secret is not configured", ErrValidation)
+	}
+	competitors, err := s.awdCompetitors(ctx, competitionID, game)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.runtime.EnsureNetwork(ctx, competitionID); err != nil {
+		return nil, err
+	}
+	result := &AwdAttackBoxDeployResult{Failed: []string{}}
+	for _, competitorID := range competitors {
+		box, err := s.awd.FindAttackBoxByKey(ctx, competitionID, game.CompetitorType, competitorID)
+		if err != nil && !isNotFound(err) {
+			return nil, err
+		}
+		if err == nil && box.Status == "running" && box.ContainerID != "" && box.SSHPasswordEnc != "" {
+			result.Reused++
+			continue
+		}
+		password, err := randomAwdPassword()
+		if err != nil {
+			return nil, err
+		}
+		enc, err := encryptAwdSecret(s.secret, password)
+		if err != nil {
+			return nil, err
+		}
+		user := fmt.Sprintf("awd%d", competitorID)
+		target, err := s.runtime.CreateAttackBox(ctx, AwdAttackBoxSpec{
+			CompetitionID: competitionID, GameID: game.ID,
+			CompetitorType: game.CompetitorType, CompetitorID: competitorID,
+			SSHUser: user, SSHPassword: password,
+		})
+		if err != nil {
+			if box != nil {
+				_ = s.awd.UpdateAttackBoxSelective(ctx, box.ID, map[string]any{"status": "failed"})
+			}
+			result.Failed = append(result.Failed, fmt.Sprintf("%d: %v", competitorID, err))
+			continue
+		}
+		fields := map[string]any{
+			"container_id": target.ContainerID, "ssh_host": target.SSHHost,
+			"ssh_port": target.SSHPort, "ssh_user": user,
+			"ssh_password_enc": enc, "status": "running",
+		}
+		if box == nil {
+			box = &model.AwdAttackBox{
+				CompetitionID: competitionID, CompetitorType: game.CompetitorType,
+				CompetitorID: competitorID, ContainerID: target.ContainerID,
+				SSHHost: target.SSHHost, SSHPort: target.SSHPort, SSHUser: user,
+				SSHPasswordEnc: enc, Status: "running",
+			}
+			if err := s.awd.CreateAttackBox(ctx, box); err != nil {
+				return nil, err
+			}
+		} else if err := s.awd.UpdateAttackBoxSelective(ctx, box.ID, fields); err != nil {
+			return nil, err
+		}
+		result.Created++
+	}
+	if len(result.Failed) > 0 {
+		return result, fmt.Errorf("awd attack boxes: %d failed: %s", len(result.Failed), strings.Join(result.Failed, "; "))
 	}
 	return result, nil
 }

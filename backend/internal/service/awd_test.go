@@ -433,6 +433,17 @@ func (f *fakeAwdRuntime) DestroyTarget(_ context.Context, id string) error {
 	f.destroyed = append(f.destroyed, id)
 	return nil
 }
+func (f *fakeAwdRuntime) CreateAttackBox(_ context.Context, spec AwdAttackBoxSpec) (AwdAttackBoxTarget, error) {
+	return AwdAttackBoxTarget{
+		ContainerID: fmt.Sprintf("box-%d-%d", spec.CompetitorID, len(f.destroyed)+1),
+		SSHHost:     "ssh.test",
+		SSHPort:     2200 + len(f.created),
+	}, nil
+}
+func (f *fakeAwdRuntime) DestroyAttackBox(_ context.Context, id string) error {
+	f.destroyed = append(f.destroyed, id)
+	return nil
+}
 func (f *fakeAwdRuntime) DestroyGame(context.Context, uint) error { return nil }
 
 // TestAwdDeployTargets 运行时部署：每队每服务一个靶机；重复部署幂等复用；
@@ -528,5 +539,79 @@ func TestAwdDeployTargets(t *testing.T) {
 	}
 	if _, err := awdSvc.DeployTargets(ctx, comp.ID); !errors.Is(err, ErrValidation) {
 		t.Fatalf("teamless deploy: want ErrValidation, got %v", err)
+	}
+}
+
+// TestAwdAttackBoxes 攻击盒：每队一个；密码加密落库且可解密；重复部署复用。
+func TestAwdAttackBoxes(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdRepo := repo.NewAwdRepo(e.gdb)
+	awdSvc := NewAwdCompetitionService(awdRepo, repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	awdSvc.SetSecret("test-awd-secret")
+	awdSvc.SetRuntime(&fakeAwdRuntime{})
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 攻击盒赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	if _, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: 80}},
+	}); err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	for _, name := range []string{"box-a1", "box-a2", "box-b1"} {
+		e.ensureUser(t, name)
+	}
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
+		Teams: []TeamImport{
+			{Name: "A 队", Members: []string{"box-a1", "box-a2"}},
+			{Name: "B 队", Members: []string{"box-b1"}},
+		},
+	}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	result, err := awdSvc.DeployAttackBoxes(ctx, comp.ID)
+	if err != nil || result.Created != 2 || result.Reused != 0 || len(result.Failed) != 0 {
+		t.Fatalf("deploy boxes: %+v err=%v", result, err)
+	}
+	boxes, err := awdRepo.ListTeamServicesByGame(ctx, game.ID)
+	_ = boxes // 仅确认接口可用；攻击盒单独查
+	if err != nil {
+		t.Fatalf("list team services: %v", err)
+	}
+	teams, err := repo.NewCompetitionRepo(e.gdb).ListTeams(ctx, comp.ID)
+	if err != nil || len(teams) != 2 {
+		t.Fatalf("teams: %+v err=%v", teams, err)
+	}
+	for _, team := range teams {
+		box, err := awdRepo.FindAttackBoxByKey(ctx, comp.ID, model.AwdCompetitorTeam, team.ID)
+		if err != nil {
+			t.Fatalf("find attack box for team %d: %v", team.ID, err)
+		}
+		if box.Status != "running" || box.ContainerID == "" || box.SSHHost != "ssh.test" || box.SSHPort <= 0 {
+			t.Fatalf("attack box: %+v", box)
+		}
+		if box.SSHPasswordEnc == "" || box.SSHPasswordEnc == "password" {
+			t.Fatalf("password not encrypted: %+v", box)
+		}
+		plain, err := decryptAwdSecret("test-awd-secret", box.SSHPasswordEnc)
+		if err != nil || plain == "" {
+			t.Fatalf("decrypt password: %q err=%v", plain, err)
+		}
+	}
+	again, err := awdSvc.DeployAttackBoxes(ctx, comp.ID)
+	if err != nil || again.Created != 0 || again.Reused != 2 {
+		t.Fatalf("idempotent attack boxes: %+v err=%v", again, err)
 	}
 }

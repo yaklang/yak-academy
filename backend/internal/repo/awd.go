@@ -133,6 +133,29 @@ func (r *awdRepo) UpdateTeamServiceSelective(ctx context.Context, id uint, field
 	return r.db.WithContext(ctx).Model(&model.AwdTeamService{}).Where("id = ?", id).Updates(fields).Error
 }
 
+func (r *awdRepo) FindAttackBoxByKey(ctx context.Context, competitionID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdAttackBox, error) {
+	var box model.AwdAttackBox
+	err := r.db.WithContext(ctx).Where(
+		"competition_id = ? AND competitor_type = ? AND competitor_id = ?",
+		competitionID, competitorType, competitorID,
+	).First(&box).Error
+	if err != nil {
+		return nil, err
+	}
+	return &box, nil
+}
+
+func (r *awdRepo) CreateAttackBox(ctx context.Context, box *model.AwdAttackBox) error {
+	return r.db.WithContext(ctx).Create(box).Error
+}
+
+func (r *awdRepo) UpdateAttackBoxSelective(ctx context.Context, id uint, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.AwdAttackBox{}).Where("id = ?", id).Updates(fields).Error
+}
+
 // CreateFlags 批量写回合 flag；唯一索引冲突（重复播种）静默跳过，保证重放幂等。
 func (r *awdRepo) CreateFlags(ctx context.Context, flags []model.AwdFlag) error {
 	if len(flags) == 0 {
