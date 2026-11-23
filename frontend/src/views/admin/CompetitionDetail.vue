@@ -8,6 +8,8 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
+import CompetitionCertificatePanel from '@/components/competition/CompetitionCertificatePanel.vue'
+import CompetitionQualificationPanel from '@/components/competition/CompetitionQualificationPanel.vue'
 import {
   adminChallengeApi,
   adminCompetitionApi,
@@ -15,9 +17,6 @@ import {
   KIND_LABELS,
   SCORING_MODE_LABELS,
   type AdminLabInstance,
-  type CertificateAdminView,
-  type CertificatePreview,
-  type CertificateRuleInput,
   type ChallengeJSON,
   type CheatWarningItem,
   type Competition,
@@ -31,9 +30,6 @@ import {
   type CtfAdjustment,
   type GenerateUsersResult,
   type ParticipantImportResult,
-  type QualificationMode,
-  type QualificationPreview,
-  type QualificationRule,
   type TeamLeaderboardEntry,
   type TrainingItem,
   type WriteupItem,
@@ -961,195 +957,9 @@ async function submitAdjustment() {
   }
 }
 
-// ---------- 晋级（来源榜单 → 本邀请赛） ----------
-const qualificationSources = ref<Competition[]>([])
-const qualificationHistory = ref<QualificationRule[]>([])
-const qualificationLoading = ref(true)
-const qualificationError = ref('')
-const qualificationPreview = ref<QualificationPreview | null>(null)
-const qualificationApplying = ref(false)
-const qualificationForm = ref({
-  sourceId: null as number | null,
-  mode: 'min_score' as QualificationMode,
-  threshold: 70,
-})
-
+// 晋级/证书共享面板：只由本页派生状态门控，数据加载与操作在面板内完成。
 const qualificationDisabled = computed(() => status.value !== 'scheduled')
-
-async function loadQualifications() {
-  qualificationLoading.value = true
-  qualificationError.value = ''
-  qualificationPreview.value = null
-  try {
-    const [list, history] = await Promise.all([
-      adminCompetitionApi.list(1, 100),
-      adminCompetitionApi.qualifications(compId),
-    ])
-    qualificationSources.value = list.items.filter(
-      (c) => c.id !== compId && c.status !== 'scheduled',
-    )
-    qualificationHistory.value = history.items
-  } catch (e) {
-    qualificationError.value = e instanceof Error ? e.message : '晋级数据加载失败，请稍后重试'
-  } finally {
-    qualificationLoading.value = false
-  }
-}
-
-async function previewQualification() {
-  if (!qualificationForm.value.sourceId) {
-    notify.warning('请选择来源竞赛')
-    return
-  }
-  qualificationPreview.value = null
-  try {
-    qualificationPreview.value = await adminCompetitionApi.previewQualification(compId, {
-      source_competition_id: qualificationForm.value.sourceId,
-      mode: qualificationForm.value.mode,
-      threshold: qualificationForm.value.threshold,
-    })
-  } catch (e) {
-    notify.error(e instanceof Error ? e.message : '晋级预览失败')
-  }
-}
-
-async function applyQualification() {
-  if (!qualificationPreview.value) return
-  try {
-    await dialogs.confirm(
-      `将 ${qualificationPreview.value.candidates.length} 名中选者导入本场邀请赛并生成邀请码？同一来源竞赛只能应用一次。`,
-      '应用晋级',
-    )
-  } catch {
-    return
-  }
-  qualificationApplying.value = true
-  try {
-    const result = await adminCompetitionApi.applyQualification(compId, {
-      source_competition_id: qualificationForm.value.sourceId!,
-      mode: qualificationForm.value.mode,
-      threshold: qualificationForm.value.threshold,
-    })
-    notify.success(`已导入 ${result.imported} 名参赛者`)
-    qualificationPreview.value = null
-    await Promise.all([loadQualifications(), loadDetail()])
-  } catch (e) {
-    notify.error(e instanceof Error ? e.message : '晋级应用失败')
-  } finally {
-    qualificationApplying.value = false
-  }
-}
-
-// ---------- 证书（赛后签发） ----------
-const certificateData = ref<CertificateAdminView | null>(null)
-const certificateLoading = ref(false)
-const certificateError = ref('')
-const certificatePreview = ref<CertificatePreview | null>(null)
-const certificateIssuing = ref(false)
-const certificateForm = ref<CertificateRuleInput>({
-  title: '',
-  level: '',
-  mode: 'top_n',
-  threshold: 1,
-})
 const certificateAllowed = computed(() => status.value === 'ended')
-
-async function loadCertificates() {
-  certificateLoading.value = true
-  certificateError.value = ''
-  certificatePreview.value = null
-  try {
-    certificateData.value = await adminCompetitionApi.certificates(compId)
-  } catch (e) {
-    certificateError.value = e instanceof Error ? e.message : '证书数据加载失败，请稍后重试'
-  } finally {
-    certificateLoading.value = false
-  }
-}
-
-async function previewCertificates() {
-  if (!certificateForm.value.title.trim()) {
-    notify.warning('请填写证书名称')
-    return
-  }
-  if (!certificateForm.value.level.trim()) {
-    notify.warning('请填写证书级别')
-    return
-  }
-  if (!Number.isInteger(certificateForm.value.threshold) || certificateForm.value.threshold < 0) {
-    notify.warning('请填写有效的筛选阈值')
-    return
-  }
-  certificatePreview.value = null
-  try {
-    certificatePreview.value = await adminCompetitionApi.previewCertificates(compId, {
-      title: certificateForm.value.title.trim(),
-      level: certificateForm.value.level.trim(),
-      mode: certificateForm.value.mode,
-      threshold: certificateForm.value.threshold,
-    })
-    if (!certificatePreview.value.candidates.length) notify.warning('没有符合该规则的参赛者')
-  } catch (e) {
-    notify.error(e instanceof Error ? e.message : '证书预览失败')
-  }
-}
-
-async function issueCertificates() {
-  if (!certificatePreview.value) return
-  try {
-    await dialogs.confirm(
-      `将按「${certificatePreview.value.title}」签发 ${certificatePreview.value.candidates.length} 张证书？签发后不可撤销。`,
-      '签发证书',
-    )
-  } catch {
-    return
-  }
-  certificateIssuing.value = true
-  try {
-    const result = await adminCompetitionApi.issueCertificates(compId, {
-      title: certificateForm.value.title.trim(),
-      level: certificateForm.value.level.trim(),
-      mode: certificateForm.value.mode,
-      threshold: certificateForm.value.threshold,
-    })
-    notify.success(`已签发 ${result.certificates.length} 张证书`)
-    certificatePreview.value = null
-    await loadCertificates()
-  } catch (e) {
-    notify.error(e instanceof Error ? e.message : '证书签发失败')
-  } finally {
-    certificateIssuing.value = false
-  }
-}
-
-function certificateModeLabel(mode: QualificationMode) {
-  if (mode === 'min_score') return '最低分'
-  if (mode === 'top_percent') return '前百分比'
-  return '前 N 名'
-}
-
-function certificateThresholdLabel(mode: QualificationMode) {
-  if (mode === 'min_score') return '最低分'
-  if (mode === 'top_percent') return '百分比'
-  return 'N 名'
-}
-
-async function exportCertificates(kind: 'certificates' | 'awards') {
-  try {
-    const blob = kind === 'certificates'
-      ? await adminCompetitionApi.certificatesCSV(compId)
-      : await adminCompetitionApi.awardsCSV(compId)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `competition-${compId}-${kind}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-    notify.success(kind === 'certificates' ? '证书 CSV 已导出' : '获奖名单 CSV 已导出')
-  } catch (e) {
-    notify.error(e instanceof Error ? e.message : '导出失败')
-  }
-}
 
 async function onTab(name: string | number) {
   // 懒加载：进入对应标签页时拉取数据。
@@ -1160,8 +970,6 @@ async function onTab(name: string | number) {
   if (name === 'writeups') await loadWriteups()
   if (name === 'leaderboard') await loadBoard()
   if (name === 'adjustments') await loadAdjustments()
-  if (name === 'qualifications') await loadQualifications()
-  if (name === 'certificates') await loadCertificates()
 }
 
 onMounted(async () => {
@@ -1392,127 +1200,7 @@ onMounted(async () => {
 
       <!-- 证书（赛后按排名/分数签发） -->
       <UiTabPane label="证书" name="certificates">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>证书签发</span>
-              <UiTag :type="certificateAllowed ? 'success' : 'warning'" size="small">
-                {{ certificateAllowed ? '可签发' : '竞赛结束后可签发' }}
-              </UiTag>
-            </div>
-          </template>
-          <UiAlert
-            v-if="!certificateAllowed"
-            type="info"
-            :closable="false"
-            class="block"
-            title="证书在竞赛结束后签发"
-            description="签发时的名次与分数会写入证书快照，后续榜单变化不会改写已签发证书。"
-          />
-          <UiForm label-width="110px" style="max-width: 680px">
-            <UiFormItem label="证书名称" required>
-              <UiInput v-model="certificateForm.title" maxlength="128" placeholder="如：初赛荣誉证书 / 决赛一等奖" />
-            </UiFormItem>
-            <UiFormItem label="证书级别" required>
-              <UiInput v-model="certificateForm.level" maxlength="64" placeholder="如：一等奖 / NISP1 / AD 初级" />
-            </UiFormItem>
-            <UiFormItem label="筛选方式">
-              <UiSelect v-model="certificateForm.mode" style="width: 100%">
-                <UiOption label="最低总分" value="min_score" />
-                <UiOption label="前 N 名" value="top_n" />
-                <UiOption label="前百分之 N" value="top_percent" />
-              </UiSelect>
-            </UiFormItem>
-            <UiFormItem :label="certificateThresholdLabel(certificateForm.mode)">
-              <UiInputNumber v-model="certificateForm.threshold" :min="0" :max="1000000" />
-              <div class="dim">
-                {{ certificateForm.mode === 'top_percent' ? '1-100，按向上取整计算名额。' : certificateForm.mode === 'top_n' ? '仅正分参赛者进入排名。' : '分数不低于该值即可签发。' }}
-              </div>
-            </UiFormItem>
-            <UiFormItem>
-              <UiButton type="primary" :disabled="!certificateAllowed" @click="previewCertificates">
-                预览接收人
-              </UiButton>
-            </UiFormItem>
-          </UiForm>
-          <template v-if="certificatePreview">
-            <p class="dim">
-              {{ certificatePreview.competition_name }} 共 {{ certificatePreview.total_ranked }} 个排名单位，
-              符合「{{ certificatePreview.title }}」{{ certificatePreview.candidates.length }} 人/队。
-            </p>
-            <UiTable :data="certificatePreview.candidates" size="small" max-height="300" row-key="user_id" empty-text="无符合条件的接收人">
-              <UiTableColumn label="类型" width="80">
-                <template #default="{ row }">{{ row.recipient_kind === 'team' ? '队伍' : '个人' }}</template>
-              </UiTableColumn>
-              <UiTableColumn prop="recipient_name" label="接收人" min-width="140" />
-              <UiTableColumn prop="username" label="用户名" width="130" />
-              <UiTableColumn prop="rank" label="名次" width="80" align="right" />
-              <UiTableColumn prop="score" label="分数" width="80" align="right" />
-            </UiTable>
-            <div class="qualification-actions">
-              <UiButton
-                type="primary"
-                :loading="certificateIssuing"
-                :disabled="certificateIssuing || !certificatePreview.candidates.length"
-                @click="issueCertificates"
-              >
-                签发证书（{{ certificatePreview.candidates.length }}）
-              </UiButton>
-            </div>
-          </template>
-        </UiCard>
-
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>已签发证书（{{ certificateData?.total ?? 0 }}）</span>
-              <div class="actions">
-                <UiButton size="small" :disabled="!certificateData?.total" @click="exportCertificates('awards')">
-                  导出获奖名单 CSV
-                </UiButton>
-                <UiButton size="small" :disabled="!certificateData?.total" @click="exportCertificates('certificates')">
-                  导出证书 CSV
-                </UiButton>
-                <UiButton size="small" :loading="certificateLoading" @click="loadCertificates">刷新</UiButton>
-              </div>
-            </div>
-          </template>
-          <UiLoadError v-if="certificateError" compact :message="certificateError" @retry="loadCertificates" class="block" />
-          <template v-else>
-            <h4 class="cert-subtitle">签发批次（{{ certificateData?.rules.length ?? 0 }}）</h4>
-            <UiTable :data="certificateData?.rules ?? []" :loading="certificateLoading" size="small" empty-text="尚未签发证书">
-              <UiTableColumn prop="title" label="证书名称" min-width="150" />
-              <UiTableColumn prop="level" label="级别" width="120" />
-              <UiTableColumn label="规则" width="160">
-                <template #default="{ row }">{{ certificateModeLabel(row.mode) }} {{ row.threshold }}</template>
-              </UiTableColumn>
-              <UiTableColumn prop="issued_count" label="数量" width="80" align="right" />
-              <UiTableColumn label="签发时间" width="170">
-                <template #default="{ row }">{{ fmt(row.issued_at) }}</template>
-              </UiTableColumn>
-            </UiTable>
-            <h4 class="cert-subtitle">证书明细（{{ certificateData?.certificates.length ?? 0 }}）</h4>
-            <UiTable :data="certificateData?.certificates ?? []" size="small" max-height="360" empty-text="暂无证书">
-              <UiTableColumn label="类型" width="70">
-                <template #default="{ row }">{{ row.recipient_kind === 'team' ? '队伍' : '个人' }}</template>
-              </UiTableColumn>
-              <UiTableColumn prop="recipient_name" label="接收人" min-width="130" />
-              <UiTableColumn prop="level" label="级别" width="110" />
-              <UiTableColumn prop="rank" label="名次" width="70" align="right" />
-              <UiTableColumn prop="score" label="分数" width="70" align="right" />
-              <UiTableColumn label="验证码" width="160">
-                <template #default="{ row }">
-                  <router-link :to="`/certificates/${row.code}`" target="_blank" class="cert-code-link">
-                    <code>{{ row.code }}</code>
-                  </router-link>
-                </template>
-              </UiTableColumn>
-              <UiTableColumn label="签发时间" width="170">
-                <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-              </UiTableColumn>
-            </UiTable>
-          </template>
-        </UiCard>
+        <CompetitionCertificatePanel :competition-id="compId" :allowed="certificateAllowed" />
       </UiTabPane>
 
       <!-- 容器 -->
@@ -1705,85 +1393,11 @@ onMounted(async () => {
 
       <!-- 晋级（仅邀请赛；来源 CTF/AWD/考试排名 → 本场参赛名单） -->
       <UiTabPane v-if="detail?.kind === 'invitational'" label="晋级" name="qualifications">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>晋级名单</span>
-              <UiTag v-if="qualificationDisabled" type="info" size="small">仅未开始时可应用</UiTag>
-            </div>
-          </template>
-          <UiLoadError v-if="qualificationError" compact :message="qualificationError" @retry="loadQualifications" class="block" />
-          <template v-else>
-            <UiForm label-width="110px" style="max-width: 620px">
-              <UiFormItem label="来源竞赛">
-                <UiSelect v-model="qualificationForm.sourceId" filterable placeholder="选择已开赛的竞赛（CTF/AWD/考试）" style="width: 100%">
-                  <UiOption
-                    v-for="c in qualificationSources"
-                    :key="c.id"
-                    :label="`${c.name}（${FORMAT_LABELS[c.format]}·${c.status === 'ended' ? '已结束' : '进行中'}）`"
-                    :value="c.id"
-                  />
-                </UiSelect>
-              </UiFormItem>
-              <UiFormItem label="筛选方式">
-                <UiSelect v-model="qualificationForm.mode" style="width: 100%">
-                  <UiOption label="最低总分" value="min_score" />
-                  <UiOption label="前 N 名" value="top_n" />
-                  <UiOption label="前百分之 N" value="top_percent" />
-                </UiSelect>
-              </UiFormItem>
-              <UiFormItem :label="qualificationForm.mode === 'min_score' ? '最低分' : qualificationForm.mode === 'top_n' ? 'N 名' : '百分比'">
-                <UiInputNumber v-model="qualificationForm.threshold" :min="0" :max="1000000" :step="1" />
-              </UiFormItem>
-              <UiFormItem>
-                <UiButton type="primary" :disabled="qualificationDisabled" :loading="qualificationLoading" @click="previewQualification">
-                  预览晋级名单
-                </UiButton>
-              </UiFormItem>
-            </UiForm>
-            <template v-if="qualificationPreview">
-              <p class="dim">
-                {{ qualificationPreview.source_competition_name }} 共 {{ qualificationPreview.total_participants }} 名参赛者，
-                符合条件 {{ qualificationPreview.candidates.length }} 人（并列边界一并入选）。
-              </p>
-              <UiTable :data="qualificationPreview.candidates" size="small" empty-text="无符合条件选手">
-                <UiTableColumn prop="rank" label="名次" width="80" />
-                <UiTableColumn prop="username" label="用户名" min-width="130" />
-                <UiTableColumn prop="account_code" label="账号编码" width="130" />
-                <UiTableColumn label="队伍" min-width="120">
-                  <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
-                </UiTableColumn>
-                <UiTableColumn prop="score" label="得分" width="90" />
-              </UiTable>
-              <div class="qualification-actions">
-                <UiButton
-                  type="primary"
-                  :disabled="!qualificationPreview.candidates.length || qualificationDisabled"
-                  :loading="qualificationApplying"
-                  @click="applyQualification"
-                >应用晋级（导入参赛者）</UiButton>
-              </div>
-            </template>
-
-            <div class="qualification-history">
-              <h4>历史晋级规则</h4>
-              <UiTable :data="qualificationHistory" :loading="qualificationLoading" size="small" empty-text="尚无晋级记录">
-                <UiTableColumn prop="source_name" label="来源竞赛" min-width="160" />
-                <UiTableColumn label="规则" min-width="130">
-                  <template #default="{ row }">
-                    {{ row.mode === 'min_score' ? `≥ ${row.threshold} 分` : row.mode === 'top_n' ? `前 ${row.threshold} 名` : `前 ${row.threshold}%` }}
-                  </template>
-                </UiTableColumn>
-                <UiTableColumn label="中选人数" width="100">
-                  <template #default="{ row }">{{ row.usernames.length }}</template>
-                </UiTableColumn>
-                <UiTableColumn label="应用时间" width="170">
-                  <template #default="{ row }">{{ fmt(row.applied_at) }}</template>
-                </UiTableColumn>
-              </UiTable>
-            </div>
-          </template>
-        </UiCard>
+        <CompetitionQualificationPanel
+          :competition-id="compId"
+          :disabled="qualificationDisabled"
+          @applied="loadDetail"
+        />
       </UiTabPane>
     </UiTabs>
   </div>

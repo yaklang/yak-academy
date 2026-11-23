@@ -4,6 +4,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
+import CompetitionCertificatePanel from '@/components/competition/CompetitionCertificatePanel.vue'
+import CompetitionQualificationPanel from '@/components/competition/CompetitionQualificationPanel.vue'
 import {
   adminExamApi,
   FORMAT_LABELS,
@@ -54,6 +56,8 @@ const TYPE_LABELS: Record<ExamQuestionType, string> = {
 }
 
 const locked = computed(() => props.detail.status !== 'scheduled')
+const qualificationDisabled = computed(() => props.detail.status !== 'scheduled')
+const certificateAllowed = computed(() => props.detail.status === 'ended')
 const questions = computed(() => data.value?.questions ?? [])
 const totalScore = computed(() => data.value?.paper.total_score ?? 0)
 const resultRows = computed(() => results.value?.results ?? [])
@@ -486,6 +490,13 @@ onMounted(async () => {
         </UiTable>
       </UiCard>
     </template>
+
+    <CompetitionQualificationPanel
+      v-if="detail.kind === 'invitational'"
+      :competition-id="competitionId"
+      :disabled="qualificationDisabled"
+    />
+    <CompetitionCertificatePanel :competition-id="competitionId" :allowed="certificateAllowed" />
 
     <UiDialog v-model="showQuestion" :title="editingId ? '编辑试题' : '新增试题'" width="760px">
       <UiForm label-width="120px">

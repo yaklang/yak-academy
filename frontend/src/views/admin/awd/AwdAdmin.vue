@@ -4,6 +4,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
+import CompetitionCertificatePanel from '@/components/competition/CompetitionCertificatePanel.vue'
+import CompetitionQualificationPanel from '@/components/competition/CompetitionQualificationPanel.vue'
 import {
   adminAwdApi,
   FORMAT_LABELS,
@@ -87,6 +89,8 @@ function emptyServiceForm(): ServiceForm {
 const gameStatus = computed(() => consoleData.value?.game.status ?? 'pending')
 const pending = computed(() => gameStatus.value === 'pending')
 const running = computed(() => gameStatus.value === 'running')
+const qualificationDisabled = computed(() => props.detail.status !== 'scheduled')
+const certificateAllowed = computed(() => props.detail.status === 'ended')
 const serviceByID = computed(() => {
   const map = new Map<number, AwdService>()
   for (const svc of consoleData.value?.services ?? []) map.set(svc.id, svc)
@@ -916,6 +920,16 @@ onMounted(loadConsole)
               <template #default="{ row }">{{ fmt(row.last_event_at) }}</template>
             </UiTableColumn>
           </UiTable>
+        </UiTabPane>
+        <UiTabPane v-if="detail?.kind === 'invitational'" label="晋级" name="qualifications">
+          <CompetitionQualificationPanel
+            :competition-id="competitionId"
+            :disabled="qualificationDisabled"
+            @applied="refresh(false)"
+          />
+        </UiTabPane>
+        <UiTabPane label="证书" name="certificates">
+          <CompetitionCertificatePanel :competition-id="competitionId" :allowed="certificateAllowed" />
         </UiTabPane>
       </UiTabs>
     </template>
