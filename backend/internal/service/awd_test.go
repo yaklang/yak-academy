@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -402,5 +403,130 @@ func TestAwdFlagsAndAttackValidation(t *testing.T) {
 	expired, err := awdSvc.ValidateAttack(ctx, game.ID, model.AwdCompetitorTeam, 101, flagB.Value)
 	if err != nil || expired.Accepted || expired.Reason != "flag expired" {
 		t.Fatalf("expired flag: %+v err=%v", expired, err)
+	}
+}
+
+type fakeAwdRuntime struct {
+	network     string
+	created     []AwdTargetSpec
+	destroyed   []string
+	failService uint
+}
+
+func (f *fakeAwdRuntime) EnsureNetwork(context.Context, uint) (string, error) {
+	if f.network == "" {
+		f.network = "fake-awd-net"
+	}
+	return f.network, nil
+}
+func (f *fakeAwdRuntime) CreateTarget(_ context.Context, spec AwdTargetSpec) (AwdTarget, error) {
+	if f.failService != 0 && spec.ServiceID == f.failService {
+		return AwdTarget{}, errors.New("fake runtime failure")
+	}
+	f.created = append(f.created, spec)
+	return AwdTarget{
+		ContainerID:  fmt.Sprintf("ctr-%d-%d-%d", spec.ServiceID, spec.CompetitorID, len(f.created)),
+		InternalHost: fmt.Sprintf("awd-%d-%d", spec.ServiceID, spec.CompetitorID),
+	}, nil
+}
+func (f *fakeAwdRuntime) DestroyTarget(_ context.Context, id string) error {
+	f.destroyed = append(f.destroyed, id)
+	return nil
+}
+func (f *fakeAwdRuntime) DestroyGame(context.Context, uint) error { return nil }
+
+// TestAwdDeployTargets 运行时部署：每队每服务一个靶机；重复部署幂等复用；
+// 失败服务标记 failed；团队赛未编队拒绝。
+func TestAwdDeployTargets(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdSvc := NewAwdCompetitionService(repo.NewAwdRepo(e.gdb), repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+	rt := &fakeAwdRuntime{}
+	awdSvc.SetRuntime(rt)
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 部署赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	for _, slug := range []string{"web", "pwn"} {
+		if _, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+			Slug: slug, Image: "awd/" + slug + ":latest", Ports: []AwdPort{{Name: "main", Port: 80}},
+		}); err != nil {
+			t.Fatalf("create service %s: %v", slug, err)
+		}
+	}
+	for _, name := range []string{"deploy-a1", "deploy-a2", "deploy-b1"} {
+		e.ensureUser(t, name)
+	}
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{
+		Teams: []TeamImport{
+			{Name: "A 队", Members: []string{"deploy-a1", "deploy-a2"}},
+			{Name: "B 队", Members: []string{"deploy-b1"}},
+		},
+	}); err != nil {
+		t.Fatalf("import teams: %v", err)
+	}
+	game, err := awdSvc.EnsureGame(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("ensure game: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	result, err := awdSvc.DeployTargets(ctx, comp.ID)
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if result.Network != "fake-awd-net" || result.Created != 4 || result.Reused != 0 || len(result.Failed) != 0 {
+		t.Fatalf("deploy result: %+v", result)
+	}
+	if len(rt.created) != 4 {
+		t.Fatalf("runtime targets = %d, want 4", len(rt.created))
+	}
+	again, err := awdSvc.DeployTargets(ctx, comp.ID)
+	if err != nil || again.Created != 0 || again.Reused != 4 {
+		t.Fatalf("idempotent deploy: %+v err=%v", again, err)
+	}
+	teamServices, err := repo.NewAwdRepo(e.gdb).ListTeamServicesByGame(ctx, game.ID)
+	if err != nil || len(teamServices) != 4 {
+		t.Fatalf("team services = %+v err=%v", teamServices, err)
+	}
+	hosts := map[string]bool{}
+	for _, ts := range teamServices {
+		if ts.Status != "running" || ts.ContainerID == "" || ts.InternalHost == "" {
+			t.Fatalf("team service not running: %+v", ts)
+		}
+		if hosts[ts.InternalHost] {
+			t.Fatalf("duplicate internal host %q", ts.InternalHost)
+		}
+		hosts[ts.InternalHost] = true
+	}
+
+	// 新增一个服务并注入失败：既有 4 个复用，新服务的 2 个目标失败。
+	extra := &model.AwdService{
+		CompetitionID: comp.ID, Slug: "misc", Name: "Misc", Image: "awd/misc:latest",
+		PortsJSON: `[{"name":"main","port":80,"protocol":"tcp"}]`, CheckerConfig: "{}",
+		BaseScore: 100, SlaWeight: 100, AttackPoints: 100, DefenseLoss: 50,
+		CheckdownPenalty: 50, FlagLifetimeRounds: 1,
+	}
+	if err := e.gdb.Create(extra).Error; err != nil {
+		t.Fatalf("seed extra service: %v", err)
+	}
+	rt.failService = extra.ID
+	failedResult, err := awdSvc.DeployTargets(ctx, comp.ID)
+	if err == nil || len(failedResult.Failed) != 2 || failedResult.Reused != 4 {
+		t.Fatalf("failed deploy: %+v err=%v", failedResult, err)
+	}
+
+	// 团队赛未编队：新增个人参赛者后拒绝部署。
+	teamless := e.ensureUser(t, "deploy-teamless")
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{teamless.Username}}); err != nil {
+		t.Fatalf("import teamless: %v", err)
+	}
+	if _, err := awdSvc.DeployTargets(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("teamless deploy: want ErrValidation, got %v", err)
 	}
 }

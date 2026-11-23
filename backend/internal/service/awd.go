@@ -30,6 +30,7 @@ type AwdCompetitionService struct {
 	awd     repo.AwdRepo
 	comps   repo.CompetitionRepo
 	builder ImageBuilder
+	runtime AwdRuntime
 	now     func() time.Time
 }
 
@@ -40,6 +41,11 @@ func NewAwdCompetitionService(awd repo.AwdRepo, comps repo.CompetitionRepo) *Awd
 // SetImageBuilder 注入服务包镜像构建器（docker / noop）。
 func (s *AwdCompetitionService) SetImageBuilder(builder ImageBuilder) {
 	s.builder = builder
+}
+
+// SetRuntime 注入 AWD 靶机运行时（docker / noop/fake）。
+func (s *AwdCompetitionService) SetRuntime(runtime AwdRuntime) {
+	s.runtime = runtime
 }
 
 // SetNow 测试注入时钟。
@@ -523,6 +529,110 @@ func (s *AwdCompetitionService) DeleteService(ctx context.Context, competitionID
 		return fmt.Errorf("%w: service has deployed targets", ErrValidation)
 	}
 	return s.awd.DeleteService(ctx, serviceID)
+}
+
+// AwdDeployResult 靶机部署结果（部分失败时 Failed 非空）。
+type AwdDeployResult struct {
+	Network string   `json:"network"`
+	Created int      `json:"created"`
+	Reused  int      `json:"reused"`
+	Failed  []string `json:"failed"`
+}
+
+// DeployTargets 为每个竞域单位 × 每个服务部署靶机（幂等：running 且已有容器
+// 的跳过）。团队赛要求所有参赛者已编队；个人赛每个参赛者一个 competitor。
+func (s *AwdCompetitionService) DeployTargets(ctx context.Context, competitionID uint) (*AwdDeployResult, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning {
+		return nil, fmt.Errorf("%w: AWD game is not running", ErrValidation)
+	}
+	if s.runtime == nil {
+		return nil, fmt.Errorf("%w: AWD runtime is not configured", ErrValidation)
+	}
+	services, err := s.awd.ListServices(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(services) == 0 {
+		return nil, fmt.Errorf("%w: at least one AWD service is required", ErrValidation)
+	}
+	participants, _, err := s.comps.ListParticipants(ctx, competitionID, 0, 1<<30)
+	if err != nil {
+		return nil, err
+	}
+	if len(participants) == 0 {
+		return nil, fmt.Errorf("%w: at least one participant is required", ErrValidation)
+	}
+	competitors := make([]uint, 0, len(participants))
+	seen := map[uint]bool{}
+	for _, p := range participants {
+		id := p.UserID
+		if game.CompetitorType == model.AwdCompetitorTeam {
+			if p.TeamID == 0 {
+				return nil, fmt.Errorf("%w: team AWD requires every participant to join a team", ErrValidation)
+			}
+			id = p.TeamID
+		}
+		if !seen[id] {
+			seen[id] = true
+			competitors = append(competitors, id)
+		}
+	}
+	network, err := s.runtime.EnsureNetwork(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	result := &AwdDeployResult{Network: network, Failed: []string{}}
+	for _, svc := range services {
+		for _, competitorID := range competitors {
+			ts, err := s.awd.FindTeamServiceByKey(ctx, game.ID, svc.ID, game.CompetitorType, competitorID)
+			if err != nil && !isNotFound(err) {
+				return nil, err
+			}
+			if err == nil && ts.Status == "running" && ts.ContainerID != "" {
+				result.Reused++
+				continue
+			}
+			if ts == nil {
+				ts = &model.AwdTeamService{
+					GameID: game.ID, ServiceID: svc.ID,
+					CompetitorType: game.CompetitorType, CompetitorID: competitorID,
+					PortsJSON: svc.PortsJSON, Status: "pending",
+				}
+				if err := s.awd.CreateTeamService(ctx, ts); err != nil {
+					return nil, err
+				}
+			} else if err := s.awd.UpdateTeamServiceSelective(ctx, ts.ID, map[string]any{
+				"status": "pending", "ports_json": svc.PortsJSON,
+			}); err != nil {
+				return nil, err
+			}
+			target, err := s.runtime.CreateTarget(ctx, AwdTargetSpec{
+				CompetitionID: competitionID, GameID: game.ID,
+				ServiceID: svc.ID, ServiceSlug: svc.Slug, Image: svc.Image,
+				CompetitorType: game.CompetitorType, CompetitorID: competitorID,
+			})
+			if err != nil {
+				_ = s.awd.UpdateTeamServiceSelective(ctx, ts.ID, map[string]any{"status": "failed"})
+				result.Failed = append(result.Failed, fmt.Sprintf("%s/%d: %v", svc.Slug, competitorID, err))
+				continue
+			}
+			if err := s.awd.UpdateTeamServiceSelective(ctx, ts.ID, map[string]any{
+				"container_id": target.ContainerID, "internal_host": target.InternalHost,
+				"status": "running", "ports_json": svc.PortsJSON,
+			}); err != nil {
+				return nil, err
+			}
+			result.Created++
+		}
+	}
+	if len(result.Failed) > 0 {
+		return result, fmt.Errorf("awd deploy: %d target(s) failed: %s", len(result.Failed), strings.Join(result.Failed, "; "))
+	}
+	return result, nil
 }
 
 // AwdAttackValidation 攻击提交的校验结论（accepted=false 为业务拒绝，不返回 error）。

@@ -414,6 +414,9 @@ type AwdRepo interface {
 	FindRound(ctx context.Context, id uint) (*model.AwdRound, error)
 	ListTeamServicesByGame(ctx context.Context, gameID uint) ([]model.AwdTeamService, error)
 	FindTeamService(ctx context.Context, id uint) (*model.AwdTeamService, error)
+	FindTeamServiceByKey(ctx context.Context, gameID, serviceID uint, competitorType model.AwdCompetitorType, competitorID uint) (*model.AwdTeamService, error)
+	CreateTeamService(ctx context.Context, ts *model.AwdTeamService) error
+	UpdateTeamServiceSelective(ctx context.Context, id uint, fields map[string]any) error
 	CreateFlags(ctx context.Context, flags []model.AwdFlag) error
 	FindFlagByHash(ctx context.Context, valueHash string) (*model.AwdFlag, error)
 	CreateAttack(ctx context.Context, attack *model.AwdAttack) error
