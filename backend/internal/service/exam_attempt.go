@@ -425,22 +425,7 @@ func (s *ExamService) ExpireDueAttempts(ctx context.Context) (int, error) {
 
 // expireAttempt 条件交卷（幂等）；返回是否本次真正由进行中转为过期。
 func (s *ExamService) expireAttempt(ctx context.Context, attempt *model.ExamAttempt, at time.Time) bool {
-	n, err := s.exam.ExpireAttempt(ctx, attempt.ID, at)
-	if err != nil {
-		log.Printf("exam: expire attempt %d: %v", attempt.ID, err)
-		return false
-	}
-	if n == 0 {
-		return false
-	}
-	attempt.Status = model.ExamAttemptExpired
-	attempt.AutoSubmitted = true
-	attempt.SubmittedAt = &at
-	s.appendEvent(ctx, attempt.UserID, model.EventExamAttemptSubmitted, map[string]any{
-		"competition_id": attempt.CompetitionID, "paper_id": attempt.PaperID,
-		"attempt_id": attempt.ID, "auto_submitted": true, "submitted_at": at,
-	})
-	return true
+	return s.finalizeAttempt(ctx, attempt, model.ExamAttemptExpired, at, true)
 }
 
 func (s *ExamService) appendEvent(ctx context.Context, userID uint, t model.EventType, payload map[string]any) {

@@ -481,13 +481,19 @@ type ExamRepo interface {
 	FindAttempt(ctx context.Context, id uint) (*model.ExamAttempt, error)
 	CreateAttempt(ctx context.Context, attempt *model.ExamAttempt) error
 	UpdateAttemptSelective(ctx context.Context, id uint, fields map[string]any) error
-	// ExpireAttempt 条件更新 in_progress → expired（返回受影响行数，0 = 已被处理）。
-	ExpireAttempt(ctx context.Context, id uint, at time.Time) (int64, error)
+	// FinalizeAttempt 条件更新 in_progress → submitted/expired（返回受影响行数，
+	// 0 = 已被其他请求处理，调用方不得重复评分/发事件）。
+	FinalizeAttempt(ctx context.Context, id uint, status model.ExamAttemptStatus, at time.Time, auto bool) (int64, error)
 	ListExpiredAttempts(ctx context.Context, now time.Time, limit int) ([]model.ExamAttempt, error)
+	ListAttemptsByCompetition(ctx context.Context, competitionID uint) ([]model.ExamAttempt, error)
 
 	FindAnswer(ctx context.Context, attemptID, questionID uint) (*model.ExamAnswer, error)
 	ListAnswers(ctx context.Context, attemptID uint) ([]model.ExamAnswer, error)
 	UpsertAnswer(ctx context.Context, answer *model.ExamAnswer) error
+	UpdateAnswerGrading(ctx context.Context, attemptID, questionID uint, correct bool, score int) error
+
+	ListStandings(ctx context.Context, competitionID uint) ([]model.ExamStanding, error)
+	ReplaceStandings(ctx context.Context, competitionID uint, standings []model.ExamStanding) error
 }
 
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内

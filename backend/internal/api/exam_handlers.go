@@ -78,6 +78,23 @@ func (h *Handlers) examSaveAnswer(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, answer)
 }
 
+func (h *Handlers) examSubmitAttempt(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Exam.SubmitAttempt(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "exam.attempt.submit", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"attempt_id": view.Attempt.ID, "status": view.Attempt.Status})
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (h *Handlers) adminGetExamPaper(w http.ResponseWriter, req *http.Request) {
 	id, err := compID(req)
 	if err != nil {

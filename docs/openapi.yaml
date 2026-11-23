@@ -4695,6 +4695,21 @@ paths:
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 
+  /competitions/{id}/exam/attempts/current/submit:
+    post:
+      tags: [competitions]
+      summary: 交卷（客观题即时评分；已到期按 expired 自动交卷；幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamParticipantView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
   /competitions/{id}/awd/attacks:
     post:
       tags: [competitions]
