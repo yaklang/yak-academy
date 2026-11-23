@@ -1323,6 +1323,19 @@ components:
         correct: { type: boolean }
         score: { type: integer }
         code_submission_id: { type: integer }
+    ExamCodeSubmissionView:
+      type: object
+      description: 编程题提交回执（判定异步；结果通过考试页轮询）
+      properties:
+        question_id: { type: integer }
+        submission_id: { type: integer }
+        status: { type: string, enum: [pending, correct, incorrect] }
+        verdict: { type: string, nullable: true, description: 'ac/wa/tle/re/internal_error' }
+    ExamCodeInput:
+      type: object
+      required: [answer]
+      properties:
+        answer: { type: string, description: yak 源码（≤ 256KiB） }
     ExamParticipantView:
       type: object
       description: 选手考试页（单次作答；服务端计时）
@@ -4707,6 +4720,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExamParticipantView' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /competitions/{id}/exam/attempts/current/questions/{qid}/code:
+    post:
+      tags: [competitions]
+      summary: 提交编程题源码（judge exam scope；异步判定后回写考试分）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: qid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamCodeInput' }
+      responses:
+        '202':
+          description: Accepted（入队判定）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExamCodeSubmissionView' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }
 

@@ -175,6 +175,7 @@ func main() {
 	awdSvc.SetReportsDir(cfg.ReportsDir)
 	awdSvc.StartWorker(ctx)
 	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo)
+	examSvc.SetJudge(judgeSvc)
 	examSvc.SetEvents(eventRepo, bus)
 	examSvc.StartWorker(ctx)
 

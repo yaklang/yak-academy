@@ -473,6 +473,7 @@ type ExamRepo interface {
 	ListQuestions(ctx context.Context, paperID uint) ([]model.ExamQuestion, error)
 	FindQuestion(ctx context.Context, id uint) (*model.ExamQuestion, error)
 	FindQuestionBySeq(ctx context.Context, paperID uint, seq int) (*model.ExamQuestion, error)
+	FindQuestionByChallenge(ctx context.Context, paperID, challengeID uint) (*model.ExamQuestion, error)
 	CreateQuestion(ctx context.Context, question *model.ExamQuestion) error
 	UpdateQuestionSelective(ctx context.Context, id uint, fields map[string]any) error
 	DeleteQuestion(ctx context.Context, id uint) error
@@ -491,6 +492,9 @@ type ExamRepo interface {
 	ListAnswers(ctx context.Context, attemptID uint) ([]model.ExamAnswer, error)
 	UpsertAnswer(ctx context.Context, answer *model.ExamAnswer) error
 	UpdateAnswerGrading(ctx context.Context, attemptID, questionID uint, correct bool, score int) error
+	// UpdateAnswerCodeGrading 仅当 code_submission_id 仍为该次提交时回写
+	// （旧提交的迟到判定不得覆盖最新提交）。
+	UpdateAnswerCodeGrading(ctx context.Context, attemptID, questionID, submissionID uint, correct bool, score int) (int64, error)
 
 	ListStandings(ctx context.Context, competitionID uint) ([]model.ExamStanding, error)
 	ReplaceStandings(ctx context.Context, competitionID uint, standings []model.ExamStanding) error

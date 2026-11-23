@@ -94,7 +94,6 @@ func (s *ExamService) gradeAttempt(ctx context.Context, attempt *model.ExamAttem
 	for i := range answers {
 		answerByQuestion[answers[i].QuestionID] = &answers[i]
 	}
-	objectiveScore := 0
 	for i := range questions {
 		question := &questions[i]
 		if question.Type == model.ExamQuestionCode {
@@ -112,12 +111,45 @@ func (s *ExamService) gradeAttempt(ctx context.Context, attempt *model.ExamAttem
 		if err := s.exam.UpdateAnswerGrading(ctx, attempt.ID, question.ID, correct, score); err != nil {
 			return err
 		}
-		answer.Graded = true
-		answer.Correct = correct
-		answer.Score = score
-		objectiveScore += score
 	}
-	codeScore := attempt.CodeScore
+	return s.recomputeExamAttemptScores(ctx, attempt)
+}
+
+// recomputeExamAttemptScores 从已评分的作答事实重算客观/编程分并发布 graded
+// 事件（客观题交卷与编程题判题回写共用；幂等，可重复调用）。
+func (s *ExamService) recomputeExamAttemptScores(ctx context.Context, attempt *model.ExamAttempt) error {
+	paper, err := s.exam.FindPaper(ctx, attempt.PaperID)
+	if err != nil {
+		return err
+	}
+	questions, err := s.exam.ListQuestions(ctx, paper.ID)
+	if err != nil {
+		return err
+	}
+	answers, err := s.exam.ListAnswers(ctx, attempt.ID)
+	if err != nil {
+		return err
+	}
+	answerByQuestion := make(map[uint]*model.ExamAnswer, len(answers))
+	for i := range answers {
+		answerByQuestion[answers[i].QuestionID] = &answers[i]
+	}
+	objectiveScore, codeScore := 0, 0
+	for i := range questions {
+		question := &questions[i]
+		answer := answerByQuestion[question.ID]
+		if answer == nil || !answer.Graded {
+			continue
+		}
+		// 得分事实一律以 answer 表为准（judge 回写与交卷评分同源）。
+		if answer.Correct {
+			if question.Type == model.ExamQuestionCode {
+				codeScore += question.Score
+			} else {
+				objectiveScore += question.Score
+			}
+		}
+	}
 	total := objectiveScore + codeScore
 	passed := total >= paper.PassScore
 	now := s.now()

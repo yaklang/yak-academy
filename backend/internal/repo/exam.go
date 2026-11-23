@@ -181,3 +181,21 @@ func (r *examRepo) ReplaceStandings(ctx context.Context, competitionID uint, sta
 		return tx.Create(&standings).Error
 	})
 }
+
+func (r *examRepo) FindQuestionByChallenge(ctx context.Context, paperID, challengeID uint) (*model.ExamQuestion, error) {
+	var question model.ExamQuestion
+	if err := r.db.WithContext(ctx).
+		Where("paper_id = ? AND challenge_id = ?", paperID, challengeID).
+		First(&question).Error; err != nil {
+		return nil, err
+	}
+	return &question, nil
+}
+
+func (r *examRepo) UpdateAnswerCodeGrading(ctx context.Context, attemptID, questionID, submissionID uint, correct bool, score int) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.ExamAnswer{}).
+		Where("attempt_id = ? AND question_id = ? AND code_submission_id = ?",
+			attemptID, questionID, submissionID).
+		Updates(map[string]any{"graded": true, "correct": correct, "score": score})
+	return res.RowsAffected, res.Error
+}

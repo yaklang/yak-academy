@@ -16,7 +16,7 @@ description: yak-academy 事件溯源数据流约束。涉及积分、进度、�
 | type | 触发 |
 |---|---|
 | `submission.created` | 用户提交答案（flag 明文 / yak 源码） |
-| `submission.judged` | worker 完成判定（payload 含 correct 与得分；编程题另含 `verdict`: ac/wa/tle/re/internal_error） |
+| `submission.judged` | worker 完成判定（payload 含 correct 与得分；编程题另含 `verdict`: ac/wa/tle/re/internal_error；考试编程题另含 `exam_attempt_id`，全局派生器跳过 XP/竞赛积分） |
 | `hint.unlocked` | 用户扣分解锁提示 |
 | `room.completed` | Room 通关 |
 | `lab.instance.started / stopped` | 题目环境生命周期 |

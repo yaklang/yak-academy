@@ -104,6 +104,19 @@ func (s *JudgeService) Submit(ctx context.Context, userID uint, challengeID uint
 // SubmitScoped 带作用域提交：competitionID>0 即竞赛提交（记录来源 IP，
 // 判定/计分/派生全部按竞赛分组）。训练场提交走 Submit（competitionID=0）。
 func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, competitionID uint, answer, sourceIP string) (*model.Submission, error) {
+	return s.submitScoped(ctx, userID, challengeID, competitionID, 0, answer, sourceIP)
+}
+
+// SubmitExam 考试编程题提交：绑定 exam_attempt_id。判定事件只回写考试作答，
+// 全局积分/竞赛积分派生均跳过（考试独立计分）。
+func (s *JudgeService) SubmitExam(ctx context.Context, userID, challengeID, competitionID, examAttemptID uint, answer, sourceIP string) (*model.Submission, error) {
+	if examAttemptID == 0 {
+		return nil, fmt.Errorf("%w: exam_attempt_id is required", ErrValidation)
+	}
+	return s.submitScoped(ctx, userID, challengeID, competitionID, examAttemptID, answer, sourceIP)
+}
+
+func (s *JudgeService) submitScoped(ctx context.Context, userID, challengeID, competitionID, examAttemptID uint, answer, sourceIP string) (*model.Submission, error) {
 	if answer == autoAnswer {
 		return nil, fmt.Errorf("%w: reserved answer", ErrValidation)
 	}
@@ -114,6 +127,7 @@ func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, co
 		UserID:        userID,
 		ChallengeID:   challengeID,
 		CompetitionID: competitionID,
+		ExamAttemptID: examAttemptID,
 		SourceIP:      sourceIP,
 		Answer:        answer,
 		Status:        model.SubmissionPending,
@@ -126,6 +140,9 @@ func (s *JudgeService) SubmitScoped(ctx context.Context, userID, challengeID, co
 	}
 	if competitionID > 0 {
 		created["competition_id"] = competitionID
+	}
+	if examAttemptID > 0 {
+		created["exam_attempt_id"] = examAttemptID
 	}
 	s.appendEvent(ctx, userID, model.EventSubmissionCreated, created)
 	// 队列满静默丢弃：submission 已落库（pending），由 pending 轮询兜底重投。
@@ -482,6 +499,9 @@ func (s *JudgeService) finishCode(ctx context.Context, sub *model.Submission, ve
 			payload["source_ip"] = sub.SourceIP
 		}
 	}
+	if sub.ExamAttemptID > 0 {
+		payload["exam_attempt_id"] = sub.ExamAttemptID
+	}
 	s.appendEvent(ctx, sub.UserID, model.EventSubmissionJudged, payload)
 }
 
@@ -524,6 +544,9 @@ func (s *JudgeService) finish(ctx context.Context, sub *model.Submission, status
 		if sub.SourceIP != "" {
 			payload["source_ip"] = sub.SourceIP
 		}
+	}
+	if sub.ExamAttemptID > 0 {
+		payload["exam_attempt_id"] = sub.ExamAttemptID
 	}
 	s.appendEvent(ctx, sub.UserID, model.EventSubmissionJudged, payload)
 }
@@ -588,6 +611,7 @@ func (s *JudgeService) dynamicScore(ctx context.Context, challengeID, competitio
 //     （flag_mode=instance 的题，flag 按实例生成，跨队共享即违规信号）；
 //  2. ip_anomaly：来源 IP 与本人参赛记录上的最近 IP 基线不一致
 //     （可能账号被他人代打/共享）。
+//
 // 检测失败只记日志，不阻断判题主流程。
 func (s *JudgeService) detectCheat(ctx context.Context, sub *model.Submission, chal *model.Challenge) {
 	if s.competitions == nil {
