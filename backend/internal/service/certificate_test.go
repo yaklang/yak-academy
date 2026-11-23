@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"strings"
 	"testing"
@@ -144,5 +145,34 @@ func TestCertificateIssueRules(t *testing.T) {
 		Title: "无人证书", Level: "测试", Mode: model.QualificationMinScore, Threshold: 1000,
 	}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty recipients: want ErrValidation, got %v", err)
+	}
+
+	certCSV, filename, err := certSvc.CertificateCSV(ctx, comp.ID)
+	if err != nil || filename != "competition-1-certificates.csv" {
+		t.Fatalf("certificate csv: %s err=%v", filename, err)
+	}
+	if !strings.HasPrefix(string(certCSV), "\xEF\xBB\xBF") {
+		t.Fatal("certificate CSV must start with UTF-8 BOM")
+	}
+	records, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(certCSV), "\xEF\xBB\xBF"))).ReadAll()
+	if err != nil || len(records) != 4 {
+		t.Fatalf("certificate CSV rows: %d err=%v", len(records), err)
+	}
+	if records[1][3] != "张三" || records[1][7] != cert.Code || records[1][8] != "/certificates/"+cert.Code {
+		t.Fatalf("certificate CSV row: %+v", records[1])
+	}
+	awardCSV, filename, err := certSvc.AwardCSV(ctx, comp.ID)
+	if err != nil || filename != "competition-1-awards.csv" {
+		t.Fatalf("award csv: %s err=%v", filename, err)
+	}
+	awards, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(awardCSV), "\xEF\xBB\xBF"))).ReadAll()
+	if err != nil || len(awards) != 4 {
+		t.Fatalf("award CSV rows: %d err=%v", len(awards), err)
+	}
+	if awards[1][0] != comp.Name || awards[1][4] != "张三" || awards[1][2] != "一等奖" {
+		t.Fatalf("award CSV row: %+v", awards[1])
+	}
+	if strings.Contains(string(awardCSV), cert.Code) {
+		t.Fatal("award CSV must not contain verification codes")
 	}
 }

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import { E2E } from './fixtures/consts'
 import { adminToken, endCompetition, loginAsAdmin, studentToken } from './helpers'
@@ -95,6 +96,26 @@ test.describe('竞赛证书', () => {
     const codeCell = page.getByRole('cell', { name: /^[A-F0-9]{16}$/ })
     await expect(codeCell).toBeVisible()
     const code = (await codeCell.innerText()).trim()
+
+    // 证书 CSV 含验证码/验证路径；获奖名单 CSV 不含验证码。
+    const certDownloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出证书 CSV' }).click()
+    const certDownload = await certDownloadPromise
+    expect(certDownload.suggestedFilename()).toContain('certificates.csv')
+    const certCSV = await readFile((await certDownload.path()) as string, 'utf8')
+    expect(certCSV.startsWith('﻿')).toBeTruthy()
+    expect(certCSV).toContain('张三')
+    expect(certCSV).toContain(code)
+    expect(certCSV).toContain(`/certificates/${code}`)
+
+    const awardDownloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出获奖名单 CSV' }).click()
+    const awardDownload = await awardDownloadPromise
+    expect(awardDownload.suggestedFilename()).toContain('awards.csv')
+    const awardCSV = await readFile((await awardDownload.path()) as string, 'utf8')
+    expect(awardCSV).toContain('张三')
+    expect(awardCSV).toContain('一等奖')
+    expect(awardCSV).not.toContain(code)
 
     // 公开验证接口无需登录；页面凭验证码展示姓名/奖项/名次快照并支持打印。
     const verified = await request.get(`${E2E.apiURL}/api/v1/certificates/${code}`)

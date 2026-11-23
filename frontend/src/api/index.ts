@@ -1778,6 +1778,8 @@ export const adminCompetitionApi = {
     http.post<CertificatePreview>(`/admin/competitions/${id}/certificates/preview`, body),
   issueCertificates: (id: number, body: CertificateRuleInput) =>
     http.post<CertificateIssueResult>(`/admin/competitions/${id}/certificates`, body),
+  certificatesCSV: (id: number) => http.download(`/admin/competitions/${id}/certificates.csv`),
+  awardsCSV: (id: number) => http.download(`/admin/competitions/${id}/awards.csv`),
 }
 
 // 竞赛参赛（学生端）。
