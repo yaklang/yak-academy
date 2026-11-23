@@ -461,6 +461,23 @@ type AwdRepo interface {
 	CreateIncident(ctx context.Context, incident *model.AwdIncident) error
 }
 
+// ExamRepo 考试域：试卷/试题（后续提交阶段扩展作答与成绩）。与 CTF/AWD
+// 独立，ExamService 不引用 Challenge judge（编程题只在 commit 29 通过
+// JudgeService 的 exam scope 提交）。
+type ExamRepo interface {
+	FindPaperByCompetition(ctx context.Context, competitionID uint) (*model.ExamPaper, error)
+	FindPaper(ctx context.Context, id uint) (*model.ExamPaper, error)
+	CreatePaper(ctx context.Context, paper *model.ExamPaper) error
+	UpdatePaperSelective(ctx context.Context, paperID uint, fields map[string]any) error
+
+	ListQuestions(ctx context.Context, paperID uint) ([]model.ExamQuestion, error)
+	FindQuestion(ctx context.Context, id uint) (*model.ExamQuestion, error)
+	FindQuestionBySeq(ctx context.Context, paperID uint, seq int) (*model.ExamQuestion, error)
+	CreateQuestion(ctx context.Context, question *model.ExamQuestion) error
+	UpdateQuestionSelective(ctx context.Context, id uint, fields map[string]any) error
+	DeleteQuestion(ctx context.Context, id uint) error
+}
+
 // SettingsRepo 运行期统一配置（system_settings，一行一个配置域；Value 为域内
 // JSON）。Get 未命中返回 (nil, nil)，与 gorm.ErrRecordNotFound 区分开。
 type SettingsRepo interface {

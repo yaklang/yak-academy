@@ -65,6 +65,7 @@ func main() {
 	progressRepo := repo.NewProgressRepo(gdb)
 	competitionRepo := repo.NewCompetitionRepo(gdb)
 	awdRepo := repo.NewAwdRepo(gdb)
+	examRepo := repo.NewExamRepo(gdb)
 	mailRepo := repo.NewMailRepo(gdb)
 
 	// 事件总线 + 派生器（积分/进度/竞赛积分是事件的物化视图）
@@ -167,6 +168,7 @@ func main() {
 	awdSvc.SetUsers(userRepo)
 	awdSvc.SetReportsDir(cfg.ReportsDir)
 	awdSvc.StartWorker(ctx)
+	examSvc := service.NewExamService(examRepo, competitionRepo, challengeRepo)
 
 	// 备份（ops 硬化）：SQLite 快照 + 数据目录归档。PG 模式应用内备份不支持
 	//（外部 pg_dump），调度与手动创建均拒绝并给出指引。
@@ -211,7 +213,7 @@ func main() {
 	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil, emailSender)
 	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
 	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, examSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {
