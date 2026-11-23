@@ -855,6 +855,8 @@ export interface TeamLeaderboardEntry {
   solved_count: number
   members: string[]
   last_solve_at: string | null
+  // 仅 individual 模式返回：学号式账号编码。
+  account_code?: string
 }
 export interface LeaderboardResp {
   mode: 'team' | 'individual'
@@ -1013,6 +1015,9 @@ export const adminCompetitionApi = {
     http.download(`/admin/competitions/${id}/writeups/${wid}/zip`),
   leaderboard: (id: number, mode: 'team' | 'individual' = 'team') =>
     http.get<LeaderboardResp>(`/admin/competitions/${id}/leaderboard?mode=${mode}`),
+  // 榜单 CSV 导出（individual 含账号编码；返回 Blob，前端触发下载）。
+  standingsCsv: (id: number, mode: 'team' | 'individual' = 'team') =>
+    http.download(`/admin/competitions/${id}/standings.csv?mode=${mode}`),
 }
 
 // 竞赛参赛（学生端）。

@@ -776,6 +776,7 @@ components:
         solved_count: { type: integer, description: 队内成员通关题数 }
         members: { type: array, items: { type: string }, description: 成员用户名列表 }
         last_solve_at: { type: string, nullable: true, description: 最近一次通关时间（同分先达者靠前） }
+        account_code: { type: string, description: 仅 individual 模式填充的账号编码（CSV 导出用） }
     CompLeaderboardEntry:
       type: object
       description: 竞赛个人排行榜条目（同分并列同名次）
@@ -783,6 +784,7 @@ components:
         rank: { type: integer }
         user_id: { type: integer }
         username: { type: string }
+        account_code: { type: string, description: 学号式账号编码 }
         team_name:
           type: string
           nullable: true
@@ -3068,6 +3070,22 @@ paths:
                 properties:
                   mode: { type: string, enum: [team, individual] }
                   items: { type: array, items: { $ref: '#/components/schemas/TeamLeaderboardEntry' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/standings.csv:
+    get:
+      tags: [admin]
+      summary: 导出竞赛榜单 CSV（管理端；individual 含账号编码，team 含成员列表）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: mode, in: query, schema: { type: string, enum: [team, individual], default: team } }
+      responses:
+        '200':
+          description: CSV 文件（UTF-8 BOM；Content-Disposition attachment）
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
 

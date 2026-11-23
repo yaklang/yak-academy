@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"testing"
 
@@ -82,4 +84,57 @@ func TestIndividualStandingsIncludeZeroScoreParticipants(t *testing.T) {
 	if !foundZero {
 		t.Fatalf("team board missing zero-score individual: %+v", teamItems)
 	}
+
+	raw, filename, err := e.comps.StandingsCSV(ctx, comp.ID, "individual")
+	if err != nil {
+		t.Fatalf("individual CSV: %v", err)
+	}
+	if filename != "competition-"+itoa(comp.ID)+"-standings-individual.csv" {
+		t.Fatalf("individual CSV filename = %q", filename)
+	}
+	if !bytes.HasPrefix(raw, []byte("\xEF\xBB\xBF")) {
+		t.Fatal("CSV must start with UTF-8 BOM")
+	}
+	rows, err := csv.NewReader(bytes.NewReader(raw[3:])).ReadAll()
+	if err != nil {
+		t.Fatalf("parse individual CSV: %v", err)
+	}
+	if len(rows) != 3 || rows[0][0] != "排名" || rows[0][2] != "账号编码" {
+		t.Fatalf("individual CSV rows: %+v", rows)
+	}
+	if rows[1][1] != solver.Username || rows[1][4] != "100" || rows[1][5] != "1" {
+		t.Fatalf("individual CSV solver row: %+v", rows[1])
+	}
+	if rows[2][1] != zero.Username || rows[2][4] != "0" || rows[2][5] != "0" {
+		t.Fatalf("individual CSV zero row: %+v", rows[2])
+	}
+
+	teamRaw, teamFilename, err := e.comps.StandingsCSV(ctx, comp.ID, "team")
+	if err != nil || teamFilename != "competition-"+itoa(comp.ID)+"-standings-team.csv" {
+		t.Fatalf("team CSV: name=%q err=%v", teamFilename, err)
+	}
+	teamRows, err := csv.NewReader(bytes.NewReader(teamRaw[3:])).ReadAll()
+	if err != nil {
+		t.Fatalf("parse team CSV: %v", err)
+	}
+	if len(teamRows) != 3 || teamRows[0][1] != "队伍" || teamRows[0][2] != "成员" {
+		t.Fatalf("team CSV rows: %+v", teamRows)
+	}
+	if teamRows[2][1] != zero.Username || teamRows[2][3] != "0" {
+		t.Fatalf("team CSV zero row: %+v", teamRows[2])
+	}
+}
+
+func itoa(v uint) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
 }

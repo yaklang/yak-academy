@@ -352,6 +352,24 @@ func (h *Handlers) adminCompetitionLeaderboard(w http.ResponseWriter, req *http.
 	writeJSON(w, http.StatusOK, board)
 }
 
+// adminCompetitionStandingsCSV 管理端导出竞赛榜单 CSV（mode=team/individual）。
+func (h *Handlers) adminCompetitionStandingsCSV(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	data, filename, err := h.Competitions.StandingsCSV(req.Context(), id, req.URL.Query().Get("mode"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 // ---------- 参赛者 ----------
 
 // listPublicCompetitions 竞赛广场：分页列出公开赛（含报名状态）。
