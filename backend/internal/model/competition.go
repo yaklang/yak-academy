@@ -133,6 +133,22 @@ type Participant struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CompetitionProfile 竞赛身份名册：外部报名渠道的实名信息，按竞赛+用户唯一。
+// 仅管理端可见完整字段；参赛者只能读写自己的记录。不与 User 合并，避免
+// 赛事身份覆盖平台账号资料（同一用户可参加多场竞赛，身份信息按场留存）。
+type CompetitionProfile struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	CompetitionID uint      `gorm:"uniqueIndex:idx_competition_profile_user;index" json:"competition_id"`
+	UserID        uint      `gorm:"uniqueIndex:idx_competition_profile_user" json:"user_id"`
+	RealName      string    `gorm:"size:64" json:"real_name"`
+	School        string    `gorm:"size:128" json:"school"`
+	StudentNo     string    `gorm:"size:64" json:"student_no"`
+	Email         string    `gorm:"size:128" json:"email"`
+	Phone         string    `gorm:"size:32" json:"phone"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 // CompetitionChallenge 竞赛题目绑定：Challenge 仍是独立资源（teaching-integration
 // skill），本表只表达"该题属于这场竞赛"的多对多关系。
 type CompetitionChallenge struct {

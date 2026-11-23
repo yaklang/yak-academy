@@ -759,3 +759,77 @@ func sourceIP(req *http.Request) string {
 	}
 	return host
 }
+
+// adminCompetitionRoster 身份名册（全部参赛者，未填写的也返回）。
+func (h *Handlers) adminCompetitionRoster(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	rows, err := h.Competitions.Roster(req.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": rows, "total": len(rows)})
+}
+
+// adminImportCompetitionRoster CSV 名册导入（前端解析 CSV 后提交结构化条目）。
+func (h *Handlers) adminImportCompetitionRoster(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body service.CompetitionRosterImportRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.Competitions.ImportRoster(req.Context(), id, body)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "competition.roster.import", "competition", strconv.FormatUint(uint64(id), 10),
+		map[string]any{"imported": result.Imported, "missing": len(result.Missing)})
+	writeJSON(w, http.StatusOK, result)
+}
+
+// competitionProfile 参赛者本人名册（未填写返回 has_profile=false）。
+func (h *Handlers) competitionProfile(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Competitions.Profile(req.Context(), id, user.ID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// competitionUpdateProfile 参赛者补填/修改本人名册。
+func (h *Handlers) competitionUpdateProfile(w http.ResponseWriter, req *http.Request) {
+	id, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body service.CompetitionProfileInput
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	view, err := h.Competitions.UpdateProfile(req.Context(), id, user.ID, body)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
