@@ -296,6 +296,34 @@ func (r *competitionRepo) SumPositiveCtfAdjustments(ctx context.Context, competi
 	return total, err
 }
 
+// CreateQualificationRule 落一条已应用的晋级规则。
+func (r *competitionRepo) CreateQualificationRule(ctx context.Context, rule *model.QualificationRule) error {
+	return r.db.WithContext(ctx).Create(rule).Error
+}
+
+// CreateQualificationEntries 批量落中选名单（单事务）。
+func (r *competitionRepo) CreateQualificationEntries(ctx context.Context, entries []model.QualificationEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&entries).Error
+}
+
+// ListQualificationRules 目标竞赛历史晋级规则（新→旧）。
+func (r *competitionRepo) ListQualificationRules(ctx context.Context, targetCompetitionID uint) ([]model.QualificationRule, error) {
+	var list []model.QualificationRule
+	err := r.db.WithContext(ctx).Where("target_competition_id = ?", targetCompetitionID).
+		Order("created_at desc, id desc").Find(&list).Error
+	return list, err
+}
+
+// ListQualificationEntries 某条规则的中选名单（按名次）。
+func (r *competitionRepo) ListQualificationEntries(ctx context.Context, ruleID uint) ([]model.QualificationEntry, error) {
+	var list []model.QualificationEntry
+	err := r.db.WithContext(ctx).Where("rule_id = ?", ruleID).Order("rank asc, user_id asc").Find(&list).Error
+	return list, err
+}
+
 // ActiveCompetitions 当前处于 running 状态的竞赛（锁定判定用）。
 // 时间比较在 SQL 侧完成，避免时钟注入差异。入参统一转 UTC：
 // SQLite 以文本比较时间，与落库的 UTC 值保持同一基准才可靠。

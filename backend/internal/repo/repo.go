@@ -382,6 +382,15 @@ type CompetitionRepo interface {
 	// SumPositiveCtfAdjustments 单人在该竞赛的正向附加分合计（BonusCap 校验）。
 	SumPositiveCtfAdjustments(ctx context.Context, competitionID, userID uint) (int, error)
 
+	// CreateQualificationRule 落一条已应用的晋级规则。
+	CreateQualificationRule(ctx context.Context, rule *model.QualificationRule) error
+	// CreateQualificationEntries 批量落中选名单快照。
+	CreateQualificationEntries(ctx context.Context, entries []model.QualificationEntry) error
+	// ListQualificationRules 目标竞赛历史的晋级规则（新→旧）。
+	ListQualificationRules(ctx context.Context, targetCompetitionID uint) ([]model.QualificationRule, error)
+	// ListQualificationEntries 某条规则的中选名单。
+	ListQualificationEntries(ctx context.Context, ruleID uint) ([]model.QualificationEntry, error)
+
 	// ActiveCompetitions 当前 running 的竞赛（入场锁定判定用）。
 	ActiveCompetitions(ctx context.Context, now time.Time) ([]model.Competition, error)
 }

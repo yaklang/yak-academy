@@ -205,3 +205,42 @@ type CtfAdjustment struct {
 	CreatedBy     uint      `gorm:"index" json:"created_by"`
 	CreatedAt     time.Time `gorm:"index" json:"created_at"`
 }
+
+// QualificationMode 晋级筛选方式。
+type QualificationMode string
+
+const (
+	QualificationMinScore   QualificationMode = "min_score"   // 最低分（含）
+	QualificationTopN       QualificationMode = "top_n"       // 前 N 名（并列同名次一并晋级）
+	QualificationTopPercent QualificationMode = "top_percent" // 前百分之 N（并列同名次一并晋级）
+)
+
+// Valid 是否合法晋级方式。
+func (m QualificationMode) Valid() bool {
+	return m == QualificationMinScore || m == QualificationTopN || m == QualificationTopPercent
+}
+
+// QualificationRule 晋级规则（预览不落库；应用时落一条规则 + 中选名单）。
+// Source 是榜单来源竞赛，Target 是邀请赛目标竞赛（应用时把中选者导入为参赛者）。
+type QualificationRule struct {
+	ID                  uint              `gorm:"primaryKey" json:"id"`
+	SourceCompetitionID uint              `gorm:"index" json:"source_competition_id"`
+	TargetCompetitionID uint              `gorm:"index" json:"target_competition_id"`
+	Mode                QualificationMode `gorm:"size:16" json:"mode"`
+	Threshold           int               `json:"threshold"`
+	CreatedBy           uint              `gorm:"index" json:"created_by"`
+	CreatedAt           time.Time         `json:"created_at"`
+	AppliedAt           *time.Time        `json:"applied_at"`
+}
+
+// QualificationEntry 晋级中选名单快照（规则应用时的名次与分数）。
+type QualificationEntry struct {
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	RuleID              uint      `gorm:"index" json:"rule_id"`
+	SourceCompetitionID uint      `gorm:"index" json:"source_competition_id"`
+	TargetCompetitionID uint      `gorm:"index" json:"target_competition_id"`
+	UserID              uint      `gorm:"index" json:"user_id"`
+	Rank                int       `json:"rank"`
+	Score               int       `json:"score"`
+	CreatedAt           time.Time `json:"created_at"`
+}

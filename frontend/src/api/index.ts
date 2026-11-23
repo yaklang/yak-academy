@@ -876,6 +876,44 @@ export interface CtfAdjustment {
   username?: string
   team_name?: string | null
 }
+export type QualificationMode = 'min_score' | 'top_n' | 'top_percent'
+export interface QualificationCandidate {
+  user_id: number
+  username: string
+  account_code: string
+  team_name: string | null
+  rank: number
+  score: number
+}
+export interface QualificationPreview {
+  source_competition_id: number
+  source_competition_name: string
+  target_competition_id: number
+  target_competition_name: string
+  mode: QualificationMode
+  threshold: number
+  total_participants: number
+  candidates: QualificationCandidate[]
+}
+export interface QualificationApplyResult {
+  rule_id: number
+  imported: number
+  missing: string[]
+  preview: QualificationPreview
+}
+export interface QualificationRule {
+  id: number
+  source_competition_id: number
+  target_competition_id: number
+  mode: QualificationMode
+  threshold: number
+  created_by: number
+  created_at: string
+  applied_at: string | null
+  source_name: string
+  target_name: string
+  usernames: string[]
+}
 // 批量导入请求（仅邀请赛）：队伍 + 个人参赛者。条目按「账号编码或用户名」
 // 引用既有账号，不自动建号——缺失条目在响应 missing 回报（补号走一键生成）。
 export interface ParticipantImportRequest {
@@ -1038,6 +1076,16 @@ export const adminCompetitionApi = {
     http.get<{ items: CtfAdjustment[] }>(`/admin/competitions/${id}/adjustments`),
   addAdjustment: (id: number, body: { user_id: number; points: number; reason: string }) =>
     http.post<CtfAdjustment>(`/admin/competitions/${id}/adjustments`, body),
+  qualifications: (id: number) =>
+    http.get<{ items: QualificationRule[] }>(`/admin/competitions/${id}/qualifications`),
+  previewQualification: (
+    id: number,
+    body: { source_competition_id: number; mode: QualificationMode; threshold: number },
+  ) => http.post<QualificationPreview>(`/admin/competitions/${id}/qualifications/preview`, body),
+  applyQualification: (
+    id: number,
+    body: { source_competition_id: number; mode: QualificationMode; threshold: number },
+  ) => http.post<QualificationApplyResult>(`/admin/competitions/${id}/qualifications/apply`, body),
 }
 
 // 竞赛参赛（学生端）。

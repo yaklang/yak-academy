@@ -808,6 +808,52 @@ components:
         created_at: { type: string }
         username: { type: string, description: 仅列表响应填充 }
         team_name: { type: string, nullable: true, description: 仅列表响应填充 }
+    QualificationCandidate:
+      type: object
+      description: 晋级中选者（来源竞赛个人榜快照）
+      properties:
+        user_id: { type: integer }
+        username: { type: string }
+        account_code: { type: string }
+        team_name: { type: string, nullable: true }
+        rank: { type: integer }
+        score: { type: integer }
+    QualificationPreview:
+      type: object
+      description: 晋级预览（不落库；并列同名次在边界处一并入选，因此人数可超过 N）
+      properties:
+        source_competition_id: { type: integer }
+        source_competition_name: { type: string }
+        target_competition_id: { type: integer }
+        target_competition_name: { type: string }
+        mode: { type: string, enum: [min_score, top_n, top_percent] }
+        threshold: { type: integer }
+        total_participants: { type: integer }
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/QualificationCandidate' }
+    QualificationApplyResult:
+      type: object
+      properties:
+        rule_id: { type: integer }
+        imported: { type: integer, description: 导入/沿用为参赛者的人数 }
+        missing: { type: array, items: { type: string }, description: 未匹配账号（理论上为空） }
+        preview: { $ref: '#/components/schemas/QualificationPreview' }
+    QualificationRule:
+      type: object
+      description: 已应用的晋级规则（来源→目标邀请赛）
+      properties:
+        id: { type: integer }
+        source_competition_id: { type: integer }
+        target_competition_id: { type: integer }
+        mode: { type: string, enum: [min_score, top_n, top_percent] }
+        threshold: { type: integer }
+        created_by: { type: integer }
+        created_at: { type: string }
+        applied_at: { type: string, nullable: true }
+        source_name: { type: string }
+        target_name: { type: string }
+        usernames: { type: array, items: { type: string } }
     ParticipantImportRequest:
       type: object
       description: |
@@ -3147,6 +3193,78 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CtfAdjustment' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/qualifications:
+    get:
+      tags: [admin]
+      summary: 目标竞赛的历史晋级规则（含中选用户名）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/QualificationRule' } }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/qualifications/preview:
+    post:
+      tags: [admin]
+      summary: 晋级预览（来源必须是已开赛 CTF；目标必须是未开始的邀请赛；不落库）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_competition_id, mode, threshold]
+              properties:
+                source_competition_id: { type: integer }
+                mode: { type: string, enum: [min_score, top_n, top_percent] }
+                threshold: { type: integer, description: min_score>=0；top_n>0；top_percent 1..100 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QualificationPreview' }
+        '403': { $ref: '#/components/responses/ErrorResp' }
+        '404': { $ref: '#/components/responses/ErrorResp' }
+        '422': { $ref: '#/components/responses/ErrorResp' }
+
+  /admin/competitions/{id}/qualifications/apply:
+    post:
+      tags: [admin]
+      summary: 应用晋级（导入目标邀请赛参赛者 + 落规则/名单；同一来源→目标仅一次；写 audit）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_competition_id, mode, threshold]
+              properties:
+                source_competition_id: { type: integer }
+                mode: { type: string, enum: [min_score, top_n, top_percent] }
+                threshold: { type: integer }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QualificationApplyResult' }
         '403': { $ref: '#/components/responses/ErrorResp' }
         '404': { $ref: '#/components/responses/ErrorResp' }
         '422': { $ref: '#/components/responses/ErrorResp' }

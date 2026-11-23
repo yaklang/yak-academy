@@ -25,6 +25,9 @@ import {
   type CtfAdjustment,
   type GenerateUsersResult,
   type ParticipantImportResult,
+  type QualificationMode,
+  type QualificationPreview,
+  type QualificationRule,
   type TeamLeaderboardEntry,
   type TrainingItem,
   type WriteupItem,
@@ -799,6 +802,85 @@ async function submitAdjustment() {
   }
 }
 
+// ---------- 晋级（来源榜单 → 本邀请赛） ----------
+const qualificationSources = ref<Competition[]>([])
+const qualificationHistory = ref<QualificationRule[]>([])
+const qualificationLoading = ref(true)
+const qualificationError = ref('')
+const qualificationPreview = ref<QualificationPreview | null>(null)
+const qualificationApplying = ref(false)
+const qualificationForm = ref({
+  sourceId: null as number | null,
+  mode: 'min_score' as QualificationMode,
+  threshold: 70,
+})
+
+const qualificationDisabled = computed(() => status.value !== 'scheduled')
+
+async function loadQualifications() {
+  qualificationLoading.value = true
+  qualificationError.value = ''
+  qualificationPreview.value = null
+  try {
+    const [list, history] = await Promise.all([
+      adminCompetitionApi.list(1, 100),
+      adminCompetitionApi.qualifications(compId),
+    ])
+    qualificationSources.value = list.items.filter(
+      (c) => c.id !== compId && c.format === 'ctf' && c.status !== 'scheduled',
+    )
+    qualificationHistory.value = history.items
+  } catch (e) {
+    qualificationError.value = e instanceof Error ? e.message : '晋级数据加载失败，请稍后重试'
+  } finally {
+    qualificationLoading.value = false
+  }
+}
+
+async function previewQualification() {
+  if (!qualificationForm.value.sourceId) {
+    notify.warning('请选择来源竞赛')
+    return
+  }
+  qualificationPreview.value = null
+  try {
+    qualificationPreview.value = await adminCompetitionApi.previewQualification(compId, {
+      source_competition_id: qualificationForm.value.sourceId,
+      mode: qualificationForm.value.mode,
+      threshold: qualificationForm.value.threshold,
+    })
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '晋级预览失败')
+  }
+}
+
+async function applyQualification() {
+  if (!qualificationPreview.value) return
+  try {
+    await dialogs.confirm(
+      `将 ${qualificationPreview.value.candidates.length} 名中选者导入本场邀请赛并生成邀请码？同一来源竞赛只能应用一次。`,
+      '应用晋级',
+    )
+  } catch {
+    return
+  }
+  qualificationApplying.value = true
+  try {
+    const result = await adminCompetitionApi.applyQualification(compId, {
+      source_competition_id: qualificationForm.value.sourceId!,
+      mode: qualificationForm.value.mode,
+      threshold: qualificationForm.value.threshold,
+    })
+    notify.success(`已导入 ${result.imported} 名参赛者`)
+    qualificationPreview.value = null
+    await Promise.all([loadQualifications(), loadDetail()])
+  } catch (e) {
+    notify.error(e instanceof Error ? e.message : '晋级应用失败')
+  } finally {
+    qualificationApplying.value = false
+  }
+}
+
 async function onTab(name: string | number) {
   // 懒加载：进入对应标签页时拉取数据。
   if (name === 'challenges' && !challenges.value.length) await loadChallenges()
@@ -808,6 +890,7 @@ async function onTab(name: string | number) {
   if (name === 'writeups') await loadWriteups()
   if (name === 'leaderboard') await loadBoard()
   if (name === 'adjustments') await loadAdjustments()
+  if (name === 'qualifications') await loadQualifications()
 }
 
 onMounted(async () => {
@@ -1210,6 +1293,89 @@ onMounted(async () => {
           </UiTable>
         </UiCard>
       </UiTabPane>
+
+      <!-- 晋级（仅邀请赛；来源 CTF 榜单 → 本场参赛名单） -->
+      <UiTabPane v-if="detail?.kind === 'invitational'" label="晋级" name="qualifications">
+        <UiCard shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>晋级名单</span>
+              <UiTag v-if="qualificationDisabled" type="info" size="small">仅未开始时可应用</UiTag>
+            </div>
+          </template>
+          <UiLoadError v-if="qualificationError" compact :message="qualificationError" @retry="loadQualifications" class="block" />
+          <template v-else>
+            <UiForm label-width="110px" style="max-width: 620px">
+              <UiFormItem label="来源竞赛">
+                <UiSelect v-model="qualificationForm.sourceId" filterable placeholder="选择已开赛的 CTF 竞赛" style="width: 100%">
+                  <UiOption
+                    v-for="c in qualificationSources"
+                    :key="c.id"
+                    :label="`${c.name}（${c.status === 'ended' ? '已结束' : '进行中'}）`"
+                    :value="c.id"
+                  />
+                </UiSelect>
+              </UiFormItem>
+              <UiFormItem label="筛选方式">
+                <UiSelect v-model="qualificationForm.mode" style="width: 100%">
+                  <UiOption label="最低总分" value="min_score" />
+                  <UiOption label="前 N 名" value="top_n" />
+                  <UiOption label="前百分之 N" value="top_percent" />
+                </UiSelect>
+              </UiFormItem>
+              <UiFormItem :label="qualificationForm.mode === 'min_score' ? '最低分' : qualificationForm.mode === 'top_n' ? 'N 名' : '百分比'">
+                <UiInputNumber v-model="qualificationForm.threshold" :min="0" :max="1000000" :step="1" />
+              </UiFormItem>
+              <UiFormItem>
+                <UiButton type="primary" :disabled="qualificationDisabled" :loading="qualificationLoading" @click="previewQualification">
+                  预览晋级名单
+                </UiButton>
+              </UiFormItem>
+            </UiForm>
+            <template v-if="qualificationPreview">
+              <p class="dim">
+                {{ qualificationPreview.source_competition_name }} 共 {{ qualificationPreview.total_participants }} 名参赛者，
+                符合条件 {{ qualificationPreview.candidates.length }} 人（并列边界一并入选）。
+              </p>
+              <UiTable :data="qualificationPreview.candidates" size="small" empty-text="无符合条件选手">
+                <UiTableColumn prop="rank" label="名次" width="80" />
+                <UiTableColumn prop="username" label="用户名" min-width="130" />
+                <UiTableColumn prop="account_code" label="账号编码" width="130" />
+                <UiTableColumn label="队伍" min-width="120">
+                  <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
+                </UiTableColumn>
+                <UiTableColumn prop="score" label="得分" width="90" />
+              </UiTable>
+              <div class="qualification-actions">
+                <UiButton
+                  type="primary"
+                  :disabled="!qualificationPreview.candidates.length || qualificationDisabled"
+                  :loading="qualificationApplying"
+                  @click="applyQualification"
+                >应用晋级（导入参赛者）</UiButton>
+              </div>
+            </template>
+
+            <div class="qualification-history">
+              <h4>历史晋级规则</h4>
+              <UiTable :data="qualificationHistory" :loading="qualificationLoading" size="small" empty-text="尚无晋级记录">
+                <UiTableColumn prop="source_name" label="来源竞赛" min-width="160" />
+                <UiTableColumn label="规则" min-width="130">
+                  <template #default="{ row }">
+                    {{ row.mode === 'min_score' ? `≥ ${row.threshold} 分` : row.mode === 'top_n' ? `前 ${row.threshold} 名` : `前 ${row.threshold}%` }}
+                  </template>
+                </UiTableColumn>
+                <UiTableColumn label="中选人数" width="100">
+                  <template #default="{ row }">{{ row.usernames.length }}</template>
+                </UiTableColumn>
+                <UiTableColumn label="应用时间" width="170">
+                  <template #default="{ row }">{{ fmt(row.applied_at) }}</template>
+                </UiTableColumn>
+              </UiTable>
+            </div>
+          </template>
+        </UiCard>
+      </UiTabPane>
     </UiTabs>
   </div>
 
@@ -1554,6 +1720,9 @@ onMounted(async () => {
 .stat.warn b { color: var(--destructive); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .card-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.qualification-actions { margin-top: var(--space-3); }
+.qualification-history { margin-top: var(--space-5); }
+.qualification-history h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
 .block { margin-bottom: var(--space-5); }
 .dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 .pager { margin-top: var(--space-4); }

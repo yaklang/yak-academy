@@ -1654,6 +1654,8 @@ type TeamLeaderboardEntry struct {
 	LastSolveAt *string  `json:"last_solve_at"`
 	// AccountCode 仅 individual 模式填充（榜单导出/证书定位账号）；team 模式为空。
 	AccountCode string `json:"account_code,omitempty"`
+	// UserID 仅 individual 模式填充（晋级/证书按人落库）；team 模式为空。
+	UserID uint `json:"user_id,omitempty"`
 }
 
 // CompLeaderboardEntry 个人榜条目（同分并列，先达者靠前）。
@@ -1785,7 +1787,7 @@ func (s *CompetitionService) Leaderboard(ctx context.Context, id uint, mode stri
 				Rank: e.Rank, TeamName: e.TeamName,
 				Score: e.Score, Bonus: e.Bonus, SolvedCount: e.SolvedCount,
 				Members: []string{e.Username}, LastSolveAt: e.LastSolveAt,
-				AccountCode: e.AccountCode,
+				AccountCode: e.AccountCode, UserID: e.UserID,
 			}
 		}
 		return map[string]any{"mode": "individual", "items": items}, nil
@@ -2071,6 +2073,225 @@ func (s *CompetitionService) ListCtfAdjustments(ctx context.Context, competition
 		items[i] = item
 	}
 	return items, nil
+}
+
+// ---------- 晋级（来源榜单 → 邀请赛参赛名单） ----------
+
+// QualificationCandidate 晋级预览中的一名中选者（按个人榜）。
+type QualificationCandidate struct {
+	UserID      uint    `json:"user_id"`
+	Username    string  `json:"username"`
+	AccountCode string  `json:"account_code"`
+	TeamName    *string `json:"team_name"`
+	Rank        int     `json:"rank"`
+	Score       int     `json:"score"`
+}
+
+// QualificationPreview 晋级预览（不落库）。Threshold 语义随 Mode 变化：
+// min_score=最低总分（含）；top_n=前 N 名；top_percent=前 N%。
+type QualificationPreview struct {
+	SourceCompetitionID   uint                     `json:"source_competition_id"`
+	SourceCompetitionName string                   `json:"source_competition_name"`
+	TargetCompetitionID   uint                     `json:"target_competition_id"`
+	TargetCompetitionName string                   `json:"target_competition_name"`
+	Mode                  model.QualificationMode  `json:"mode"`
+	Threshold             int                      `json:"threshold"`
+	TotalParticipants     int                      `json:"total_participants"`
+	Candidates            []QualificationCandidate `json:"candidates"`
+}
+
+// QualificationApplyResult 应用结果。
+type QualificationApplyResult struct {
+	RuleID   uint                  `json:"rule_id"`
+	Imported int                   `json:"imported"`
+	Missing  []string              `json:"missing"`
+	Preview  *QualificationPreview `json:"preview"`
+}
+
+// QualificationRuleItem 历史晋级规则（管理端展示）。
+type QualificationRuleItem struct {
+	model.QualificationRule
+	SourceName string   `json:"source_name"`
+	TargetName string   `json:"target_name"`
+	Usernames  []string `json:"usernames"`
+}
+
+func (s *CompetitionService) qualificationPreview(ctx context.Context, sourceID, targetID uint, mode string, threshold int) (*QualificationPreview, error) {
+	if sourceID == 0 || targetID == 0 {
+		return nil, fmt.Errorf("%w: source_competition_id and target_competition_id are required", ErrValidation)
+	}
+	if sourceID == targetID {
+		return nil, fmt.Errorf("%w: source and target competition must differ", ErrValidation)
+	}
+	source, err := s.requireFormat(ctx, sourceID, model.CompetitionFormatCTF)
+	if err != nil {
+		return nil, err
+	}
+	if source.Status(s.now()) == model.CompetitionScheduled {
+		return nil, fmt.Errorf("%w: source competition has not started", ErrValidation)
+	}
+	target, err := s.find(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if target.Kind != model.CompetitionInvitational {
+		return nil, fmt.Errorf("%w: qualification can only target an invitational competition", ErrValidation)
+	}
+	if target.Status(s.now()) != model.CompetitionScheduled {
+		return nil, fmt.Errorf("%w: qualification target must be scheduled", ErrValidation)
+	}
+	m := model.QualificationMode(strings.TrimSpace(mode))
+	if !m.Valid() {
+		return nil, fmt.Errorf("%w: invalid qualification mode", ErrValidation)
+	}
+	switch m {
+	case model.QualificationMinScore:
+		if threshold < 0 {
+			return nil, fmt.Errorf("%w: min_score cannot be negative", ErrValidation)
+		}
+	case model.QualificationTopN:
+		if threshold <= 0 {
+			return nil, fmt.Errorf("%w: top_n must be positive", ErrValidation)
+		}
+	case model.QualificationTopPercent:
+		if threshold <= 0 || threshold > 100 {
+			return nil, fmt.Errorf("%w: top_percent must be in 1..100", ErrValidation)
+		}
+	}
+	board, err := s.Leaderboard(ctx, sourceID, "individual")
+	if err != nil {
+		return nil, err
+	}
+	items, _ := board["items"].([]TeamLeaderboardEntry)
+	total := len(items)
+	quota := 0
+	if m == model.QualificationTopPercent {
+		quota = (total*threshold + 99) / 100
+	}
+	candidates := make([]QualificationCandidate, 0, total)
+	for _, item := range items {
+		eligible := false
+		switch m {
+		case model.QualificationMinScore:
+			eligible = item.Score >= threshold
+		case model.QualificationTopN:
+			eligible = item.Score > 0 && item.Rank <= threshold
+		case model.QualificationTopPercent:
+			eligible = item.Score > 0 && item.Rank <= quota
+		}
+		if !eligible {
+			continue
+		}
+		username := ""
+		if len(item.Members) > 0 {
+			username = item.Members[0]
+		}
+		candidates = append(candidates, QualificationCandidate{
+			UserID: item.UserID, Username: username, AccountCode: item.AccountCode,
+			TeamName: item.TeamName, Rank: item.Rank, Score: item.Score,
+		})
+	}
+	return &QualificationPreview{
+		SourceCompetitionID: source.ID, SourceCompetitionName: source.Name,
+		TargetCompetitionID: target.ID, TargetCompetitionName: target.Name,
+		Mode: m, Threshold: threshold, TotalParticipants: total, Candidates: candidates,
+	}, nil
+}
+
+// PreviewQualification 按来源竞赛个人榜预览晋级名单。
+func (s *CompetitionService) PreviewQualification(ctx context.Context, sourceID, targetID uint, mode string, threshold int) (*QualificationPreview, error) {
+	return s.qualificationPreview(ctx, sourceID, targetID, mode, threshold)
+}
+
+// ApplyQualification 应用晋级：把中选者导入目标邀请赛（生成邀请码并投递邀请），
+// 落晋级规则 + 名单快照。同一来源→目标只允许应用一次（重复应用 422）。
+func (s *CompetitionService) ApplyQualification(ctx context.Context, actorID, sourceID, targetID uint, mode string, threshold int) (*QualificationApplyResult, error) {
+	preview, err := s.qualificationPreview(ctx, sourceID, targetID, mode, threshold)
+	if err != nil {
+		return nil, err
+	}
+	if len(preview.Candidates) == 0 {
+		return nil, fmt.Errorf("%w: no participant matches the qualification rule", ErrValidation)
+	}
+	rules, err := s.comps.ListQualificationRules(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rules {
+		if r.SourceCompetitionID == sourceID {
+			return nil, fmt.Errorf("%w: qualification from this source has already been applied", ErrValidation)
+		}
+	}
+	usernames := make([]string, 0, len(preview.Candidates))
+	for _, candidate := range preview.Candidates {
+		usernames = append(usernames, candidate.Username)
+	}
+	imported, err := s.ImportParticipants(ctx, targetID, ParticipantImportRequest{Individuals: usernames})
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	rule := &model.QualificationRule{
+		SourceCompetitionID: sourceID, TargetCompetitionID: targetID,
+		Mode: preview.Mode, Threshold: threshold, CreatedBy: actorID,
+		CreatedAt: now, AppliedAt: &now,
+	}
+	if err := s.comps.CreateQualificationRule(ctx, rule); err != nil {
+		return nil, err
+	}
+	entries := make([]model.QualificationEntry, 0, len(preview.Candidates))
+	for _, candidate := range preview.Candidates {
+		entries = append(entries, model.QualificationEntry{
+			RuleID: rule.ID, SourceCompetitionID: sourceID, TargetCompetitionID: targetID,
+			UserID: candidate.UserID, Rank: candidate.Rank, Score: candidate.Score,
+			CreatedAt: now,
+		})
+	}
+	if err := s.comps.CreateQualificationEntries(ctx, entries); err != nil {
+		return nil, err
+	}
+	return &QualificationApplyResult{
+		RuleID: rule.ID, Imported: len(imported.Participants), Missing: imported.Missing,
+		Preview: preview,
+	}, nil
+}
+
+// ListQualifications 目标竞赛历史晋级规则（含中选用户名）。
+func (s *CompetitionService) ListQualifications(ctx context.Context, targetID uint) ([]QualificationRuleItem, error) {
+	target, err := s.find(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := s.comps.ListQualificationRules(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QualificationRuleItem, 0, len(rules))
+	for _, rule := range rules {
+		item := QualificationRuleItem{QualificationRule: rule, TargetName: target.Name}
+		if source, err := s.comps.FindByID(ctx, rule.SourceCompetitionID); err == nil {
+			item.SourceName = source.Name
+		}
+		entries, err := s.comps.ListQualificationEntries(ctx, rule.ID)
+		if err != nil {
+			return nil, err
+		}
+		userIDs := make([]uint, 0, len(entries))
+		for _, entry := range entries {
+			userIDs = append(userIDs, entry.UserID)
+		}
+		if len(userIDs) > 0 {
+			users, err := s.users.FindByIDs(ctx, userIDs...)
+			if err != nil {
+				return nil, err
+			}
+			for _, u := range users {
+				item.Usernames = append(item.Usernames, u.Username)
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // ---------- 管理端：警告 / WP / 容器 ----------

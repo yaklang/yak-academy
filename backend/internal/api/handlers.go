@@ -160,6 +160,9 @@ func (h *Handlers) Register(r *Router) {
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/standings.csv", "admin", h.adminCompetitionStandingsCSV)
 	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminListCtfAdjustments)
 	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/adjustments", "admin", h.adminCreateCtfAdjustment)
+	r.Handle(http.MethodGet, "/api/v1/admin/competitions/{id}/qualifications", "admin", h.adminListQualifications)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/preview", "admin", h.adminPreviewQualification)
+	r.Handle(http.MethodPost, "/api/v1/admin/competitions/{id}/qualifications/apply", "admin", h.adminApplyQualification)
 
 	// 竞赛：参赛者（广场/报名/入场/首页/容器/提交/榜单/WP——登录即可，入场校验在 service）
 	r.Handle(http.MethodGet, "/api/v1/competitions", "", h.listPublicCompetitions)

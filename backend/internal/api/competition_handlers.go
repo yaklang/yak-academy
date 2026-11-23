@@ -417,6 +417,72 @@ func (h *Handlers) adminCreateCtfAdjustment(w http.ResponseWriter, req *http.Req
 	writeJSON(w, http.StatusCreated, item)
 }
 
+// adminPreviewQualification 晋级预览（来源榜单 → 目标邀请赛，不落库）。
+func (h *Handlers) adminPreviewQualification(w http.ResponseWriter, req *http.Request) {
+	targetID, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		SourceCompetitionID uint   `json:"source_competition_id"`
+		Mode                string `json:"mode"`
+		Threshold           int    `json:"threshold"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	preview, err := h.Competitions.PreviewQualification(req.Context(), body.SourceCompetitionID, targetID, body.Mode, body.Threshold)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
+// adminApplyQualification 应用晋级（导入参赛者 + 落规则/名单；写 audit）。
+func (h *Handlers) adminApplyQualification(w http.ResponseWriter, req *http.Request) {
+	targetID, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	var body struct {
+		SourceCompetitionID uint   `json:"source_competition_id"`
+		Mode                string `json:"mode"`
+		Threshold           int    `json:"threshold"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	user := UserFrom(req.Context())
+	result, err := h.Competitions.ApplyQualification(req.Context(), user.ID, body.SourceCompetitionID, targetID, body.Mode, body.Threshold)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	h.audit(req, "competition.qualification.apply", "competition", strconv.FormatUint(uint64(targetID), 10),
+		map[string]any{"source_competition_id": body.SourceCompetitionID, "mode": body.Mode, "threshold": body.Threshold, "imported": result.Imported})
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// adminListQualifications 目标竞赛历史晋级规则。
+func (h *Handlers) adminListQualifications(w http.ResponseWriter, req *http.Request) {
+	targetID, err := compID(req)
+	if err != nil {
+		writeError(w, errValidation)
+		return
+	}
+	items, err := h.Competitions.ListQualifications(req.Context(), targetID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 // ---------- 参赛者 ----------
 
 // listPublicCompetitions 竞赛广场：分页列出公开赛（含报名状态）。
