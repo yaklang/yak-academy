@@ -46,6 +46,86 @@ func (s *AwdCompetitionService) SetNow(now func() time.Time) {
 	}
 }
 
+// Start 开始比赛：仅 pending；竞赛必须在进行中；至少一个服务和一个参赛者。
+func (s *AwdCompetitionService) Start(ctx context.Context, competitionID uint) (*AwdGameView, error) {
+	comp, err := s.requireAwdCompetition(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if comp.Status(s.now()) != model.CompetitionRunning {
+		return nil, fmt.Errorf("%w: competition must be running before starting AWD", ErrValidation)
+	}
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGamePending {
+		return nil, fmt.Errorf("%w: AWD game is not pending", ErrValidation)
+	}
+	services, err := s.awd.ListServices(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(services) == 0 {
+		return nil, fmt.Errorf("%w: at least one AWD service is required", ErrValidation)
+	}
+	participants, _, err := s.comps.ListParticipants(ctx, competitionID, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(participants) == 0 {
+		return nil, fmt.Errorf("%w: at least one participant is required", ErrValidation)
+	}
+	now := s.now()
+	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{
+		"status": model.AwdGameRunning, "started_at": now, "ended_at": nil, "current_round": 0,
+	}); err != nil {
+		return nil, err
+	}
+	return s.Game(ctx, competitionID)
+}
+
+// Pause 暂停比赛（running → paused）。
+func (s *AwdCompetitionService) Pause(ctx context.Context, competitionID uint) (*AwdGameView, error) {
+	return s.transition(ctx, competitionID, model.AwdGamePaused, model.AwdGameRunning)
+}
+
+// Resume 继续比赛（paused → running）。
+func (s *AwdCompetitionService) Resume(ctx context.Context, competitionID uint) (*AwdGameView, error) {
+	return s.transition(ctx, competitionID, model.AwdGameRunning, model.AwdGamePaused)
+}
+
+// End 结束比赛（running/paused → ended）。
+func (s *AwdCompetitionService) End(ctx context.Context, competitionID uint) (*AwdGameView, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != model.AwdGameRunning && game.Status != model.AwdGamePaused {
+		return nil, fmt.Errorf("%w: AWD game is not running or paused", ErrValidation)
+	}
+	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{
+		"status": model.AwdGameEnded, "ended_at": s.now(),
+	}); err != nil {
+		return nil, err
+	}
+	return s.Game(ctx, competitionID)
+}
+
+func (s *AwdCompetitionService) transition(ctx context.Context, competitionID uint, to, from model.AwdGameStatus) (*AwdGameView, error) {
+	game, err := s.EnsureGame(ctx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if game.Status != from {
+		return nil, fmt.Errorf("%w: AWD game is %s, expected %s", ErrValidation, game.Status, from)
+	}
+	if err := s.awd.UpdateGameSelective(ctx, game.ID, map[string]any{"status": to}); err != nil {
+		return nil, err
+	}
+	return s.Game(ctx, competitionID)
+}
+
 // AwdGameView 管理端 AWD 配置视图：比赛 + 服务定义。
 type AwdGameView struct {
 	Game     model.AwdGame      `json:"game"`

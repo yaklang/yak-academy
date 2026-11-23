@@ -223,3 +223,81 @@ func TestAwdServicePackageUpload(t *testing.T) {
 		t.Fatalf("running game package: want ErrValidation, got %v", err)
 	}
 }
+
+// TestAwdGameLifecycle 比赛生命周期：pending→running→paused→running→ended；
+// 非法迁移拒绝；开赛要求竞赛进行中 + 至少一个服务/参赛者。
+func TestAwdGameLifecycle(t *testing.T) {
+	e := newCompEnv(t)
+	ctx := context.Background()
+	awdSvc := NewAwdCompetitionService(repo.NewAwdRepo(e.gdb), repo.NewCompetitionRepo(e.gdb))
+	awdSvc.SetNow(func() time.Time { return e.now })
+
+	comp, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 生命周期赛", Start: e.now.Add(-time.Hour), End: e.now.Add(time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create comp: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("start without service: want ErrValidation, got %v", err)
+	}
+	if _, err := awdSvc.CreateService(ctx, comp.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: 80}},
+	}); err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("start without participant: want ErrValidation, got %v", err)
+	}
+	alice := e.ensureUser(t, "awd-lifecycle")
+	if _, err := e.comps.ImportParticipants(ctx, comp.ID, ParticipantImportRequest{Individuals: []string{alice.Username}}); err != nil {
+		t.Fatalf("import participant: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	running, err := awdSvc.Game(ctx, comp.ID)
+	if err != nil || running.Game.Status != model.AwdGameRunning || running.Game.StartedAt == nil {
+		t.Fatalf("running game: %+v err=%v", running, err)
+	}
+	if _, err := awdSvc.Start(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("double start: want ErrValidation, got %v", err)
+	}
+	if _, err := awdSvc.Pause(ctx, comp.ID); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if _, err := awdSvc.Pause(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("double pause: want ErrValidation, got %v", err)
+	}
+	if _, err := awdSvc.Resume(ctx, comp.ID); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if _, err := awdSvc.Resume(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("double resume: want ErrValidation, got %v", err)
+	}
+	ended, err := awdSvc.End(ctx, comp.ID)
+	if err != nil || ended.Game.Status != model.AwdGameEnded || ended.Game.EndedAt == nil {
+		t.Fatalf("end: %+v err=%v", ended, err)
+	}
+	if _, err := awdSvc.Resume(ctx, comp.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("resume ended: want ErrValidation, got %v", err)
+	}
+
+	scheduled, err := e.comps.Create(ctx, CompetitionCreate{
+		Name: "AWD 未开赛", Start: e.now.Add(time.Hour), End: e.now.Add(2 * time.Hour), Format: "awd",
+	})
+	if err != nil {
+		t.Fatalf("create scheduled: %v", err)
+	}
+	if _, err := awdSvc.CreateService(ctx, scheduled.ID, AwdServiceInput{
+		Slug: "web", Image: "nginx:alpine", Ports: []AwdPort{{Name: "http", Port: 80}},
+	}); err != nil {
+		t.Fatalf("create scheduled service: %v", err)
+	}
+	if _, err := e.comps.ImportParticipants(ctx, scheduled.ID, ParticipantImportRequest{Individuals: []string{alice.Username}}); err != nil {
+		t.Fatalf("import scheduled participant: %v", err)
+	}
+	if _, err := awdSvc.Start(ctx, scheduled.ID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("start before competition: want ErrValidation, got %v", err)
+	}
+}
