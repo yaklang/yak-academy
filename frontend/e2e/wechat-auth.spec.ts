@@ -23,7 +23,7 @@ test.describe('微信注册/登录', () => {
     await wechatButton.click()
     // 模拟授权页把 code/state 回跳到登录页；登录页完成 callback 后进入 /learn。
     await page.waitForURL((u) => u.pathname === '/learn')
-    await expect(page.getByRole('link', { name: /微信用户（普通人）/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /微信用户（学员）/ })).toBeVisible()
 
     // 微信账号没有平台密码：资料页显示「微信登录」标签，不提供修改密码入口。
     await page.goto('/profile')

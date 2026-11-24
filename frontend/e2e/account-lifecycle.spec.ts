@@ -14,7 +14,8 @@ test.describe('账号生命周期', () => {
     const oldToken = await page.evaluate(() => localStorage.getItem('academy_token'))
 
     // 改密入口在账号信息面板（账号安全区块）；弹窗：当前密码 → 新密码 → 确认
-    await page.getByRole('link', { name: `${E2E.student.username}（普通人）` }).click()
+    await page.getByRole('button', { name: `${E2E.student.username}（学员）` }).click()
+    await page.getByRole('menuitem', { name: '账号信息' }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
     const dialog = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
     await dialog.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill(E2E.student.password)
@@ -45,7 +46,8 @@ test.describe('账号生命周期', () => {
     await page.waitForURL((u) => !u.pathname.startsWith('/login'))
 
     // 恢复初始密码，保证套件内其他 spec 的账号常量可用
-    await page.getByRole('link', { name: `${E2E.student.username}（普通人）` }).click()
+    await page.getByRole('button', { name: `${E2E.student.username}（学员）` }).click()
+    await page.getByRole('menuitem', { name: '账号信息' }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
     const d2 = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
     await d2.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill('stu-e2e-pass-2')
