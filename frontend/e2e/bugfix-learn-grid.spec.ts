@@ -27,7 +27,7 @@ test.describe('回归：学习路线卡片网格', () => {
     expect(box!.width).toBeGreaterThan(320)
     expect(box!.width).toBeLessThan(520)
 
-    await expect(card.getByText(/个 Room/)).toBeVisible()
+    await expect(card.getByText(/个章节/)).toBeVisible()
     await expect(card.getByText('进入专题')).toBeVisible()
 
     // 回归（2026-11-02）：topic.md front matter 的 summary 曾不被解析，

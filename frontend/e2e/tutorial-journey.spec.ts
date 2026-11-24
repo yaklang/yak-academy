@@ -16,7 +16,7 @@ test.describe('教程旅程', () => {
 
     // Topic 详情：上方学习路线 + 下方树形专题节点
     await expect(page.getByRole('heading', { name: '学习路线' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '具体专题' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '章节列表' })).toBeVisible()
     const routeStops = page.locator('.route-stop')
     await expect(routeStops).toHaveCount(1)
     await expect(routeStops.first()).toContainText(E2E.tutorial.roomTitle)

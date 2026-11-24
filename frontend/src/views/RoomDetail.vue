@@ -1,13 +1,18 @@
 <script setup lang="ts">
-// Room 详情页：纯教程页（文字 Markdown + 视频 + 流程 + 知识链接）。
-// 题目是独立资源；有关联题目时给"前往题目"入口跳题目详情页。
+// 章节详情：页头 → 视频 → 流程 → 正文（Markdown）→ 关联题目入口。
+// 阅读列最大 72ch，右侧目录由 LessonMarkdown 自己维护。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { DIFFICULTY_LABELS, topicApi, type Room } from '../api'
+import { ArrowRight } from '@lucide/vue'
+import { topicApi, type Room } from '../api'
 import RoomVideoPlayer from '../components/RoomVideoPlayer.vue'
 import LessonFlow from '../components/LessonFlow.vue'
 import LessonMarkdown from '../components/LessonMarkdown.vue'
 import KnowledgePopover from '../components/KnowledgePopover.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import { Button } from '@/components/ui/button'
 
 const route = useRoute()
 const room = ref<Room | null>(null)
@@ -62,32 +67,37 @@ onMounted(load)
 <template>
   <div v-if="loading" class="room-skeleton" role="status" aria-label="正在加载教程">
     <div class="sk-head" aria-hidden="true">
-      <i class="sk-line title" />
-      <i class="sk-line short" />
-      <i class="sk-line short" />
+      <span class="sk-line sk-line--title" />
+      <span class="sk-line sk-line--short" />
+      <span class="sk-line sk-line--short" />
     </div>
     <div class="sk-reading" aria-hidden="true">
-      <i class="sk-block" />
-      <i v-for="n in 7" :key="n" class="sk-line" :class="{ short: n === 3 || n === 7 }" />
+      <span class="sk-block" />
+      <span v-for="n in 7" :key="n" class="sk-line" :class="{ 'sk-line--short': n === 3 || n === 7 }" />
     </div>
   </div>
-  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
-  <div v-else-if="room" class="page">
-    <header class="page-head">
-      <div>
-        <h2 class="page-title">{{ room.title }}</h2>
-        <p class="page-sub">
-          <UiTag size="small" effect="plain">{{ DIFFICULTY_LABELS[room.difficulty] }}</UiTag>
-          <span class="lesson-kind">教程 · 约 {{ readingMinutes }} 分钟</span>
-        </p>
-      </div>
-      <div v-if="room.related_challenge_slug" class="page-actions">
-        <router-link
-          class="challenge-link"
-          :to="`${trainingBase}/training/${room.related_challenge_slug}`"
-        >前往配套题目练习 <span aria-hidden="true">→</span></router-link>
-      </div>
-    </header>
+  <EmptyState
+    v-else-if="loadError"
+    tone="error"
+    title="教程加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="load"
+  />
+  <div v-else-if="room" class="room-page">
+    <PageHeader :title="room.title" :description="`教程 · 约 ${readingMinutes} 分钟`">
+      <template #badges>
+        <StatusTag kind="difficulty" :value="room.difficulty" />
+      </template>
+      <template v-if="room.related_challenge_slug" #actions>
+        <Button variant="outline" as-child>
+          <RouterLink :to="`${trainingBase}/training/${room.related_challenge_slug}`">
+            前往配套题目练习
+            <ArrowRight aria-hidden="true" />
+          </RouterLink>
+        </Button>
+      </template>
+    </PageHeader>
 
     <RoomVideoPlayer v-if="videoSrc" :src="videoSrc" />
 
@@ -108,36 +118,51 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page {
+.room-page {
   --lesson-reading-width: 780px;
   --lesson-toc-width: 220px;
   --lesson-gutter: var(--space-10);
   max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter));
   margin-inline: auto;
 }
-.page-head { max-width: var(--lesson-reading-width); }
-.room-skeleton { max-width: var(--lesson-reading-width); }
-.sk-head { display: grid; gap: var(--space-3); margin-bottom: var(--space-6); }
-.sk-reading { display: grid; gap: var(--space-3); }
-.sk-line { display: block; width: 100%; height: 13px; border-radius: 4px; background: var(--muted); }
-.sk-line.short { width: 32%; }
-.sk-line.title { width: 48%; height: 28px; }
-.sk-block { display: block; height: 260px; margin-bottom: var(--space-4); border-radius: var(--radius-card); background: var(--muted); }
-.room-skeleton .sk-line,
-.room-skeleton .sk-block { animation: room-skeleton-pulse 1.4s ease-in-out infinite; }
-@keyframes room-skeleton-pulse { 50% { opacity: .45; } }
-.lesson-kind { margin-left: var(--space-2); color: var(--muted-foreground); font-size: var(--text-xs); }
-.challenge-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 36px;
-  padding-inline: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--accent-foreground);
-  font-size: var(--text-sm);
-  font-weight: 500;
+
+.room-skeleton {
+  max-width: 780px;
 }
-.challenge-link:hover { background: var(--accent); }
+
+.sk-head {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.sk-reading {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sk-line {
+  display: block;
+  width: 100%;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+}
+
+.sk-line--short {
+  width: 32%;
+}
+
+.sk-line--title {
+  width: 48%;
+  height: 24px;
+}
+
+.sk-block {
+  display: block;
+  height: 240px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--bg-subtle);
+}
 </style>
