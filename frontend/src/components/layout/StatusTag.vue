@@ -19,7 +19,7 @@ const text = computed(() => props.label ?? meta.value.label)
 </script>
 
 <template>
-  <span class="status-tag" :data-tone="meta.tone">
+  <span class="status-tag" data-slot="badge" :data-tone="meta.tone">
     <span v-if="dot" class="status-tag__dot" aria-hidden="true" />
     {{ text }}
   </span>

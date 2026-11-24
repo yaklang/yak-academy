@@ -35,7 +35,7 @@ test.describe('教程管理内置训练集', () => {
     await importBtn.click()
     const [importResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith('/api/v1/admin/challenges/builtin') && response.request().method() === 'POST'),
-      page.getByRole('alertdialog').getByRole('button', { name: '导入/更新', exact: true }).click(),
+      page.locator('[data-slot=dialog-content]').getByRole('button', { name: '导入/更新', exact: true }).click(),
     ])
     expect(importResponse.ok()).toBeTruthy()
     await expect(
