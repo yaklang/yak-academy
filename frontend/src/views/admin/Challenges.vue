@@ -1,36 +1,52 @@
 <script setup lang="ts">
 // 题目管理：三个题库 tab（内置训练 / CTF / ACM）分开管理。
 // 内置 tab 只读——目录是内置内容唯一事实源，更新只经「一键导入」整体进行
-// （写接口对内置题一律 422，前端同步禁用编辑/删除/可见性/附件操作）。
-// CTF / ACM tab 支持关键字搜索（slug/标题/分类前缀）与筛选（分类/难度/来源）。
-// 主上传流程不变：选择 challenge.json → 前端校验 → 编辑弹窗确认 → 一键上传
-// （打包即把表单数据规范化回 JSON 后 POST /admin/challenges）。
-// 行内「编辑」拉取库内完整定义回填同一弹窗（GET /admin/challenges/{slug}），
-// 附件管理也并入了该弹窗；操作列只保留 编辑 / 删除。
-// zip 题目包通道保留给 image: . 场景（需 Dockerfile/compose，上传时构建）。
+// （写接口对内置题一律拒绝，前端同步禁用编辑/删除/可见性/附件操作）。
+// CTF / ACM tab 支持关键字搜索（标识/标题/分类前缀）与筛选（分类/难度/来源）。
+// 上传流程：选择 challenge.json → 前端校验 → 编辑弹窗确认 → 一键上传；
+// 行内「编辑」拉取库内完整定义回填同一弹窗，附件管理也在该弹窗内。
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { notify, dialogs } from '@/lib/notifications'
-import { formatDateTime } from '@/lib/format'
+import { notify } from '@/lib/notifications'
+import { formatBytes, formatDateTime } from '@/lib/format'
 import { Search } from '@lucide/vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import PageTabs from '@/components/layout/PageTabs.vue'
+import FilterBar from '@/components/layout/FilterBar.vue'
+import DataTablePanel from '@/components/layout/DataTablePanel.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
+import ConfirmDialog from '@/components/layout/ConfirmDialog.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
-  adminChallengeApi, DIFFICULTY_LABELS,
+  adminChallengeApi,
+  CATEGORY_LABELS,
+  DIFFICULTY_LABELS,
   type AdminChallengeQuery,
-  type BuiltinImageStatus, type ChallengeAttachment, type ChallengeBank, type ChallengeDifficulty,
-  type ChallengeFullJSON, type ChallengeHintInput, type ChallengeJSON, type ChallengeLink,
-  type JudgeJSON, type TrainingItem, type YakEngineStatus,
+  type BuiltinImageStatus,
+  type ChallengeAttachment,
+  type ChallengeBank,
+  type ChallengeDifficulty,
+  type ChallengeFullJSON,
+  type ChallengeHintInput,
+  type ChallengeJSON,
+  type ChallengeLink,
+  type JudgeJSON,
+  type TrainingItem,
+  type YakEngineStatus,
 } from '../../api'
 import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
-import { useAuthStore } from '../../stores/auth'
 import { LIB_DESC } from '../../components/yakVocab'
 
-// 库白名单候选（教学常用 12 库 + 中文说明；el-select allow-create 支持手输
-// 其他 yaklang 库名，后端按完整库表校验——exec/file 等黑名单库配置即 422）。
+// 库白名单候选（教学常用库 + 中文说明；可手输其他 yaklang 库名，
+// 后端按完整库表校验——命令执行与文件访问类库配置即被拒绝）。
 const libOptions = Object.keys(LIB_DESC).map((lib) => ({ value: lib, label: `${lib}（${LIB_DESC[lib]}）` }))
 
-const auth = useAuthStore()
 const items = ref<TrainingItem[]>([])
 const total = ref(0)
 const page = ref(1)
+const pageSize = 20
 const loading = ref(true)
 const loadError = ref('')
 const uploading = ref(false)
@@ -39,13 +55,19 @@ const specVisible = ref(false)
 // ===== 题库 tab（内置只读；CTF/ACM 可管理）=====
 type AdminTab = 'builtin' | 'ctf' | 'acm'
 const activeTab = ref<AdminTab>('builtin')
-// 内置 tab 按来源聚合（is_builtin=true，不限 bank——内置集现全为 tutorial，
-// 但语义上「内置训练」= 随二进制分发的一套，不该被 bank 二次切分）。
+// 内置 tab 按来源聚合（is_builtin=true，不限 bank——内置集语义上是随平台
+// 分发的一套，不该被 bank 二次切分）。
 const TAB_META: Record<AdminTab, { bank?: ChallengeBank; builtin: boolean; hint: string }> = {
-  builtin: { builtin: true, hint: '内置训练集随平台分发，只读展示；更新 / 清理一律经「导入内置训练（vulinbox）」按目录整体进行' },
-  ctf: { bank: 'ctf', builtin: false, hint: 'CTF 题目：flag 提交判定（静态 / 正则），可选容器环境' },
-  acm: { bank: 'acm', builtin: false, hint: 'ACM 题目：算法编程题，challenge.json 归置 bank=acm 上传' },
+  builtin: { builtin: true, hint: '内置训练集随平台分发，只读展示；更新与清理经「导入内置训练」按目录整体进行。' },
+  ctf: { bank: 'ctf', builtin: false, hint: 'CTF 题目：flag 提交判定（明文或正则），可选容器环境。' },
+  acm: { bank: 'acm', builtin: false, hint: 'ACM 题目：算法编程题，上传时题库选择 ACM。' },
 }
+
+const tabs = [
+  { label: '内置训练', value: 'builtin' },
+  { label: 'CTF 题目', value: 'ctf' },
+  { label: 'ACM 题目', value: 'acm' },
+]
 
 // ===== 搜索 / 筛选（随 tab 与分页联动；关键字 400ms 防抖）=====
 const keyword = ref('')
@@ -94,13 +116,25 @@ watch(activeTab, (tab) => {
   if (tab === 'acm') loadEngineStatus()
 })
 
+const hasFilters = computed(() =>
+  Boolean(keyword.value.trim() || categoryFilter.value || difficultyFilter.value || builtinFilter.value),
+)
+
 // 当前 tab 的分类选项从列表页可见数据聚合（管理端题目量级小，前端聚合足够；
 // 保持与列表过滤同一事实源，避免单独的 distinct 接口）。
 const categoryOptions = computed(() => {
-  const s = new Set<string>()
-  for (const it of items.value) s.add(it.category)
-  return [...s].sort()
+  const set = new Set<string>()
+  for (const item of items.value) set.add(item.category)
+  return [...set].sort()
 })
+
+function categoryLabel(category: string) {
+  return CATEGORY_LABELS[category] ?? category
+}
+
+function codeOf(row: TrainingItem) {
+  return row.slug
+}
 
 // ===== challenge.json 导入 + 编辑弹窗 =====
 const editVisible = ref(false)
@@ -109,11 +143,9 @@ const editSourceFile = ref('')
 // 行内编辑来源：非空 = 正在编辑已入库题目（附件区随之显示）。
 const editExistingSlug = ref('')
 const editLoading = ref('')
-// tutorial 题库为内置题集专属：行内编辑该类题时锁定题库选择，
+// 教程题库为内置题集专属：行内编辑该类题时锁定题库选择，
 // 提交省略 bank（后端缺省 = 保留原值），避免把内置题挤出教程题目 tab。
 const bankLocked = ref(false)
-// 表单模型：env 用 has_env 开关承载（env 段要么都填要么都不填）。
-// ACM 编程题用 judge 承载（judge 段存在时隐藏 flag 表单项，判定类型固定 code）。
 const form = reactive({
   slug: '',
   title: '',
@@ -134,13 +166,8 @@ const form = reactive({
   judge: null as JudgeJSON | null,
 })
 
-// 表单 → 规范化题目 JSON（"自动打包"）。
-// bankLocked（编辑内置 tutorial 题）时省略 bank：后端缺省 = 保留原值。
-// ACM 编程题（judge 段）：省略 challenge 段；judge 不带数据组 = 保留库内
-// 测试数据（元数据维护语义，后端兜底校验）。
+// 表单 → 规范化题目 JSON。bankLocked（编辑内置 tutorial 题）时省略 bank。
 function buildPayload(): ChallengeJSON {
-  // challenge 段为必填类型，ACM 编程题用 Partial 上的二选一填入（judge 段
-  // 存在时省略 challenge——后端互斥校验；judge 不带数据组 = 保留库内数据）。
   const payload = {
     slug: form.slug.trim(),
     title: form.title.trim(),
@@ -154,11 +181,7 @@ function buildPayload(): ChallengeJSON {
       engine: 'yak',
       time_limit_s: form.judge.time_limit_s,
       memory_limit_mb: form.judge.memory_limit_mb,
-      // 库白名单（防高危库执行）：空数组语义 = 未配置（允许全部非黑名单库），
-      // 后端按空序列化列（serializeAllowedLibs）。
       allowed_libs: form.judge.allowed_libs ?? [],
-      // 数据组回传 name/sample/score（内容在库内；后端按空 input/output 走
-      // 保留语义，score 覆写——元数据维护里调整组分值不出包 zip）。
       testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample, score: t.score ?? 0 })),
     }
   } else {
@@ -176,7 +199,7 @@ function buildPayload(): ChallengeJSON {
   return payload as ChallengeJSON
 }
 
-// 实时校验错误（弹窗内 alert 展示，保存按钮禁用）。
+// 实时校验错误（弹窗内展示，保存按钮禁用）。
 const formErrors = computed(() => {
   if (!editVisible.value) return []
   return validateChallenge(buildPayload())
@@ -187,7 +210,6 @@ function fillForm(chal: ChallengeJSON) {
   form.title = chal.title ?? ''
   form.category = chal.category ?? ''
   // 教程题目 tab 专属内置题集：上传只允许 ctf/acm，其余（tutorial/空）归 ctf。
-  // 行内编辑 tutorial 题时 bankLocked 置位，保留 tutorial 展示并在提交时省略。
   bankLocked.value = chal.bank === 'tutorial'
   form.bank = chal.bank === 'acm' ? 'acm' : chal.bank === 'tutorial' ? 'tutorial' : 'ctf'
   form.difficulty = chal.difficulty ?? 'apprentice'
@@ -195,7 +217,6 @@ function fillForm(chal: ChallengeJSON) {
   form.flag_mode = chal.flag_mode ?? 'shared'
   form.type = chal.challenge?.type ?? 'static'
   form.flag = chal.challenge?.flag ?? ''
-  // ACM 编程题：judge 段回填（组名/样例标记/组分值 + 判定配置 + 库白名单）；flag 表单项隐藏。
   form.judge = (chal as ChallengeFullJSON).judge
     ? {
         engine: 'yak',
@@ -219,17 +240,19 @@ function fillForm(chal: ChallengeJSON) {
 function addHint() {
   form.hints.push({ title: '', content: '', cost: 10 })
 }
-function removeHint(i: number) {
-  form.hints.splice(i, 1)
+function removeHint(index: number) {
+  form.hints.splice(index, 1)
 }
 function addLink() {
   form.links.push({ name: '', url: '' })
 }
-function removeLink(i: number) {
-  form.links.splice(i, 1)
+function removeLink(index: number) {
+  form.links.splice(index, 1)
 }
 
-// el-upload before-upload：读文件 → 解析 → 校验 → 单题进编辑弹窗，多题询问批量直传。
+// 文件导入：读文件 → 解析 → 校验 → 单题进编辑弹窗，多题走批量导入确认。
+const bulkList = ref<ChallengeJSON[] | null>(null)
+
 async function onImport(file: File) {
   let parsed
   try {
@@ -246,27 +269,16 @@ async function onImport(file: File) {
   const { list } = parsed
   if (list.length > 1) {
     // 数组文件：编辑弹窗只支持单题，提供直接批量导入的出路。
-    try {
-      await dialogs.confirm(
-        `文件包含 ${list.length} 个题目。编辑确认仅支持单题，是否跳过编辑直接批量导入（逐题校验，失败整体不入库）？`,
-        '批量导入',
-        { type: 'info', confirmButtonText: '直接批量导入', cancelButtonText: '取消' },
-      )
-    } catch {
-      return false
-    }
-    await doUpload(list)
+    bulkList.value = list
     return false
   }
   const chal = list[0]
   if (chal.bank === 'tutorial') {
-    // 文件导入不允许 tutorial：解锁题库选择并归 ctf（上传显式 tutorial 一律 422）。
-    notify.warning({ message: '教程题目 tab 专属内置题集：该文件声明的 bank=tutorial 不再接受上传，将按表单所选题库（ctf/acm）入库', duration: 5000 })
+    notify.warning({ message: '教程题库为内置题集专属：该文件声明的题库不再接受上传，将按表单所选题库（CTF/ACM）入库', duration: 5000 })
   }
-  const errs = validateChallenge(chal)
-  if (errs.length) {
-    // 格式不合法也允许进弹窗修正（错误先展示，修正后才可上传）。
-    notify.warning({ message: `题目格式有 ${errs.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
+  const errors = validateChallenge(chal)
+  if (errors.length) {
+    notify.warning({ message: `题目格式有 ${errors.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
   }
   fillForm(chal)
   if (bankLocked.value) {
@@ -276,11 +288,17 @@ async function onImport(file: File) {
   editExistingSlug.value = ''
   editSourceFile.value = file.name
   editVisible.value = true
-  return false // 阻止 el-upload 默认行为
+  return false
 }
 
-// 行内「编辑」：拉取库内完整定义回填弹窗（含 flag/hints/env），
-// 多 flag（题目包上传）时提醒保存只保留表单那一个；附件区随弹窗加载。
+async function confirmBulkImport() {
+  const list = bulkList.value
+  if (!list) return
+  await doUpload(list)
+  bulkList.value = null
+}
+
+// 行内「编辑」：拉取库内完整定义回填弹窗（含 flag/hints/env），附件区随之加载。
 async function openRowEdit(row: TrainingItem) {
   editLoading.value = row.slug
   try {
@@ -313,7 +331,6 @@ async function doUpload(list: ChallengeJSON[]) {
   }
 }
 
-// 弹窗「确认上传」：实时校验通过才可达。
 async function saveFromEdit() {
   if (formErrors.value.length) return
   editSaving.value = true
@@ -345,19 +362,11 @@ async function onUploadPackage(file: File) {
 }
 
 // ===== 内置训练（vulinbox）一键导入 =====
-// 幂等：已导入的同名题目会被更新；镜像在 Docker 可用时构建（ noop 下跳过并提示）。
+// 幂等：已导入的同名题目会被更新；镜像在 Docker 可用时构建。
 const builtinImporting = ref(false)
+const builtinConfirmOpen = ref(false)
 
-async function onImportBuiltin() {
-  try {
-    await dialogs.confirm(
-      '将导入随平台分发的内置训练集（基于 yaklang vulinbox 靶场引擎）：配套教程（一个教程对应一道题目）+ 11 道题目。已导入的同名内容会被更新；配置了 Docker 时会同时构建靶场基础镜像（需联网下载约 165MB 的官方二进制）。是否继续？',
-      '导入内置训练',
-      { type: 'info', confirmButtonText: '导入/更新', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+async function confirmImportBuiltin() {
   builtinImporting.value = true
   try {
     const resp = await adminChallengeApi.importBuiltin()
@@ -370,6 +379,7 @@ async function onImportBuiltin() {
     } else {
       notify.warning({ message: `${summary}；未配置 Docker，镜像未构建（启用 Docker 后重新导入即可）`, duration: 6000 })
     }
+    builtinConfirmOpen.value = false
     await load()
   } catch (e) {
     notify.error(`内置训练导入失败：${(e as Error).message}`)
@@ -379,10 +389,9 @@ async function onImportBuiltin() {
 }
 
 // ===== vulinbox 靶场镜像状态（OSS 构建） =====
-// 状态卡数据源 GET /admin/challenges/builtin/image；构建走 docker build
-// （内从官方 OSS 下载二进制，约 1-3 分钟），noop 驱动不可构建。
 const imageStatus = ref<BuiltinImageStatus | null>(null)
 const imageBuilding = ref(false)
+const imageConfirmOpen = ref(false)
 
 async function loadImageStatus() {
   try {
@@ -392,20 +401,12 @@ async function loadImageStatus() {
   }
 }
 
-async function onBuildBuiltinImage() {
-  try {
-    await dialogs.confirm(
-      '将从官方 OSS 下载 vulinbox 二进制并构建靶场基础镜像（约 165MB，需联网，耗时约 1-3 分钟）。构建期间请勿关闭页面。是否继续？',
-      '构建 vulinbox 镜像',
-      { type: 'info', confirmButtonText: '开始构建', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+async function confirmBuildImage() {
   imageBuilding.value = true
   try {
     const resp = await adminChallengeApi.buildBuiltinImage()
     notify.success(`镜像已构建：${resp.image_tag}`)
+    imageConfirmOpen.value = false
     await loadImageStatus()
   } catch (e) {
     notify.error({ message: `镜像构建失败：${(e as Error).message}`, duration: 8000 })
@@ -419,7 +420,6 @@ async function load() {
   const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
-  // 切 tab / 筛选时先清空旧行，避免新结果的加载期仍展示上一个 tab 的题目。
   items.value = []
   total.value = 0
   try {
@@ -436,11 +436,8 @@ async function load() {
 }
 
 // ===== yak 判题引擎状态（OSS 异步下载，仅 ACM tab） =====
-// 状态卡数据源 GET /admin/challenges/engine/yak。引擎二进制约 220MB，走
-// 后台任务 + 1s 轮询（大文件同步转发放大有代理超时风险，与靶场镜像的
-// 同步构建不同）；完成即装配，无需重启后端。进入 ACM tab 或刷新时加载，
-// 若服务端仍有进行中的任务（如页面刷新过）自动续上轮询。
 const engineStatus = ref<YakEngineStatus | null>(null)
+const engineConfirmOpen = ref(false)
 let enginePollTimer: number | undefined
 
 async function loadEngineStatus() {
@@ -482,59 +479,43 @@ function stopEnginePolling() {
   }
 }
 
-// total=-1（OSS 未给 Content-Length）时退化为不定态进度条。
 const engineDownloadPercent = computed(() => {
-  const d = engineStatus.value?.download
-  if (!d || d.total <= 0) return 0
-  return Math.min(100, Math.round((d.received / d.total) * 100))
+  const download = engineStatus.value?.download
+  if (!download || download.total <= 0) return 0
+  return Math.min(100, Math.round((download.received / download.total) * 100))
 })
 
-async function onDownloadYakEngine() {
-  try {
-    await dialogs.confirm(
-      '将从 yaklang 官方 OSS 下载 yak 引擎二进制（约 220MB，需联网，视带宽约 1-5 分钟）。下载在后台进行，完成后自动装配，无需重启服务。是否继续？',
-      '下载 yak 判题引擎',
-      { type: 'info', confirmButtonText: '开始下载', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+async function confirmDownloadEngine() {
   try {
     engineStatus.value = await adminChallengeApi.yakEngineDownload()
+    engineConfirmOpen.value = false
     resumeEnginePolling()
   } catch (e) {
     notify.error(`引擎下载启动失败：${(e as Error).message}`)
   }
 }
 
-async function remove(row: TrainingItem) {
+// ===== 删除 / 可见性 =====
+const deleteTarget = ref<TrainingItem | null>(null)
+const deleting = ref(false)
+
+async function confirmRemove() {
+  const target = deleteTarget.value
+  if (!target) return
+  deleting.value = true
   try {
-    await dialogs.confirm(
-      `确定删除题目「${row.title}」？该题的运行中容器将被销毁，判定答案与提示一并删除。` +
-        '已有用户通关的题目无法删除（提交历史不可删）。',
-      '删除题目',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
-  try {
-    await adminChallengeApi.remove(row.slug)
-    notify.success(`已删除 ${row.slug}`)
+    await adminChallengeApi.remove(target.slug)
+    notify.success(`已删除 ${target.title}`)
+    deleteTarget.value = null
     await load()
   } catch (e) {
-    // 409：题目存在通关记录，事件历史 append-only 不可删（契约语义直接透出）。
+    // 已有学员通关的题目不可删除（事件历史只追加）。
     notify.error(`删除失败：${(e as Error).message}`)
+  } finally {
+    deleting.value = false
   }
 }
 
-// ===== 可见性开关 =====
-// 状态语义：隐藏的题目学生端整体 404。定时发布功能已随操作列精简移除
-//（PATCH visibility 的 release_at 能力仍在契约中保留）。
 const visSaving = ref('')
 
 async function toggleVisible(row: TrainingItem) {
@@ -542,7 +523,7 @@ async function toggleVisible(row: TrainingItem) {
   try {
     const updated = await adminChallengeApi.updateVisibility(row.slug, { is_visible: !row.is_visible })
     row.is_visible = updated.is_visible
-    notify.success(updated.is_visible ? `「${row.title}」已对学生可见` : `「${row.title}」已隐藏`)
+    notify.success(updated.is_visible ? `「${row.title}」已对学员可见` : `「${row.title}」已隐藏`)
   } catch (e) {
     notify.error(`可见性更新失败：${(e as Error).message}`)
   } finally {
@@ -550,12 +531,13 @@ async function toggleVisible(row: TrainingItem) {
   }
 }
 
-// ===== 附件管理（并入编辑弹窗：pcap/exe 等配套文件，学生端凭 JWT 下载）=====
-// 挂在 editExistingSlug（行内编辑已入库题目）上；文件导入新建流程不显示。
+// ===== 附件管理（编辑弹窗内：pcap/exe 等配套文件，学员登录后下载） =====
 const attachments = ref<ChallengeAttachment[]>([])
 const attachLoading = ref(false)
 const attachError = ref('')
 const attachUploading = ref(false)
+const attachmentTarget = ref('')
+const attachmentDeleting = ref(false)
 
 async function loadAttachments() {
   if (!editExistingSlug.value) return
@@ -571,7 +553,7 @@ async function loadAttachments() {
   }
 }
 
-// 同名文件覆盖更新（服务端按 slug+filename upsert）。
+// 同名文件覆盖更新（服务端按题目与文件名更新）。
 async function onUploadAttachment(file: File) {
   attachUploading.value = true
   try {
@@ -583,35 +565,36 @@ async function onUploadAttachment(file: File) {
   } finally {
     attachUploading.value = false
   }
-  return false // 阻止 el-upload 默认提交
+  return false
 }
 
-async function removeAttachment(filename: string) {
-  try {
-    await dialogs.confirm(`确定删除附件「${filename}」？`, '删除附件', { type: 'warning' })
-  } catch {
-    return
-  }
+async function confirmRemoveAttachment() {
+  const filename = attachmentTarget.value
+  if (!filename) return
+  attachmentDeleting.value = true
   try {
     await adminChallengeApi.deleteAttachment(editExistingSlug.value, filename)
+    attachmentTarget.value = ''
     await loadAttachments()
   } catch (e) {
     notify.error(`附件删除失败：${(e as Error).message}`)
+  } finally {
+    attachmentDeleting.value = false
   }
 }
 
-function attachSize(n: number) {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`
-  return `${n} B`
-}
-
-function difficultyType(d: TrainingItem['difficulty']) {
-  return d === 'apprentice' ? 'success' : d === 'practitioner' ? 'warning' : 'danger'
-}
-
-// 内置 tab 只读：编辑/删除/可见性/附件全部收口（后端同语义 422 兜底）。
+// 内置 tab 只读：编辑/删除/可见性/附件全部收口（后端同语义兜底）。
 const readonlyTab = computed(() => TAB_META[activeTab.value].builtin)
+
+function onEmptyAction() {
+  if (hasFilters.value) {
+    clearFilters()
+  } else if (readonlyTab.value) {
+    builtinConfirmOpen.value = true
+  } else {
+    downloadSampleChallenge()
+  }
+}
 
 onMounted(() => {
   load()
@@ -622,252 +605,290 @@ onUnmounted(stopEnginePolling)
 </script>
 
 <template>
-  <header class="page-head">
-    <div>
-      <h2 class="page-title">题目<span class="accent">管理</span></h2>
-      <p class="page-sub">维护内置题集、CTF 题目与 ACM 题目；上传、可见性、附件与配套教程均在此管理。</p>
-    </div>
-    <span class="head-count" v-if="total">共 {{ total }} 题</span>
-  </header>
-
-  <UiTabs v-model="activeTab" class="bank-tabs">
-    <UiTabPane name="builtin">
-      <template #label>
-        <span class="tab-label">内置训练<span class="tab-sub">只读</span></span>
-      </template>
-    </UiTabPane>
-    <UiTabPane name="ctf">
-      <template #label><span class="tab-label">CTF 题目</span></template>
-    </UiTabPane>
-    <UiTabPane name="acm">
-      <template #label><span class="tab-label">ACM 题目</span></template>
-    </UiTabPane>
-  </UiTabs>
-
-  <p class="hint">{{ TAB_META[activeTab].hint }}</p>
-
-  <!-- 内置 tab 只读：收起全部上传入口，仅保留一键导入与镜像状态 -->
-  <template v-if="readonlyTab">
-    <div class="toolbar">
-      <UiButton
-        :loading="builtinImporting"
-        title="导入随平台分发的 vulinbox 内置训练题集（重复导入 = 更新；目录外残留自动清理）"
-        @click="onImportBuiltin"
-      >
-        导入内置训练（vulinbox）
-      </UiButton>
-      <UiButton text @click="load">刷新</UiButton>
-    </div>
-  </template>
-  <template v-else>
-    <div class="toolbar">
-      <UiUpload
-        :show-file-list="false"
-        accept=".json,application/json"
-        :before-upload="onImport"
-        :disabled="uploading"
-      >
-        <UiButton type="primary" :loading="uploading">选择 challenge.json</UiButton>
-      </UiUpload>
-      <UiButton @click="downloadSampleChallenge">下载样例 JSON</UiButton>
-      <UiUpload
-        :show-file-list="false"
-        accept=".zip,application/zip"
-        :before-upload="onUploadPackage"
-        :disabled="uploading"
-      >
-        <UiButton :loading="uploading" title="image: . 的容器题需经 zip 包上传（上传时构建镜像）">
-          上传题目包 zip
-        </UiButton>
-      </UiUpload>
-      <UiButton
-        @click="specVisible = !specVisible"
-      >
-        {{ specVisible ? '收起格式规范' : '查看格式规范' }}
-      </UiButton>
-    </div>
-  </template>
-
-  <!-- 搜索 / 筛选：全部 tab 可用；来源筛选仅非内置 tab（内置 tab 恒为内置来源） -->
-  <div class="filter-bar">
-    <UiInput
-      v-model="keyword"
-      class="filter-search"
-      placeholder="搜索 slug / 标题 / 分类（前缀匹配）"
-      clearable
-      :prefix-icon="Search"
-      @input="onKeywordInput"
-      @clear="resetAndLoad"
-    />
-    <UiSelect v-model="categoryFilter" class="filter" placeholder="分类：全部" clearable>
-      <UiOption label="分类：全部" value="" />
-      <UiOption v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
-    </UiSelect>
-    <UiSelect v-model="difficultyFilter" class="filter" placeholder="难度：全部" clearable>
-      <UiOption label="难度：全部" value="" />
-      <UiOption v-for="(label, v) in DIFFICULTY_LABELS" :key="v" :label="`${v}（${label}）`" :value="v" />
-    </UiSelect>
-    <UiSelect v-if="!readonlyTab" v-model="builtinFilter" class="filter" placeholder="来源：全部" clearable>
-      <UiOption label="来源：全部" value="" />
-      <UiOption label="来源：内置题集" value="yes" />
-      <UiOption label="来源：管理员上传" value="no" />
-    </UiSelect>
-    <span v-if="keyword || categoryFilter || difficultyFilter || builtinFilter" class="filter-clear" @click="clearFilters">
-      清除筛选
-    </span>
-  </div>
-
-  <!-- vulinbox 靶场镜像状态：仅内置训练 tab 显示（镜像只服务内置题集的实验环境） -->
-  <UiCard v-if="readonlyTab && imageStatus" class="image-card" shadow="never">
-    <div class="image-status">
-      <span class="image-label">vulinbox 靶场镜像</span>
-      <UiTag :type="imageStatus.driver === 'docker' ? 'success' : 'info'" size="small">
-        驱动：{{ imageStatus.driver === 'docker' ? 'Docker' : '未启用（noop，环境启动 501）' }}
-      </UiTag>
-      <UiTag
-        :type="imageStatus.image_present ? 'success' : imageStatus.can_build ? 'warning' : 'danger'"
-        size="small"
-      >
-        {{ imageStatus.image_present ? '镜像已就绪' : imageStatus.can_build ? '镜像缺失' : '镜像未构建（需 Docker）' }}
-      </UiTag>
-      <code class="image-tag">{{ imageStatus.image_tag }}</code>
-      <UiButton
-        size="small"
-        type="primary"
-        :loading="imageBuilding"
-        :disabled="!imageStatus.can_build"
-        :title="imageStatus.can_build
-          ? 'docker build 内从官方 OSS 下载二进制（约 165MB，1-3 分钟）'
-          : '服务端未装配 Docker 驱动（ACADEMY_ENV_DRIVER），无法构建镜像'"
-        @click="onBuildBuiltinImage"
-      >
-        从 OSS 构建镜像
-      </UiButton>
-      <UiButton size="small" text @click="loadImageStatus">刷新</UiButton>
-    </div>
-  </UiCard>
-
-  <!-- yak 判题引擎状态：仅 ACM tab 显示（引擎服务 code 题判定与自测运行；
-       未装配时 ACM 提交判 internal_error、自测运行 422） -->
-  <UiCard v-if="activeTab === 'acm' && engineStatus" class="image-card" shadow="never">
-    <div class="image-status">
-      <span class="image-label">yak 判题引擎</span>
-      <UiTag :type="engineStatus.configured ? 'success' : 'warning'" size="small">
-        {{ engineStatus.configured ? '已装配' : '未装配' }}
-      </UiTag>
-      <UiTag v-if="engineStatus.version" type="info" size="small">{{ engineStatus.version }}</UiTag>
-      <code class="image-tag">{{ engineStatus.path }}</code>
-      <UiButton
-        size="small"
-        type="primary"
-        :loading="engineStatus.download.state === 'running'"
-        :title="engineStatus.configured
-          ? '重新从官方 OSS 下载 yak 二进制并换装（约 220MB，后台进行，完成即生效）'
-          : '从 yaklang 官方 OSS 下载 yak 二进制到数据目录（约 220MB，后台进行，完成即装配，无需重启）'"
-        @click="onDownloadYakEngine"
-      >
-        从 OSS 下载引擎
-      </UiButton>
-      <UiButton size="small" text @click="loadEngineStatus">刷新</UiButton>
-    </div>
-    <div v-if="engineStatus.download.state === 'running'" class="engine-progress">
-      <UiProgress
-        :percentage="engineDownloadPercent"
-        :indeterminate="engineStatus.download.total < 0"
-        :show-text="false"
-        :stroke-width="6"
-      />
-      <span class="engine-progress-text">
-        {{ attachSize(engineStatus.download.received) }}{{ engineStatus.download.total > 0 ? ` / ${attachSize(engineStatus.download.total)}` : '' }}
-      </span>
-    </div>
-    <p v-else-if="engineStatus.download.state === 'failed'" class="engine-error">
-      上次下载失败：{{ engineStatus.download.error || '未知错误' }}（可重试）
-    </p>
-  </UiCard>
-
-  <UiCollapseTransition>
-    <UiCard v-show="specVisible" class="spec">
-      <h3>challenge.json 字段</h3>
-      <pre class="json">{
-  "slug": "sqli-login-bypass",        // 必填 [a-z0-9-]+
-  "title": "SQL 注入登录绕过",          // 必填
-  "category": "sql-injection",         // 必填 [a-z0-9-]+
-  "bank": "ctf",                      // 题库 tab：ctf（默认）| acm；tutorial 为内置题集专属，上传传即 422
-  "difficulty": "apprentice",          // apprentice | practitioner | expert
-  "description_md": "# 背景…",         // Markdown 描述（可选）
-  "score": 100,
-  "flag_mode": "shared",               // shared | instance（instance 需含 {token} 模板 + env）
-  "challenge": { "type": "static", "flag": "flag{answer}" },
-  "env": { "image": "vulnapp:1.0", "port": 80 },   // 可选；容器环境
-  "hints": [ { "title": "提示一", "content": "看 UNION", "cost": 10 } ],
-  "links": [ { "name": "Wireshark", "url": "https://…" } ],  // 可选外链
-  "tutorial_slug": "sqli-basics"       // 可选关联教程
-}</pre>
-      <p class="dim">附件（pcap/exe 等文件）不走 JSON：经行内「编辑」弹窗的附件区上传，学生端凭登录态下载。</p>
-      <p class="dim">上传接口：POST /admin/challenges（单对象或数组，逐题校验、整体拒绝）。</p>
-      <h3>题目包 zip（image: . 容器题）</h3>
-      <pre class="json">challenge.yml + Dockerfile + docker-compose.yml + src/…</pre>
-      <p class="dim">接口：POST /admin/challenges/package。<code>image: .</code> 落库为 yak-academy/&lt;slug&gt;:latest。</p>
-    </UiCard>
-  </UiCollapseTransition>
-
-  <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
-  <UiTable v-else :data="items" :loading="loading" class="chal-table">
-    <UiTableColumn prop="slug" label="Slug" width="180" fixed="left" show-overflow-tooltip />
-    <UiTableColumn prop="title" label="标题" min-width="160" show-overflow-tooltip />
-    <UiTableColumn prop="category" label="分类" width="140" show-overflow-tooltip />
-    <UiTableColumn label="难度" width="110">
-      <template #default="{ row }">
-        <UiTag :type="difficultyType(row.difficulty)" size="small">{{ row.difficulty }}</UiTag>
-      </template>
-    </UiTableColumn>
-    <UiTableColumn prop="score" label="分值" width="80" />
-    <UiTableColumn label="容器" width="70">
-      <template #default="{ row }">
-        <UiTag v-if="row.has_env" type="primary" size="small">有</UiTag>
-        <span v-else>—</span>
-      </template>
-    </UiTableColumn>
-    <UiTableColumn label="关联教程" min-width="140">
-      <template #default="{ row }">
-        <span v-if="row.tutorial_slug">{{ row.tutorial_title || row.tutorial_slug }}</span>
-        <span v-else>—</span>
-      </template>
-    </UiTableColumn>
-    <template v-if="!readonlyTab">
-      <UiTableColumn label="可见性" width="90">
-        <template #default="{ row }">
-          <UiSwitch
-            :model-value="row.is_visible !== false"
-            :loading="visSaving === row.slug"
-            inline-prompt
-            active-text="可见"
-            inactive-text="隐藏"
-            @change="toggleVisible(row)"
-          />
-        </template>
-      </UiTableColumn>
-      <UiTableColumn v-if="auth.user?.global_role === 'admin'" label="操作" width="140" fixed="right">
-        <template #default="{ row }">
-          <UiButton size="small" :loading="editLoading === row.slug" @click="openRowEdit(row)">编辑</UiButton>
-          <UiButton size="small" type="danger" @click="remove(row)">删除</UiButton>
-        </template>
-      </UiTableColumn>
-      <UiTableColumn v-else label="来源" width="90">
-        <template #default="{ row }">
-          <UiTag v-if="row.is_builtin" size="small" type="info">内置</UiTag>
-        </template>
-      </UiTableColumn>
+  <PageHeader
+    title="题目管理"
+    description="维护内置题集、CTF 题目与 ACM 题目；上传、可见性、附件与配套教程都在这一个页面完成。"
+  >
+    <template #badges>
+      <span v-if="total" class="head-count">共 {{ total }} 题</span>
     </template>
-  </UiTable>
-  <UiPagination
-    v-if="total > 20"
-    layout="prev, pager, next"
-    :total="total"
-    :page-size="20"
-    v-model:current-page="page"
-    @current-change="load"
+    <template #actions>
+      <template v-if="readonlyTab">
+        <Button type="button" variant="outline" @click="load">刷新</Button>
+        <Button type="button" :disabled="builtinImporting" @click="builtinConfirmOpen = true">
+          导入内置训练（vulinbox）
+        </Button>
+      </template>
+      <template v-else>
+        <Button type="button" variant="outline" @click="specVisible = !specVisible">
+          {{ specVisible ? '收起格式规范' : '查看格式规范' }}
+        </Button>
+        <Button type="button" variant="outline" @click="downloadSampleChallenge">下载样例 JSON</Button>
+        <UiUpload
+          :show-file-list="false"
+          accept=".zip,application/zip"
+          :before-upload="onUploadPackage"
+          :disabled="uploading"
+        >
+          <UiButton :loading="uploading">上传题目包 zip</UiButton>
+        </UiUpload>
+        <UiUpload
+          :show-file-list="false"
+          accept=".json,application/json"
+          :before-upload="onImport"
+          :disabled="uploading"
+        >
+          <UiButton type="primary" :loading="uploading">选择 challenge.json</UiButton>
+        </UiUpload>
+      </template>
+    </template>
+  </PageHeader>
+
+  <PageTabs v-model="activeTab" :tabs="tabs" aria-label="题库切换" />
+  <p class="tab-hint">{{ TAB_META[activeTab].hint }}</p>
+
+  <section v-if="specVisible && !readonlyTab" class="spec-panel">
+    <div class="spec-panel__head">
+      <h2 class="spec-panel__title">题目格式</h2>
+      <Button type="button" variant="ghost" size="sm" @click="specVisible = false">收起</Button>
+    </div>
+    <p class="spec-text">用 challenge.json 定义题目，字段如下（下载样例 JSON 可直接修改）：</p>
+    <table class="spec-table">
+      <thead>
+        <tr><th scope="col">字段</th><th scope="col">必填</th><th scope="col">说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题目标识</td><td>是</td><td>全站唯一，小写字母、数字与连字符</td></tr>
+        <tr><td>标题</td><td>是</td><td>学员看到的题目名称</td></tr>
+        <tr><td>分类</td><td>是</td><td>小写字母、数字与连字符，用于筛选</td></tr>
+        <tr><td>题库</td><td>否</td><td>CTF 或 ACM；教程题库为内置题集专属</td></tr>
+        <tr><td>难度</td><td>是</td><td>入门 / 进阶 / 专家</td></tr>
+        <tr><td>分值</td><td>是</td><td>非负整数</td></tr>
+        <tr><td>描述</td><td>否</td><td>Markdown 正文</td></tr>
+        <tr><td>flag 判定</td><td>二选一</td><td>明文或正则，作用域为共享或每实例唯一</td></tr>
+        <tr><td>容器环境</td><td>否</td><td>镜像与端口</td></tr>
+        <tr><td>提示</td><td>否</td><td>标题、内容与花费积分</td></tr>
+        <tr><td>外链</td><td>否</td><td>名称与 URL</td></tr>
+        <tr><td>关联教程</td><td>否</td><td>填写教程标识</td></tr>
+      </tbody>
+    </table>
+    <h3 class="spec-subtitle">容器题（自定义镜像）</h3>
+    <p class="spec-text">题目包 zip 根目录放 Dockerfile、docker-compose.yml 与题目定义；上传时构建镜像，学生打开题目即获得独立环境。</p>
+    <p class="spec-note">附件（pcap、exe 等）不写进 JSON：在行内「编辑」弹窗的附件区上传，学员登录后可下载。</p>
+  </section>
+
+  <FilterBar class="challenge-filters">
+    <label class="filter-field">
+      <span class="filter-field__label">搜索</span>
+      <span class="filter-field__control">
+        <Search class="filter-field__icon" aria-hidden="true" />
+        <Input
+          v-model="keyword"
+          class="filter-field__input"
+          placeholder="搜索标识 / 标题 / 分类（前缀匹配）"
+          @input="onKeywordInput"
+        />
+      </span>
+    </label>
+    <label class="filter-field">
+      <span class="filter-field__label">分类</span>
+      <select v-model="categoryFilter" class="filter-select" aria-label="分类">
+        <option value="">全部分类</option>
+        <option v-for="category in categoryOptions" :key="category" :value="category">
+          {{ categoryLabel(category) }}（{{ category }}）
+        </option>
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="filter-field__label">难度</span>
+      <select v-model="difficultyFilter" class="filter-select" aria-label="难度">
+        <option value="">全部难度</option>
+        <option v-for="(label, value) in DIFFICULTY_LABELS" :key="value" :value="value">{{ label }}</option>
+      </select>
+    </label>
+    <label v-if="!readonlyTab" class="filter-field">
+      <span class="filter-field__label">来源</span>
+      <select v-model="builtinFilter" class="filter-select" aria-label="来源">
+        <option value="">全部来源</option>
+        <option value="yes">内置题集</option>
+        <option value="no">管理员上传</option>
+      </select>
+    </label>
+    <template #actions>
+      <Button v-if="hasFilters" type="button" variant="ghost" size="sm" class="filter-clear" @click="clearFilters">
+        清除筛选
+      </Button>
+    </template>
+  </FilterBar>
+
+  <!-- vulinbox 靶场镜像状态：仅内置训练 tab 显示 -->
+  <section v-if="readonlyTab && imageStatus" class="status-panel image-card">
+    <div class="status-panel__main">
+      <p class="status-panel__title">vulinbox 靶场镜像</p>
+      <div class="status-panel__chips">
+        <span class="status-chip" :data-tone="imageStatus.driver === 'docker' ? 'success' : 'neutral'">
+          驱动：{{ imageStatus.driver === 'docker' ? 'Docker' : '未启用' }}
+        </span>
+        <span
+          class="status-chip"
+          :data-tone="imageStatus.image_present ? 'success' : imageStatus.can_build ? 'warning' : 'danger'"
+        >
+          {{ imageStatus.image_present ? '镜像已就绪' : imageStatus.can_build ? '镜像缺失' : '镜像未构建（需 Docker）' }}
+        </span>
+        <code class="image-tag">{{ imageStatus.image_tag }}</code>
+      </div>
+    </div>
+    <div class="status-panel__actions">
+      <Button type="button" variant="outline" size="sm" @click="loadImageStatus">刷新</Button>
+      <Button
+        type="button"
+        size="sm"
+        :disabled="!imageStatus.can_build || imageBuilding"
+        :title="imageStatus.can_build ? '从官方 OSS 下载二进制并构建镜像（约 165MB，1-3 分钟）' : '服务端未启用容器运行时，无法构建镜像'"
+        @click="imageConfirmOpen = true"
+      >
+        {{ imageBuilding ? '正在构建…' : '从 OSS 构建镜像' }}
+      </Button>
+    </div>
+  </section>
+
+  <!-- yak 判题引擎状态：仅 ACM tab 显示 -->
+  <section v-if="activeTab === 'acm' && engineStatus" class="status-panel image-card">
+    <div class="status-panel__main">
+      <p class="status-panel__title">yak 判题引擎</p>
+      <div class="status-panel__chips">
+        <StatusTag
+          kind="container"
+          :value="engineStatus.configured ? 'running' : 'stopped'"
+          :label="engineStatus.configured ? '已装配' : '未装配'"
+        />
+        <span v-if="engineStatus.version" class="status-chip">{{ engineStatus.version }}</span>
+        <code class="image-tag">{{ engineStatus.path }}</code>
+      </div>
+      <div v-if="engineStatus.download.state === 'running'" class="engine-progress">
+        <div class="usage-track" role="presentation">
+          <span class="usage-fill" :style="{ width: `${engineDownloadPercent}%` }" />
+        </div>
+        <span class="engine-progress-text">
+          {{ engineStatus.download.total > 0
+            ? `${formatBytes(engineStatus.download.received)} / ${formatBytes(engineStatus.download.total)}`
+            : '正在下载…' }}
+        </span>
+      </div>
+      <p v-else-if="engineStatus.download.state === 'failed'" class="engine-error">
+        上次下载失败：{{ engineStatus.download.error || '未知错误' }}（可重试）
+      </p>
+    </div>
+    <div class="status-panel__actions">
+      <Button type="button" variant="outline" size="sm" @click="loadEngineStatus">刷新</Button>
+      <Button type="button" size="sm" :disabled="engineStatus.download.state === 'running'" @click="engineConfirmOpen = true">
+        {{ engineStatus.download.state === 'running' ? '正在下载…' : '从 OSS 下载引擎' }}
+      </Button>
+    </div>
+  </section>
+
+  <DataTablePanel
+    v-if="!loadError"
+    title="题目列表"
+    :count="total"
+    :description="loading ? '正在加载题目…' : hasFilters ? `按当前条件显示 ${total} 题` : undefined"
+  >
+    <UiTable
+      :data="items"
+      :loading="loading"
+      :loading-rows="7"
+      class="chal-table"
+      aria-label="题目列表"
+    >
+      <UiTableColumn label="题目" min-width="260">
+        <template #default="{ row }">
+          <span class="challenge-title">{{ row.title }}</span>
+          <code class="challenge-code">{{ codeOf(row) }}</code>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="分类" min-width="130">
+        <template #default="{ row }">
+          <span class="challenge-category">{{ categoryLabel(row.category) }}</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="难度" width="100">
+        <template #default="{ row }">
+          <StatusTag kind="difficulty" :value="row.difficulty" />
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="分值" width="80">
+        <template #default="{ row }">
+          <span class="challenge-score">{{ row.score }} 分</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="容器" width="80">
+        <template #default="{ row }">
+          <span :class="row.has_env ? 'challenge-flag-yes' : 'challenge-muted'">{{ row.has_env ? '支持' : '—' }}</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="关联教程" min-width="160">
+        <template #default="{ row }">
+          <span v-if="row.tutorial_title" class="challenge-muted">{{ row.tutorial_title }}</span>
+          <span v-else-if="row.tutorial_slug" class="challenge-muted">{{ row.tutorial_slug }}</span>
+          <span v-else class="challenge-muted">—</span>
+        </template>
+      </UiTableColumn>
+      <template v-if="!readonlyTab">
+        <UiTableColumn label="可见性" width="100">
+          <template #default="{ row }">
+            <Switch
+              :model-value="row.is_visible !== false"
+              :disabled="visSaving === row.slug"
+              :aria-label="`切换「${row.title}」可见性`"
+              @update:model-value="toggleVisible(row)"
+            />
+          </template>
+        </UiTableColumn>
+        <UiTableColumn label="操作" width="150">
+          <template #default="{ row }">
+            <div class="row-actions">
+              <Button type="button" variant="outline" size="sm" :disabled="editLoading === row.slug" @click="openRowEdit(row)">
+                {{ editLoading === row.slug ? '读取中…' : '编辑' }}
+              </Button>
+              <Button type="button" variant="link" size="sm" class="danger-action" @click="deleteTarget = row">删除</Button>
+            </div>
+          </template>
+        </UiTableColumn>
+      </template>
+      <template #empty>
+        <EmptyState
+          data-slot="table-empty"
+          compact
+          :tone="hasFilters ? 'filtered' : 'empty'"
+          :title="hasFilters ? '没有匹配的题目' : readonlyTab ? '内置训练尚未导入' : '还没有题目'"
+          :description="hasFilters
+            ? '试试更换关键词，或清除分类、难度与来源筛选。'
+            : readonlyTab
+              ? '内置训练随平台分发；导入后可在这里查看题目与配套教程。'
+              : '上传 challenge.json 或题目包 zip 后，题目会出现在这里。'"
+          :action-label="hasFilters ? '清除筛选' : readonlyTab ? '导入内置训练' : '下载样例 JSON'"
+          @action="onEmptyAction"
+        />
+      </template>
+    </UiTable>
+    <template v-if="total > pageSize" #footer>
+      <UiPagination
+        v-model:current-page="page"
+        layout="prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        @current-change="load"
+      />
+    </template>
+  </DataTablePanel>
+
+  <EmptyState
+    v-if="loadError"
+    tone="error"
+    title="题目列表加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="load"
   />
 
   <!-- 题目编辑弹窗：行内「编辑」回填库内定义，或选择 challenge.json 后确认上传 -->
@@ -882,44 +903,43 @@ onUnmounted(stopEnginePolling)
     </UiAlert>
     <UiForm label-width="110px">
       <div class="form-grid">
-        <UiFormItem label="slug" required>
-          <UiInput v-model="form.slug" placeholder="sqli-login-bypass" />
+        <UiFormItem label="题目标识" required>
+          <UiInput v-model="form.slug" placeholder="例如 sqli-login-bypass" />
         </UiFormItem>
         <UiFormItem label="标题" required>
           <UiInput v-model="form.title" />
         </UiFormItem>
         <UiFormItem label="分类" required>
-          <UiInput v-model="form.category" placeholder="sql-injection" />
+          <UiInput v-model="form.category" placeholder="例如 sql-injection" />
         </UiFormItem>
         <UiFormItem label="题库">
           <UiSelect v-model="form.bank" :disabled="bankLocked">
             <UiOption v-if="bankLocked" value="tutorial" label="教程题目（内置，不可改）" />
-            <UiOption value="ctf" label="CTF 题目（ctf，默认）" />
-            <UiOption value="acm" label="ACM 题目（acm）" />
+            <UiOption value="ctf" label="CTF 题目" />
+            <UiOption value="acm" label="ACM 题目" />
           </UiSelect>
-          <div class="dim form-hint">教程题目 tab 为内置题集专属，经「导入内置训练」写入</div>
+          <div class="form-hint">教程题库为内置题集专属，经「导入内置训练」写入</div>
         </UiFormItem>
         <UiFormItem label="难度" required>
           <UiSelect v-model="form.difficulty">
-            <UiOption value="apprentice" label="apprentice（入门）" />
-            <UiOption value="practitioner" label="practitioner（进阶）" />
-            <UiOption value="expert" label="expert（专家）" />
+            <UiOption value="apprentice" label="入门" />
+            <UiOption value="practitioner" label="进阶" />
+            <UiOption value="expert" label="专家" />
           </UiSelect>
         </UiFormItem>
         <UiFormItem label="分值" required>
           <UiInputNumber v-model="form.score" :min="0" />
         </UiFormItem>
         <UiFormItem label="关联教程">
-          <UiInput v-model="form.tutorial_slug" placeholder="可选，教程 Room slug" />
+          <UiInput v-model="form.tutorial_slug" placeholder="可选，填写教程标识" />
         </UiFormItem>
-        <!-- ACM 编程题：judge 段回填（判定配置只读展示；测试数据经题目包 zip 维护，
-             组分值（部分得分制）可在此调整——保存随元数据维护一并覆写） -->
+        <!-- ACM 编程题：判定配置回填；测试数据经题目包 zip 维护，组分值可在此调整 -->
         <template v-if="form.judge">
           <UiFormItem label="判定引擎">
-            <UiTag>code / yak</UiTag>
-            <div class="dim form-hint">
-              ACM 编程题：学生提交 yak 源码，引擎逐组运行测试数据判定（不验 flag）。
-              测试数据共 {{ form.judge.testdata.length }} 组，经题目包 zip 的 testdata/ 目录维护，此处保存仅更新元数据。
+            <UiTag>代码判题（yak）</UiTag>
+            <div class="form-hint">
+              学员提交 yak 源码，引擎逐组运行测试数据判定（不验 flag）。
+              当前共 {{ form.judge.testdata.length }} 组测试数据，内容经题目包 zip 维护，此处保存只更新元数据。
             </div>
           </UiFormItem>
           <UiFormItem label="时限（秒）">
@@ -935,23 +955,22 @@ onUnmounted(stopEnginePolling)
               filterable
               allow-create
               :reserve-keyword="false"
-              placeholder="留空 = 允许全部 yak 库（黑名单除外）"
+              placeholder="留空 = 允许全部 yak 库（禁用库除外）"
               class="lib-select"
             >
-              <UiOption v-for="o in libOptions" :key="o.value" :value="o.value" :label="o.label" />
+              <UiOption v-for="option in libOptions" :key="option.value" :value="option.value" :label="option.label" />
             </UiSelect>
-            <div class="dim form-hint">
-              yak 库白名单（防高危库执行）：配置后学生源码只能引用这些库，其余库提交/自测一律 422。
-              黑名单库（exec / file / ssh 等命令执行与宿主文件访问类）任何题目不可启用，配置即被拒绝。
+            <div class="form-hint">
+              配置后学员源码只能引用白名单内的库；命令执行与宿主文件访问类库始终不可用。
             </div>
           </UiFormItem>
           <UiFormItem label="测试组与分值">
             <div v-if="form.judge.testdata.length" class="testdata-list">
-              <div v-for="t in form.judge.testdata" :key="t.name" class="testdata-row">
-                <span class="testdata-name">{{ t.name }}</span>
-                <UiTag v-if="t.sample" size="small" effect="plain">样例</UiTag>
+              <div v-for="test in form.judge.testdata" :key="test.name" class="testdata-row">
+                <span class="testdata-name">{{ test.name }}</span>
+                <UiTag v-if="test.sample" size="small" effect="plain">样例</UiTag>
                 <UiInputNumber
-                  v-model="t.score"
+                  v-model="test.score"
                   :min="0"
                   size="small"
                   controls-position="right"
@@ -959,17 +978,17 @@ onUnmounted(stopEnginePolling)
                 />
               </div>
             </div>
-            <div v-else class="dim form-hint">无数据组（元数据维护语义将保留库内数据）。</div>
-            <div class="dim form-hint">
-              组分值 0 = 未配置（全有全无：全过才得分）；&gt;0 时按权重分摊题面分值，通过组即得。
+            <div v-else class="form-hint">无数据组（保存会保留库内测试数据）。</div>
+            <div class="form-hint">
+              组分值 0 = 全有全无（全部通过才得分）；大于 0 时按权重分摊题面分值，通过即得。
             </div>
           </UiFormItem>
         </template>
         <template v-else>
           <UiFormItem label="判定类型" required>
             <UiSelect v-model="form.type">
-              <UiOption value="static" label="static（明文 flag）" />
-              <UiOption value="regex" label="regex（正则匹配）" />
+              <UiOption value="static" label="明文 flag" />
+              <UiOption value="regex" label="正则匹配" />
             </UiSelect>
           </UiFormItem>
           <UiFormItem label="flag" required>
@@ -977,16 +996,16 @@ onUnmounted(stopEnginePolling)
           </UiFormItem>
           <UiFormItem label="flag 作用域">
             <UiSelect v-model="form.flag_mode">
-              <UiOption value="shared" label="shared（题目级共享）" />
-              <UiOption value="instance" label="instance（每实例唯一）" />
+              <UiOption value="shared" label="题目级共享" />
+              <UiOption value="instance" label="每实例唯一" />
             </UiSelect>
           </UiFormItem>
         </template>
       </div>
       <UiFormItem label="容器环境">
-        <UiSwitch v-model="form.has_env" />
+        <UiSwitch v-model="form.has_env" aria-label="启用容器环境" />
         <template v-if="form.has_env">
-          <UiInput v-model="form.image" placeholder="镜像（如 nginx:alpine；image: . 需走 zip 包通道）" class="env-image" />
+          <UiInput v-model="form.image" placeholder="镜像，例如 nginx:alpine；自定义镜像请走题目包 zip" class="env-image" />
           <UiInputNumber v-model="form.port" :min="1" :max="65535" controls-position="right" />
         </template>
       </UiFormItem>
@@ -995,28 +1014,28 @@ onUnmounted(stopEnginePolling)
       </UiFormItem>
       <UiFormItem label="提示">
         <div class="hints">
-          <div v-for="(h, i) in form.hints" :key="i" class="hint-row">
-            <UiInput v-model="h.title" placeholder="标题" class="hint-title" />
-            <UiInput v-model="h.content" placeholder="内容" class="hint-content" />
-            <UiInputNumber v-model="h.cost" :min="0" controls-position="right" class="hint-cost" />
-            <UiButton type="danger" link @click="removeHint(i)">删除</UiButton>
+          <div v-for="(hint, index) in form.hints" :key="index" class="hint-row">
+            <UiInput v-model="hint.title" placeholder="标题" class="hint-title" />
+            <UiInput v-model="hint.content" placeholder="内容" class="hint-content" />
+            <UiInputNumber v-model="hint.cost" :min="0" controls-position="right" class="hint-cost" />
+            <UiButton type="danger" link @click="removeHint(index)">删除</UiButton>
           </div>
           <UiButton size="small" @click="addHint">添加提示</UiButton>
         </div>
       </UiFormItem>
       <UiFormItem label="外链">
         <div class="hints">
-          <div v-for="(l, i) in form.links" :key="i" class="hint-row">
-            <UiInput v-model="l.name" placeholder="名称（如 Wireshark 下载）" class="hint-title" />
-            <UiInput v-model="l.url" placeholder="https://…" class="hint-content" />
-            <UiButton type="danger" link @click="removeLink(i)">删除</UiButton>
+          <div v-for="(link, index) in form.links" :key="index" class="hint-row">
+            <UiInput v-model="link.name" placeholder="名称（如 Wireshark 下载）" class="hint-title" />
+            <UiInput v-model="link.url" placeholder="https://…" class="hint-content" />
+            <UiButton type="danger" link @click="removeLink(index)">删除</UiButton>
           </div>
           <UiButton size="small" @click="addLink">添加外链</UiButton>
         </div>
       </UiFormItem>
-      <!-- 附件区：仅行内编辑已入库题目时显示（文件导入新建流程题目尚未落库） -->
+      <!-- 附件区：仅行内编辑已入库题目时显示 -->
       <template v-if="editExistingSlug">
-        <UiDivider content-position="left">附件（不经 JSON，学生端凭登录态下载）</UiDivider>
+        <UiDivider content-position="left">附件（学员登录后可下载）</UiDivider>
         <div class="attach-toolbar">
           <UiUpload
             :show-file-list="false"
@@ -1026,20 +1045,35 @@ onUnmounted(stopEnginePolling)
             <UiButton type="primary" size="small" :loading="attachUploading">上传附件（≤50MB，同名覆盖）</UiButton>
           </UiUpload>
         </div>
-        <UiLoadError v-if="attachError" compact :message="attachError" @retry="loadAttachments" class="attach-error" />
-        <UiTable v-else :data="attachments" :loading="attachLoading" :loading-rows="3" size="small" empty-text="暂无附件">
-          <UiTableColumn prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
-          <UiTableColumn label="大小" width="100">
-            <template #default="{ row }">{{ attachSize(row.size) }}</template>
-          </UiTableColumn>
-          <UiTableColumn label="上传时间" width="150">
-            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-          </UiTableColumn>
-          <UiTableColumn label="操作" width="70" fixed="right">
+        <EmptyState
+          v-if="attachError"
+          compact
+          tone="error"
+          title="附件列表加载失败"
+          :description="attachError"
+          action-label="重试"
+          @action="loadAttachments"
+        />
+        <UiTable v-else :data="attachments" :loading="attachLoading" :loading-rows="3" aria-label="题目附件">
+          <UiTableColumn label="文件名" min-width="200">
             <template #default="{ row }">
-              <UiButton size="small" type="danger" link @click="removeAttachment(row.filename)">删除</UiButton>
+              <span class="challenge-code">{{ row.filename }}</span>
             </template>
           </UiTableColumn>
+          <UiTableColumn label="大小" width="100">
+            <template #default="{ row }">{{ formatBytes(row.size) }}</template>
+          </UiTableColumn>
+          <UiTableColumn label="上传时间" width="160">
+            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+          </UiTableColumn>
+          <UiTableColumn label="操作" width="90">
+            <template #default="{ row }">
+              <Button type="button" variant="link" size="sm" class="danger-action" @click="attachmentTarget = row.filename">删除</Button>
+            </template>
+          </UiTableColumn>
+          <template #empty>
+            <EmptyState compact title="暂无附件" description="上传 pcap、exe 等配套文件后，学员可在题目页下载。" />
+          </template>
         </UiTable>
       </template>
     </UiForm>
@@ -1050,69 +1084,463 @@ onUnmounted(stopEnginePolling)
       </UiButton>
     </template>
   </UiDialog>
+
+  <ConfirmDialog
+    :open="!!deleteTarget"
+    title="删除题目"
+    :description="deleteTarget ? `确定删除题目「${deleteTarget.title}」？运行中的容器会被销毁，判定答案与提示一并删除。已有学员通关的题目无法删除。` : ''"
+    confirm-label="删除"
+    tone="danger"
+    :loading="deleting"
+    @update:open="!$event && (deleteTarget = null)"
+    @confirm="confirmRemove"
+  />
+
+  <ConfirmDialog
+    :open="builtinConfirmOpen"
+    title="导入内置训练"
+    description="将导入随平台分发的内置训练集（配套教程与题目）。已导入的同名内容会被更新；配置了 Docker 时会同时构建靶场基础镜像。"
+    confirm-label="导入/更新"
+    :loading="builtinImporting"
+    @update:open="builtinConfirmOpen = $event"
+    @confirm="confirmImportBuiltin"
+  />
+
+  <ConfirmDialog
+    :open="!!bulkList"
+    title="批量导入题目"
+    :description="bulkList ? `文件包含 ${bulkList.length} 个题目。编辑确认仅支持单题，是否跳过编辑直接批量导入？` : ''"
+    confirm-label="直接批量导入"
+    :loading="uploading"
+    @update:open="!$event && (bulkList = null)"
+    @confirm="confirmBulkImport"
+  />
+
+  <ConfirmDialog
+    :open="imageConfirmOpen"
+    title="构建 vulinbox 镜像"
+    description="将从官方 OSS 下载 vulinbox 二进制并构建靶场基础镜像（约 165MB，需要联网，耗时约 1-3 分钟）。构建期间请勿关闭页面。"
+    confirm-label="开始构建"
+    :loading="imageBuilding"
+    @update:open="imageConfirmOpen = $event"
+    @confirm="confirmBuildImage"
+  />
+
+  <ConfirmDialog
+    :open="engineConfirmOpen"
+    title="下载 yak 判题引擎"
+    description="将从 yaklang 官方 OSS 下载 yak 引擎二进制（约 220MB，需要联网，视带宽约 1-5 分钟）。下载在后台进行，完成后自动装配，无需重启服务。"
+    confirm-label="开始下载"
+    @update:open="engineConfirmOpen = $event"
+    @confirm="confirmDownloadEngine"
+  />
+
+  <ConfirmDialog
+    :open="!!attachmentTarget"
+    title="删除附件"
+    :description="attachmentTarget ? `确定删除附件「${attachmentTarget}」？学员将无法再从题目页下载该文件。` : ''"
+    confirm-label="删除"
+    tone="danger"
+    :loading="attachmentDeleting"
+    @update:open="!$event && (attachmentTarget = '')"
+    @confirm="confirmRemoveAttachment"
+  />
 </template>
 
 <style scoped>
-/* 页头 */
-.page-title .accent { color: var(--accent-foreground); margin-left: 2px; }
-.head-count { color: var(--muted-foreground); font-size: var(--text-sm); }
-
-/* 题库 tab */
-.bank-tabs :deep([data-slot="tabs-list"]) { margin-bottom: var(--space-1); }
-.tab-label { font-size: var(--text-sm); }
-.tab-sub {
-  font-size: var(--text-xs); color: var(--accent-foreground); border: 1px solid var(--border);
-  padding: 0 var(--space-1); margin-left: var(--space-1); border-radius: var(--radius-control); vertical-align: 1px;
+.head-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
 }
-.hint { color: var(--muted-foreground); font-size: var(--text-sm); margin: 0 0 var(--space-4); }
 
-/* 工具栏与筛选 */
-.toolbar { margin-bottom: var(--space-4); display: flex; gap: var(--space-2); align-items: flex-start; flex-wrap: wrap; }
-.filter-bar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
-.filter-search { width: 300px; max-width: 100%; }
-.filter { width: 170px; max-width: 100%; }
-.filter-clear {
-  color: var(--accent-foreground); font-size: var(--text-sm); cursor: pointer; user-select: none;
+.tab-hint {
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
 }
-.filter-clear:hover { opacity: 0.8; }
-.list-error { margin-bottom: var(--space-3); }
-.attach-error { margin-bottom: var(--space-3); }
 
-/* 镜像状态卡 / 引擎状态卡 / 规范折叠卡 / 表格 */
-.image-card { margin-bottom: var(--space-4); }
-.image-card :deep([data-slot="card-content"]) { padding: var(--space-3) var(--space-4); }
-.image-status { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.image-label { font-weight: 600; }
-.image-tag { color: var(--muted-foreground); font-size: var(--text-xs); }
-/* 引擎下载进度行 / 失败提示：与 image-tag 同一字号体系 */
-.engine-progress { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); max-width: 480px; }
-.engine-progress .ui-progress { flex: 1; }
-.engine-progress-text { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
-.engine-error { color: var(--destructive); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
-.spec { margin-bottom: var(--space-4); }
-.spec h3 { margin-top: 0; }
-.spec pre { background: var(--muted); padding: var(--space-3); border-radius: 4px; font-size: var(--text-xs); overflow: auto; }
-.spec .json { line-height: 1.5; font-family: Consolas, monospace; }
-.chal-table { margin-bottom: var(--space-3); }
-.dim { color: var(--muted-foreground); font-size: var(--text-sm); }
+.challenge-filters {
+  margin-top: var(--space-2);
+}
 
-/* 编辑弹窗 */
-.form-errors { margin-bottom: var(--space-4); }
-.err-line { margin: var(--space-1) 0; font-size: var(--text-sm); }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--space-3); }
-.lib-select { width: 100%; }
-.mono :deep(textarea) { font-family: Consolas, monospace; }
-.env-image { width: 320px; max-width: 100%; margin-left: var(--space-3); margin-right: var(--space-2); }
-.hints { width: 100%; display: flex; flex-direction: column; gap: var(--space-2); }
-.hint-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-.hint-title { width: 140px; flex: none; }
-.hint-content { flex: 1; }
-.hint-cost { flex: none; }
-.attach-toolbar { margin-bottom: var(--space-3); }
-.form-hint { line-height: 1.4; margin-top: 2px; }
-/* ACM 数据组行：与 attach-row 同一排版体系（等宽组名 + 说明文字） */
-.testdata-list { display: flex; flex-direction: column; gap: var(--space-1); }
-.testdata-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.testdata-name { font-family: Consolas, monospace; min-width: 104px; }
-.testdata-score { width: 130px; }
+.filter-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.filter-field__label {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+.filter-field__control {
+  position: relative;
+  display: block;
+}
+
+.filter-field__icon {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.filter-field__input {
+  width: 260px;
+  padding-left: var(--space-8);
+}
+
+.filter-select {
+  min-height: 36px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+
+.spec-panel {
+  margin-bottom: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+}
+
+.spec-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.spec-panel__title {
+  color: var(--text-primary);
+  font-size: var(--text-section);
+  font-weight: 600;
+}
+
+.spec-text,
+.spec-note {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+}
+
+.spec-subtitle {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.spec-note {
+  margin-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.spec-table {
+  width: 100%;
+  margin-top: var(--space-3);
+  border-collapse: collapse;
+  font-size: var(--text-meta);
+}
+
+.spec-table th,
+.spec-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.spec-table th {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.spec-table td:first-child {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.spec-table td:last-child {
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+}
+
+.status-panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+}
+
+.status-panel__main {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.status-panel__title {
+  margin-bottom: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.status-panel__chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.status-chip[data-tone='success'] {
+  color: var(--status-success);
+}
+
+.status-chip[data-tone='warning'] {
+  color: var(--status-warning);
+}
+
+.status-chip[data-tone='danger'] {
+  color: var(--status-danger);
+}
+
+.status-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.image-tag {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.engine-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 480px;
+  margin-top: var(--space-2);
+}
+
+.engine-progress .usage-track {
+  flex: 1;
+}
+
+.usage-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--action-primary);
+}
+
+.engine-progress-text {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+}
+
+.engine-error {
+  margin-top: var(--space-2);
+  color: var(--status-danger);
+  font-size: var(--text-meta);
+}
+
+.challenge-title {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.challenge-code {
+  display: block;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.challenge-category,
+.challenge-score {
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.challenge-flag-yes {
+  color: var(--status-success);
+  font-size: var(--text-meta);
+}
+
+.challenge-muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.danger-action {
+  color: var(--status-danger);
+}
+
+.form-errors {
+  margin-bottom: var(--space-4);
+}
+
+.err-line {
+  margin: var(--space-1) 0;
+  font-size: var(--text-caption);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-3);
+}
+
+.lib-select {
+  width: 100%;
+}
+
+.mono :deep(textarea) {
+  font-family: var(--font-mono);
+}
+
+.env-image {
+  flex: 1 1 16rem;
+  margin-inline: var(--space-3);
+}
+
+.hints {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hint-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hint-title {
+  width: 9rem;
+  flex: none;
+}
+
+.hint-content {
+  flex: 1;
+}
+
+.hint-cost {
+  flex: none;
+}
+
+.attach-toolbar {
+  margin-bottom: var(--space-3);
+}
+
+.form-hint {
+  line-height: var(--leading-normal);
+  margin-top: var(--space-1);
+}
+
+.testdata-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.testdata-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.testdata-name {
+  min-width: 6rem;
+  font-family: var(--font-mono);
+}
+
+.testdata-score {
+  width: 8rem;
+}
+
+@media (max-width: 720px) {
+  .filter-field,
+  .filter-field__input,
+  .filter-select {
+    width: 100%;
+  }
+
+  .filter-select {
+    min-height: 44px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-panel__actions {
+    width: 100%;
+  }
+}
 </style>

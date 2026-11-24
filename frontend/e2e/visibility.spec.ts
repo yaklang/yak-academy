@@ -22,10 +22,11 @@ test.describe('可见性旅程', () => {
     // 开关状态翻转
     await expect(row.locator('[role=switch]')).not.toBeChecked()
 
-    // 学生端：列表无此题
+    // 学生端：默认教程题库不含 CTF 题；切到 CTF 题库也无此题
     await loginAsStudent(page)
     await page.goto('/training')
-    await expect(page.getByRole('link', { name: C.title })).toHaveCount(0)
+    await page.getByRole('tab', { name: 'CTF 题目' }).click()
+    await expect(page.locator('[data-slot=table] tr', { hasText: C.title })).toHaveCount(0)
 
     // 学生端：直连详情 404（页面内错误提示 + 重试，页面无题目标题）
     await page.goto(`/training/${C.slug}`)
@@ -41,12 +42,12 @@ test.describe('可见性旅程', () => {
     await switchAdminChallengeBank(page, 'CTF 题目')
     const row2 = page.locator('[data-slot=table] tr', { hasText: C.slug })
     await row2.locator('[role=switch]').click()
-    await expect(page.locator('[data-sonner-toast]', { hasText: '已对学生可见' })).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]', { hasText: '已对学员可见' })).toBeVisible()
 
     await loginAsStudent(page)
     await page.goto('/training')
     // 上传的种子题归 CTF 题目 tab（教程题目专属内置题集）
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.getByRole('link', { name: C.title })).toBeVisible()
+    await expect(page.locator('[data-slot=table] tr', { hasText: C.title })).toBeVisible()
   })
 })

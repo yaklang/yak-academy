@@ -20,13 +20,14 @@ const emit = defineEmits<{ 'update:modelValue': [value: string | number] }>()
 </script>
 
 <template>
-  <nav class="page-tabs" :aria-label="ariaLabel || '页面分区'">
+  <nav class="page-tabs" role="tablist" :aria-label="ariaLabel || '页面分区'">
     <template v-for="tab in tabs" :key="tab.value ?? tab.to ?? tab.label">
       <RouterLink
         v-if="tab.to"
         :to="tab.to"
         class="page-tabs__item"
         active-class="is-active"
+        role="tab"
       >
         {{ tab.label }}
         <span v-if="tab.count !== undefined" class="page-tabs__count">{{ tab.count }}</span>
@@ -35,8 +36,10 @@ const emit = defineEmits<{ 'update:modelValue': [value: string | number] }>()
         v-else
         type="button"
         class="page-tabs__item"
+        role="tab"
         :class="{ 'is-active': tab.value === modelValue }"
         :disabled="tab.disabled"
+        :aria-selected="tab.value === modelValue"
         :aria-current="tab.value === modelValue ? 'page' : undefined"
         @click="emit('update:modelValue', tab.value as string | number)"
       >
