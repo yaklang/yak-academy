@@ -231,12 +231,27 @@ const initial = () => props.displayName.slice(0, 1).toUpperCase()
 }
 
 @media (max-width: 1023px) {
+  .app-topbar {
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+  }
+
   .app-topbar__mobile {
     display: inline-flex;
   }
 
   .app-topbar__collapse {
     display: none;
+  }
+
+  /* 手机上优先保留导航与账号入口；XP 在账号页与学习页仍可查看。 */
+  .app-topbar__xp {
+    display: none;
+  }
+
+  /* 工具区不参与收缩：宁可截断面包屑，也不能把账号按钮挤出视口。 */
+  .app-topbar__tools {
+    flex-shrink: 0;
   }
 
   .app-topbar__tools :deep([data-slot='button']),
@@ -250,6 +265,13 @@ const initial = () => props.displayName.slice(0, 1).toUpperCase()
   }
 
   .app-topbar__xp-detail {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-topbar__mode,
+  .app-topbar__sep {
     display: none;
   }
 }
