@@ -36,7 +36,7 @@ test.describe('账号生命周期', () => {
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
     await page.getByRole('button', { name: '登录', exact: true }).click()
-    await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
+    await expect(page.getByRole('alert')).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
 
     // 新密码可登录
