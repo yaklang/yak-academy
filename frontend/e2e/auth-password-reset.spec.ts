@@ -43,7 +43,7 @@ test.describe('找回账号与重置密码', () => {
     await page.goto('/login')
     // el-link 在可访问树是 generic（非 link role），用精确文本锚定。
     await page.getByText('找回账号', { exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'yak-academy 找回账号' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '找回你的账号。' })).toBeVisible()
 
     await page.getByLabel('邮箱或手机号', { exact: true }).fill(email)
     await page.getByRole('button', { name: '获取验证码' }).click()
