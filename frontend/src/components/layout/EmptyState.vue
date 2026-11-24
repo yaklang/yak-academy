@@ -53,14 +53,14 @@ const title = computed(() => props.title ?? defaultTitles[props.tone])
     <div v-if="$slots.default || actionLabel" class="empty-state__actions">
       <slot>
         <Button
-          v-if="actionTo"
+          v-if="actionLabel && actionTo"
           as-child
           variant="outline"
         >
           <RouterLink :to="actionTo">{{ actionLabel }}</RouterLink>
         </Button>
         <Button
-          v-else
+          v-else-if="actionLabel"
           variant="outline"
           @click="emit('action')"
         >

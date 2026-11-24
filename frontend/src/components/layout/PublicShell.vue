@@ -106,8 +106,15 @@ const year = new Date().getFullYear()
 
 @media (max-width: 767px) {
   .public-shell__header {
-    height: 64px;
-    gap: var(--space-3);
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    padding-block: var(--space-2);
+  }
+
+  .public-shell__actions {
+    margin-left: auto;
   }
 
   .public-shell__nav {

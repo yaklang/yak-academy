@@ -37,14 +37,14 @@ test.describe('ACM 编程题（源码判定）', () => {
     await expect(demo).toContainText('30') // demo 组期望输出
 
     // 代码编辑器（CodeMirror）存在，flag 输入不存在（ACM 不通过 flag 判定）
-    const editor = page.locator('.solve .cm-editor')
+    const editor = page.locator('.solve-panel .cm-editor')
     await expect(editor).toBeVisible()
     await expect(page.getByPlaceholder('输入 flag')).toHaveCount(0)
 
     // 代码语法高亮生效：输入源码后出现带着色类名的 token span。
     // 不断言具体色值——配色会随主题调整，断言色号只会让样式改动误伤功能用例。
     await fillSource(page, 'println("hi")')
-    const tokenCount = await page.locator('.solve .cm-line span').count()
+    const tokenCount = await page.locator('.solve-panel .cm-line span').count()
     expect(tokenCount).toBeGreaterThan(0)
 
     // 库策略提示：题面 chips 显示白名单（fixture 配 [str, io, os]），
@@ -61,7 +61,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     // yak 代码补全：词首补全（内建函数）与 lib. 成员补全（标准库真实函数）；
     // 补全菜单遵循题面白名单——str. 提供成员，白名单外（codec.）/黑名单（exec.）
     // 不提供任何成员（无菜单）
-    const content = page.locator('.solve .cm-content')
+    const content = page.locator('.solve-panel .cm-content')
     const menu = page.locator('.cm-tooltip-autocomplete')
     await content.click()
     await content.press('ControlOrMeta+a')
@@ -90,8 +90,8 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, E2E.acm.correctSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    await expect(page.locator('.result')).toContainText('判定通过，得分', { timeout: 30_000 })
-    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'success')
+    await expect(page.locator('.result-notice')).toContainText('判定通过，得分', { timeout: 30_000 })
+    await expect(page.locator('.result-notice')).toHaveAttribute('data-tone', 'success')
   })
 
   test('提交错误输出的源码 → WA 判定不通过', async ({ page }) => {
@@ -102,8 +102,8 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, E2E.acm.wrongSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    await expect(page.locator('.result')).toContainText('答案错误（WA）', { timeout: 30_000 })
-    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
+    await expect(page.locator('.result-notice')).toContainText('答案错误（WA）', { timeout: 30_000 })
+    await expect(page.locator('.result-notice')).toHaveAttribute('data-tone', 'error')
   })
 
   // 部分得分回归（e2e-bugfix）：种子题 scores.json 按 2/1/1/1 配分，
@@ -131,27 +131,27 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, E2E.acm.partialSource)
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    await expect(page.locator('.result')).toContainText(
+    await expect(page.locator('.result-notice')).toContainText(
       `部分通过，得分 ${expected}`, { timeout: 30_000 },
     )
-    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
+    await expect(page.locator('.result-notice')).toHaveAttribute('data-tone', 'error')
     // 逐组结论：通过组绿色「通过」并显示组分；失败组红色 WA 且无分
     for (const name of Object.keys(E2E.acm.partialGroups)) {
       await expect(page.locator('.group-row', { hasText: name })).toBeVisible()
     }
     const failRow = page.locator('.group-row', { hasText: 'partialfail' })
-    await expect(failRow).toHaveClass(/group-fail/)
+    await expect(failRow).toHaveAttribute('data-passed', 'false')
     await expect(failRow).toContainText('WA')
     await expect(failRow.locator('.group-score')).toHaveCount(0)
     const demoRow = page.locator('.group-row', { hasText: 'demo' })
-    await expect(demoRow).toHaveClass(/group-pass/)
+    await expect(demoRow).toHaveAttribute('data-passed', 'true')
     await expect(demoRow.locator('.group-score')).toContainText('2 分')
 
     // 题目未通关：部分通过不翻转 solved——页面保持未通关态
     // （全量套件下 AC 用例先通关属正常前置，solved 一旦翻转不回退，
     // 因此断言收敛为「通关标记与结算文案互斥且部分通过为 error 警示」）。
-    await expect(page.locator('.result')).toHaveAttribute('data-tone', 'error')
-    await expect(page.locator('.result')).not.toContainText('判定通过')
+    await expect(page.locator('.result-notice')).toHaveAttribute('data-tone', 'error')
+    await expect(page.locator('.result-notice')).not.toContainText('判定通过')
   })
 
   test('引擎未装配 → 提交/自测入口禁用并事前提示', async ({ page }) => {
@@ -217,17 +217,18 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.goto(`/training/${E2E.acm.slug}`)
 
     await expect(page.getByRole('button', { name: '运行自测' })).toBeVisible()
-    // 样例组与自定义输入都以 radio 按钮呈现，默认选中第一个样例
+    // 自测输入是一个下拉选择：默认第一个样例组，可切到自定义输入。
+    const runTarget = page.getByRole('combobox', { name: '自测输入' })
     for (const name of E2E.acm.samples) {
-      await expect(page.locator('.run-bar').getByText(`样例 ${name}`)).toBeVisible()
+      await expect(runTarget.getByRole('option', { name: `样例 ${name}`, exact: true })).toHaveCount(1)
     }
-    await expect(page.locator('.run-bar input[type=radio]').first()).toBeChecked()
+    await expect(runTarget).toHaveValue(E2E.acm.samples[0])
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
 
     // 切到自定义输入出现 stdin 输入框，切回样例收起
-    await page.locator('.run-bar').getByRole('radio', { name: '自定义输入', exact: true }).check()
+    await runTarget.selectOption('自定义输入')
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toBeVisible()
-    await page.locator('.run-bar').getByRole('radio', { name: `样例 ${E2E.acm.samples[0]}`, exact: true }).check()
+    await runTarget.selectOption(E2E.acm.samples[0])
     await expect(page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）')).toHaveCount(0)
   })
 
@@ -240,7 +241,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.getByRole('button', { name: '运行自测' }).click()
 
     // demo 组：输入 2 3 / 10 20 → 期望 5 / 30
-    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-output')).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('.run-output')).toContainText('与样例期望一致')
     await expect(page.locator('.run-stdout')).toContainText('30')
     await expect(page.locator('.run-output')).toContainText(/耗时 \d+ ms/)
@@ -252,11 +253,11 @@ test.describe('ACM 编程题（源码判定）', () => {
     await page.goto(`/training/${E2E.acm.slug}`)
 
     await fillSource(page, E2E.acm.correctSource)
-    await page.locator('.run-bar').getByRole('radio', { name: '自定义输入', exact: true }).check()
+    await page.getByRole('combobox', { name: '自测输入' }).selectOption('自定义输入')
     await page.getByPlaceholder('自定义输入（作为程序的标准输入，回车换行）').fill('10 20\n2 5')
     await page.getByRole('button', { name: '运行自测' }).click()
 
-    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-output')).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('.run-stdout')).toContainText('30')
     await expect(page.locator('.run-stdout')).toContainText('7')
     // 自定义模式 matches 恒 null：不出现样例一致性标签
@@ -271,7 +272,7 @@ test.describe('ACM 编程题（源码判定）', () => {
     await fillSource(page, E2E.acm.wrongSource)
     await page.getByRole('button', { name: '运行自测' }).click()
 
-    await expect(page.locator('.run-output')).toContainText('运行完成', { timeout: 30_000 })
+    await expect(page.locator('.run-output')).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('.run-output')).toContainText('与样例期望不一致')
     await expect(page.locator('.run-stdout')).toContainText('42')
   })

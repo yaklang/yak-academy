@@ -454,7 +454,7 @@ async function submit() {
 }
 
 .login-story__badge {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.06em;

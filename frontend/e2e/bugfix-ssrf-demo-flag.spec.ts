@@ -17,7 +17,7 @@ import { loginAsAdmin } from './helpers'
 async function submitFlag(page: Page, flag: string) {
   await page.getByPlaceholder('输入 flag').fill(flag)
   await page.getByRole('button', { name: '提交', exact: true }).click()
-  await expect(page.locator('.result')).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.result-notice')).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('回归：SSRF 课程演示假 flag 一眼可辨', () => {
@@ -56,6 +56,6 @@ test.describe('回归：SSRF 课程演示假 flag 一眼可辨', () => {
     await expect(page.getByRole('heading', { name: 'SSRF 基础：让服务器替你访问内网接口' })).toBeVisible()
 
     await submitFlag(page, 'flag{test}')
-    await expect(page.locator('.result')).toContainText('判定不通过')
+    await expect(page.locator('.result-notice')).toContainText('判定不通过')
   })
 })

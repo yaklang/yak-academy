@@ -9,12 +9,12 @@ test.describe('窄屏响应式布局', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
   test('移动端视口下主要页面无横向溢出', async ({ page }) => {
-    // 登录页：分屏 hero 在 ≤880px 折为单列，仍不得横向滚动
+    // 登录页：分屏 hero 在窄屏折为单列，仍不得横向滚动
     await page.goto('/login')
-    await expect(page.getByRole('heading', { name: 'yak-academy 登录' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     await expectNoOverflow(page, '/login')
 
-    // 登录后：顶栏（≤960px 收起 chips/用户名，≤640px 主导航折行）与内容区
+    // 登录后：顶栏入口收进下拉/图标，内容区不得出现横向滚动
     await loginAsAdmin(page)
     for (const path of ['/', '/training', '/leaderboard']) {
       await page.goto(path)

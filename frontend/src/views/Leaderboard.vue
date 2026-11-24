@@ -409,13 +409,13 @@ onMounted(() => void load(1))
 }
 
 .podium-score small {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 400;
 }
 
 .podium-meta {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--text-meta);
 }
 
@@ -443,6 +443,11 @@ onMounted(() => void load(1))
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+.podium-score small,
+.dist-count small {
+  font-size: var(--text-micro);
 }
 
 .me-chip {
