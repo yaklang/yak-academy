@@ -1,0 +1,223 @@
+/* ==========================================================================
+   Design tokens — the single source of colour, type, spacing and radius.
+   Layers:
+     1. raw scale (never referenced by pages)
+     2. semantic tokens (light in :root, dark in .dark)
+     3. compatibility aliases consumed by shadcn-vue / Ui* components
+   Contract: docs/frontend-design.md
+   ========================================================================== */
+
+:root {
+  /* ---- raw neutral scale ---- */
+  --gray-0: #ffffff;
+  --gray-50: #fafafa;
+  --gray-100: #f4f4f5;
+  --gray-150: #ececea;
+  --gray-200: #e4e4e7;
+  --gray-300: #d4d4d8;
+  --gray-400: #a1a1aa;
+  --gray-500: #71717a;
+  --gray-600: #52525b;
+  --gray-700: #3f3f46;
+  --gray-800: #27272a;
+  --gray-850: #1e1e21;
+  --gray-900: #141416;
+  --gray-950: #0b0b0c;
+  --gray-1000: #050506;
+
+  /* ---- raw brand orange scale ---- */
+  --orange-50: #fff7ed;
+  --orange-100: #ffedd5;
+  --orange-200: #fed7aa;
+  --orange-300: #fdba74;
+  --orange-400: #fb923c;
+  --orange-500: #f97316;
+  --orange-600: #ea580c;
+  --orange-700: #c2410c;
+  --orange-800: #9a3412;
+  --orange-900: #7c2d12;
+
+  /* ---- semantic surfaces (light) ---- */
+  --bg-canvas: #f6f6f4;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-subtle: #f1f1ef;
+  --bg-hover: #ececea;
+  --bg-active: #e6e6e3;
+
+  /* ---- semantic text (light) ---- */
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+
+  /* ---- semantic strokes (light) ---- */
+  --border-default: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --input-border: #d4d4d8;
+
+  /* ---- semantic actions (light) ---- */
+  --action-primary: #c2410c;
+  --action-primary-hover: #9a3412;
+  --action-primary-fg: #ffffff;
+  --action-subtle: #fff1e8;
+  --action-subtle-fg: #9a3412;
+  --focus-ring: #ea580c;
+  --brand-mark: #ea580c;
+
+  /* ---- semantic status (light) ---- */
+  --status-success: #15803d;
+  --status-warning: #a16207;
+  --status-danger: #b91c1c;
+  --status-info: #1d4ed8;
+
+  /* ---- charts (light) ---- */
+  --chart-1: #c2410c;
+  --chart-2: #475569;
+  --chart-3: #0f766e;
+  --chart-4: #a16207;
+  --chart-5: #7c3aed;
+
+  /* ---- syntax highlight (light) ---- */
+  --code-keyword: #a21caf;
+  --code-type: #7c3aed;
+  --code-namespace: #0f766e;
+  --code-function: #b45309;
+  --code-number: #15803d;
+  --code-string: #4d7c0f;
+  --code-bracket: #52525b;
+
+  /* ---- compatibility aliases (shadcn-vue / Ui*) ---- */
+  --background: var(--bg-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --panel: var(--bg-surface);
+  --popover: var(--bg-surface-raised);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--action-primary);
+  --primary-foreground: var(--action-primary-fg);
+  --secondary: var(--bg-subtle);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-subtle);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--action-subtle);
+  --accent-foreground: var(--action-subtle-fg);
+  --destructive: var(--status-danger);
+  --success: var(--status-success);
+  --warning: var(--status-warning);
+  --border: var(--border-default);
+  --input: var(--input-border);
+  --ring: var(--focus-ring);
+  --sidebar: var(--bg-surface);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--action-primary);
+  --sidebar-primary-foreground: var(--action-primary-fg);
+  --sidebar-accent: var(--bg-subtle);
+  --sidebar-accent-foreground: var(--action-subtle-fg);
+  --sidebar-border: var(--border-default);
+  --sidebar-ring: var(--focus-ring);
+
+  /* ---- elevation ---- */
+  --shadow-popover: 0 12px 32px -12px rgb(24 24 27 / 0.14), 0 2px 8px rgb(24 24 27 / 0.05);
+
+  /* ---- type roles ---- */
+  --text-micro: 11px;
+  --text-meta: 12px;
+  --text-caption: 13px;
+  --text-body: 14px;
+  --text-section: 16px;
+  --text-page: 20px;
+  --text-metric: 24px;
+  --text-display: 32px;
+  /* legacy aliases kept for the migration window */
+  --text-xs: var(--text-meta);
+  --text-sm: var(--text-caption);
+  --text-base: var(--text-body);
+  --text-md: var(--text-section);
+  --text-lg: var(--text-section);
+  --text-xl: var(--text-page);
+  --text-2xl: var(--text-page);
+  --text-3xl: var(--text-metric);
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  /* ---- spacing scale (4px based) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---- radius ---- */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-overlay: 16px;
+  --radius-pill: 999px;
+  --radius: var(--radius-control);
+  --radius-panel: var(--radius-overlay);
+
+  /* ---- layout ---- */
+  --layout-max-width: 1280px;
+  --public-max-width: 1280px;
+  --competition-max-width: 1440px;
+}
+
+.dark {
+  /* ---- semantic surfaces (graphite, never pure black) ---- */
+  --bg-canvas: #0b0b0c;
+  --bg-surface: #141416;
+  --bg-surface-raised: #19191b;
+  --bg-subtle: #1e1e21;
+  --bg-hover: #26262a;
+  --bg-active: #2e2e33;
+
+  /* ---- semantic text ---- */
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #8a8a93;
+
+  /* ---- semantic strokes ---- */
+  --border-default: #27272a;
+  --border-strong: #3f3f46;
+  --input-border: #3f3f46;
+
+  /* ---- semantic actions ---- */
+  --action-primary: #fb923c;
+  --action-primary-hover: #fdba74;
+  --action-primary-fg: #1c1206;
+  --action-subtle: #2a1a0e;
+  --action-subtle-fg: #fdba74;
+  --focus-ring: #fb923c;
+  --brand-mark: #fb923c;
+
+  /* ---- semantic status ---- */
+  --status-success: #4ade80;
+  --status-warning: #fbbf24;
+  --status-danger: #f87171;
+  --status-info: #60a5fa;
+
+  /* ---- charts ---- */
+  --chart-1: #fb923c;
+  --chart-2: #94a3b8;
+  --chart-3: #2dd4bf;
+  --chart-4: #fbbf24;
+  --chart-5: #a78bfa;
+
+  /* ---- syntax highlight ---- */
+  --code-keyword: #e6a377;
+  --code-type: #cfa9ec;
+  --code-namespace: #93d4cb;
+  --code-function: #edb96b;
+  --code-number: #94d8b6;
+  --code-string: #bed894;
+  --code-bracket: #ccc7c0;
+
+  /* ---- elevation ---- */
+  --shadow-popover: 0 16px 40px -16px rgb(0 0 0 / 0.72), 0 2px 8px rgb(0 0 0 / 0.4);
+}
