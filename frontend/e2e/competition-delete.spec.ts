@@ -27,7 +27,7 @@ test.describe('竞赛删除旅程', () => {
 
     // running：确认后删除被拒，提示「进行中的竞赛不可删除」
     await row.getByRole('button', { name: '删除' }).click()
-    await page.locator('[role=alertdialog]').getByRole('button', { name: '删除' }).click()
+    await page.locator('[data-slot=dialog-content]').getByRole('button', { name: '删除' }).click()
     await expect(page.locator('[data-sonner-toast]', { hasText: '进行中的竞赛不可删除' })).toBeVisible()
     // 行仍在（未误删）
     await expect(row).toBeVisible()
@@ -41,7 +41,7 @@ test.describe('竞赛删除旅程', () => {
     const row2 = page.locator('[data-slot=table] tr', { hasText: 'E2E 删除验证赛' })
     await expect(row2).toBeVisible()
     await row2.getByRole('button', { name: '删除' }).click()
-    await page.locator('[role=alertdialog]').getByRole('button', { name: '删除' }).click()
+    await page.locator('[data-slot=dialog-content]').getByRole('button', { name: '删除' }).click()
     await expect(page.locator('[data-sonner-toast]', { hasText: '已删除' })).toBeVisible()
     await expect(page.locator('[data-slot=table] tr', { hasText: 'E2E 删除验证赛' })).toHaveCount(0)
 

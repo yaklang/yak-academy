@@ -115,11 +115,11 @@ test.describe('竞赛隔离旅程', () => {
     // 管理端手动结束竞赛（POST /end，end_time 置为当前时刻）：比赛立即结束
     await endCompetition(request, comp.id)
 
-    // 竞赛首页 5s 节拍自检：感知结束 → 解锁并放出 WP 提交（结束态业务标识）
-    await expect(page.getByRole('tab', { name: 'WP 提交' })).toBeVisible({ timeout: 12_000 })
+    // 竞赛首页 5s 节拍自检：感知结束 → 解锁并放出解题报告提交（结束态业务标识）
+    await expect(page.getByRole('tab', { name: '解题报告' })).toBeVisible({ timeout: 12_000 })
     // 结束态在概览 KPI 里有明确文案（标题旁的状态 tag、头部时钟也含"已结束"，
     // 用文案定位避免 strict mode 多元素冲突）。
-    await expect(page.getByText('比赛已结束，可提交 Writeup')).toBeVisible()
+    await expect(page.getByText('比赛已结束，可提交解题报告')).toBeVisible()
 
     // 平台访问恢复：不再被引导回竞赛页；服务端同步解除（topics 200）
     await page.goto('/training')
