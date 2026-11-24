@@ -143,54 +143,57 @@ POST /challenges/{slug}/hints/{hintId}/unlock
   → 返回 hint 正文 + 当前积分
 题目详情 GET /challenges/{slug}：未解锁 hint 的 content 置空，仅返回 id/title/cost/unlocked。
 ```
-## 6. 自助注册流（邮箱验证码主通道，手机号兼容）
+## 6. 微信注册/登录流（唯一自助入口）
+
+手机号/邮箱自助注册已下线；新账号只经微信 OAuth 创建。服务端只使用微信官方
+网页授权接口，不引入第三方 OAuth 库。
 
 ```
-FE(未登录)         API                register SVC          repo            DB
-   │  POST /auth/email/code {email}   │                      │               │
-   ├─────────────────────────────────→│ 邮箱格式/长度(≤254)校验               │
-   │                                  │ 60s 限频（最近一码 CreatedAt）        │
-   │                                  │ 10min 窗口 ≤3 条                      │
-   │                                  │ 邮箱已注册 → 422（不发码）             │
-   │                                  │ genCode(crypto/rand 拒绝采样) ─────→│ SmsCode(email) 落库(5min TTL)
-   │                                  │ EmailSender：管理端设置 > 环境变量 SMTP │
-   │                                  │  未配置/停用：非严格模式写日志；       │
-   │                                  │  严格模式返回 501                     │
-   │   200 {ok:true}（限频 → 200 {ok, retry_after}，不报错）                  │
-   │   code 仅本地演示回显（ACADEMY_SHOW_VERIFICATION_CODE=1）                │
-   │←─────────────────────────────────┤                      │               │
-   │  POST /auth/register {email, code, username, password}  │               │
-   ├─────────────────────────────────→│ email/phone 二选一 + 参数校验          │
-   │                                  │ 取该邮箱最新一码：                    │
-   │                                  │  ├─ 无码/已核销/过期 → 422            │
-   │                                  │  ├─ 恒时比较(逐字符XOR)失败 → 422     │
-   │                                  │ MarkUsed(条件更新 used=0→1) ───────→│
-   │                                  │  └─ 0 行 = 并发已核销 → 422（一次性） │
-   │                                  │ 用户名/邮箱查重 → 422                 │
-   │                                  │ bcrypt 建号(角色固定 student) ──────→│
-   │   200 {token, expires_at}（建号即登录）                                  │
-   │←─────────────────────────────────┤                      │               │
+FE(未登录)              API                    wechat SVC          repo/DB
+   │  GET /auth/wechat/status                                        │
+   ├──────────────────────────────────→│ enabled/mock/mode（未配置 → 前端  │
+   │  200 {enabled, mock, mode}         │ 禁用按钮并提示联系管理员）          │
+   │←──────────────────────────────────┤                                   │
+   │  GET /auth/wechat/start?redirect=/profile                         │
+   ├──────────────────────────────────→│ 随机 nonce + HMAC-SHA256 签名       │
+   │                                  │ state 会话（nonce/redirect/exp）    │
+   │  Set-Cookie: academy_wechat_state=…；HttpOnly; SameSite=Lax; 10min │
+   │  200 {authorize_url}               │ official_account: oauth2/authorize │
+   │←──────────────────────────────────┤ open_platform:  qrconnect           │
+   │  浏览器整页跳转微信授权页（携带 appid/redirect_uri/state）           │
+   │  微信回调 → 302 前端 /login?code=…&state=…                         │
+   │  POST /auth/wechat/callback {code, state}                          │
+   ├──────────────────────────────────→│ 无 state Cookie → 401              │
+   │                                  │ 签名/过期/nonce 恒时比对失败 → 401  │
+   │                                  │ 立即清除 state Cookie（一次性）      │
+   │                                  │ Exchange: access_token → userinfo  │
+   │                                  │  ├─ openid 命中 → 复用账号          │
+   │                                  │  ├─ unionid 命中 → 复用并补 openid  │
+   │                                  │  └─ 未命中 → 建 student 账号        │
+   │                                  │     （昵称生成用户名，冲突加后缀；   │
+   │                                  │      PasswordHash 为空）───────────→│ User
+   │  200 {token, expires_at, redirect}（JWT 只在响应体，绝不进 URL）    │
+   │←──────────────────────────────────┤                                   │
+   │  前端保存 token → /me → 跳转 redirect（仅站内路径，默认 /learn）      │
 ```
 
 要点：
-- 邮箱是注册凭据与找回依据，**不参与登录**（登录仍为用户名 + 密码）。
-- 旧版手机号注册（`POST /auth/sms/code` + `/auth/register {phone}`）保留兼容；`User.phone` 字段与已有数据不迁移。
-- 验证码比对与核销分离：比对失败不消耗；核销是条件更新，并发同码注册只有一个成功。
-- 角色固定 `student`，接口无角色入参（禁止自选）。
-- 限频对客户端表现为 200 + retry_after，前端据此倒计时。
-- 回显默认关闭；生产严格模式禁止开启，验证码只经 SMTP（邮箱）或旧短信投递器发送。
-- SMTP 配置来源优先级：管理端「系统设置」保存的 `system_settings.smtp` > 环境变量 `ACADEMY_SMTP_*` > 未配置。管理端保存后立即热替换投递器；密码加密落库且不回显，JWT secret 轮换后需重新填写。
+- **两种官方模式**：`official_account`（公众号网页授权 `snsapi_userinfo`，可用免费测试号联调）与 `open_platform`（开放平台网站应用扫码 `snsapi_login`）；`ACADEMY_WECHAT_MODE` 选择，空配置 = 未启用。
+- **Mock 仅本地/E2E**：`ACADEMY_WECHAT_MOCK=1` 直接回跳登录页并建号，不访问微信；`ACADEMY_STRICT=1` 时该开关必须关闭。`ACADEMY_WECHAT_REDIRECT_URL` 必须与微信后台配置的授权回调域一致，指向**前端登录页**。
+- **state 防 CSRF**：随机 nonce + HMAC-SHA256 签名会话存 HttpOnly + SameSite=Lax Cookie，10 分钟有效；回调时恒时比对并立即清除（重放/伪造一律 401）。JWT 只经 JSON 响应体返回，避免 token 泄漏进日志/Referer。
+- **账号归并**：openid 优先（唯一索引，空值不占用），unionid 兜底（同主体多应用互通）；用户名由微信昵称生成，重名追加稳定后缀，昵称不足 3 字符时补后缀而非丢弃。
+- **无密码账号**：`PasswordHash` 为空，`GET /me` 返回 `password_set=false`；密码登录 401、本人改密 422，资料页隐藏改密入口并显示「微信登录」标签。管理员重置密码后即可密码登录。
+- 历史邮箱/手机号账号继续用户名 + 密码登录；邮箱/手机号字段仅为历史数据保留，不参与登录。
 
-### 6.1 找回密码流（邮箱主通道，手机号兼容，同套验证码设施）
+### 6.1 找回密码流（仅历史账号）
 
 ```
 FE(未登录)         API                reset SVC             repo            DB
    │  登录页「找回账号」→ POST /auth/password-reset/code {email|phone}       │
    ├─────────────────────────────────→│ 目标必须已注册（422 未注册，         │
-   │                                  │ 先于限频告知；竞赛批量号无邮箱/      │
-   │                                  │ 手机号 → 引导管理端重置）            │
-   │                                  │ 限频同注册(60s/10min≤3，按 purpose  │
-   │                                  │ 独立计数)                            │
+   │                                  │ 先于限频告知；微信/竞赛批量号没有    │
+   │                                  │ 绑定值 → 引导管理端重置）            │
+   │                                  │ 限频(60s/10min≤3，按 purpose 独立)  │
    │                                  │ genCode ───────────────────────────→│ SmsCode(purpose=password_reset)
    │   200 {ok}（限频 → {ok, retry_after}；本地演示回显附 code）              │
    │←─────────────────────────────────┤                      │               │
@@ -200,17 +203,17 @@ FE(未登录)         API                reset SVC             repo            D
    │                                  │  恒时比较 + MarkUsed 条件更新)       │
    │                                  │ bcrypt 改密 + TokenInvalidBefore   │
    │                                  │ 推进(签发秒+1) ───────────────────→│ User
-   │   200 {username, account_code}（忘记用户名的学员凭邮箱一并找回）         │
+   │   200 {username, account_code}（忘记用户名的历史账号凭邮箱一并找回）     │
    │←─────────────────────────────────┤                      │               │
    │  （不自动登录：回登录页用新密码登录；原 token 已全量失效）               │
 
-管理端路径（未绑定邮箱/手机号的账号）：admin 用户管理行内「重置密码」
+管理端路径（微信注册/竞赛批量建号等无邮箱手机号的账号）：admin 用户管理行内「重置密码」
   POST /admin/users/{id}/reset-password {password} → 不校验旧密码，同语义
   改密 + token 全量失效（预填平台初始密码 123456 可改），写管理审计。
 ```
 
 要点：
-- 验证码**用途隔离**（`SmsCode.purpose` = register / password_reset）：注册码不可重置、重置码不可注册；限频窗口同样按用途独立。
+- 验证码**用途隔离**（`SmsCode.purpose` = password_reset）：注册用途已随自助注册下线，历史 register 码不可用于重置。
 - 邮箱与手机号验证码分别按目标落库，互不通用（填 email 必须用邮箱码）。
 - 改密失效语义与本人改密（`POST /auth/change-password`）、管理员重置完全一致：`TokenInvalidBefore` 推进，已签发 token 全量吊销。
 
