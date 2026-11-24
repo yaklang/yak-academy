@@ -55,11 +55,11 @@ function axisTime(at: string) {
 function buildChart() {
   const el = canvas.value
   if (!el || rows.value.length <= 1) return undefined
-  const primary = token('--primary') || '#7a5236'
-  const accent = token('--accent-foreground') || '#6f452b'
-  const border = token('--border') || '#e6ddd2'
-  const muted = token('--muted-foreground') || '#6b6158'
-  const surface = token('--panel') || '#f4eadf'
+  const primary = token('--action-primary') || token('--primary')
+  const accent = token('--action-subtle-fg') || token('--accent-foreground')
+  const border = token('--border')
+  const muted = token('--text-tertiary') || token('--muted-foreground')
+  const surface = token('--bg-surface') || token('--panel')
   const gridLine = `${muted}33`
 
   const config: ChartConfiguration<'line'> = {
@@ -93,7 +93,7 @@ function buildChart() {
           backgroundColor: surface,
           borderColor: border,
           borderWidth: 1,
-          titleColor: token('--foreground') || '#241f1a',
+          titleColor: token('--text-primary') || token('--foreground'),
           bodyColor: muted,
           padding: 10,
           displayColors: false,
@@ -116,13 +116,13 @@ function buildChart() {
         x: {
           grid: { display: false },
           border: { display: false },
-          ticks: { color: muted, maxTicksLimit: 6, font: { size: 10 } },
+          ticks: { color: muted, maxTicksLimit: 6, font: { size: 11 } },
         },
         y: {
           beginAtZero: true,
           border: { display: false },
           grid: { color: gridLine },
-          ticks: { color: muted, precision: 0, font: { size: 10 } },
+          ticks: { color: muted, precision: 0, font: { size: 11 } },
         },
       },
     },
@@ -157,9 +157,9 @@ onBeforeUnmount(() => chart?.destroy())
   height: 238px;
   display: grid;
   place-items: center;
-  padding: 0 24px;
+  padding: 0 var(--space-4);
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
   text-align: center;
 }
 </style>
