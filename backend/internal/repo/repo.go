@@ -18,6 +18,12 @@ type UserRepo interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	// FindByPhone 旧版注册手机号查重（兼容保留）。调用前应保证 phone 非空。
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
+	// FindByWechatOpenID 微信 openid 查人（微信回调登录/注册）。调用前保证非空。
+	FindByWechatOpenID(ctx context.Context, openID string) (*model.User, error)
+	// FindByWechatUnionID 微信 unionid 查人（跨公众号/网站应用识别同一用户）。
+	FindByWechatUnionID(ctx context.Context, unionID string) (*model.User, error)
+	// UpdateWechatIdentity 补齐/刷新微信身份字段（昵称、unionid、openid 变更时）。
+	UpdateWechatIdentity(ctx context.Context, userID uint, openID, unionID, nickname string) error
 	// FindByAccountCode 账号编码查人（邀请赛表格导入解析编码引用）。
 	FindByAccountCode(ctx context.Context, code string) (*model.User, error)
 	// List 管理端用户分页（filter 零值 = 全量；返回条目附活跃/解题画像标记）。

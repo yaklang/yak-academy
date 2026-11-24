@@ -48,7 +48,9 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 		}
 		return "", time.Time{}, err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+	// 微信注册账号 PasswordHash 为空：不存在可用密码，统一按凭据错误处理。
+	if user.PasswordHash == "" ||
+		bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return "", time.Time{}, ErrInvalidCredential
 	}
 	return s.issueToken(ctx, user)
@@ -129,6 +131,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, tokenStr string) (*mode
 			return nil, ErrTokenRevoked
 		}
 	}
+	user.PasswordSet = user.PasswordHash != ""
 	return user, nil
 }
 
@@ -162,6 +165,9 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPa
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if user.PasswordHash == "" {
+		return ErrPasswordNotSet
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)) != nil {
 		return ErrInvalidCredential
