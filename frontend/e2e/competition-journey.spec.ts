@@ -47,7 +47,7 @@ test.describe('竞赛隔离旅程', () => {
     await page.waitForURL((u) => u.pathname === '/learn')
 
     // —— 邀请邮件 → 入场页（邀请码预填）→ 入场 ——
-    await page.getByRole('navigation', { name: '页面导航' }).getByRole('link', { name: '邮箱', exact: true }).click()
+    await page.getByRole('navigation', { name: '页面导航' }).getByRole('link', { name: /^邮箱/ }).click()
     await page.waitForURL((u) => u.pathname === '/mailbox')
     // 邮件标题含竞赛名（此前 spec 的邀请邮件也在邮箱里，须按本赛名定位）
     const inviteRow = page.locator('tr', { hasText: E2E.competition.lockName })
