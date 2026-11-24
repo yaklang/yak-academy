@@ -172,7 +172,7 @@ async function auditPage(
         // 开关的可见轨道只有 32×18，但组件用 ::after 把可点击区域扩到 ≥44px，
         // 包围盒无法反映扩展命中区，因此按控件类型排除。
         const selector =
-          'button:not([role="switch"]), [role="button"], input:not([type="hidden"]), select, textarea, [role="tab"], .app-nav-item, .ui-pagination button'
+          'button:not([role="switch"]), [role="button"], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea, [role="tab"], .app-nav-item, .ui-pagination button'
         return [...document.querySelectorAll<HTMLElement>(selector)]
           .filter((el) => {
             if (el.closest('[disabled], [aria-disabled="true"]')) return false

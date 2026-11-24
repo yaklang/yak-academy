@@ -131,14 +131,24 @@ html,
   }
 }
 
-/* Icon-only actions need a 44px hit area on touch screens; text buttons keep
-   their compact height because their width already exceeds the target. */
+/* Touch screens: every actionable control keeps a >=44px hit area. Text
+   metrics differ across platforms, so width cannot be assumed from padding. */
 @media (max-width: 767px) {
-  button[data-size^='icon'],
-  [role='button'][data-size^='icon'],
-  [data-slot='button'][data-size^='icon'] {
-    min-width: 44px;
+  button,
+  [role='button'],
+  [role='tab'],
+  [data-slot='button'],
+  select,
+  textarea,
+  input:not([type='checkbox']):not([type='radio']):not([type='hidden']) {
     min-height: 44px;
+  }
+
+  button,
+  [role='button'],
+  [role='tab'],
+  [data-slot='button'] {
+    min-width: 44px;
   }
 }
 

@@ -14,12 +14,13 @@ test.describe('回归：教程配套练习入口', () => {
     const action = page.getByRole('link', { name: /前往配套题目练习/ })
     await expect(action).toBeVisible()
 
+    // 路由 chunk 的 scoped CSS 可能晚于 DOM 注入；等阅读壳层宽度收敛后再量。
+    await expect.poll(async () => (await shell.boundingBox())?.width ?? Infinity).toBeLessThanOrEqual(1040)
     const shellBox = await shell.boundingBox()
     const actionBox = await action.boundingBox()
     if (!shellBox || !actionBox) throw new Error('lesson header is not visible')
 
-    // 阅读壳层不超过约 1040px；入口右边缘与壳层右边缘对齐，不越过视口留白。
-    expect(shellBox.width).toBeLessThanOrEqual(1040)
+    // 入口右边缘与壳层右边缘对齐，不越过视口留白。
     expect(Math.abs(actionBox.x + actionBox.width - (shellBox.x + shellBox.width))).toBeLessThanOrEqual(1)
   })
 })
