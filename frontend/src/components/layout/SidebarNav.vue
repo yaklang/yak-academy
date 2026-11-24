@@ -317,6 +317,13 @@ const initial = computed(() => props.displayName.slice(0, 1).toUpperCase())
   width: 100%;
 }
 
+@media (max-width: 1023px) {
+  /* 紧凑视口由顶栏按钮打开 Sheet，桌面侧栏必须退出布局，否则会覆盖顶栏与内容。 */
+  .app-sidebar {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-menu,
   .app-nav-item,
