@@ -9,6 +9,14 @@ import { notify } from '@/lib/notifications'
 import { authApi, profileApi, type CapabilityProfile, type UserProfile } from '../api'
 import { useAuthStore } from '../stores/auth'
 import CapabilityRadar from '@/components/CapabilityRadar.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
+import MetricStrip from '@/components/layout/MetricStrip.vue'
+import StatCard from '@/components/layout/StatCard.vue'
+import FormField from '@/components/layout/FormField.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -27,6 +35,7 @@ const avatarUrl = ref<string | null>(null)
 const pwdVisible = ref(false)
 const pwdForm = reactive({ current: '', next: '', confirm: '' })
 const pwdLoading = ref(false)
+const pwdError = ref('')
 
 // 微信注册账号没有密码（password_set=false）：隐藏改密入口，避免必然失败的请求；
 // 管理员重置密码后 /me 会返回 true，入口自动恢复。
@@ -83,7 +92,7 @@ async function copyAccountID() {
   if (!profile.value) return
   try {
     await navigator.clipboard.writeText(String(profile.value.id))
-    notify.success('账号 ID 已复制')
+    notify.success('账号编码已复制')
   } catch {
     notify.warning('浏览器未授权剪贴板，请手动选择复制')
   }
@@ -128,13 +137,19 @@ async function onAvatarChange(file: File) {
   }
 }
 
+async function openPwd() {
+  pwdError.value = ''
+  pwdVisible.value = true
+}
+
 async function submitChangePassword() {
+  pwdError.value = ''
   if (!pwdForm.current || pwdForm.next.length < 6) {
-    notify.warning('请填写当前密码，且新密码至少 6 位')
+    pwdError.value = '请填写当前密码，且新密码至少 6 位'
     return
   }
   if (pwdForm.next !== pwdForm.confirm) {
-    notify.warning('两次输入的新密码不一致')
+    pwdError.value = '两次输入的新密码不一致'
     return
   }
   pwdLoading.value = true
@@ -146,7 +161,7 @@ async function submitChangePassword() {
     await auth.logout()
     router.push('/login')
   } catch (e) {
-    notify.error((e as Error).message)
+    pwdError.value = (e as Error).message
   } finally {
     pwdLoading.value = false
   }
@@ -159,65 +174,65 @@ onMounted(() => {
 </script>
 
 <template>
-  <header class="page-head">
-    <div>
-      <h2 class="page-title">账号<span class="accent">信息</span></h2>
-      <p class="page-sub">查看身份资料与能力画像，管理头像、简介和登录密码。</p>
-    </div>
-    <div class="page-actions">
-      <router-link to="/mailbox" class="head-link"><Mail :size="15" aria-hidden="true" />站内邮箱</router-link>
-    </div>
-  </header>
+  <PageHeader
+    title="账号信息"
+    description="查看身份资料与能力画像，管理头像、简介和登录密码。"
+  >
+    <template #actions>
+      <Button variant="outline" as-child>
+        <RouterLink to="/mailbox">
+          <Mail aria-hidden="true" />
+          站内邮箱
+        </RouterLink>
+      </Button>
+    </template>
+  </PageHeader>
 
-  <div v-if="loading" class="profile-grid profile-skeleton" role="status" aria-label="正在加载账号信息">
-    <div class="column" aria-hidden="true">
-      <div class="sk-card tall">
-        <div class="sk-card-head"><i class="sk-line medium" /><i class="sk-pill" /></div>
-        <div class="sk-identity"><i class="sk-avatar" /><div class="sk-lines"><i class="sk-line" /><i class="sk-line short" /></div></div>
-        <div class="sk-lines"><i class="sk-line" /><i class="sk-line medium" /></div>
+  <div v-if="loading" class="profile-grid" role="status" aria-label="正在加载账号信息">
+    <div v-for="column in 2" :key="column" class="profile-column" aria-hidden="true">
+      <div class="profile-panel">
+        <span class="sk-line sk-line--title" />
+        <span class="sk-line" />
+        <span class="sk-line sk-line--short" />
       </div>
-      <div class="sk-card">
-        <i class="sk-line medium" />
-        <i class="sk-line" />
-        <i class="sk-line short" />
-      </div>
-    </div>
-    <div class="column" aria-hidden="true">
-      <div class="sk-card tall">
-        <div class="sk-card-head"><i class="sk-line medium" /><i class="sk-pill" /></div>
-        <div class="sk-score-row"><i class="sk-stat" /><i class="sk-stat" /><i class="sk-stat" /></div>
-        <i class="sk-radar" />
+      <div class="profile-panel">
+        <span class="sk-line sk-line--title" />
+        <span class="sk-line" />
       </div>
     </div>
   </div>
-  <UiLoadError v-else-if="loadError" class="profile-load-error" :message="loadError" @retry="load" />
+  <EmptyState
+    v-else-if="loadError"
+    tone="error"
+    title="账号信息加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="load"
+  />
   <div v-else-if="profile" class="profile-grid">
-    <div class="column">
-      <UiCard class="card">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h3 class="card-title">身份资料</h3>
-              <p class="card-hint">账号编码与注册信息由平台分配，不可修改。</p>
-            </div>
-            <UiTag size="small" effect="plain">{{ roleLabel(profile.global_role) }}</UiTag>
+    <div class="profile-column">
+      <section class="profile-panel" aria-labelledby="identity-title">
+        <header class="profile-panel__head">
+          <div>
+            <h2 id="identity-title" class="profile-panel__title">身份资料</h2>
+            <p class="profile-panel__hint">账号编码与注册信息由平台分配，不可修改。</p>
           </div>
-        </template>
+          <StatusTag kind="role" :value="profile.global_role" />
+        </header>
 
         <div class="identity">
           <div class="avatar-frame">
-            <UiAvatar :size="88" :src="avatarUrl ?? undefined" class="avatar">
-              {{ profile.username.slice(0, 1).toUpperCase() }}
-            </UiAvatar>
-            <label class="upload" :class="{ disabled: avatarUploading }">
+            <img v-if="avatarUrl" :src="avatarUrl" alt="当前头像" class="avatar-img" />
+            <span v-else class="avatar-initial" aria-hidden="true">{{ profile.username.slice(0, 1).toUpperCase() }}</span>
+            <label class="avatar-upload" :data-busy="avatarUploading ? 'true' : undefined">
               {{ avatarUploading ? '上传中…' : '更换头像' }}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/gif,image/webp"
                 :disabled="avatarUploading"
-                @change="(e) => {
-                  const f = (e.target as HTMLInputElement).files?.[0]
-                  if (f) onAvatarChange(f)
+                @change="(event) => {
+                  const file = (event.target as HTMLInputElement).files?.[0]
+                  if (file) onAvatarChange(file)
                 }"
               />
             </label>
@@ -227,247 +242,359 @@ onMounted(() => {
             <p class="identity-name">{{ profile.username }}</p>
             <dl class="facts">
               <div class="fact">
-                <dt><UserRound :size="14" aria-hidden="true" />账号 ID</dt>
+                <dt><UserRound aria-hidden="true" />账号编码</dt>
                 <dd>
-                  <span class="mono">{{ profile.id }}</span>
-                  <button type="button" class="icon-button" aria-label="复制账号 ID" @click="copyAccountID">
-                    <Copy :size="13" aria-hidden="true" />
+                  <span class="fact__value">{{ profile.id }}</span>
+                  <button type="button" class="icon-button" aria-label="复制账号编码" @click="copyAccountID">
+                    <Copy aria-hidden="true" />
                   </button>
                 </dd>
               </div>
               <div class="fact">
-                <dt><CalendarDays :size="14" aria-hidden="true" />注册时间</dt>
+                <dt><CalendarDays aria-hidden="true" />注册时间</dt>
                 <dd>{{ formatDate(profile.created_at) }}</dd>
               </div>
             </dl>
           </div>
         </div>
 
-        <div class="bio-block">
-          <div class="bio-head">
-            <h4>描述简介</h4>
-            <UiButton v-if="!editing" size="small" @click="editing = true">编辑</UiButton>
-            <div v-else class="bio-actions">
-              <UiButton size="small" :loading="bioLoading" @click="saveBio">保存</UiButton>
-              <UiButton
-                size="small"
-                @click="
-                  () => {
-                    editing = false
-                    bio = profile?.bio ?? ''
-                  }
-                "
-              >取消</UiButton>
+        <div class="profile-bio">
+          <div class="profile-bio__head">
+            <h3 class="profile-bio__title">简介</h3>
+            <Button v-if="!editing" size="sm" variant="outline" @click="editing = true">编辑</Button>
+            <div v-else class="profile-bio__actions">
+              <Button size="sm" :loading="bioLoading" @click="saveBio">保存</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                @click="() => { editing = false; bio = profile?.bio ?? '' }"
+              >取消</Button>
             </div>
           </div>
-          <UiInput
+          <textarea
             v-if="editing"
             v-model="bio"
-            type="textarea"
-            :rows="4"
+            class="profile-bio__input"
+            rows="4"
             maxlength="500"
-            show-word-limit
             placeholder="介绍一下自己（≤500 字）"
           />
-          <p v-else class="bio-text">{{ profile.bio || '暂无简介，写一句介绍自己吧。' }}</p>
+          <p v-else class="profile-bio__text">{{ profile.bio || '暂无简介，写一句介绍自己吧。' }}</p>
         </div>
-      </UiCard>
+      </section>
 
-      <UiCard class="card">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h3 class="card-title">账号安全</h3>
-              <p class="card-hint">{{ canChangePassword ? '修改密码后全部已登录会话失效，需要重新登录。' : '微信注册账号通过微信登录，不设置平台密码。' }}</p>
-            </div>
+      <section class="profile-panel" aria-labelledby="security-title">
+        <header class="profile-panel__head">
+          <div>
+            <h2 id="security-title" class="profile-panel__title">账号安全</h2>
+            <p class="profile-panel__hint">
+              {{ canChangePassword ? '修改密码后全部已登录会话失效，需要重新登录。' : '微信注册账号通过微信登录，不设置平台密码。' }}
+            </p>
           </div>
-        </template>
+        </header>
         <div class="security-row">
-          <span class="security-icon"><KeyRound :size="16" aria-hidden="true" /></span>
+          <span class="security-icon"><KeyRound aria-hidden="true" /></span>
           <div class="security-copy">
             <p>登录密码</p>
             <span>{{ canChangePassword ? '建议使用与其他平台不同的密码。' : '如需使用密码登录，请联系管理员重置密码。' }}</span>
           </div>
-          <UiButton v-if="canChangePassword" size="small" @click="pwdVisible = true">修改密码</UiButton>
-          <UiTag v-else size="small" effect="plain">微信登录</UiTag>
+          <Button v-if="canChangePassword" size="sm" variant="outline" @click="openPwd">修改密码</Button>
+          <StatusTag v-else kind="role" value="student" label="微信登录" />
         </div>
-      </UiCard>
+      </section>
     </div>
 
-    <div class="column">
-      <UiCard class="card" data-testid="capability-card">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h3 class="card-title">能力画像</h3>
-              <p class="card-hint">按题目分类统计通关覆盖，只计当前可见题目。</p>
-            </div>
-            <ShieldCheck class="head-icon" :size="18" aria-hidden="true" />
+    <div class="profile-column">
+      <section class="profile-panel" data-testid="capability-card" aria-labelledby="capability-title">
+        <header class="profile-panel__head">
+          <div>
+            <h2 id="capability-title" class="profile-panel__title">能力画像</h2>
+            <p class="profile-panel__hint">按题目分类统计通关覆盖，只计当前可见题目。</p>
           </div>
-        </template>
+          <ShieldCheck class="profile-panel__icon" aria-hidden="true" />
+        </header>
 
-        <div class="score-strip">
-          <div class="score-cell">
-            <span class="score-value mono">{{ profile.score }}</span>
-            <span class="score-label">总得分</span>
-          </div>
-          <div class="score-cell">
-            <span class="score-value mono">{{ visibleSolved }}<span class="score-total">/{{ visibleTotal }}</span></span>
-            <span class="score-label">可见题通关</span>
-          </div>
-          <div class="score-cell">
-            <span class="score-value mono">{{ masteredCategories() }}<span class="score-total">/{{ categoryCount() }}</span></span>
-            <span class="score-label">已掌握分类</span>
-          </div>
-        </div>
+        <MetricStrip :columns="3">
+          <StatCard label="总得分" :value="profile.score" tone="primary" />
+          <StatCard label="可见题通关" :value="`${visibleSolved}/${visibleTotal}`" />
+          <StatCard label="已掌握分类" :value="`${masteredCategories()}/${categoryCount()}`" />
+        </MetricStrip>
 
-        <div v-if="capabilitiesLoading" class="capability-state capability-skeleton" role="status" aria-label="正在加载能力画像">
-          <i class="sk-radar" aria-hidden="true" />
-          <div class="sk-lines" aria-hidden="true">
-            <i class="sk-line" />
-            <i class="sk-line medium" />
-            <i class="sk-line short" />
-          </div>
+        <div v-if="capabilitiesLoading" class="capability-state" role="status" aria-label="正在加载能力画像">
+          <span class="sk-radar" aria-hidden="true" />
         </div>
-        <UiLoadError
+        <EmptyState
           v-else-if="capabilitiesError"
           compact
+          tone="error"
           title="能力画像加载失败"
-          :message="capabilitiesError"
-          @retry="loadCapabilities"
+          :description="capabilitiesError"
+          action-label="重试"
+          @action="loadCapabilities"
         />
         <CapabilityRadar v-else-if="capabilities" :dimensions="capabilities.dimensions" />
 
         <p v-if="capabilities && capabilities.dimensions.length" class="capability-note">
           总得分为历史累计；覆盖率 = 该分类已通关题数 / 该类可见题数，题库更新后自动重算。
         </p>
-      </UiCard>
+      </section>
     </div>
   </div>
 
   <UiDialog v-model="pwdVisible" title="修改密码" width="420px">
-    <UiForm label-width="90px">
-      <UiFormItem label="当前密码">
-        <UiInput v-model="pwdForm.current" type="password" show-password />
-      </UiFormItem>
-      <UiFormItem label="新密码">
-        <UiInput v-model="pwdForm.next" type="password" show-password placeholder="至少 6 位" />
-      </UiFormItem>
-      <UiFormItem label="确认新密码">
-        <UiInput v-model="pwdForm.confirm" type="password" show-password />
-      </UiFormItem>
-    </UiForm>
+    <div class="pwd-form">
+      <p v-if="pwdError" class="pwd-error" role="alert">{{ pwdError }}</p>
+      <FormField label="当前密码" html-for="pwd-current">
+        <template #default="{ id }">
+          <Input :id="id" v-model="pwdForm.current" type="password" autocomplete="current-password" />
+        </template>
+      </FormField>
+      <FormField label="新密码" html-for="pwd-next" hint="至少 6 位">
+        <template #default="{ id, describedby }">
+          <Input :id="id" v-model="pwdForm.next" type="password" autocomplete="new-password" placeholder="至少 6 位" :aria-describedby="describedby" />
+        </template>
+      </FormField>
+      <FormField label="确认新密码" html-for="pwd-confirm">
+        <template #default="{ id }">
+          <Input :id="id" v-model="pwdForm.confirm" type="password" autocomplete="new-password" />
+        </template>
+      </FormField>
+    </div>
     <template #footer>
-      <UiButton @click="pwdVisible = false">取消</UiButton>
-      <UiButton type="primary" :loading="pwdLoading" @click="submitChangePassword">确认修改</UiButton>
+      <Button variant="outline" @click="pwdVisible = false">取消</Button>
+      <Button :loading="pwdLoading" @click="submitChangePassword">确认修改</Button>
     </template>
   </UiDialog>
 </template>
 
 <style scoped>
-.head-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--accent-foreground);
-  font-size: var(--text-sm);
-  text-decoration: none;
-}
-.head-link:hover { text-decoration: underline; text-underline-offset: 3px; }
-
 .profile-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   align-items: start;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
-.column { display: grid; gap: var(--space-5); min-width: 0; }
-.profile-load-error { max-width: 720px; }
-.sk-card {
+
+.profile-column {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
+}
+
+.profile-panel {
+  min-width: 0;
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--panel);
+  background: var(--bg-surface);
 }
-.sk-card.tall { min-height: 300px; align-content: start; }
-.sk-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.sk-identity { display: flex; align-items: center; gap: var(--space-4); }
-.sk-avatar { width: 88px; height: 88px; flex: none; border-radius: 999px; background: var(--muted); }
-.sk-lines { display: grid; flex: 1; gap: var(--space-3); min-width: 0; }
-.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
-.sk-line.short { width: 28%; }
-.sk-line.medium { width: 52%; }
-.sk-pill { width: 52px; height: 20px; border-radius: 999px; background: var(--muted); }
-.sk-score-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
-.sk-stat { height: 52px; border-radius: var(--radius-control); background: var(--muted); }
-.sk-radar { display: block; width: min(100%, 300px); aspect-ratio: 1; margin-inline: auto; border-radius: 999px; background: var(--muted); }
-.capability-skeleton { grid-template-columns: minmax(0, 240px) minmax(0, 1fr); justify-items: stretch; align-items: center; }
-.capability-skeleton .sk-radar { width: 100%; }
-.profile-skeleton .sk-line,
-.profile-skeleton .sk-pill,
-.profile-skeleton .sk-avatar,
-.profile-skeleton .sk-stat,
-.profile-skeleton .sk-radar,
-.capability-skeleton .sk-line,
-.capability-skeleton .sk-radar { animation: profile-skeleton-pulse 1.4s ease-in-out infinite; }
-@keyframes profile-skeleton-pulse { 50% { opacity: .45; } }
 
-.card-head {
+.profile-panel__head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
-.card-title { margin: 0; color: var(--foreground); font-size: var(--text-md); font-weight: 600; letter-spacing: 0; }
-.card-hint { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: var(--leading-normal); }
-.head-icon { color: var(--accent-foreground); flex-shrink: 0; }
 
-.identity { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5); }
-.avatar-frame { display: grid; justify-items: center; gap: var(--space-2); flex-shrink: 0; }
-.avatar { font-size: 30px; border-color: var(--border); }
-.upload {
+.profile-panel__title {
+  color: var(--text-primary);
+  font-size: var(--text-section);
+  font-weight: 600;
+}
+
+.profile-panel__hint {
+  margin-top: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+.profile-panel__icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.avatar-frame {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.avatar-img,
+.avatar-initial {
+  display: grid;
+  place-items: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--action-subtle);
+  color: var(--action-subtle-fg);
+  font-size: var(--text-display);
+  font-weight: 600;
+  object-fit: cover;
+}
+
+.avatar-upload {
   position: relative;
   overflow: hidden;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: var(--text-xs);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
   cursor: pointer;
-  transition: border-color 150ms ease, background-color 150ms ease;
 }
-.upload:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); background: var(--accent); }
-.upload.disabled { opacity: .55; cursor: wait; }
-.upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
-.identity-copy { display: grid; gap: var(--space-3); min-width: 0; }
-.identity-name { margin: 0; color: var(--foreground); font-size: var(--text-lg); font-weight: 600; letter-spacing: 0; overflow-wrap: anywhere; }
-.facts { display: grid; gap: var(--space-2); margin: 0; }
-.fact { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
-.fact dt { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted-foreground); min-width: 84px; }
-.fact dd { display: inline-flex; align-items: center; gap: var(--space-1); margin: 0; color: var(--foreground); }
+.avatar-upload:hover {
+  background: var(--bg-hover);
+}
+
+.avatar-upload[data-busy='true'] {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.avatar-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.identity-copy {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.identity-name {
+  color: var(--text-primary);
+  font-size: var(--text-section);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fact {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-caption);
+}
+
+.fact dt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 88px;
+  color: var(--text-tertiary);
+}
+
+.fact dt :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.fact dd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-primary);
+}
+
+.fact__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
 .icon-button {
   display: inline-grid;
   width: 24px;
   height: 24px;
   place-items: center;
-  border: 0;
   border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted-foreground);
+  color: var(--text-tertiary);
 }
-.icon-button:hover { background: var(--accent); color: var(--accent-foreground); }
 
-.bio-block { display: grid; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--border); }
-.bio-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.bio-head h4 { margin: 0; color: var(--foreground); font-size: var(--text-sm); font-weight: 600; }
-.bio-actions { display: flex; gap: var(--space-2); }
-.bio-text { margin: 0; color: var(--foreground); font-size: var(--text-sm); line-height: var(--leading-relaxed); white-space: pre-wrap; overflow-wrap: anywhere; }
+.icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 
-.security-row { display: flex; align-items: center; gap: var(--space-3); }
+.icon-button :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.profile-bio {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.profile-bio__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.profile-bio__title {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.profile-bio__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.profile-bio__input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+  resize: vertical;
+}
+
+.profile-bio__text {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.security-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
 .security-icon {
   display: inline-grid;
   width: 34px;
@@ -476,37 +603,103 @@ onMounted(() => {
   place-items: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--card);
-  color: var(--accent-foreground);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
 }
-.security-copy { flex: 1; min-width: 0; }
-.security-copy p { margin: 0; color: var(--foreground); font-size: var(--text-sm); font-weight: 500; }
-.security-copy span { color: var(--muted-foreground); font-size: var(--text-xs); }
 
-.score-strip {
+.security-icon :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.security-copy {
+  flex: 1;
+  min-width: 160px;
+}
+
+.security-copy p {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+
+.security-copy span {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.capability-state {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-items: center;
+  align-content: center;
   gap: var(--space-3);
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-5);
-  border-bottom: 1px solid var(--border);
+  min-height: 220px;
 }
-.score-cell { display: grid; gap: 2px; min-width: 0; }
-.score-value { color: var(--primary); font-size: var(--text-xl); font-weight: 650; line-height: var(--leading-tight); }
-.score-total { color: var(--muted-foreground); font-size: var(--text-sm); }
-.score-label { color: var(--muted-foreground); font-size: var(--text-xs); }
 
-.capability-state { min-height: 220px; display: grid; justify-items: center; align-content: center; gap: var(--space-3); }
-.capability-state p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
-.capability-note { margin: var(--space-4) 0 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: var(--leading-normal); }
+.sk-radar {
+  display: block;
+  width: min(100%, 260px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+}
+
+.capability-note {
+  margin-top: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+.sk-line {
+  display: block;
+  width: 100%;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+}
+
+.sk-line--title {
+  width: 42%;
+  height: 16px;
+}
+
+.sk-line--short {
+  width: 28%;
+}
+
+.pwd-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.pwd-error {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--status-danger) 10%, var(--bg-surface));
+  color: var(--status-danger);
+  font-size: var(--text-caption);
+}
 
 @media (max-width: 1023px) {
-  .profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
+
 @media (max-width: 560px) {
-  .identity { align-items: flex-start; gap: var(--space-4); }
-  .fact { flex-wrap: wrap; row-gap: 2px; }
-  .score-strip { gap: var(--space-2); }
-  .score-value { font-size: var(--text-lg); }
+  .identity {
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .fact {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .profile-panel {
+    padding: var(--space-4);
+  }
 }
 </style>

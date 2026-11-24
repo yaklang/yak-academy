@@ -20,6 +20,7 @@ export type StatusKind =
   | 'difficulty'
   | 'role'
   | 'user'
+  | 'mail'
 
 const fallback = (value?: string | null): StatusMeta => ({
   label: value ? String(value) : '未知',
@@ -64,6 +65,10 @@ const MAPS: Record<Exclude<StatusKind, 'difficulty' | 'role' | 'user'>, Record<s
     pending: { label: '判题中', tone: 'info' },
     correct: { label: '通过', tone: 'success' },
     incorrect: { label: '未通过', tone: 'danger' },
+  },
+  mail: {
+    unread: { label: '未读', tone: 'warning' },
+    read: { label: '已读', tone: 'neutral' },
   },
 }
 

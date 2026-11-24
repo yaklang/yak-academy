@@ -1,11 +1,15 @@
 <script setup lang="ts">
 // 竞赛广场（学生端）：分页列出公开赛（邀请赛定向，不在此展示）。
-// 可查看赛程并提前报名（幂等）；已报名者开赛后免邀请码入场
-// （入场页 /competitions/enter/:id 支持免码提交）。
+// 可查看赛程并提前报名（幂等）；已报名者开赛后免邀请码入场。
 import { onMounted, ref } from 'vue'
 import { notify } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
 import { competitionApi, FORMAT_LABELS, type CompetitionFormat, type PublicCompetitionItem } from '../api'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import DataTablePanel from '@/components/layout/DataTablePanel.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
+import { Button } from '@/components/ui/button'
 
 const items = ref<PublicCompetitionItem[]>([])
 const total = ref(0)
@@ -35,22 +39,14 @@ async function register(row: PublicCompetitionItem) {
   registering.value = row.id
   try {
     const updated = await competitionApi.register(row.id)
-    // 原位更新报名状态与人数，不整页刷新。
-    const i = items.value.findIndex((it) => it.id === row.id)
-    if (i >= 0) items.value[i] = updated
+    const index = items.value.findIndex((item) => item.id === row.id)
+    if (index >= 0) items.value[index] = updated
     notify.success('报名成功：开赛后可免邀请码入场')
   } catch (e) {
     notify.error((e as Error).message)
   } finally {
     registering.value = 0
   }
-}
-
-function statusType(s: PublicCompetitionItem['status']) {
-  return s === 'running' ? 'success' : s === 'scheduled' ? 'warning' : 'info'
-}
-function statusLabel(s: PublicCompetitionItem['status']) {
-  return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
 }
 
 // 报名窗口（可选）：未配置 = 开放到竞赛结束；已配置则按起止时间判断。
@@ -74,29 +70,31 @@ onMounted(load)
 </script>
 
 <template>
-  <header class="page-head">
-    <div>
-      <h2 class="page-title">竞赛<span class="accent">广场</span></h2>
-      <p class="page-sub">
-        公开赛在此开放报名：报名后开赛即可免邀请码入场，比赛期间可自由进出；邀请赛凭站内邀请邮件中的邀请码入场并锁定至结束，不在此展示。
-      </p>
-    </div>
-  </header>
+  <PageHeader
+    title="竞赛广场"
+    description="公开赛在此开放报名：报名后开赛即可免邀请码入场，比赛期间可自由进出。邀请赛凭站内邀请邮件中的邀请码入场并锁定至结束。"
+  />
 
-  <UiCard shadow="never">
-    <UiLoadError v-if="loadError" compact :message="loadError" @retry="load" class="list-error" />
-    <UiTable v-else :data="items" :loading="loading" empty-text="暂无公开竞赛">
-      <UiTableColumn prop="name" label="竞赛" min-width="180" />
+  <DataTablePanel
+    v-if="!loadError"
+    title="公开竞赛"
+    :count="total"
+    description="报名是幂等的，重复点击不会重复报名。"
+  >
+    <UiTable :data="items" :loading="loading" row-key="id" selection-label="选择竞赛">
+      <UiTableColumn prop="name" label="竞赛" min-width="200">
+        <template #default="{ row }">
+          <span class="competition-name">{{ row.name }}</span>
+        </template>
+      </UiTableColumn>
       <UiTableColumn label="形式" width="90">
         <template #default="{ row }">
-          <UiTag size="small" :type="row.format === 'awd' ? 'danger' : row.format === 'exam' ? 'warning' : 'info'">
-            {{ FORMAT_LABELS[row.format as CompetitionFormat] }}
-          </UiTag>
+          <span class="format-tag">{{ FORMAT_LABELS[row.format as CompetitionFormat] }}</span>
         </template>
       </UiTableColumn>
       <UiTableColumn label="状态" width="100">
         <template #default="{ row }">
-          <UiTag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</UiTag>
+          <StatusTag kind="competition" :value="row.status" />
         </template>
       </UiTableColumn>
       <UiTableColumn label="开始时间" width="170">
@@ -109,40 +107,80 @@ onMounted(load)
       <UiTableColumn label="报名 / 入场" width="200">
         <template #default="{ row }">
           <template v-if="row.registered">
-            <UiTag type="success" size="small" class="reg-tag">已报名</UiTag>
-            <router-link v-if="row.status === 'running'" :to="`/competitions/enter/${row.id}`">
-              <UiButton size="small" type="primary" link>进入竞赛</UiButton>
-            </router-link>
-            <span v-else-if="row.status === 'scheduled'" class="dim">开赛后免码入场</span>
+            <StatusTag kind="user" value="active" label="已报名" />
+            <Button v-if="row.status === 'running'" size="sm" as-child class="row-action">
+              <RouterLink :to="`/competitions/enter/${row.id}`">进入竞赛</RouterLink>
+            </Button>
+            <span v-else-if="row.status === 'scheduled'" class="competition-dim">开赛后免码入场</span>
           </template>
-          <UiButton
+          <Button
             v-else-if="row.status !== 'ended' && registrationOpen(row)"
-            size="small"
-            type="primary"
+            size="sm"
             :loading="registering === row.id"
             @click="register(row)"
-          >报名</UiButton>
-          <span v-else-if="row.status !== 'ended'" class="dim">{{ registrationHint(row) }}</span>
-          <span v-else class="dim">已结束</span>
+          >报名</Button>
+          <span v-else-if="row.status !== 'ended'" class="competition-dim">{{ registrationHint(row) }}</span>
+          <span v-else class="competition-dim">已结束</span>
         </template>
       </UiTableColumn>
+      <template #empty>
+        <EmptyState
+          compact
+          title="暂无公开竞赛"
+          description="邀请赛通过站内邮件定向通知；公开赛开放报名后会显示在这里。"
+          action-label="查看站内邮箱"
+          action-to="/mailbox"
+        />
+      </template>
     </UiTable>
-    <UiPagination
-      v-if="total > 0"
-      background
-      layout="total, prev, pager, next"
-      :total="total"
-      :page-size="pageSize"
-      v-model:current-page="page"
-      @current-change="load"
-      class="pager"
-    />
-  </UiCard>
+    <template v-if="total > pageSize" #footer>
+      <UiPagination
+        background
+        layout="prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        v-model:current-page="page"
+        @current-change="load"
+      />
+    </template>
+  </DataTablePanel>
+
+  <EmptyState
+    v-else
+    tone="error"
+    title="竞赛列表加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="load"
+  />
 </template>
 
 <style scoped>
-.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
-.reg-tag { margin-right: var(--space-2); }
-.pager { margin-top: var(--space-4); }
-.list-error { margin-bottom: var(--space-4); }
+.competition-name {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.format-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+.competition-dim {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.row-action {
+  margin-left: var(--space-2);
+}
 </style>
