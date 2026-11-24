@@ -11,8 +11,6 @@ import (
 )
 
 // zhMessage 表驱动：码级默认 → 精确匹配 → 包含规则（含特异性排序）→ 兜底。
-// "phone already registered" 两段文案断言与 e2e bugfix-register-phone-taken
-// spec 锚定的 UI 文案同步，改这里必须同步那边。
 func TestZhMessage(t *testing.T) {
 	cases := []struct {
 		name, code, detail, want string
@@ -20,10 +18,14 @@ func TestZhMessage(t *testing.T) {
 		{"码级默认（无 detail）", "NOT_FOUND", "", "资源不存在或已被删除"},
 		{"未知 detail 回落码级默认", "VALIDATION_FAILED", "something brand new", "请求参数有误，请检查后重试"},
 		{"未知码兜底", "WEIRD_CODE", "", "操作失败，请稍后重试"},
-		{"精确：已注册手机号", "VALIDATION_FAILED", "phone already registered",
-			"该手机号已注册过账号：请返回登录；忘记密码可在登录页「找回账号」自助重置"},
-		{"精确：已注册邮箱", "VALIDATION_FAILED", "email already registered",
-			"该邮箱已注册过账号：请返回登录；忘记密码可在登录页「找回账号」自助重置"},
+		{"精确：微信未配置", "NOT_IMPLEMENTED", "not implemented yet: wechat login not configured",
+			"微信登录未配置：请在部署环境设置 ACADEMY_WECHAT_APP_ID、ACADEMY_WECHAT_APP_SECRET 与 ACADEMY_WECHAT_REDIRECT_URL 后重启"},
+		{"精确：微信 state 失效", "UNAUTHORIZED", "wechat state is invalid or expired",
+			"微信登录状态已失效，请重新发起微信登录"},
+		{"精确：微信授权失败", "UNAUTHORIZED", "wechat authorization failed",
+			"微信授权失败，请重新发起微信登录"},
+		{"精确：微信账号无密码", "VALIDATION_FAILED", "account has no password",
+			"该账号通过微信注册，未设置密码：请使用微信登录；如需密码登录请联系管理员"},
 		{"精确：未注册邮箱", "VALIDATION_FAILED", "email not registered",
 			"该邮箱未注册过账号：请先注册"},
 		{"精确：邮箱格式", "VALIDATION_FAILED", "invalid email address",
@@ -88,7 +90,7 @@ func TestErrorDetail(t *testing.T) {
 		e    *apiError
 		want string
 	}{
-		{&apiError{"VALIDATION_FAILED", 422, "validation failed: phone already registered"}, "phone already registered"},
+		{&apiError{"VALIDATION_FAILED", 422, "validation failed: account has no password"}, "account has no password"},
 		{&apiError{"VALIDATION_FAILED", 422, "validation failed"}, ""},
 		{&apiError{"NOT_FOUND", 404, "resource not found"}, ""},
 		{&apiError{"UNAUTHORIZED", 401, "invalid credentials"}, "invalid credentials"},
@@ -109,10 +111,10 @@ func TestWriteErrorLogsAndTranslates(t *testing.T) {
 	defer slog.SetDefault(prev)
 
 	rec := httptest.NewRecorder()
-	writeError(rec, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity,
-		"validation failed: phone already registered"})
+	writeError(rec, &apiError{"UNAUTHORIZED", http.StatusUnauthorized,
+		"wechat state is invalid or expired"})
 
-	if rec.Code != http.StatusUnprocessableEntity {
+	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	var env struct {
@@ -121,17 +123,16 @@ func TestWriteErrorLogsAndTranslates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}
-	if env.Error.Code != "VALIDATION_FAILED" {
+	if env.Error.Code != "UNAUTHORIZED" {
 		t.Fatalf("code = %q", env.Error.Code)
 	}
-	if !strings.Contains(env.Error.Message, "该手机号已注册过账号") ||
-		!strings.Contains(env.Error.Message, "请返回登录") {
-		t.Fatalf("zh message = %q, want phone-taken guidance", env.Error.Message)
+	if !strings.Contains(env.Error.Message, "微信登录状态已失效") {
+		t.Fatalf("zh message = %q, want wechat state guidance", env.Error.Message)
 	}
 
 	logLine := buf.String()
 	for _, want := range []string{
-		"api_error", "phone already registered", "该手机号已注册过账号", "VALIDATION_FAILED",
+		"api_error", "wechat state is invalid or expired", "微信登录状态已失效", "UNAUTHORIZED",
 	} {
 		if !strings.Contains(logLine, want) {
 			t.Fatalf("error log missing %q: %s", want, logLine)

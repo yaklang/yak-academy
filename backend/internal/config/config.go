@@ -76,10 +76,10 @@ type Config struct {
 	YakDownloadDir string
 
 	// VerificationShowCode 验证码回显模式（仅本地演示）：开启后
-	// /auth/email/code、/auth/sms/code 与找回发码响应携带验证码原文，页面
-	// 内联显示。默认关闭；本地联调可设 ACADEMY_SHOW_VERIFICATION_CODE=1
-	// （旧变量 ACADEMY_SMS_SHOW_CODE 兼容）。严格模式（ACADEMY_STRICT=1）
-	// 禁止开启（StrictViolations 拒绝启动），避免任意请求方读取验证码。
+	// /auth/password-reset/code 响应携带验证码原文，页面内联显示。默认关闭；
+	// 本地联调可设 ACADEMY_SHOW_VERIFICATION_CODE=1（旧变量
+	// ACADEMY_SMS_SHOW_CODE 兼容）。严格模式（ACADEMY_STRICT=1）禁止开启
+	// （StrictViolations 拒绝启动），避免任意请求方读取验证码。
 	VerificationShowCode bool
 
 	// SMTPAddr SMTP/事务邮件服务地址（host:port，如 smtp.example.com:587）。

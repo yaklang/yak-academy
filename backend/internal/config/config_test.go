@@ -18,6 +18,7 @@ func TestStrictViolations(t *testing.T) {
 		{"short password", Config{JWTSecret: strongSecret, AdminPassword: "short"}, 1},
 		{"strong credentials", Config{JWTSecret: strongSecret, AdminPassword: strongPass}, 0},
 		{"strict mode rejects verification echo", Config{JWTSecret: strongSecret, AdminPassword: strongPass, VerificationShowCode: true}, 1},
+		{"strict mode rejects wechat mock", Config{JWTSecret: strongSecret, AdminPassword: strongPass, WechatMock: true}, 1},
 	}
 	for _, c := range cases {
 		if got := len(c.cfg.StrictViolations()); got != c.want {
@@ -142,5 +143,37 @@ func TestLoadWriteupStoreEnvs(t *testing.T) {
 	t.Setenv("ACADEMY_WRITEUPS_STORE", "")
 	if cfg := Load(); cfg.WriteupsStoreKind != "fs" {
 		t.Fatalf("default kind: %q", cfg.WriteupsStoreKind)
+	}
+}
+
+// TestLoadWechatEnvs 微信 OAuth 环境变量：默认公众号网页授权；mock 开关
+// 只做本地演示，严格模式必须视为违规（生产禁止伪造微信身份）。
+func TestLoadWechatEnvs(t *testing.T) {
+	t.Setenv("ACADEMY_WECHAT_APP_ID", "wx-app-id")
+	t.Setenv("ACADEMY_WECHAT_APP_SECRET", "wx-app-secret")
+	t.Setenv("ACADEMY_WECHAT_REDIRECT_URL", "https://academy.example.com/login")
+	t.Setenv("ACADEMY_WECHAT_MOCK", "1")
+
+	cfg := Load()
+	if cfg.WechatAppID != "wx-app-id" || cfg.WechatAppSecret != "wx-app-secret" {
+		t.Fatalf("wechat credentials: %+v", cfg)
+	}
+	if cfg.WechatRedirectURL != "https://academy.example.com/login" {
+		t.Fatalf("wechat redirect: %q", cfg.WechatRedirectURL)
+	}
+	if cfg.WechatMode != "official_account" {
+		t.Fatalf("default mode: %q", cfg.WechatMode)
+	}
+	if !cfg.WechatMock {
+		t.Fatal("mock flag")
+	}
+	found := false
+	for _, v := range cfg.StrictViolations() {
+		if v == "ACADEMY_WECHAT_MOCK must be disabled in strict mode" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("strict violations missing wechat mock: %v", cfg.StrictViolations())
 	}
 }

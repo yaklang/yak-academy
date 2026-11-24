@@ -16,7 +16,7 @@ import (
 )
 
 func TestUnavailableEmailSender(t *testing.T) {
-	err := NewUnavailableEmailSender().Send(context.Background(), "user@example.com", "123456", model.SmsPurposeRegister)
+	err := NewUnavailableEmailSender().Send(context.Background(), "user@example.com", "123456", model.SmsPurposePasswordReset)
 	if !IsNotImplemented(err) {
 		t.Fatalf("want NotImplementedError, got %v", err)
 	}
@@ -87,12 +87,12 @@ func TestSMTPEmailSenderSendsVerificationCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sender: %v", err)
 	}
-	if err := sender.Send(context.Background(), "student@example.com", "654321", model.SmsPurposeRegister); err != nil {
+	if err := sender.Send(context.Background(), "student@example.com", "654321", model.SmsPurposePasswordReset); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	select {
 	case msg := <-messages:
-		for _, want := range []string{"To: student@example.com", "注册验证码", "654321"} {
+		for _, want := range []string{"To: student@example.com", "密码重置验证码", "654321"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("message missing %q:\n%s", want, msg)
 			}

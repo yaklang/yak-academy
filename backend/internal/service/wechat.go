@@ -318,6 +318,8 @@ type WechatStartResult struct {
 	State        string
 	StateCookie  string
 	MaxAge       int
+	// MockID 仅 Mock 模式返回，供 API 层写入稳定的本地模拟身份 Cookie。
+	MockID string
 }
 
 // WechatAuthService 微信注册/登录：state 校验 + 微信身份换取 + 本地建号。
@@ -387,7 +389,7 @@ func (s *WechatAuthService) Start(redirect, mockID string) (WechatStartResult, e
 	}
 	return WechatStartResult{
 		AuthorizeURL: authorizeURL, State: nonce, StateCookie: cookieValue,
-		MaxAge: int(WechatStateTTL.Seconds()),
+		MaxAge: int(WechatStateTTL.Seconds()), MockID: session.MockOpenID,
 	}, nil
 }
 

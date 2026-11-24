@@ -239,11 +239,26 @@ func main() {
 	if cfg.VerificationShowCode {
 		log.Println("warning: verification code echo enabled — use for local demos only, never in production")
 	}
-	registerSvc := service.NewRegisterService(userRepo, smsCodeRepo, nil, emailSender)
 	resetSvc := service.NewPasswordResetService(userRepo, smsCodeRepo, nil, emailSender)
+	// 微信 OAuth 是唯一自助注册入口：公众号网页授权或开放平台网站应用扫码。
+	// 手机号/邮箱验证码注册已下线；SMTP 仅保留给历史账号找回密码。
+	wechatOAuth, err := service.NewWechatOAuthClient(service.WechatOAuthConfig{
+		AppID: cfg.WechatAppID, AppSecret: cfg.WechatAppSecret,
+		RedirectURL: cfg.WechatRedirectURL, Mode: cfg.WechatMode, Scope: cfg.WechatScope,
+		Mock: cfg.WechatMock,
+	})
+	if err != nil {
+		log.Fatalf("wechat oauth: %v", err)
+	}
+	wechatSvc := service.NewWechatAuthService(userRepo, wechatOAuth, []byte(cfg.JWTSecret))
+	if wechatOAuth.Enabled() {
+		log.Printf("wechat login: enabled (mode=%s mock=%v)", wechatOAuth.Mode(), wechatOAuth.Mock())
+	} else {
+		log.Println("wechat login: disabled (set ACADEMY_WECHAT_APP_ID/SECRET/REDIRECT_URL; self-service registration unavailable)")
+	}
 	// 管理操作审计（ops 硬化）：独立 append-only 表，与 Event 学生行为流分工。
 	auditSvc := service.NewAuditService(repo.NewAuditLogRepo(gdb))
-	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, examSvc, certificateSvc, registerSvc, resetSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
+	api.NewHandlers(authSvc, contentSvc, challengeSvc, judgeSvc, progressSvc, topicSvc, envSvc, badgeSvc, profileSvc, competitionSvc, awdSvc, examSvc, certificateSvc, resetSvc, wechatSvc, backupSvc, auditSvc, settingsSvc, cfg.VerificationShowCode).Register(router)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 	go func() {

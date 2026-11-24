@@ -146,7 +146,7 @@ func TestListUsersFiltersAndMarkers(t *testing.T) {
 	if len(byCode) != 1 || byCode[activeSolver.Username].Username == "" {
 		t.Fatalf("q=account_code = %v", keysOf(byCode))
 	}
-	// 关键字按邮箱子串命中（管理端检索邮箱注册账号）。
+	// 关键字按邮箱子串命中（管理端检索历史邮箱账号）。
 	byEmail := list(repo.UserListFilter{Now: now, Q: "solver@example"})
 	if len(byEmail) != 1 || byEmail[activeSolver.Username].Username == "" {
 		t.Fatalf("q=email = %v", keysOf(byEmail))

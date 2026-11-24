@@ -31,14 +31,15 @@ export const useAuthStore = defineStore('auth', () => {
     setToken(resp.token)
   }
 
-  // 自助注册（邮箱验证码）：建号成功即视为登录（后端直接签发 token），
-  // 与 login 相同的本地态切换（作废 in-flight /me、清用户缓存、重置竞赛锁）。
-  async function register(email: string, code: string, username: string, password: string) {
-    const resp = await authApi.register(email, code, username, password)
+  // 微信回调换 token：首次授权自动建号，与密码登录相同的本地态切换
+  // （作废 in-flight /me、清用户缓存、重置竞赛锁）。返回后端给的站内跳转路径。
+  async function completeWechatLogin(code: string, state: string): Promise<string> {
+    const resp = await authApi.wechatCallback(code, state)
     meInFlight = null
     user.value = null
     resetCompetition()
     setToken(resp.token)
+    return resp.redirect
   }
 
   // 拉取当前用户（登录后/页面刷新时调用；失败则清除本地 token）。
@@ -74,5 +75,5 @@ export const useAuthStore = defineStore('auth', () => {
     resetCompetition()
   }
 
-  return { token, user, login, register, fetchMe, logout, setToken }
+  return { token, user, login, completeWechatLogin, fetchMe, logout, setToken }
 })

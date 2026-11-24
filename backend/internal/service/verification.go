@@ -1,13 +1,16 @@
 package service
 
-// 验证码目标与共用流程：邮箱注册/找回（主通道）与旧版手机号注册/找回兼容。
+// 验证码目标与共用流程：历史账号找回密码（邮箱主通道、手机号兼容）。
+// 手机号/邮箱自助注册已下线；验证码只用于 password_reset 用途。
 // 目标必须二选一（email / phone），验证码按目标渠道落库、按 purpose 隔离；
 // 同目标 60 秒限频、10 分钟窗口最多 3 条，与 docs/architecture.md §3.1 一致。
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/mail"
 	"strings"
 	"time"
@@ -21,7 +24,16 @@ import (
 const (
 	verificationChannelEmail = "email"
 	verificationChannelPhone = "phone"
+
+	smsCodeTTL      = 5 * time.Minute
+	smsSendInterval = 60 * time.Second
+	smsWindow       = 10 * time.Minute
+	smsWindowLimit  = 3
 )
+
+// ErrSmsThrottled 发码限频（60s 内重复 / 窗口超量），handler 转 200 + retry_after。
+// 邮箱与手机号通道共用该哨兵（历史命名保留）。
+var ErrSmsThrottled = errors.New("sms send throttled")
 
 // verificationTarget 已校验的验证码目标：邮箱（小写归一）或手机号。
 type verificationTarget struct {
@@ -153,13 +165,6 @@ func findUserByTarget(ctx context.Context, users repo.UserRepo, target verificat
 	return users.FindByPhone(ctx, target.value)
 }
 
-func targetExistsError(target verificationTarget) error {
-	if target.isEmail() {
-		return fmt.Errorf("%w: email already registered", ErrValidation)
-	}
-	return fmt.Errorf("%w: phone already registered", ErrValidation)
-}
-
 func targetMissingError(target verificationTarget) error {
 	if target.isEmail() {
 		return fmt.Errorf("%w: email not registered", ErrValidation)
@@ -174,4 +179,49 @@ func deliverVerificationCode(ctx context.Context, sms SmsSender, email EmailSend
 		return email.Send(ctx, target.value, code, purpose)
 	}
 	return sms.Send(target.value, code)
+}
+
+func validPhone(p string) bool {
+	if len(p) != 11 || p[0] != '1' {
+		return false
+	}
+	if p[1] < '3' || p[1] > '9' {
+		return false
+	}
+	for i := 2; i < len(p); i++ {
+		if p[i] < '0' || p[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// genCode 密码学随机 6 位数字（crypto/rand，拒绝取模偏置：rejection sampling）。
+func genCode() (string, error) {
+	digits := make([]byte, 6)
+	for i := range digits {
+		for {
+			n, err := rand.Int(rand.Reader, big.NewInt(10))
+			if err != nil {
+				return "", err
+			}
+			if n.Int64() < 10 {
+				digits[i] = byte('0' + n.Int64())
+				break
+			}
+		}
+	}
+	return string(digits), nil
+}
+
+// constantTimeEq 逐字符 XOR 比较（长度不同直接 false，不泄漏内容）。
+func constantTimeEq(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var v byte
+	for i := 0; i < len(a); i++ {
+		v |= a[i] ^ b[i]
+	}
+	return v == 0
 }

@@ -37,7 +37,7 @@ test.describe('回归：浅色主题雨幕黑底', () => {
     await page.addInitScript(() => localStorage.setItem('academy_theme', 'light'))
     await page.goto('/login')
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-    await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible()
     const canvas = page.locator('.auth-rain canvas')
     await expect(canvas).toBeVisible()
     expect(await opaqueRatio(canvas)).toBeLessThan(0.35)
