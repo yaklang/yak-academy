@@ -162,8 +162,9 @@ Tailwind `--radius-sm/md/lg/xl` 显式映射 6/8/10/12，不再 `calc(var(--radi
 2. `grep` 检查准备新增/删除的类名在全仓库的引用；不留死类名。
 3. 先改原语与共享样式，再改单页；不用页面 scoped CSS 覆盖系统问题。
 4. 补 e2e 回归（布局类 bug 必须覆盖真实用户路径），先红后绿；
-   视觉规范（配色、对比度、明度层级、字重）不写进 e2e 断言，按本 skill 实现，
-   用 1440/1024/390 截图人工检查；e2e 只断言用户可见的功能终态。
+   结构/可读性契约（无横向溢出、单一 h1、角色字号、对比度、44px 触控目标）
+   由 `frontend/e2e/visual-qa.spec.ts` 自动守护；配色与明度层级的具体观感
+   仍按 1440/1024/390 截图人工复核，不做像素基线。
 5. 跑 `npm run check:design && npm run check:census && npm run check:copy && npm run build && npm test`，共享布局改动跑全量 e2e。
 6. 截图检查 1440/1024/390；做一次“眯眼测试”，确认层级仍然清楚。
 

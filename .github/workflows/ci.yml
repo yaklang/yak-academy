@@ -103,6 +103,16 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 7
 
+      # 视觉走查截图：每页 × 视口 × 主题，供人工复核版式（不做像素基线）。
+      - name: Upload visual QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-qa-screenshots
+          path: frontend/test-results/**/visual/
+          if-no-files-found: warn
+          retention-days: 7
+
   backend-docker:
     name: Backend Docker integration
     runs-on: ubuntu-latest
