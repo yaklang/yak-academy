@@ -29,7 +29,7 @@ withDefaults(defineProps<{
     <div class="data-table-panel__body">
       <slot />
     </div>
-    <footer v-if="$slots.footer" class="data-table-panel__footer">
+    <footer v-if="$slots.footer && count !== 0" class="data-table-panel__footer">
       <slot name="footer" />
     </footer>
   </section>

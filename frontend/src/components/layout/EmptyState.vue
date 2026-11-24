@@ -84,8 +84,13 @@ const title = computed(() => props.title ?? defaultTitles[props.tone])
 }
 
 .empty-state.is-compact {
-  min-height: 160px;
-  padding: var(--space-6) var(--space-4);
+  min-height: 144px;
+  padding: var(--space-4);
+  gap: var(--space-1);
+}
+
+.empty-state.is-compact .empty-state__icon {
+  margin-bottom: 0;
 }
 
 .empty-state__icon {

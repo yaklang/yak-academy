@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// 徽章页：目录全集 + 当前用户获得状态（计算型读模型，进度/积分/路径的投影）。
+// 徽章页：目录全集 + 当前用户获得状态（计算型读模型）。
 import { computed, onMounted, ref } from 'vue'
 import { Award, Lock } from '@lucide/vue'
 import { badgeApi, type Badge } from '../api'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
 
 const badges = ref<Badge[]>([])
 const loading = ref(true)
 const loadError = ref('')
 
-const earnedCount = computed(() => badges.value.filter((b) => b.earned).length)
+const earnedCount = computed(() => badges.value.filter((badge) => badge.earned).length)
 
 async function load() {
   loading.value = true
@@ -27,85 +29,158 @@ onMounted(load)
 </script>
 
 <template>
-  <header class="page-head">
-    <div>
-      <h2 class="page-title">徽<span class="accent">章</span></h2>
-      <p class="page-sub">
-        <template v-if="loading">正在同步徽章…</template>
-        <template v-else-if="!loadError">已获得 {{ earnedCount }} / {{ badges.length }} 枚 —— 完成题目、学习教程与积分里程碑自动解锁。</template>
-        <template v-else>完成题目、学习教程与积分里程碑自动解锁。</template>
-      </p>
-    </div>
-  </header>
-  <div v-if="loading" class="grid badge-skeleton" role="status" aria-label="正在加载徽章">
-    <div v-for="n in 6" :key="n" class="badge sk-badge" aria-hidden="true">
-      <span class="sk-medal" />
-      <span class="sk-copy">
-        <i class="sk-title" />
-        <i class="sk-desc" />
+  <PageHeader
+    title="徽章"
+    description="完成题目、学习教程与积分里程碑自动解锁。"
+  >
+    <template v-if="!loading && !loadError" #actions>
+      <span class="badge-count">已获得 {{ earnedCount }} / {{ badges.length }} 枚</span>
+    </template>
+  </PageHeader>
+
+  <div v-if="loading" class="badge-grid" role="status" aria-label="正在加载徽章">
+    <div v-for="n in 6" :key="n" class="badge-card" aria-hidden="true">
+      <span class="badge-medal badge-medal--empty" />
+      <span class="badge-copy">
+        <span class="sk-line sk-line--title" />
+        <span class="sk-line" />
       </span>
     </div>
   </div>
-  <UiLoadError v-else-if="loadError" :message="loadError" @retry="load" />
-  <UiEmpty v-else-if="badges.length === 0" description="暂无徽章：完成题目或教程后自动解锁" />
-  <div v-else class="grid">
-    <div v-for="b in badges" :key="b.code" class="badge" :class="{ earned: b.earned }">
-      <span class="medal">
-        <Award v-if="b.earned" :size="22" aria-hidden="true" />
-        <Lock v-else :size="18" aria-hidden="true" />
+  <EmptyState
+    v-else-if="loadError"
+    tone="error"
+    title="徽章加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="load"
+  />
+  <EmptyState
+    v-else-if="badges.length === 0"
+    title="还没有可解锁的徽章"
+    description="完成题目或教程后，徽章会自动出现在这里。"
+    action-label="去题库"
+    action-to="/training"
+  />
+  <div v-else class="badge-grid">
+    <div
+      v-for="badge in badges"
+      :key="badge.code"
+      class="badge-card"
+      :data-earned="badge.earned ? 'true' : 'false'"
+    >
+      <span class="badge-medal" aria-hidden="true">
+        <Award v-if="badge.earned" />
+        <Lock v-else />
       </span>
-      <div class="meta">
-        <span class="title">{{ b.title }}</span>
-        <span class="desc">{{ b.description }}</span>
-      </div>
+      <span class="badge-copy">
+        <span class="badge-title">{{ badge.title }}</span>
+        <span class="badge-desc">{{ badge.description }}</span>
+      </span>
+      <span v-if="badge.earned" class="badge-state">已获得</span>
+      <span v-else class="badge-state">未解锁</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.grid {
+.badge-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.badge-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: var(--space-3);
 }
-.badge {
+
+.badge-card {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px dashed var(--border);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--panel);
+  background: var(--bg-surface);
 }
-.badge .medal { opacity: 0.55; }
-.badge .title { color: var(--muted-foreground); }
-.badge.earned {
-  border-style: solid;
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-  background: var(--accent);
+
+.badge-card[data-earned='true'] {
+  border-color: color-mix(in srgb, var(--action-primary) 32%, var(--border));
 }
-.badge.earned .medal { opacity: 1; color: var(--accent-foreground); }
-.badge.earned .title { color: var(--foreground); }
-.medal {
+
+.badge-medal {
   display: inline-grid;
+  place-items: center;
   width: 40px;
   height: 40px;
   flex: none;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--card);
-  color: var(--muted-foreground);
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
 }
-.meta { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
-.title { color: var(--foreground); font-size: var(--text-sm); font-weight: 600; }
-.desc { color: var(--muted-foreground); font-size: var(--text-xs); line-height: var(--leading-normal); }
-.sk-badge { border-style: solid; }
-.sk-medal { width: 40px; height: 40px; flex: none; border-radius: 999px; background: var(--muted); }
-.sk-copy { display: grid; flex: 1; gap: var(--space-2); min-width: 0; }
-.sk-title { display: block; width: 42%; height: 13px; border-radius: 4px; background: var(--muted); }
-.sk-desc { display: block; width: 78%; height: 10px; border-radius: 4px; background: var(--muted); }
-.badge-skeleton .sk-medal,
-.badge-skeleton .sk-title,
-.badge-skeleton .sk-desc { animation: badge-skeleton-pulse 1.4s ease-in-out infinite; }
-@keyframes badge-skeleton-pulse { 50% { opacity: .45; } }
+
+.badge-medal :deep(svg) {
+  width: 20px;
+  height: 20px;
+}
+
+.badge-card[data-earned='true'] .badge-medal {
+  background: var(--action-subtle);
+  color: var(--action-subtle-fg);
+}
+
+.badge-medal--empty {
+  background: var(--bg-subtle);
+}
+
+.badge-copy {
+  display: grid;
+  flex: 1;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.badge-title {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.badge-desc {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+.badge-state {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.badge-card[data-earned='true'] .badge-state {
+  color: var(--status-success);
+}
+
+.sk-line {
+  display: block;
+  width: 78%;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+}
+
+.sk-line--title {
+  width: 42%;
+  height: 12px;
+}
+
+@media (max-width: 560px) {
+  .badge-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>
