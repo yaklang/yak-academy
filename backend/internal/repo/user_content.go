@@ -66,6 +66,35 @@ func (r *userRepo) FindByPhone(ctx context.Context, phone string) (*model.User, 
 	return &u, nil
 }
 
+func (r *userRepo) FindByWechatOpenID(ctx context.Context, openID string) (*model.User, error) {
+	var u model.User
+	if err := r.db.WithContext(ctx).Where("wechat_open_id = ?", openID).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *userRepo) FindByWechatUnionID(ctx context.Context, unionID string) (*model.User, error) {
+	var u model.User
+	if err := r.db.WithContext(ctx).Where("wechat_union_id = ?", unionID).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// UpdateWechatIdentity 只补齐微信身份字段；不改用户名/角色/密码（身份绑定
+// 一旦建立不因昵称变化而改登录标识）。
+func (r *userRepo) UpdateWechatIdentity(ctx context.Context, userID uint, openID, unionID, nickname string) error {
+	updates := map[string]any{"wechat_open_id": openID}
+	if unionID != "" {
+		updates["wechat_union_id"] = unionID
+	}
+	if nickname != "" {
+		updates["wechat_nickname"] = nickname
+	}
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error
+}
+
 // List 管理端用户分页（filter 零值 = 全量）。active/solved_any 与过滤条件
 // 共用同一 SQL 口径（COALESCE(last_login_at, created_at) 与 EXISTS 提交
 // correct 行），时间比较绑定参数（与 LabInstance 过期扫描同款方言中立做法）。

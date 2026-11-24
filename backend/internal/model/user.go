@@ -51,6 +51,17 @@ type User struct {
 	// SQLite 唯一索引允许多个 NULL，但空串不空——竞赛批量建号的空 Phone 会撞唯一索引，
 	// 故唯一性排除空串（手机号已注册的查重由 service FindByPhone 兜住）。
 	Phone string `gorm:"index:idx_users_phone,unique,where:phone <> ''" json:"phone"`
+	// WechatOpenID 微信 OAuth 的 openid（同一公众号/网站应用内唯一；微信注册账号必填）。
+	// 不参与密码登录，仅用于微信回调找回账号。唯一性排除空串（存量账号/管理员建号为空）。
+	WechatOpenID string `gorm:"size:128;index:idx_users_wechat_openid,unique,where:wechat_open_id <> ''" json:"-"`
+	// WechatUnionID 微信开放平台 unionid（公众号与网站应用绑定同一开放平台时出现；
+	// 用于跨应用识别同一微信用户；可为空）。
+	WechatUnionID string `gorm:"size:128;index:idx_users_wechat_unionid" json:"-"`
+	// WechatNickname 微信昵称快照（注册时作为用户名候选；不参与登录）。
+	WechatNickname string `gorm:"size:64" json:"-"`
+	// PasswordSet 账号是否设置密码（不落库，由 PasswordHash 是否为空派生）：
+	// 微信注册账号无密码，只能走微信登录；管理员重置密码后变为可密码登录。
+	PasswordSet bool `gorm:"-" json:"password_set"`
 	// Bio 描述简介（账号信息面板，≤500 字）。
 	Bio string `gorm:"size:500" json:"bio"`
 	// AvatarFile 头像落盘文件名（avatars/<userID>/<file>，空 = 未上传）。

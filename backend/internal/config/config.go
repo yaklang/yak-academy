@@ -96,6 +96,20 @@ type Config struct {
 	// （仅限本地或内网明文中继）。
 	SMTPTLS string
 
+	// WechatAppID/WechatAppSecret 微信网页授权凭据（公众号或开放平台网站应用）。
+	// 三个关键配置（AppID/AppSecret/RedirectURL）全空 = 微信注册未启用。
+	WechatAppID     string
+	WechatAppSecret string
+	// WechatRedirectURL 微信回调后回到的前端登录页绝对地址（必须与微信后台
+	// 授权域名一致），例如 https://academy.example.com/login。
+	WechatRedirectURL string
+	// WechatMode official_account（默认，公众号网页授权）| open_platform（网站应用扫码）。
+	WechatMode string
+	// WechatScope 网页授权 scope；空 = 按 mode 默认（snsapi_userinfo / snsapi_login）。
+	WechatScope string
+	// WechatMock 本地/E2E 模拟微信回调（不访问微信，直接建号）；严格模式禁止。
+	WechatMock bool
+
 	// Strict 生产严格模式（ACADEMY_STRICT=1）：启动时拒绝开发默认/弱凭据
 	// （StrictViolations）。compose 部署已用 :? 强制变量存在，但显式设置
 	// 默认值、或直跑二进制绕过 compose 的路径仍可能带默认凭据起服务——
@@ -175,6 +189,12 @@ func Load() *Config {
 		SMTPPassword:         os.Getenv("ACADEMY_SMTP_PASSWORD"),
 		SMTPFrom:             getenv("ACADEMY_SMTP_FROM", ""),
 		SMTPTLS:              strings.ToLower(getenv("ACADEMY_SMTP_TLS", "starttls")),
+		WechatAppID:          getenv("ACADEMY_WECHAT_APP_ID", ""),
+		WechatAppSecret:      os.Getenv("ACADEMY_WECHAT_APP_SECRET"),
+		WechatRedirectURL:    getenv("ACADEMY_WECHAT_REDIRECT_URL", ""),
+		WechatMode:           getenv("ACADEMY_WECHAT_MODE", "official_account"),
+		WechatScope:          getenv("ACADEMY_WECHAT_SCOPE", ""),
+		WechatMock:           getenvBool("ACADEMY_WECHAT_MOCK"),
 		Strict:               getenvBool("ACADEMY_STRICT"),
 		WriteupsStoreKind:    getenv("ACADEMY_WRITEUPS_STORE", "fs"),
 		WriteupsS3: S3Options{
@@ -211,6 +231,9 @@ func (c *Config) StrictViolations() []string {
 	}
 	if c.VerificationShowCode {
 		violations = append(violations, "ACADEMY_SHOW_VERIFICATION_CODE must be disabled in strict mode")
+	}
+	if c.WechatMock {
+		violations = append(violations, "ACADEMY_WECHAT_MOCK must be disabled in strict mode")
 	}
 	return violations
 }
