@@ -39,7 +39,8 @@ func NewPasswordResetService(users repo.UserRepo, codes repo.SmsCodeRepo, sms Sm
 }
 
 // SendResetCode 向已注册目标发送找回验证码。email / phone 必须且只能填一个。
-// 返回值语义同 RegisterService.SendEmailCode：(code, retryAfter, err)。
+// 返回 (code, retryAfter, err)：code 非空表示本次实际投递（回显模式用），
+// retryAfter > 0 表示限频剩余秒数。
 func (s *PasswordResetService) SendResetCode(ctx context.Context, email, phone string) (string, int, error) {
 	target, err := parseVerificationTarget(email, phone)
 	if err != nil {

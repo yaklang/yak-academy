@@ -1,9 +1,8 @@
 package service
 
-// 找回密码（邮箱主通道 + 手机号兼容）域测试：真实 SQLite 仓库。
-// 覆盖发码限频与注册同策略、未注册目标拒绝、验证码核销一次性/过期/错误、
-// 用途隔离（注册码不可重置、重置码不可注册）、成功重置后新密码可用且
-// token 失效阈值推进（旧 token 全量吊销语义）。
+// 找回密码（历史账号邮箱主通道 + 手机号兼容）域测试：真实 SQLite 仓库。
+// 覆盖发码限频、未注册目标拒绝、验证码核销一次性/过期/错误、用途隔离
+// （历史注册码不可用于重置）、成功重置后新密码可用且 token 失效阈值推进。
 
 import (
 	"context"
@@ -22,12 +21,28 @@ import (
 
 type resetEnv struct {
 	reset     *PasswordResetService
-	reg       *RegisterService
 	users     repo.UserRepo
 	codes     repo.SmsCodeRepo
 	sent      []string // 短信投递探针记录已发验证码
 	emailSent []sentEmail
 	now       time.Time
+}
+
+type sentEmail struct {
+	to      string
+	code    string
+	purpose string
+}
+
+// senderFunc / emailSenderFunc 把投递探针适配成 SmsSender / EmailSender。
+type senderFunc func(phone, code string) error
+
+func (f senderFunc) Send(phone, code string) error { return f(phone, code) }
+
+type emailSenderFunc func(ctx context.Context, to, code, purpose string) error
+
+func (f emailSenderFunc) Send(ctx context.Context, to, code, purpose string) error {
+	return f(ctx, to, code, purpose)
 }
 
 func newResetEnv(t *testing.T) *resetEnv {
@@ -55,8 +70,6 @@ func newResetEnv(t *testing.T) *resetEnv {
 	})
 	env.reset = NewPasswordResetService(env.users, env.codes, sender, emailSender)
 	env.reset.now = func() time.Time { return env.now }
-	env.reg = NewRegisterService(env.users, env.codes, sender, emailSender)
-	env.reg.now = func() time.Time { return env.now }
 	return env
 }
 
@@ -221,39 +234,35 @@ func TestPasswordResetThrottleSamePolicyAsRegister(t *testing.T) {
 	}
 }
 
-// TestPasswordResetPurposeIsolation 验证码用途隔离：注册码不可用于重置、
-// 重置码不可用于注册（LatestByPhone 按 purpose 过滤）。
+// TestPasswordResetPurposeIsolation 验证码用途隔离：历史 register 用途的码
+// 不可用于重置（LatestByPhone 按 purpose 过滤）；重置发码与历史注册发码的
+// 限频窗口也独立。
 func TestPasswordResetPurposeIsolation(t *testing.T) {
 	env := newResetEnv(t)
 	ctx := context.Background()
-
-	// 重置码不可用于注册：已注册手机号发重置码后，拿它走注册（用户名撞车无关，
-	// 断言在验证码核销一步就以「未发过注册码」拒绝）。
 	env.ensurePhoneUser(t, "u-iso", "13900000005")
-	resetCode, _, err := env.sendResetPhone(ctx, "13900000005")
-	if err != nil {
-		t.Fatalf("send reset code: %v", err)
-	}
-	if _, _, _, err := registerWithPhone(ctx, env.reg, "13900000005", resetCode, "intruder-1", "pass-123456"); !errors.Is(err, ErrValidation) {
-		t.Fatalf("register with reset code: want ErrValidation, got %v", err)
-	}
 
-	// 注册码不可用于重置：未注册手机号走注册发码（注册发码要求未注册），
-	// 拿注册码直接重置——手机号本就未注册，最先被「phone not registered」拒绝；
-	// 补充注册成功后再试，仍被「未发过重置码」拒绝（purposes 不同表行）。
-	regCode, _, err := env.reg.SendCode(ctx, "13900000006")
-	if err != nil {
-		t.Fatalf("send register code: %v", err)
+	// 直接播种一条历史注册用途的码（注册入口已下线，数据仍可能存在于旧库）。
+	regCode := "654321"
+	if err := env.codes.Create(ctx, &model.SmsCode{
+		Phone: "13900000005", Code: regCode, Purpose: model.SmsPurposeRegister,
+		ExpiresAt: env.now.Add(smsCodeTTL), CreatedAt: env.now,
+	}); err != nil {
+		t.Fatalf("seed register code: %v", err)
 	}
-	if _, _, _, err := registerWithPhone(ctx, env.reg, "13900000006", regCode, "iso-reg", "pass-123456"); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if _, err := env.resetPhone(ctx, "13900000006", regCode, "hijack-123456"); !errors.Is(err, ErrValidation) {
+	if _, err := env.resetPhone(ctx, "13900000005", regCode, "hijack-123456"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("reset with register code: want ErrValidation, got %v", err)
 	}
-	// 注册与重置的限频窗口也按用途独立：紧接的重置发码不受 60s 注册发码限制。
-	if _, _, err := env.sendResetPhone(ctx, "13900000006"); err != nil {
-		t.Fatalf("reset send after register send (independent windows): %v", err)
+	// 紧接发送重置码：历史注册码不占重置用途的限频窗口。
+	resetCode, _, err := env.sendResetPhone(ctx, "13900000005")
+	if err != nil {
+		t.Fatalf("reset send after register code: %v", err)
+	}
+	if resetCode == regCode {
+		t.Fatal("reset code must be independent from historical register code")
+	}
+	if _, err := env.resetPhone(ctx, "13900000005", resetCode, "new-pass-456"); err != nil {
+		t.Fatalf("reset with reset code: %v", err)
 	}
 }
 
@@ -303,7 +312,7 @@ func TestPasswordResetEmailRejectionsAndIsolation(t *testing.T) {
 		t.Fatalf("reset unregistered email: want ErrValidation, got %v", err)
 	}
 
-	// 邮箱注册码不可用于邮箱找回，邮箱找回码不可用于邮箱注册。
+	// 历史注册用途的邮箱码不可用于找回密码。
 	env.ensureEmailUser(t, "mail-iso", "iso@example.com")
 	if err := env.codes.Create(ctx, &model.SmsCode{
 		Email: "iso@example.com", Code: "654321", Purpose: model.SmsPurposeRegister,
@@ -317,11 +326,6 @@ func TestPasswordResetEmailRejectionsAndIsolation(t *testing.T) {
 	resetCode, _, err := env.sendResetEmail(ctx, "iso@example.com")
 	if err != nil {
 		t.Fatalf("send reset email: %v", err)
-	}
-	if _, _, _, err := env.reg.Register(ctx, RegisterInput{
-		Email: "iso@example.com", Code: resetCode, Username: "intruder", Password: "pass-123456",
-	}, issueTokenStub); !errors.Is(err, ErrValidation) {
-		t.Fatalf("register with reset email code: want ErrValidation, got %v", err)
 	}
 
 	// 邮箱/手机号同时填写拒绝，避免验证码渠道歧义。

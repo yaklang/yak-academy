@@ -38,7 +38,7 @@ test.describe('回归：重登后仍锁在竞赛页', () => {
     await page.waitForURL((u) => u.pathname === '/login')
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
 
     // 业务终态：不是"没崩"，而是回到进行中的竞赛页且题目可见
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`, { timeout: 10_000 })

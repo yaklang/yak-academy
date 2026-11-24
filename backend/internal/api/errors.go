@@ -119,6 +119,15 @@ func mapError(w http.ResponseWriter, err error) {
 		writeError(w, errNotFound)
 	case errors.Is(err, service.ErrInvalidCredential):
 		writeError(w, errBadCred)
+	case errors.Is(err, service.ErrWechatStateInvalid):
+		writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized,
+			"wechat state is invalid or expired"})
+	case errors.Is(err, service.ErrWechatAuthFailed):
+		writeError(w, &apiError{"UNAUTHORIZED", http.StatusUnauthorized,
+			"wechat authorization failed"})
+	case errors.Is(err, service.ErrPasswordNotSet):
+		writeError(w, &apiError{"VALIDATION_FAILED", http.StatusUnprocessableEntity,
+			"account has no password"})
 	case errors.Is(err, service.ErrValidation):
 		msg := err.Error()
 		if msg == "" || msg == service.ErrValidation.Error() {

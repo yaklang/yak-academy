@@ -14,9 +14,9 @@ type UserRepo interface {
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	FindByID(ctx context.Context, id uint) (*model.User, error)
 	FindByIDs(ctx context.Context, ids ...uint) ([]model.User, error)
-	// FindByEmail 注册邮箱查重（邮箱自助注册）。调用前应保证 email 非空且已小写归一。
+	// FindByEmail 历史账号邮箱查找（找回密码）。调用前应保证 email 非空且已小写归一。
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
-	// FindByPhone 旧版注册手机号查重（兼容保留）。调用前应保证 phone 非空。
+	// FindByPhone 历史账号手机号查找（找回密码）。调用前应保证 phone 非空。
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	// FindByWechatOpenID 微信 openid 查人（微信回调登录/注册）。调用前保证非空。
 	FindByWechatOpenID(ctx context.Context, openID string) (*model.User, error)

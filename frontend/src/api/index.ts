@@ -3,10 +3,15 @@ import { http } from './client'
 
 export interface TokenResponse { token: string; expires_at: string }
 export interface VerificationCodeResponse { ok: boolean; retry_after?: number; code?: string }
-// 找回密码的账号标识：邮箱（主通道）或旧账号手机号，必须二选一。
+// 找回密码的账号标识：历史账号邮箱或旧账号手机号，必须二选一。
 export interface AccountIdentifier { email?: string; phone?: string }
+// 微信网页授权：status 判断部署是否可用；start 返回跳转地址；callback 换应用 JWT。
+export interface WechatStatus { enabled: boolean; mock: boolean; mode: '' | 'official_account' | 'open_platform' }
+export interface WechatStartResponse { authorize_url: string }
+export interface WechatCallbackResponse extends TokenResponse { redirect: string }
 // account_code：学号式账号编码（YA{YY}-{NNNNN}，建号时按年分配；旧库迁移行可能为空串）。
-// email/phone：注册凭据（邮箱主通道；旧手机号账号/导入建号对应字段可为空）。
+// email/phone：历史账号联系字段；微信/导入建号可为空。
+// password_set：微信注册账号为 false（只能微信登录），管理员重置密码后为 true。
 // last_login_at：最近登录（从未登录为 null；管理端不活跃判定 = 最近登录或注册超 6 个月）。
 export interface User {
   id: number
@@ -15,6 +20,7 @@ export interface User {
   account_code: string
   email: string
   phone: string
+  password_set: boolean
   bio: string
   last_login_at: string | null
   created_at: string
@@ -376,17 +382,14 @@ export const adminSettingsApi = {
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<TokenResponse>('/auth/login', { username, password }),
-  // 注册发码（邮箱主通道）：限频时后端不报错，返回 200 + retry_after（秒）。
-  // code 仅本地演示回显模式返回（生产默认关闭，严格模式禁止开启）。
-  sendEmailCode: (email: string) =>
-    http.post<VerificationCodeResponse>('/auth/email/code', { email }),
-  // 旧版手机号注册发码（兼容保留，当前页面不再使用）。
-  sendSmsCode: (phone: string) =>
-    http.post<VerificationCodeResponse>('/auth/sms/code', { phone }),
-  // 凭验证码建号（角色固定 student），成功直接返回登录 token。
-  register: (email: string, code: string, username: string, password: string) =>
-    http.post<TokenResponse>('/auth/register', { email, code, username, password }),
-  // 找回密码发码：email / phone 二选一；限频语义同注册发码。
+  // 微信是唯一自助注册入口：status → start（拿授权地址，整页跳转）→
+  // 微信回调到登录页后 callback 换应用 token（首次自动建号）。
+  wechatStatus: () => http.get<WechatStatus>('/auth/wechat/status'),
+  wechatStart: (redirect?: string) =>
+    http.get<WechatStartResponse>(`/auth/wechat/start${redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''}`),
+  wechatCallback: (code: string, state: string) =>
+    http.post<WechatCallbackResponse>('/auth/wechat/callback', { code, state }),
+  // 找回密码发码（历史账号）：email / phone 二选一；限频返回 200 + retry_after。
   sendResetCode: (identifier: AccountIdentifier) =>
     http.post<VerificationCodeResponse>('/auth/password-reset/code', identifier),
   // 凭找回验证码重置密码；返回用户名与账号编码（忘记用户名也可完整找回）。

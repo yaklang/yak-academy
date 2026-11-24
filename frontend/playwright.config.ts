@@ -95,6 +95,10 @@ export default defineConfig({
         ACADEMY_SHOW_VERIFICATION_CODE: '1',
         ACADEMY_SMTP_ADDR: '',
         ACADEMY_STRICT: '',
+        // 微信是唯一自助注册入口：E2E 走本地 mock（不访问微信），授权页
+        // 直接回跳前端登录页，登录页再把 code/state 交回后端建号/登录。
+        ACADEMY_WECHAT_MOCK: '1',
+        ACADEMY_WECHAT_REDIRECT_URL: `${baseURL}/login`,
         ACADEMY_PUBLIC_URL: apiURL,
         // 实例 endpoint 对外主机名（docker project）：localhost 而非 127.0.0.1，
         // 使 endpoint 回归 spec 能区分「配置的主机名」与「硬编码回环」。

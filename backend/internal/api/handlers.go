@@ -30,8 +30,8 @@ type Handlers struct {
 	AWD          *service.AwdCompetitionService
 	Exam         *service.ExamService
 	Certificates *service.CertificateService
-	RegisterSvc  *service.RegisterService
 	ResetSvc     *service.PasswordResetService
+	Wechat       *service.WechatAuthService
 	Backup       *service.BackupService
 	Audit        *service.AuditService
 	Settings     *service.SettingsService
@@ -40,18 +40,19 @@ type Handlers struct {
 }
 
 // NewHandlers 构造 handler 集合；showVerificationCode 见 config.VerificationShowCode。
-func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, awd *service.AwdCompetitionService, exam *service.ExamService, certificates *service.CertificateService, register *service.RegisterService, reset *service.PasswordResetService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
-	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, AWD: awd, Exam: exam, Certificates: certificates, RegisterSvc: register, ResetSvc: reset, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
+func NewHandlers(auth *service.AuthService, content *service.ContentService, challenge *service.ChallengeService, judge *service.JudgeService, progress *service.UserProgressService, topics *service.TopicService, env *service.EnvService, badges *service.BadgeService, profile *service.ProfileService, competitions *service.CompetitionService, awd *service.AwdCompetitionService, exam *service.ExamService, certificates *service.CertificateService, reset *service.PasswordResetService, wechat *service.WechatAuthService, backup *service.BackupService, audit *service.AuditService, settings *service.SettingsService, showVerificationCode bool) *Handlers {
+	return &Handlers{Auth: auth, Content: content, Challenge: challenge, Judge: judge, Progress: progress, Topics: topics, Env: env, Badges: badges, Profile: profile, Competitions: competitions, AWD: awd, Exam: exam, Certificates: certificates, ResetSvc: reset, Wechat: wechat, Backup: backup, Audit: audit, Settings: settings, showVerificationCode: showVerificationCode}
 }
 
 func (h *Handlers) Register(r *Router) {
-	// 公开接口：登录（JWT）、注册/找回密码（邮箱主通道、手机号兼容）、检测点回调
-	// （token 能力鉴权，容器内 checker 调用）与健康检查（进程存活探针，无鉴权；
-	// compose healthcheck 用）。
+	// 公开接口：登录（JWT）、微信注册/登录（OAuth 回调）、找回密码（历史账号
+	// 邮箱/手机验证码）、检测点回调（token 能力鉴权，容器内 checker 调用）与
+	// 健康检查（进程存活探针，无鉴权；compose healthcheck 用）。
+	// 手机号/邮箱自助注册已下线：新账号唯一入口为微信 OAuth。
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/login", h.login)
-	r.HandlePublic(http.MethodPost, "/api/v1/auth/email/code", h.sendEmailCode)
-	r.HandlePublic(http.MethodPost, "/api/v1/auth/sms/code", h.sendSmsCode)
-	r.HandlePublic(http.MethodPost, "/api/v1/auth/register", h.register)
+	r.HandlePublic(http.MethodGet, "/api/v1/auth/wechat/status", h.wechatStatus)
+	r.HandlePublic(http.MethodGet, "/api/v1/auth/wechat/start", h.wechatStart)
+	r.HandlePublic(http.MethodPost, "/api/v1/auth/wechat/callback", h.wechatCallback)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset/code", h.sendPasswordResetCode)
 	r.HandlePublic(http.MethodPost, "/api/v1/auth/password-reset", h.passwordReset)
 	r.HandlePublic(http.MethodPost, "/api/v1/checkpoints/{token}", h.checkpoint)
@@ -259,36 +260,11 @@ func (h *Handlers) login(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
 }
 
-// sendEmailCode 注册邮箱发码（公开，主通道）。限频不报错：按契约返回
-// 200 + retry_after，前端据此显示倒计时。
-func (h *Handlers) sendEmailCode(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Email string `json:"email"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Email == "" {
-		writeError(w, errValidation)
-		return
-	}
-	code, retryAfter, err := h.RegisterSvc.SendEmailCode(req.Context(), body.Email)
-	h.respondCodeSent(w, code, retryAfter, err)
-}
+const wechatCookiePath = "/api/v1/auth/wechat"
+const wechatMockIDCookie = "academy_wechat_mock_id"
 
-// sendSmsCode 旧版手机号注册发码（公开，兼容保留）。限频不报错：
-// 按契约返回 200 + retry_after，前端据此显示倒计时。
-func (h *Handlers) sendSmsCode(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Phone string `json:"phone"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Phone == "" {
-		writeError(w, errValidation)
-		return
-	}
-	code, retryAfter, err := h.RegisterSvc.SendCode(req.Context(), body.Phone)
-	h.respondCodeSent(w, code, retryAfter, err)
-}
-
-// respondCodeSent 发码统一响应：限频 → 200 + retry_after；成功 → 仅回显模式下
-// 携带验证码原文（本地演示，生产严格模式禁止开启）。
+// respondCodeSent 找回密码发码统一响应：限频 → 200 + retry_after；成功 → 仅
+// 回显模式下携带验证码原文（本地演示，生产严格模式禁止开启）。
 func (h *Handlers) respondCodeSent(w http.ResponseWriter, code string, retryAfter int, err error) {
 	if err != nil {
 		if errors.Is(err, service.ErrSmsThrottled) {
@@ -305,29 +281,104 @@ func (h *Handlers) respondCodeSent(w http.ResponseWriter, code string, retryAfte
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// register 凭验证码建号（公开，角色固定 student），成功即签发登录 token。
-// email 为推荐渠道（配 /auth/email/code），phone 兼容旧客户端（配 /auth/sms/code）。
-func (h *Handlers) register(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Email    string `json:"email"`
-		Phone    string `json:"phone"`
-		Code     string `json:"code"`
-		Username string `json:"username"`
-		Password string `json:"password"`
+// wechatStatus 微信登录能力：前端据此决定是否渲染微信按钮/提示未配置。
+func (h *Handlers) wechatStatus(w http.ResponseWriter, _ *http.Request) {
+	enabled := h.Wechat != nil && h.Wechat.Enabled()
+	mock := h.Wechat != nil && h.Wechat.Mock()
+	mode := ""
+	if h.Wechat != nil {
+		mode = h.Wechat.Mode()
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Code == "" || body.Username == "" || body.Password == "" {
-		writeError(w, errValidation)
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "mock": mock, "mode": mode})
+}
+
+// wechatStart 发起微信授权：返回 authorize_url，前端整页跳转；state 写
+// HttpOnly Cookie（微信回调回到前端登录页后，由 callback 校验）。
+func (h *Handlers) wechatStart(w http.ResponseWriter, req *http.Request) {
+	if h.Wechat == nil {
+		h.wechatUnavailable(w)
 		return
 	}
-	token, expires, _, err := h.RegisterSvc.Register(req.Context(), service.RegisterInput{
-		Email: body.Email, Phone: body.Phone, Code: body.Code,
-		Username: body.Username, Password: body.Password,
-	}, func(u *model.User) (string, time.Time, error) { return h.Auth.IssueToken(req.Context(), u) })
+	mockID := ""
+	if h.Wechat.Mock() {
+		if q := strings.TrimSpace(req.URL.Query().Get("mock_id")); q != "" {
+			mockID = q
+		} else if cookie, err := req.Cookie(wechatMockIDCookie); err == nil {
+			mockID = cookie.Value
+		}
+	}
+	result, err := h.Wechat.Start(req.URL.Query().Get("redirect"), mockID)
 	if err != nil {
 		mapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": expires})
+	h.setWechatCookie(w, req, service.WechatStateCookieName, result.StateCookie, result.MaxAge)
+	if h.Wechat.Mock() && result.MockID != "" {
+		// 本地模拟身份稳定 30 天：同一浏览器重复登录复用账号，清 Cookie 即新用户。
+		h.setWechatCookie(w, req, wechatMockIDCookie, result.MockID, 30*24*60*60)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authorize_url": result.AuthorizeURL})
+}
+
+// wechatCallback 微信回调落到前端登录页后，前端把 code/state 交回本接口：
+// 校验 state Cookie → 换微信身份 → 查找/建号 → 签发应用 JWT。
+func (h *Handlers) wechatCallback(w http.ResponseWriter, req *http.Request) {
+	if h.Wechat == nil {
+		h.wechatUnavailable(w)
+		return
+	}
+	var body struct {
+		Code  string `json:"code"`
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.Code == "" || body.State == "" {
+		writeError(w, errValidation)
+		return
+	}
+	cookie, err := req.Cookie(service.WechatStateCookieName)
+	if err != nil || cookie.Value == "" {
+		mapError(w, service.ErrWechatStateInvalid)
+		return
+	}
+	// state 一次性：无论成功失败都清除，避免同一次授权被重放。
+	h.clearWechatCookie(w, req, service.WechatStateCookieName)
+	user, redirect, err := h.Wechat.Authenticate(req.Context(), body.Code, body.State, cookie.Value)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	token, expires, err := h.Auth.IssueToken(req.Context(), user)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": token, "expires_at": expires, "redirect": redirect,
+	})
+}
+
+func (h *Handlers) wechatUnavailable(w http.ResponseWriter) {
+	writeError(w, &apiError{"NOT_IMPLEMENTED", http.StatusNotImplemented,
+		"not implemented yet: wechat login not configured"})
+}
+
+func (h *Handlers) setWechatCookie(w http.ResponseWriter, req *http.Request, name, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: name, Value: value, Path: wechatCookiePath, MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestIsHTTPS(req),
+	})
+}
+
+func (h *Handlers) clearWechatCookie(w http.ResponseWriter, req *http.Request, name string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: name, Value: "", Path: wechatCookiePath, MaxAge: -1,
+		Expires: time.Unix(1, 0), HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: requestIsHTTPS(req),
+	})
+}
+
+func requestIsHTTPS(req *http.Request) bool {
+	return req.TLS != nil || strings.EqualFold(req.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // sendPasswordResetCode 找回密码发码（公开）。email / phone 二选一；

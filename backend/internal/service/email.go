@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"net"
 	"net/mail"
@@ -22,6 +23,42 @@ import (
 )
 
 const smtpTimeout = 10 * time.Second
+
+// SmsSender 旧版短信投递抽象（历史手机号账号找回密码兼容；当前仅开发日志）。
+type SmsSender interface {
+	Send(phone, code string) error
+}
+
+// DevSmsSender 开发投递器：验证码写服务日志，本地联调与 E2E 从日志取码。
+type DevSmsSender struct{}
+
+func (DevSmsSender) Send(phone, code string) error {
+	log.Printf("[sms] dev deliver: phone=%s code=%s", phone, code)
+	return nil
+}
+
+// EmailSender 邮箱验证码投递抽象：SMTP/事务邮件服务或本地开发投递器。
+type EmailSender interface {
+	Send(ctx context.Context, to, code, purpose string) error
+}
+
+// DevEmailSender 开发投递器：验证码写服务日志（仅非严格模式使用）。
+type DevEmailSender struct{}
+
+func (DevEmailSender) Send(_ context.Context, to, code, purpose string) error {
+	log.Printf("[email] dev deliver: to=%s purpose=%s code=%s", to, purpose, code)
+	return nil
+}
+
+type unavailableEmailSender struct{}
+
+func (unavailableEmailSender) Send(context.Context, string, string, string) error {
+	return errNotImplemented("email delivery not configured")
+}
+
+// NewUnavailableEmailSender 严格模式未配置 SMTP 时的投递器：发码接口返回 501，
+// 避免把验证码写进生产日志。
+func NewUnavailableEmailSender() EmailSender { return unavailableEmailSender{} }
 
 // SMTPEmailSender SMTP/事务邮件服务投递器。
 type SMTPEmailSender struct {

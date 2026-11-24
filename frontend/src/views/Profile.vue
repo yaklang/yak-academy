@@ -28,6 +28,9 @@ const pwdVisible = ref(false)
 const pwdForm = reactive({ current: '', next: '', confirm: '' })
 const pwdLoading = ref(false)
 
+// 微信注册账号没有密码（password_set=false）：隐藏改密入口，避免必然失败的请求；
+// 管理员重置密码后 /me 会返回 true，入口自动恢复。
+const canChangePassword = computed(() => auth.user?.password_set !== false)
 const roleLabel = (role: UserProfile['global_role']) => (role === 'admin' ? '管理员' : '学员')
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 // 总数与雷达图同一口径（当前可见题目），避免卡片内部出现
@@ -275,7 +278,7 @@ onMounted(() => {
           <div class="card-head">
             <div>
               <h3 class="card-title">账号安全</h3>
-              <p class="card-hint">修改密码后全部已登录会话失效，需要重新登录。</p>
+              <p class="card-hint">{{ canChangePassword ? '修改密码后全部已登录会话失效，需要重新登录。' : '微信注册账号通过微信登录，不设置平台密码。' }}</p>
             </div>
           </div>
         </template>
@@ -283,9 +286,10 @@ onMounted(() => {
           <span class="security-icon"><KeyRound :size="16" aria-hidden="true" /></span>
           <div class="security-copy">
             <p>登录密码</p>
-            <span>建议使用与其他平台不同的密码。</span>
+            <span>{{ canChangePassword ? '建议使用与其他平台不同的密码。' : '如需使用密码登录，请联系管理员重置密码。' }}</span>
           </div>
-          <UiButton size="small" @click="pwdVisible = true">修改密码</UiButton>
+          <UiButton v-if="canChangePassword" size="small" @click="pwdVisible = true">修改密码</UiButton>
+          <UiTag v-else size="small" effect="plain">微信登录</UiTag>
         </div>
       </UiCard>
     </div>

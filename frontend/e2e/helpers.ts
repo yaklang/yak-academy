@@ -7,7 +7,7 @@ export async function login(page: Page, who: { username: string; password: strin
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill(who.username)
   await page.getByPlaceholder('密码').fill(who.password)
-  await page.getByRole('button', { name: '登录' }).click()
+  await page.getByRole('button', { name: '登录', exact: true }).click()
   await page.waitForURL((u) => !u.pathname.startsWith('/login'))
 }
 

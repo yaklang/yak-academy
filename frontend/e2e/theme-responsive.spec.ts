@@ -33,10 +33,10 @@ test('公开首页与登录/注册/找回页面在两种主题和五种宽度下
         await page.getByRole('link', { name: '开始学习', exact: true }).click()
         await expect(page.getByRole('textbox', { name: '用户名', exact: true })).toBeVisible()
         await fits(page, width)
-        await page.getByRole('button', { name: '邮箱验证码注册', exact: true }).click()
-        await expect(page.getByLabel('邮箱', { exact: true })).toBeVisible()
+        // 自助注册唯一入口是微信按钮（mock 模式下点击会离开登录页，
+        // 主题/响应式用例只断言入口存在且不溢出）。
+        await expect(page.getByRole('button', { name: '微信扫码注册 / 登录', exact: true })).toBeVisible()
         await fits(page, width)
-        await page.getByRole('button', { name: '返回登录', exact: true }).click()
         await page.getByRole('button', { name: '找回账号', exact: true }).click()
         await expect(page.getByRole('button', { name: '重置密码并找回账号', exact: true })).toBeVisible()
         await fits(page, width)

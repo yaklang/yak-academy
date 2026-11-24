@@ -86,7 +86,7 @@ test.describe('竞赛隔离旅程', () => {
     await page.waitForURL((u) => u.pathname === '/login')
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
     await page.waitForURL((u) => u.pathname === `/competitions/${comp.id}`)
 
     // —— 竞赛域内可用：题目抽屉提交 flag，异步判对转「已通关」 ——

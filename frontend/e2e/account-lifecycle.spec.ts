@@ -9,7 +9,7 @@ test.describe('账号生命周期', () => {
     await page.goto('/login')
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
     await page.waitForURL((u) => !u.pathname.startsWith('/login'))
     const oldToken = await page.evaluate(() => localStorage.getItem('academy_token'))
 
@@ -34,14 +34,14 @@ test.describe('账号生命周期', () => {
     // 旧密码登录失败：停留登录页并报错
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
     await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
 
     // 新密码可登录
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill('stu-e2e-pass-2')
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
     await page.waitForURL((u) => !u.pathname.startsWith('/login'))
 
     // 恢复初始密码，保证套件内其他 spec 的账号常量可用
@@ -56,7 +56,7 @@ test.describe('账号生命周期', () => {
     // 恢复后验证初始密码可登录（下个用例与后续 spec 依赖它）
     await page.getByPlaceholder('用户名').fill(E2E.student.username)
     await page.getByPlaceholder('密码').fill(E2E.student.password)
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录', exact: true }).click()
     await page.waitForURL((u) => !u.pathname.startsWith('/login'))
   })
 
