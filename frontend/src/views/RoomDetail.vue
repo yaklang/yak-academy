@@ -122,7 +122,7 @@ onMounted(load)
   --lesson-reading-width: 780px;
   --lesson-toc-width: 220px;
   --lesson-gutter: var(--space-10);
-  max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter));
+  max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter, 40px));
   margin-inline: auto;
 }
 
