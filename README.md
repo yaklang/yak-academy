@@ -83,9 +83,14 @@ Docker Desktop：Settings → Docker Engine，Linux 直接编辑 `/etc/docker/da
 |---|---|---|
 | 后端单测 | `cd backend && go test -race ./...` | 全量（含契约守卫：`internal/api/contract_test.go` 双向比对 openapi.yaml 与注册路由） |
 | 前端单测 | `cd frontend && npm test` | 纯逻辑单测（vue-tsc + vitest 在 `npm run build` 一并执行） |
-| E2E | `cd frontend && npm run e2e` | Playwright 全旅程（13 用例）：自动起 Go 后端 :18080 + vite :15173、每次整跑全新 DB、经管理 API 播种 |
+| 设计门禁 | `cd frontend && npm run check:design && npm run check:census && npm run check:copy` | 令牌/字号/间距、每页单 h1 与表格容器、可见文案（内部枚举/术语）三道静态检查 |
+| E2E | `cd frontend && npm run e2e` | Playwright 全旅程（60+ spec）：自动起 Go 后端 :18080 + vite :15173、每次整跑全新 DB、经管理 API 播种 |
 | E2E（容器） | `E2E_DOCKER=1 npm run e2e` | 追加 docker project（1 用例）：真实容器启动→访问→409→续期→销毁，需本机 Docker |
 | Docker 集成 | `cd backend && ACADEMY_TEST_DOCKER=1 go test ./internal/service/ -run Docker` | 真实 daemon 门控集（无 Docker 时自动 Skip） |
+
+视觉走查包含在 E2E 中：`visual-qa.spec.ts` 遍历公开页、学习端、管理端与竞赛满屏页，
+在 1440/1024/390、浅/深色下断言无横向溢出、单一 h1、角色字号、正文对比度与
+移动端触控目标；截图写入 `test-results/**/visual/`（CI 作为 artifact 上传，不做像素基线）。
 
 E2E 调试：`E2E_KEEP_STATE=1` 保留运行后的 DB/附件目录（`frontend/e2e/.state/`），
 `npx playwright test --project=chromium -g "关键词"` 单跑一个用例，
