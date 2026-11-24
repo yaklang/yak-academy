@@ -28,6 +28,7 @@ import { useAuthStore } from '../stores/auth'
 import { useCompetitionStore } from '../stores/competition'
 import { ApiError } from '../api/client'
 import CompetitionOverview from '../components/competition/CompetitionOverview.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -112,7 +113,7 @@ async function refreshAfterEnd() {
   // 比赛结束瞬间：解除锁定态并刷新（可访问平台 + 可交 WP）。
   compStore.unlock()
   await loadView()
-  notify.info('比赛已结束，感谢参与！可提交 Writeup 或返回平台。')
+  notify.info('比赛已结束，感谢参与！可提交解题报告或返回平台。')
 }
 
 // 提交后统一刷新：概览聚合与排行榜必须同拍更新，避免名次/得分不同步。
@@ -305,13 +306,13 @@ async function saveWp(item: CompetitionChallengeItem) {
   const content = wpDrafts.value[item.id] ?? ''
   const existing = wpOf(item.id)
   if (!content.trim() && !existing?.zip_name) {
-    notify.warning('请填写 WP 文字或上传 zip（至少一项）')
+    notify.warning('请填写解题报告文字或上传压缩包（至少一项）')
     return
   }
   wpSaving.value = true
   try {
     await competitionApi.saveWriteup(compId, item.id, content)
-    notify.success(`「${item.title}」WP 已提交（可继续修改）`)
+    notify.success(`「${item.title}」解题报告已提交（可继续修改）`)
     await loadWps()
   } catch (e) {
     notify.error((e as Error).message)
@@ -426,15 +427,12 @@ onUnmounted(() => {
             </svg>
           </span>
           <div class="comp-title">
-            <p class="comp-eyebrow">YAK ACADEMY · CTF</p>
             <div class="comp-name-row">
               <h1>{{ comp?.name ?? '竞赛' }}</h1>
-              <UiTag v-if="comp" :type="running ? 'success' : ended ? 'info' : 'warning'" size="small">
-                {{ running ? '进行中' : ended ? '已结束' : '未开始' }}
-              </UiTag>
-              <UiTag v-if="comp" size="small" type="info">{{ kindLabel }}</UiTag>
-              <UiTag v-if="comp" size="small" type="warning">{{ formatLabel }}</UiTag>
-              <UiTag v-if="fixedScoringLabel" size="small" type="info">{{ fixedScoringLabel }}</UiTag>
+              <StatusTag v-if="comp" kind="competition" :value="comp.status" />
+              <span v-if="comp" class="comp-chip">{{ kindLabel }}</span>
+              <span v-if="comp" class="comp-chip">{{ formatLabel }}</span>
+              <span v-if="fixedScoringLabel" class="comp-chip">{{ fixedScoringLabel }}</span>
             </div>
             <p v-if="comp" class="comp-window mono">{{ shortDateTime(comp.start_time) }} → {{ shortDateTime(comp.end_time) }}</p>
           </div>
@@ -507,7 +505,7 @@ onUnmounted(() => {
           <div class="challenge-toolbar">
             <UiInput
               v-model="challengeSearch"
-              placeholder="搜索题目 / slug"
+              placeholder="搜索题目"
               clearable
               class="challenge-search"
               aria-label="搜索题目"
@@ -629,11 +627,11 @@ onUnmounted(() => {
         </UiTabPane>
 
         <!-- WP（结束后；按题目一份，全队共享可互相修改） -->
-        <UiTabPane v-if="ended" label="WP 提交" name="writeup">
+        <UiTabPane v-if="ended" label="解题报告" name="writeup">
           <UiAlert
             type="info"
             :closable="false"
-            title="每道题提交一份 WP：文字 + 可选附带 zip（脚本/截图打包）；队伍模式下全队共享同一份，任一成员均可修改或重新上传。"
+            title="每道题提交一份解题报告：文字 + 可选附带压缩包（脚本/截图打包）；队伍模式下全队共享同一份，任一成员均可修改或重新上传。"
             class="block"
           />
           <div v-for="item in view?.challenges ?? []" :key="item.id" class="wp-card">
@@ -663,7 +661,7 @@ onUnmounted(() => {
                 </UiButton>
               </UiUpload>
               <UiButton type="primary" size="small" :loading="wpSaving" @click="saveWp(item)">
-                {{ wpOf(item.id) ? '更新 WP' : '提交 WP' }}
+                {{ wpOf(item.id) ? '更新解题报告' : '提交解题报告' }}
               </UiButton>
             </div>
           </div>
@@ -754,6 +752,19 @@ onUnmounted(() => {
 .comp-identity { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
 .comp-mark { display: grid; flex-shrink: 0; place-items: center; color: var(--brand-mark); }
 .comp-title { min-width: 0; }
+.comp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
 .comp-eyebrow {
   margin: 0 0 2px;
   color: var(--muted-foreground);
