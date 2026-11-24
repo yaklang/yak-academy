@@ -1,14 +1,23 @@
 <script setup lang="ts">
-// 管理面板：容器管理。整体视图 = 主机性能面板（宿主 CPU/内存/容器与镜像计数/
-// 数据卷用量 + 全容器资源占用表，可自动刷新）+ 当前活跃容器概览（含题目信息，
-// 可强制销毁）+ 下方容器生命周期日志（append-only，记录每次启动/停止及失败原因）。
-// 后两个表格均为固定最大高度的内滚动；日志表分页常驻，支持切换每页条数。
-import { onMounted, onUnmounted, ref } from 'vue'
-import { notify, dialogs } from '@/lib/notifications'
-import { formatDateTime, formatTime } from '@/lib/format'
+// 管理面板：容器管理。主机资源概览（CPU/内存/容器与镜像/数据卷 + 全容器资源）
+// 可自动刷新；下方是当前打开的容器与生命周期日志。强制销毁会真实回收容器。
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { notify } from '@/lib/notifications'
+import { formatBytes, formatDateTime } from '@/lib/format'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import DataTablePanel from '@/components/layout/DataTablePanel.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
+import ConfirmDialog from '@/components/layout/ConfirmDialog.vue'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import {
-  adminInstanceApi, performanceApi,
-  type AdminLabInstance, type InstanceLog, type PerformanceReport,
+  adminInstanceApi,
+  performanceApi,
+  type AdminLabInstance,
+  type InstanceLog,
+  type PerformanceReport,
 } from '../../api'
 
 const perf = ref<PerformanceReport | null>(null)
@@ -21,6 +30,7 @@ const active = ref<AdminLabInstance[]>([])
 const activeLoading = ref(true)
 const activeError = ref('')
 const destroying = ref(0)
+const destroyTarget = ref<AdminLabInstance | null>(null)
 
 const logs = ref<InstanceLog[]>([])
 const logTotal = ref(0)
@@ -31,14 +41,41 @@ const logError = ref('')
 
 const REFRESH_MS = 10000
 
+const cpuPercent = computed(() => {
+  const value = perf.value?.host?.cpu_percent
+  return value === null || value === undefined ? null : Math.min(100, value)
+})
+
+const memPercent = computed(() => {
+  const host = perf.value?.host
+  if (!host || host.mem_used_bytes === null || !host.mem_total_bytes) return null
+  return Math.min(100, (host.mem_used_bytes / host.mem_total_bytes) * 100)
+})
+
+const volumePercent = computed(() => {
+  const volume = perf.value?.data_volume
+  if (!volume || !volume.total_bytes) return null
+  return Math.min(100, (volume.used_bytes / volume.total_bytes) * 100)
+})
+
+function usageTone(percent: number | null) {
+  if (percent === null) return 'neutral'
+  if (percent > 85) return 'danger'
+  if (percent > 60) return 'warning'
+  return 'success'
+}
+
+function barWidth(percent: number | null) {
+  return `${Math.round((percent ?? 0) * 10) / 10}%`
+}
+
 async function loadPerf(silent = true) {
   if (!silent) perfLoading.value = true
   try {
     perf.value = await performanceApi.get()
     perfError.value = ''
   } catch (e) {
-    // 自动刷新失败不打断页面，但必须把失败原因留在卡片里；
-    // 否则会退化成“未配置容器运行时”的误导性空态。
+    // 自动刷新失败不打断页面，但必须把失败原因留在面板里。
     perfError.value = e instanceof Error ? e.message : '性能数据加载失败，请稍后重试'
     if (!silent) notify.error(perfError.value)
   } finally {
@@ -107,30 +144,24 @@ async function load() {
   await Promise.all([loadPerf(false), loadActive(), loadLogs()])
 }
 
-async function forceDestroy(inst: AdminLabInstance) {
+function askDestroy(instance: AdminLabInstance) {
+  destroyTarget.value = instance
+}
+
+async function confirmDestroy() {
+  const target = destroyTarget.value
+  if (!target) return
+  destroying.value = target.id
   try {
-    await dialogs.confirm(
-      `将强制销毁用户 ${inst.username} 的实例「${inst.challenge_title}」#${inst.id}，容器会被真实回收，该用户环境将不可用。`,
-      '强制销毁确认',
-      { type: 'warning', confirmButtonText: '销毁', cancelButtonText: '取消' },
-    )
-  } catch {
-    return // 用户取消
-  }
-  destroying.value = inst.id
-  try {
-    await adminInstanceApi.destroy(inst.id)
-    notify.success(`实例 #${inst.id} 已销毁`)
+    await adminInstanceApi.destroy(target.id)
+    notify.success(`已销毁 ${target.username} 的容器`)
+    destroyTarget.value = null
     await load()
   } catch (e) {
     notify.error(`销毁失败：${(e as Error).message}`)
   } finally {
     destroying.value = 0
   }
-}
-
-function statusType(s: AdminLabInstance['status']) {
-  return s === 'running' ? 'success' : s === 'creating' ? 'warning' : s === 'destroyed' ? 'info' : 'danger'
 }
 
 function sourceLabel(source: string) {
@@ -143,36 +174,6 @@ function fmt(ts: string) {
   return formatDateTime(ts)
 }
 
-function fmtTime(ts: string) {
-  return formatTime(ts)
-}
-
-function fmtBytes(bytes: number | null | undefined) {
-  if (bytes === null || bytes === undefined) return '—'
-  if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(2)} GB`
-  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`
-  if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(1)} KB`
-  return `${bytes} B`
-}
-
-// 资源占用水位着色：<60% 健康、60–85% 警告、>85% 危险（进度条与数字标签共用）。
-function usageColor(pct: number) {
-  return pct > 85 ? '#f56c6c' : pct > 60 ? '#e6a23c' : '#67c23a'
-}
-
-function memPercentOf(rep: PerformanceReport) {
-  if (!rep.host) return null
-  const used = rep.host.mem_used_bytes
-  if (used === null || !rep.host.mem_total_bytes) return null
-  return (used / rep.host.mem_total_bytes) * 100
-}
-
-function volPercent() {
-  const v = perf.value?.data_volume
-  if (!v || !v.total_bytes) return 0
-  return (v.used_bytes / v.total_bytes) * 100
-}
-
 onMounted(() => {
   load()
   schedulePerf()
@@ -182,251 +183,498 @@ onUnmounted(stopPerf)
 </script>
 
 <template>
-  <header class="page-head">
-    <div>
-      <h2 class="page-title">容器<span class="accent">管理</span></h2>
-      <p class="page-sub">
-        主机性能、当前打开的容器与操作日志。强制销毁会回收真实容器资源；每次启动/停止均记录日志（含来源与失败原因）。
-      </p>
-    </div>
-  </header>
+  <PageHeader
+    title="容器管理"
+    description="查看主机资源、当前打开的容器与生命周期日志。强制销毁会立即回收真实容器，学员的实验环境随之失效。"
+  />
 
-  <!-- 主机性能面板 -->
-  <UiCard class="block" shadow="never">
-    <template #header>
-      <div class="card-head">
-        <span>主机性能</span>
-        <div class="head-actions">
-          <span v-if="autoRefresh" class="dim">每 {{ REFRESH_MS / 1000 }}s 自动刷新</span>
-          <UiSwitch v-model="autoRefresh" size="small" @change="onAutoRefreshChange" />
-          <UiButton size="small" @click="loadPerf(false)">刷新</UiButton>
-        </div>
-      </div>
+  <DataTablePanel
+    title="主机性能"
+    :description="perfError ? undefined : `每 ${REFRESH_MS / 1000} 秒自动刷新；数据来自容器运行时。`"
+  >
+    <template #toolbar>
+      <label class="auto-refresh">
+        <Switch v-model="autoRefresh" aria-label="自动刷新主机性能" @update:model-value="onAutoRefreshChange" />
+        <span>自动刷新</span>
+      </label>
+      <Button type="button" variant="outline" @click="loadPerf(false)">刷新</Button>
     </template>
-    <UiLoadError v-if="perfError" compact :message="perfError" @retry="loadPerf(false)" class="card-error" />
-    <div v-if="!perf && perfLoading" class="perf-skeleton" role="status" aria-label="正在加载主机性能">
-      <div v-for="n in 4" :key="n" class="sk-metric">
-        <i class="sk-line short" />
-        <i class="sk-line" />
-        <i class="sk-line medium" />
+
+    <EmptyState
+      v-if="perfError"
+      compact
+      tone="error"
+      title="主机性能加载失败"
+      :description="perfError"
+      action-label="重试"
+      @action="loadPerf(false)"
+    />
+
+    <div v-else-if="!perf && perfLoading" class="host-metrics host-metrics--loading" aria-busy="true" aria-label="正在加载主机性能">
+      <div v-for="n in 4" :key="n" class="host-metric">
+        <Skeleton class="host-skeleton host-skeleton--label" />
+        <Skeleton class="host-skeleton host-skeleton--value" />
+        <Skeleton class="host-skeleton" />
       </div>
     </div>
+
     <template v-else-if="perf">
-      <div class="host-grid">
-        <div class="metric">
-          <div class="metric-title">CPU（{{ perf.ncpu }} 核）</div>
-          <div v-if="perf.host?.cpu_percent !== null && perf.host?.cpu_percent !== undefined">
-            <UiProgress
-              :percentage="Math.min(100, Math.round(perf.host.cpu_percent))"
-              :color="usageColor(perf.host.cpu_percent)"
-            />
-            <div class="dim" :style="{ color: usageColor(perf.host.cpu_percent) }">
-              宿主占用 {{ perf.host.cpu_percent.toFixed(1) }}%（多核可超 100%）
-            </div>
+      <div class="host-metrics">
+        <div class="host-metric">
+          <p class="host-metric__label">CPU（{{ perf.ncpu }} 核）</p>
+          <p class="host-metric__value">{{ cpuPercent === null ? '—' : `${cpuPercent.toFixed(1)}%` }}</p>
+          <div class="usage-track" role="presentation">
+            <span class="usage-fill" :data-tone="usageTone(cpuPercent)" :style="{ width: barWidth(cpuPercent) }" />
           </div>
-          <div v-else class="dim">宿主占用采样不可用（非 Linux 部署）</div>
+          <p class="host-metric__hint">{{ cpuPercent === null ? '宿主占用采样不可用' : '宿主占用（多核可超 100%）' }}</p>
         </div>
-        <div class="metric">
-          <div class="metric-title">内存</div>
-          <template v-if="memPercentOf(perf) !== null">
-            <UiProgress
-              :percentage="Math.min(100, Math.round(memPercentOf(perf)!))"
-              :color="usageColor(memPercentOf(perf)!)"
-            />
-            <div class="dim">
-              {{ fmtBytes(perf.host!.mem_used_bytes) }} / {{ fmtBytes(perf.host!.mem_total_bytes) }}
-            </div>
-          </template>
-          <div v-else class="dim">总量 {{ fmtBytes(perf.mem_total_bytes) }}；占用采样不可用</div>
-        </div>
-        <div class="metric">
-          <div class="metric-title">容器 / 镜像</div>
-          <div class="metric-line">
-            共 {{ perf.containers_total }}：
-            <UiTag size="small" type="success">运行 {{ perf.containers_running }}</UiTag>
-            <UiTag size="small" type="warning" v-if="perf.containers_paused">暂停 {{ perf.containers_paused }}</UiTag>
-            <UiTag size="small" type="info">停止 {{ perf.containers_stopped }}</UiTag>
+
+        <div class="host-metric">
+          <p class="host-metric__label">内存</p>
+          <p class="host-metric__value">{{ memPercent === null ? '—' : `${memPercent.toFixed(1)}%` }}</p>
+          <div class="usage-track" role="presentation">
+            <span class="usage-fill" :data-tone="usageTone(memPercent)" :style="{ width: barWidth(memPercent) }" />
           </div>
-          <div class="dim">镜像 {{ perf.images }} 个</div>
+          <p class="host-metric__hint">
+            {{ memPercent === null
+              ? `总量 ${formatBytes(perf.mem_total_bytes)}；占用采样不可用`
+              : `${formatBytes(perf.host!.mem_used_bytes)} / ${formatBytes(perf.host!.mem_total_bytes)}` }}
+          </p>
         </div>
-        <div class="metric">
-          <div class="metric-title">数据卷</div>
-          <template v-if="perf.data_volume">
-            <UiProgress :percentage="Math.min(100, Math.round(volPercent()))" :color="usageColor(volPercent())" />
-            <div class="dim">
-              {{ fmtBytes(perf.data_volume.used_bytes) }} / {{ fmtBytes(perf.data_volume.total_bytes) }}
-              （可用 {{ fmtBytes(perf.data_volume.avail_bytes) }}）
-            </div>
-          </template>
-          <div v-else class="dim">数据卷用量统计不可用（非 Linux 部署）</div>
+
+        <div class="host-metric">
+          <p class="host-metric__label">容器 / 镜像</p>
+          <p class="host-metric__value">{{ perf.containers_total }}</p>
+          <div class="host-metric__chips">
+            <StatusTag kind="container" value="running" :label="`运行 ${perf.containers_running}`" />
+            <StatusTag v-if="perf.containers_paused" kind="awd" value="paused" :label="`暂停 ${perf.containers_paused}`" />
+            <StatusTag kind="container" value="stopped" :label="`停止 ${perf.containers_stopped}`" />
+          </div>
+          <p class="host-metric__hint">镜像 {{ perf.images }} 个</p>
+        </div>
+
+        <div class="host-metric">
+          <p class="host-metric__label">数据卷</p>
+          <p class="host-metric__value">{{ volumePercent === null ? '—' : `${volumePercent.toFixed(1)}%` }}</p>
+          <div class="usage-track" role="presentation">
+            <span class="usage-fill" :data-tone="usageTone(volumePercent)" :style="{ width: barWidth(volumePercent) }" />
+          </div>
+          <p class="host-metric__hint">
+            {{ volumePercent === null
+              ? '数据卷用量统计不可用'
+              : `${formatBytes(perf.data_volume!.used_bytes)} / ${formatBytes(perf.data_volume!.total_bytes)} · 可用 ${formatBytes(perf.data_volume!.avail_bytes)}` }}
+          </p>
         </div>
       </div>
 
-      <UiTable :data="perf.containers" max-height="320" empty-text="当前没有容器" class="res-table">
-        <UiTableColumn prop="name" label="容器" min-width="180">
-          <template #default="{ row }">
-            <span>{{ row.name }}</span>
-            <div class="dim">{{ row.id }}</div>
+      <div class="host-resources">
+        <h3 class="host-resources__title">全部容器资源</h3>
+        <UiTable
+          :data="perf.containers"
+          max-height="320"
+          aria-label="全部容器资源"
+        >
+          <UiTableColumn label="容器" min-width="180">
+            <template #default="{ row }">
+              <span class="container-name">{{ row.name }}</span>
+              <span class="container-id">{{ row.id }}</span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn label="CPU" width="100">
+            <template #default="{ row }">
+              <span class="resource-value">{{ row.cpu_percent.toFixed(2) }}%</span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn label="内存" min-width="200">
+            <template #default="{ row }">
+              <span class="resource-value">
+                {{ formatBytes(row.mem_used_bytes) }} / {{ formatBytes(row.mem_limit_bytes) }}
+                <span class="resource-percent" :data-tone="usageTone(row.mem_percent)">{{ row.mem_percent.toFixed(1) }}%</span>
+              </span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn label="网络 下行 / 上行" width="180">
+            <template #default="{ row }">
+              <span class="resource-value">{{ formatBytes(row.net_io_bytes[0]) }} / {{ formatBytes(row.net_io_bytes[1]) }}</span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn label="磁盘 读 / 写" width="180">
+            <template #default="{ row }">
+              <span class="resource-value">{{ formatBytes(row.block_io_bytes[0]) }} / {{ formatBytes(row.block_io_bytes[1]) }}</span>
+            </template>
+          </UiTableColumn>
+          <UiTableColumn prop="pids" label="进程数" width="90" />
+          <template #empty>
+            <EmptyState compact title="当前没有容器" description="学员打开实验环境后，容器会出现在这里。" />
           </template>
-        </UiTableColumn>
-        <UiTableColumn label="CPU" width="140">
-          <template #default="{ row }">
-            <UiTag size="small" :color="usageColor(row.cpu_percent / (perf!.ncpu || 1))" effect="dark">
-              {{ row.cpu_percent.toFixed(2) }}%
-            </UiTag>
-          </template>
-        </UiTableColumn>
-        <UiTableColumn label="内存" min-width="200">
-          <template #default="{ row }">
-            <div class="mem-line">
-              <span>{{ fmtBytes(row.mem_used_bytes) }} / {{ fmtBytes(row.mem_limit_bytes) }}</span>
-              <UiTag size="small" :type="row.mem_percent > 85 ? 'danger' : row.mem_percent > 60 ? 'warning' : 'success'">
-                {{ row.mem_percent.toFixed(1) }}%
-              </UiTag>
-            </div>
-          </template>
-        </UiTableColumn>
-        <UiTableColumn label="网络 ↓/↑" width="170">
-          <template #default="{ row }">{{ fmtBytes(row.net_io_bytes[0]) }} / {{ fmtBytes(row.net_io_bytes[1]) }}</template>
-        </UiTableColumn>
-        <UiTableColumn label="磁盘读/写" width="170">
-          <template #default="{ row }">{{ fmtBytes(row.block_io_bytes[0]) }} / {{ fmtBytes(row.block_io_bytes[1]) }}</template>
-        </UiTableColumn>
-        <UiTableColumn prop="pids" label="PIDs" width="70" />
-      </UiTable>
-    </template>
-    <div v-else-if="!perfLoading && !perfError" class="dim">
-      性能数据不可用：未配置容器运行时（Docker）或守护进程不可达。
-    </div>
-  </UiCard>
-
-  <!-- 当前活跃容器概览 -->
-  <UiCard class="block" shadow="never">
-    <template #header>
-      <div class="card-head">
-        <span>当前打开的容器</span>
-        <UiTag size="small" type="primary">{{ active.length }}</UiTag>
+        </UiTable>
       </div>
     </template>
-    <UiLoadError v-if="activeError" compact :message="activeError" @retry="loadActive" class="card-error" />
-    <UiTable
+
+    <EmptyState
       v-else
+      compact
+      title="容器运行时不可用"
+      description="未配置容器运行时（Docker）或守护进程不可达，暂时无法查看主机资源。"
+      action-label="重试"
+      @action="loadPerf(false)"
+    />
+  </DataTablePanel>
+
+  <DataTablePanel
+    v-if="!activeError"
+    class="containers-panel"
+    title="当前打开的容器"
+    :count="active.length"
+    description="强制销毁会立即回收容器；学员需要重新打开题目才能获得新环境。"
+  >
+    <UiTable
       :data="active"
       :loading="activeLoading"
       max-height="360"
-      empty-text="当前没有运行中的容器"
+      aria-label="当前打开的容器"
     >
-      <UiTableColumn prop="id" label="ID" width="70" fixed="left" />
-      <UiTableColumn prop="username" label="用户" width="120" />
-      <UiTableColumn label="题目" min-width="180">
+      <UiTableColumn label="学员" width="140">
         <template #default="{ row }">
-          <span>{{ row.challenge_title || `题目 #${row.challenge_id}` }}</span>
-          <div v-if="row.challenge_slug" class="dim">{{ row.challenge_slug }}</div>
+          <span class="container-user">{{ row.username }}</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="题目" min-width="220">
+        <template #default="{ row }">
+          <span class="container-title">{{ row.challenge_title || '未命名题目' }}</span>
         </template>
       </UiTableColumn>
       <UiTableColumn label="状态" width="100">
         <template #default="{ row }">
-          <UiTag :type="statusType(row.status)" size="small">{{ row.status }}</UiTag>
+          <StatusTag kind="container" :value="row.status" />
         </template>
       </UiTableColumn>
-      <UiTableColumn prop="endpoint" label="Endpoint" min-width="160" show-overflow-tooltip>
+      <UiTableColumn label="访问地址" min-width="200">
         <template #default="{ row }">
-          <code v-if="row.endpoint">{{ row.endpoint }}</code>
-          <span v-else class="dim">-</span>
+          <code v-if="row.endpoint" class="container-endpoint">{{ row.endpoint }}</code>
+          <span v-else class="container-muted">尚未分配</span>
         </template>
       </UiTableColumn>
-      <UiTableColumn label="到期时间" width="100">
-        <template #default="{ row }">{{ fmtTime(row.expire_at) }}</template>
-      </UiTableColumn>
-      <UiTableColumn label="操作" width="110" fixed="right">
+      <UiTableColumn label="到期时间" width="170">
         <template #default="{ row }">
-          <UiButton
-            size="small"
-            type="danger"
-            :loading="destroying === row.id"
-            @click="forceDestroy(row)"
-          >强制销毁</UiButton>
+          <span class="container-time">{{ fmt(row.expire_at) }}</span>
         </template>
       </UiTableColumn>
+      <UiTableColumn label="操作" width="110">
+        <template #default="{ row }">
+          <Button variant="link" size="sm" type="button" class="destroy-action" @click="askDestroy(row)">
+            强制销毁
+          </Button>
+        </template>
+      </UiTableColumn>
+      <template #empty>
+        <EmptyState compact title="当前没有打开的容器" description="学员打开实验环境后会出现在这里。" />
+      </template>
     </UiTable>
-  </UiCard>
+  </DataTablePanel>
 
-  <!-- 容器生命周期日志 -->
-  <UiCard class="block" shadow="never">
-    <template #header>
-      <div class="card-head">
-        <span>容器日志</span>
-        <UiButton size="small" @click="load">刷新</UiButton>
-      </div>
+  <EmptyState
+    v-if="activeError"
+    tone="error"
+    title="活跃容器加载失败"
+    :description="activeError"
+    action-label="重试"
+    @action="loadActive"
+  />
+
+  <DataTablePanel
+    v-if="!logError"
+    class="containers-panel"
+    title="容器日志"
+    :count="logTotal"
+    description="记录每次启动与停止，含来源和失败原因。"
+  >
+    <template #toolbar>
+      <Button type="button" variant="outline" @click="loadLogs">刷新</Button>
     </template>
-    <UiLoadError v-if="logError" compact :message="logError" @retry="loadLogs" class="card-error" />
+
     <UiTable
-      v-else
       :data="logs"
       :loading="logLoading"
       max-height="480"
-      empty-text="暂无容器操作记录"
+      aria-label="容器生命周期日志"
     >
-      <UiTableColumn label="时间" width="170" fixed="left">
-        <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-      </UiTableColumn>
-      <UiTableColumn prop="instance_id" label="实例" width="80" />
-      <UiTableColumn prop="username" label="用户" width="120" />
-      <UiTableColumn label="题目" min-width="160">
+      <UiTableColumn label="时间" width="170">
         <template #default="{ row }">
-          <span>{{ row.challenge_title || `题目 #${row.challenge_id}` }}</span>
+          <span class="container-time">{{ fmt(row.created_at) }}</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="学员" width="140">
+        <template #default="{ row }">
+          <span class="container-user">{{ row.username }}</span>
+        </template>
+      </UiTableColumn>
+      <UiTableColumn label="题目" min-width="200">
+        <template #default="{ row }">
+          <span class="container-title">{{ row.challenge_title || '未命名题目' }}</span>
         </template>
       </UiTableColumn>
       <UiTableColumn label="动作" width="90">
         <template #default="{ row }">
-          <UiTag :type="row.action === 'started' ? 'success' : 'info'" size="small">
-            {{ row.action === 'started' ? '启动' : '停止' }}
-          </UiTag>
+          <StatusTag kind="container" :value="row.action === 'started' ? 'running' : 'stopped'" :label="row.action === 'started' ? '启动' : '停止'" />
         </template>
       </UiTableColumn>
-      <UiTableColumn label="来源" width="90">
+      <UiTableColumn label="来源" width="100">
         <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
       </UiTableColumn>
-      <UiTableColumn prop="status" label="状态" width="90" />
-      <UiTableColumn prop="detail" label="详情" min-width="160" show-overflow-tooltip>
+      <UiTableColumn label="状态" width="100">
         <template #default="{ row }">
-          <span v-if="row.detail">{{ row.detail }}</span>
-          <span v-else class="dim">-</span>
+          <StatusTag kind="container" :value="row.status" />
         </template>
       </UiTableColumn>
+      <UiTableColumn label="详情" min-width="180">
+        <template #default="{ row }">
+          <span v-if="row.detail" class="container-detail">{{ row.detail }}</span>
+          <span v-else class="container-muted">—</span>
+        </template>
+      </UiTableColumn>
+      <template #empty>
+        <EmptyState compact title="暂无容器记录" description="学员启动实验环境后，这里会记录启动与停止。" />
+      </template>
     </UiTable>
-    <!-- 超过一页才显示分页器；只有一页时保留总数没有可执行意义。 -->
-    <UiPagination
-      background
-      layout="total, sizes, prev, pager, next, jumper"
-      :total="logTotal"
-      :page-sizes="[20, 50, 100]"
-      v-model:page-size="logPageSize"
-      v-model:current-page="logPage"
-      @current-change="loadLogs"
-      @size-change="onLogSizeChange"
-      class="pager"
-    />
-  </UiCard>
+    <template v-if="logTotal > 0" #footer>
+      <UiPagination
+        v-model:page-size="logPageSize"
+        v-model:current-page="logPage"
+        background
+        layout="total, sizes, prev, pager, next"
+        :total="logTotal"
+        :page-sizes="[20, 50, 100]"
+        @current-change="loadLogs"
+        @size-change="onLogSizeChange"
+      />
+    </template>
+  </DataTablePanel>
+
+  <EmptyState
+    v-if="logError"
+    tone="error"
+    title="容器日志加载失败"
+    :description="logError"
+    action-label="重试"
+    @action="loadLogs"
+  />
+
+  <ConfirmDialog
+    :open="!!destroyTarget"
+    title="强制销毁容器"
+    :description="destroyTarget ? `将回收 ${destroyTarget.username} 的容器「${destroyTarget.challenge_title || '未命名题目'}」，该学员的实验环境会立即失效。` : ''"
+    confirm-label="销毁"
+    tone="danger"
+    :loading="destroying > 0"
+    @update:open="!$event && (destroyTarget = null)"
+    @confirm="confirmDestroy"
+  />
 </template>
 
 <style scoped>
-.block { margin-bottom: var(--space-5); }
-.card-head { display: flex; align-items: center; justify-content: space-between; }
-.head-actions { display: flex; align-items: center; gap: var(--space-2); }
-.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
-.pager { margin-top: var(--space-4); }
-.card-error { margin-bottom: var(--space-4); }
-.host-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); margin-bottom: var(--space-4); }
-.metric-title { font-weight: 600; margin-bottom: var(--space-2); }
-.metric-line { display: flex; gap: var(--space-1); align-items: center; flex-wrap: wrap; }
-.res-table { width: 100%; }
-.mem-line { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.perf-skeleton { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); }
-.sk-metric { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
-.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
-.sk-line.short { width: 32%; }
-.sk-line.medium { width: 68%; }
-.perf-skeleton .sk-line { animation: perf-skeleton-pulse 1.4s ease-in-out infinite; }
-@keyframes perf-skeleton-pulse { 50% { opacity: .45; } }
+.containers-panel {
+  margin-top: var(--space-4);
+}
+
+.auto-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+}
+
+.host-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.host-metric {
+  min-width: 0;
+  padding: var(--space-4);
+  border-right: 1px solid var(--border);
+}
+
+.host-metric:last-child {
+  border-right: 0;
+}
+
+.host-metric__label {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+.host-metric__value {
+  margin-top: var(--space-1);
+  color: var(--text-primary);
+  font-size: var(--text-metric);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+}
+
+.usage-track {
+  height: 6px;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--status-success);
+}
+
+.usage-fill[data-tone='warning'] {
+  background: var(--status-warning);
+}
+
+.usage-fill[data-tone='danger'] {
+  background: var(--status-danger);
+}
+
+.usage-fill[data-tone='neutral'] {
+  background: var(--border-strong);
+}
+
+.host-metric__hint {
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  line-height: var(--leading-normal);
+}
+
+.host-metric__chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+.host-metrics--loading .host-metric {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.host-skeleton {
+  width: 100%;
+  height: 12px;
+}
+
+.host-skeleton--label {
+  width: 40%;
+}
+
+.host-skeleton--value {
+  width: 60%;
+  height: 24px;
+}
+
+.host-resources {
+  border-top: 1px solid var(--border);
+}
+
+.host-resources__title {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.container-name,
+.container-user,
+.container-title {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.container-id,
+.container-time,
+.container-detail {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.container-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+}
+
+.container-endpoint {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.container-muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.resource-value {
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.resource-percent {
+  margin-left: var(--space-1);
+  color: var(--status-success);
+  font-weight: 600;
+}
+
+.resource-percent[data-tone='warning'] {
+  color: var(--status-warning);
+}
+
+.resource-percent[data-tone='danger'] {
+  color: var(--status-danger);
+}
+
+.destroy-action {
+  color: var(--status-danger);
+}
+
+@media (max-width: 1023px) {
+  .host-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .host-metric:nth-child(2) {
+    border-right: 0;
+  }
+
+  .host-metric:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 560px) {
+  .host-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .host-metric {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .host-metric:last-child {
+    border-bottom: 0;
+  }
+}
 </style>
