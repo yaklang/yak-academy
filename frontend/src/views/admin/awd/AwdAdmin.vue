@@ -642,7 +642,7 @@ onMounted(loadConsole)
           <UiCard header="AWD 比赛配置">
             <UiForm label-width="120px" class="config-form">
               <UiFormItem label="竞域单位">
-                <UiSelect v-model="configForm.competitorType" :disabled="!pending" style="width: 100%">
+                <UiSelect v-model="configForm.competitorType" :disabled="!pending" class="awd-select-full">
                   <UiOption value="team" label="战队（team）" />
                   <UiOption value="user" label="个人（user）" />
                 </UiSelect>
@@ -1065,4 +1065,5 @@ onMounted(loadConsole)
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .score-grid { grid-template-columns: 1fr; }
 }
+.awd-select-full { width: 100%; }
 </style>

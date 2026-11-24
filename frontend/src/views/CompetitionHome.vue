@@ -49,6 +49,13 @@ const clock = window.setInterval(() => (nowTs.value = Date.now()), 1000)
 const comp = computed(() => view.value?.competition ?? null)
 const ended = computed(() => comp.value?.status === 'ended')
 const running = computed(() => comp.value?.status === 'running')
+const countdownCaption = computed(() => {
+  if (!comp.value) return '剩余时间'
+  if (comp.value.status === 'ended') return '比赛结束'
+  if (comp.value.status === 'scheduled') return '尚未开始'
+  return '剩余时间'
+})
+
 const countdown = computed(() => {
   if (!comp.value) return ''
   if (comp.value.status === 'scheduled') return '未开始'
@@ -440,7 +447,7 @@ onUnmounted(() => {
 
         <div class="comp-clock" :class="{ ended }">
           <div class="clock-line">
-            <span class="clock-label">{{ ended ? '比赛结束' : comp?.status === 'scheduled' ? '尚未开始' : '剩余时间' }}</span>
+            <span class="clock-label">{{ countdownCaption }}</span>
             <b class="mono">{{ countdown }}</b>
           </div>
           <span class="race-track" aria-hidden="true"><i :style="{ width: elapsedPercent + '%' }" /></span>
@@ -720,7 +727,7 @@ onUnmounted(() => {
 .sk-logo { width: 22px; height: 26px; flex: none; border-radius: var(--radius-control); background: var(--muted); }
 .sk-head-copy { display: grid; flex: 1; gap: var(--space-2); max-width: 340px; min-width: 0; }
 .sk-clock { display: grid; gap: var(--space-2); width: 170px; }
-.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: var(--radius-control); background: var(--muted); }
 .sk-line.short { width: 38%; }
 .sk-line.title { width: 64%; height: 18px; }
 .sk-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
@@ -744,12 +751,12 @@ onUnmounted(() => {
 .comp-header-inner {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: var(--space-8);
   max-width: 1280px;
   margin-inline: auto;
-  padding: 14px 32px;
+  padding: var(--space-4) var(--space-8);
 }
-.comp-identity { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.comp-identity { display: flex; align-items: center; gap: var(--space-3); flex: 1; min-width: 0; }
 .comp-mark { display: grid; flex-shrink: 0; place-items: center; color: var(--brand-mark); }
 .comp-title { min-width: 0; }
 .comp-chip {
@@ -766,62 +773,62 @@ onUnmounted(() => {
 }
 
 .comp-eyebrow {
-  margin: 0 0 2px;
+  margin: 0 0 var(--space-1);
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: var(--text-micro);
   letter-spacing: 0.12em;
 }
-.comp-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.comp-name-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .comp-name-row h1 {
   margin: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-size: 19px;
+  font-size: var(--text-page);
   font-weight: 600;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.comp-window { margin: 2px 0 0; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
+.comp-window { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--text-micro); white-space: nowrap; }
 
-.comp-clock { display: grid; flex-shrink: 0; gap: 4px; width: 170px; }
-.clock-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.clock-label { color: var(--muted-foreground); font-size: 11px; }
-.clock-line b { color: var(--accent-foreground); font-size: 14px; font-weight: 600; }
+.comp-clock { display: grid; flex-shrink: 0; gap: var(--space-1); width: 170px; }
+.clock-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.clock-label { color: var(--muted-foreground); font-size: var(--text-micro); }
+.clock-line b { color: var(--accent-foreground); font-size: var(--text-body); font-weight: 600; }
 .comp-clock.ended .clock-line b { color: var(--muted-foreground); }
 .race-track { display: block; height: 3px; overflow: hidden; border-radius: 999px; background: var(--muted); }
 .race-track i { display: block; height: 100%; background: var(--primary); transition: width 180ms ease-out; }
-.clock-sub { color: var(--muted-foreground); font-size: 10px; }
+.clock-sub { color: var(--muted-foreground); font-size: var(--text-micro); }
 
-.comp-user { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.comp-user { display: flex; flex-shrink: 0; align-items: center; gap: var(--space-2); }
 .user-name {
   max-width: 160px;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.comp-body { max-width: 1280px; margin-inline: auto; padding: 24px 32px 48px; }
-.tab-loading { padding: 48px 0; color: var(--muted-foreground); font-size: 13px; text-align: center; }
+.comp-body { max-width: 1280px; margin-inline: auto; padding: var(--space-6) var(--space-8) var(--space-12); }
+.tab-loading { padding: var(--space-12) 0; color: var(--muted-foreground); font-size: var(--text-caption); text-align: center; }
 
 .challenge-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 .challenge-search { width: 240px; max-width: 100%; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .filter-chip {
-  padding: 5px 10px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--panel);
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-meta);
   cursor: pointer;
 }
 .filter-chip:hover { border-color: var(--input); color: var(--foreground); }
@@ -837,15 +844,15 @@ onUnmounted(() => {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin: 24px 0 10px;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-3);
 }
 .section-head h4 { margin: 0; }
-.card-meta { color: var(--muted-foreground); font-size: 12px; }
+.card-meta { color: var(--muted-foreground); font-size: var(--text-meta); }
 
-.challenge-cell { display: grid; gap: 5px; min-width: 0; justify-items: start; text-align: left; }
+.challenge-cell { display: grid; gap: var(--space-2); min-width: 0; justify-items: start; text-align: left; }
 .challenge-link { text-align: left; }
-.challenge-rate { display: flex; align-items: center; gap: 8px; }
+.challenge-rate { display: flex; align-items: center; gap: var(--space-2); }
 .mini-track {
   display: block;
   flex-shrink: 0;
@@ -856,53 +863,53 @@ onUnmounted(() => {
   background: var(--muted);
 }
 .mini-track i { display: block; height: 100%; background: var(--primary); }
-.mini-meta { color: var(--muted-foreground); font-size: 10px; white-space: nowrap; }
+.mini-meta { color: var(--muted-foreground); font-size: var(--text-micro); white-space: nowrap; }
 
 .board-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
-.board-score { display: flex; align-items: center; gap: 8px; }
-.board-score b { min-width: 44px; font-size: 12px; font-weight: 600; text-align: right; }
+.board-score { display: flex; align-items: center; gap: var(--space-2); }
+.board-score b { min-width: 44px; font-size: var(--text-meta); font-weight: 600; text-align: right; }
 .board-score .mini-track { flex: 1; width: auto; max-width: 120px; }
-.block { margin-bottom: 12px; }
+.block { margin-bottom: var(--space-3); }
 
 .wp-card {
-  margin-bottom: 16px;
-  padding: 16px;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--panel);
 }
-.wp-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
-.wp-meta { margin: 2px 0 8px; }
-.wp-actions { display: flex; gap: 8px; margin-top: 8px; }
+.wp-card-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-1); }
+.wp-meta { margin: var(--space-1) 0 var(--space-2); }
+.wp-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
 
-.drawer-meta { display: flex; gap: 6px; margin-bottom: 12px; }
+.drawer-meta { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
 .description { line-height: 1.7; }
 .description :deep(pre) {
-  padding: 12px;
+  padding: var(--space-3);
   overflow: auto;
   border-radius: 8px;
   background: var(--muted);
 }
-.endpoint { display: flex; align-items: center; gap: 8px; }
-.inst-actions { display: flex; gap: 8px; margin-top: 8px; }
-.submit-btn { width: 100%; margin-top: 8px; }
-.dim { color: var(--muted-foreground); font-size: 13px; }
-h4 { margin: 12px 0 6px; }
+.endpoint { display: flex; align-items: center; gap: var(--space-2); }
+.inst-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+.submit-btn { width: 100%; margin-top: var(--space-2); }
+.dim { color: var(--muted-foreground); font-size: var(--text-caption); }
+h4 { margin: var(--space-3) 0 var(--space-2); }
 
 @media (max-width: 1100px) {
-  .comp-header-inner { gap: 16px; padding: 12px 20px; }
+  .comp-header-inner { gap: var(--space-4); padding: var(--space-3) var(--space-5); }
   .comp-clock { width: 150px; }
   .comp-window { display: none; }
-  .comp-body { padding: 20px 20px 40px; }
+  .comp-body { padding: var(--space-5) var(--space-5) var(--space-10); }
 }
 @media (max-width: 760px) {
-  .comp-header-inner { flex-wrap: wrap; gap: 10px 16px; }
+  .comp-header-inner { flex-wrap: wrap; gap: var(--space-3) var(--space-4); }
   .comp-identity { flex-basis: 100%; }
   .comp-clock { width: auto; flex: 1; }
   .comp-user .user-name { display: none; }
@@ -910,8 +917,8 @@ h4 { margin: 12px 0 6px; }
   .sk-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
-  .comp-name-row h1 { font-size: 16px; }
-  .comp-body { padding: 16px 16px 32px; }
+  .comp-name-row h1 { font-size: var(--text-section); }
+  .comp-body { padding: var(--space-4) var(--space-4) var(--space-8); }
   .challenge-search { width: 100%; }
   .sk-kpis { grid-template-columns: minmax(0, 1fr); }
   .comp-refresh-error { margin-inline: var(--space-4); }

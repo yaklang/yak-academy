@@ -484,7 +484,7 @@ onMounted(() => void load(1))
 .dist-track i {
   display: block;
   height: 100%;
-  border-radius: inherit;
+  border-radius: var(--radius-control);
   background: var(--action-primary);
   transition: width 180ms ease-out;
 }

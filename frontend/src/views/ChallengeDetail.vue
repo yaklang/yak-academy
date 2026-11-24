@@ -722,10 +722,10 @@ onUnmounted(() => {
 }
 
 .description :deep(code) {
-  padding: 1px var(--space-1);
+  padding: var(--space-1) var(--space-1);
   border-radius: var(--radius-control);
   background: var(--bg-subtle);
-  font-size: 0.95em;
+  font-size: var(--text-caption);
 }
 
 .description :deep(pre code) {
@@ -915,7 +915,7 @@ onUnmounted(() => {
 }
 
 .endpoint {
-  padding: 2px var(--space-1);
+  padding: var(--space-1) var(--space-1);
   border-radius: var(--radius-control);
   background: var(--bg-subtle);
   color: var(--action-subtle-fg);

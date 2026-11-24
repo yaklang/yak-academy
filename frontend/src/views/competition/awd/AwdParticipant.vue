@@ -802,7 +802,7 @@ onUnmounted(() => {
 .awd-eyebrow {
   margin: 0 0 var(--space-1);
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0;
 }
 .awd-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }

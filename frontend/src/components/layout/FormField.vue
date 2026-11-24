@@ -53,7 +53,7 @@ const describedBy = computed(() =>
 }
 
 .form-field__required {
-  margin-left: 2px;
+  margin-left: var(--space-1);
   color: var(--status-danger);
 }
 

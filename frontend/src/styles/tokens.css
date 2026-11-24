@@ -159,6 +159,10 @@
   --radius-card: 12px;
   --radius-overlay: 16px;
   --radius-pill: 999px;
+
+  /* Print output always renders on paper, independent of the active theme. */
+  --print-bg: #ffffff;
+  --print-ink: #111111;
   --radius: var(--radius-control);
   --radius-panel: var(--radius-overlay);
 

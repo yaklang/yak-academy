@@ -2076,7 +2076,7 @@ onMounted(async () => {
 
 .detail-skeleton { display: grid; gap: var(--space-5); }
 .sk-head { display: grid; gap: var(--space-3); }
-.sk-line { display: block; width: 100%; height: 12px; border-radius: 4px; background: var(--muted); }
+.sk-line { display: block; width: 100%; height: 12px; border-radius: var(--radius-control); background: var(--muted); }
 .sk-line.short { width: 32%; }
 .sk-line.medium { width: 58%; }
 .sk-line.title { width: 36%; height: 28px; }

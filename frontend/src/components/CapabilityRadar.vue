@@ -188,7 +188,7 @@ onBeforeUnmount(() => chart?.destroy())
 .legend-value { color: var(--accent-foreground); font-size: var(--text-sm); }
 .legend-total { color: var(--muted-foreground); }
 .legend-track { display: block; height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted-foreground) 24%, transparent); overflow: hidden; }
-.legend-fill { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+.legend-fill { display: block; height: 100%; border-radius: var(--radius-control); background: var(--primary); }
 .legend-percent { color: var(--muted-foreground); font-size: var(--text-xs); text-align: right; }
 @media (max-width: 560px) {
   .legend-row { grid-template-columns: minmax(0, 1fr) auto 42px; }

@@ -7,6 +7,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
+import { statusLabel } from '@/lib/labels'
 import {
   competitionExamApi,
   type ExamAnswerView,
@@ -394,7 +395,7 @@ onUnmounted(() => {
             <div class="exam-name-row">
               <h1>{{ comp?.name ?? '在线考试' }}</h1>
               <UiTag v-if="comp" size="small" :type="comp.status === 'running' ? 'success' : 'info'">
-                {{ comp.status === 'running' ? '进行中' : comp.status === 'ended' ? '已结束' : '未开始' }}
+                {{ statusLabel('competition', comp.status) }}
               </UiTag>
               <UiTag v-if="comp" size="small" type="info">{{ comp.kind === 'public' ? '公开赛' : '邀请赛' }}</UiTag>
               <UiTag v-if="attempt" size="small" :type="attempt.status === 'submitted' ? 'success' : attempt.status === 'expired' ? 'warning' : 'info'">
@@ -714,7 +715,7 @@ onUnmounted(() => {
 }
 .exam-title { min-width: 0; }
 .exam-eyebrow {
-  margin: 0 0 2px;
+  margin: 0 0 var(--space-1);
   font-size: var(--text-xs);
   letter-spacing: 0.12em;
   color: var(--muted-foreground);
@@ -722,7 +723,7 @@ onUnmounted(() => {
 }
 .exam-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .exam-name-row h1 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.3; }
-.exam-window { margin: 3px 0 0; font-size: var(--text-xs); color: var(--muted-foreground); }
+.exam-window { margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--muted-foreground); }
 .exam-clock {
   min-width: 240px;
   padding: var(--space-2) var(--space-4);
@@ -797,7 +798,7 @@ onUnmounted(() => {
 .exam-result { display: grid; gap: var(--space-5); max-width: 960px; }
 .exam-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .exam-result-label { margin: 0 0 var(--space-1); font-size: var(--text-xs); color: var(--muted-foreground); }
-.exam-result-score { font-size: 56px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.exam-result-score { font-size: var(--text-display); line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
 .exam-result-tip { margin-top: var(--space-2); }
 .exam-result-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .exam-review-list { display: grid; gap: var(--space-4); }
@@ -812,7 +813,7 @@ onUnmounted(() => {
 .exam-md { color: var(--foreground); font-size: var(--text-sm); line-height: 1.75; min-width: 0; }
 .exam-md :deep(p) { margin: 0 0 var(--space-3); }
 .exam-md :deep(pre) { padding: var(--space-3); border-radius: var(--radius-md); background: var(--muted); overflow: auto; }
-.exam-md :deep(code) { font-family: var(--font-mono); font-size: 0.9em; }
+.exam-md :deep(code) { font-family: var(--font-mono); font-size: var(--text-sm); }
 .exam-md :deep(ul), .exam-md :deep(ol) { padding-left: 1.4em; margin: 0 0 var(--space-3); }
 .exam-dim { color: var(--muted-foreground); font-size: var(--text-xs); }
 @media (max-width: 900px) {

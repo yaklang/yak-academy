@@ -1377,7 +1377,7 @@ onUnmounted(stopEnginePolling)
 .usage-fill {
   display: block;
   height: 100%;
-  border-radius: inherit;
+  border-radius: var(--radius-control);
   background: var(--action-primary);
 }
 

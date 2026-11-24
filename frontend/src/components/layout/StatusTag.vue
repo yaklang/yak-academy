@@ -29,7 +29,7 @@ const text = computed(() => props.label ?? meta.value.label)
 .status-tag {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   height: 24px;
   padding-inline: var(--space-2);
   border: 1px solid transparent;
