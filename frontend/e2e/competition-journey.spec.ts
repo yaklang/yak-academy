@@ -47,14 +47,14 @@ test.describe('竞赛隔离旅程', () => {
     await page.waitForURL((u) => u.pathname === '/learn')
 
     // —— 邀请邮件 → 入场页（邀请码预填）→ 入场 ——
-    await page.getByRole('link', { name: /邮箱/ }).click()
+    await page.getByRole('navigation', { name: '页面导航' }).getByRole('link', { name: '邮箱', exact: true }).click()
     await page.waitForURL((u) => u.pathname === '/mailbox')
     // 邮件标题含竞赛名（此前 spec 的邀请邮件也在邮箱里，须按本赛名定位）
     const inviteRow = page.locator('tr', { hasText: E2E.competition.lockName })
     await expect(inviteRow).toContainText('竞赛邀请')
     await inviteRow.getByRole('button', { name: '查看' }).click()
     const mailDialog = page.locator('[data-slot=dialog-content]')
-    await expect(mailDialog).toContainText('邀请码：')
+    await expect(mailDialog.getByText('邀请码', { exact: true })).toBeVisible()
     await mailDialog.getByRole('button', { name: '进入竞赛' }).click()
     await page.waitForURL((u) => u.pathname.startsWith('/competitions/enter/'))
     await page.getByRole('button', { name: '进入竞赛' }).click()

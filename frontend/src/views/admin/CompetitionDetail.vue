@@ -1,13 +1,21 @@
 <script setup lang="ts">
 // 管理面板：竞赛详情页。配置编辑 + 题目绑定/批量导入 + 参赛人员管理
 // （邀请赛：固定格式表格导入 / 一键生成账号并导出；公开赛：广场自助报名）
-// + 竞赛容器 + 反作弊警告 + WP 提交情况 + 双榜。
+// + 竞赛容器 + 反作弊警告 + 解题报告提交情况 + 双榜。
 // 状态由起止时间派生：running 期间禁改 start_time、禁解绑题目（后端同样校验）；
 // 进行中的竞赛可手动结束，已结束的竞赛可重新配置起止时间再次开赛。
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatDateTime } from '@/lib/format'
+import { Button } from '@/components/ui/button'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import MetricStrip from '@/components/layout/MetricStrip.vue'
+import StatCard from '@/components/layout/StatCard.vue'
+import DataTablePanel from '@/components/layout/DataTablePanel.vue'
+import FormSection from '@/components/layout/FormSection.vue'
+import EmptyState from '@/components/layout/EmptyState.vue'
+import StatusTag from '@/components/layout/StatusTag.vue'
 import CompetitionCertificatePanel from '@/components/competition/CompetitionCertificatePanel.vue'
 import CompetitionQualificationPanel from '@/components/competition/CompetitionQualificationPanel.vue'
 import {
@@ -64,12 +72,6 @@ async function reloadDetail() {
 const status = computed<Competition['status']>(() => detail.value?.status ?? 'scheduled')
 const running = computed(() => status.value === 'running')
 
-function statusType(s: Competition['status']) {
-  return s === 'running' ? 'success' : s === 'scheduled' ? 'warning' : 'info'
-}
-function statusLabel(s: Competition['status']) {
-  return s === 'running' ? '进行中' : s === 'scheduled' ? '未开始' : '已结束'
-}
 function fmt(ts: string | null | undefined) {
   return formatDateTime(ts)
 }
@@ -163,14 +165,14 @@ async function saveConfig() {
   }
 }
 
-// 手动结束竞赛（仅 running）：end_time 置为当前时刻；参赛者解锁、WP 开放提交。
+// 手动结束竞赛（仅 running）：end_time 置为当前时刻；参赛者解锁、解题报告开放提交。
 // 结束后仍可重新配置起止时间再次开赛。
 const ending = ref(false)
 
 async function endCompetition() {
   try {
     await dialogs.confirm(
-      `手动结束竞赛「${detail.value?.name}」？立即生效：邀请赛参赛者解除锁定、停止提交与容器，WP 转为可提交。结束后仍可重新配置起止时间再次开赛。`,
+      `手动结束竞赛「${detail.value?.name}」？立即生效：邀请赛参赛者解除锁定、停止提交与容器，解题报告转为可提交。结束后仍可重新配置起止时间再次开赛。`,
       '手动结束竞赛',
       { type: 'warning', confirmButtonText: '结束竞赛', confirmButtonClass: 'el-button--danger' },
     )
@@ -782,7 +784,7 @@ function warningType(k: CheatWarningItem['kind']) {
   return k === 'cross_team_flag' ? 'danger' : 'warning'
 }
 
-// ---------- WP（单位 = 题目 × 队伍/个人，仅返回已提交条目） ----------
+// ---------- 解题报告（单位 = 题目 × 队伍/个人，仅返回已提交条目） ----------
 const writeups = ref<WriteupItem[]>([])
 const writeupsLoading = ref(true)
 const writeupsError = ref('')
@@ -796,7 +798,7 @@ async function loadWriteups() {
     const resp = await adminCompetitionApi.writeups(compId)
     writeups.value = resp.items
   } catch (e) {
-    writeupsError.value = e instanceof Error ? e.message : 'WP 列表加载失败，请稍后重试'
+    writeupsError.value = e instanceof Error ? e.message : '解题报告列表加载失败，请稍后重试'
   } finally {
     writeupsLoading.value = false
   }
@@ -990,24 +992,31 @@ onMounted(async () => {
     <div class="sk-tabs" aria-hidden="true"><i v-for="n in 5" :key="n" /></div>
     <div class="sk-panel" aria-hidden="true"><i class="sk-line" /><i class="sk-line medium" /><i class="sk-line short" /></div>
   </div>
-  <UiLoadError v-else-if="loadError" :message="loadError" @retry="reloadDetail" />
+  <EmptyState
+    v-else-if="loadError"
+    tone="error"
+    title="竞赛详情加载失败"
+    :description="loadError"
+    action-label="重试"
+    @action="reloadDetail"
+  />
   <div v-else>
-    <div class="head">
-      <h2>
-        {{ detail?.name ?? '竞赛详情' }}
-        <UiTag v-if="detail" :type="detail.kind === 'public' ? 'success' : 'warning'" size="small">
-          {{ KIND_LABELS[detail.kind] }}
-        </UiTag>
-        <UiTag v-if="detail" size="small" type="info">
-          {{ FORMAT_LABELS[detail.format as CompetitionFormat] }}
-        </UiTag>
-        <UiTag v-if="detail && detail.format === 'ctf'" size="small" type="warning">
-          {{ SCORING_MODE_LABELS[detail.scoring_mode] }}
-        </UiTag>
-        <UiTag v-if="detail" :type="statusType(status)" size="small">{{ statusLabel(status) }}</UiTag>
-      </h2>
-      <router-link to="/admin/panel/competitions"><UiButton size="small">← 返回列表</UiButton></router-link>
-    </div>
+    <PageHeader
+      :title="detail?.name ?? '竞赛详情'"
+      description="起止时间决定竞赛状态；进行中不能改开赛时间或解绑题目，结束后可重新配置起止时间再次开赛。"
+    >
+      <template #badges>
+        <StatusTag kind="competition" :value="status" />
+        <span v-if="detail" class="meta-chip">{{ KIND_LABELS[detail.kind] }}</span>
+        <span v-if="detail" class="meta-chip">{{ FORMAT_LABELS[detail.format as CompetitionFormat] }}</span>
+        <span v-if="detail && detail.format === 'ctf'" class="meta-chip">{{ SCORING_MODE_LABELS[detail.scoring_mode] }}</span>
+      </template>
+      <template #actions>
+        <Button variant="outline" as-child>
+          <RouterLink to="/admin/panel/competitions">返回列表</RouterLink>
+        </Button>
+      </template>
+    </PageHeader>
     <p class="hint">
       {{ fmt(detail?.start_time) }} ~ {{ fmt(detail?.end_time) }}
       <span v-if="detail?.registration_start && detail?.registration_end">
@@ -1017,21 +1026,21 @@ onMounted(async () => {
     </p>
 
     <!-- 统计卡片 -->
-    <div v-if="detail" class="stats">
-      <div class="stat"><b>{{ detail.stats.teams }}</b><span>战队</span></div>
-      <div class="stat"><b>{{ detail.stats.participants }}</b><span>参赛人数</span></div>
-      <div class="stat"><b>{{ detail.stats.entered }}</b><span>已入场</span></div>
-      <div class="stat"><b>{{ detail.stats.challenges }}</b><span>题目</span></div>
-      <div class="stat"><b>{{ detail.stats.instances }}</b><span>容器</span></div>
-      <div class="stat warn"><b>{{ detail.stats.warnings }}</b><span>反作弊警告</span></div>
-      <div class="stat"><b>{{ detail.stats.writeups }}</b><span>WP 提交</span></div>
-    </div>
+    <MetricStrip v-if="detail" class="stats" :columns="4">
+      <StatCard label="战队" :value="detail.stats.teams" />
+      <StatCard label="参赛人数" :value="detail.stats.participants" />
+      <StatCard label="已入场" :value="detail.stats.entered" />
+      <StatCard label="题目" :value="detail.stats.challenges" />
+      <StatCard label="容器" :value="detail.stats.instances" />
+      <StatCard label="反作弊警告" :value="detail.stats.warnings" :tone="detail.stats.warnings ? 'danger' : 'neutral'" />
+      <StatCard label="解题报告" :value="detail.stats.writeups" />
+    </MetricStrip>
 
-    <UiTabs v-model="activeTab" @tab-change="onTab">
+    <UiTabs v-model="activeTab" class="detail-tabs" @tab-change="onTab">
       <!-- 配置 -->
       <UiTabPane label="配置" name="config">
-        <UiCard shadow="never">
-          <UiForm label-width="90px" style="max-width: 560px">
+        <FormSection title="竞赛配置" description="起止时间决定竞赛状态；计分模式开赛后锁定。">
+          <UiForm label-width="90px" class="config-form">
             <UiFormItem label="竞赛名称">
               <UiInput v-model="form.name" maxlength="100" />
             </UiFormItem>
@@ -1039,12 +1048,12 @@ onMounted(async () => {
               <UiInput v-model="form.description" type="textarea" :rows="3" />
             </UiFormItem>
             <UiFormItem label="开始时间">
-              <UiDatePicker v-model="form.start" type="datetime" :disabled="running" style="width: 100%" />
+              <UiDatePicker v-model="form.start" type="datetime" :disabled="running" class="date-full" />
               <div v-if="running" class="dim">进行中的竞赛不能修改开赛时间，可先手动结束</div>
               <div v-else-if="status === 'ended'" class="dim">已结束的竞赛可重新配置起止时间，再次开赛</div>
             </UiFormItem>
             <UiFormItem label="结束时间">
-              <UiDatePicker v-model="form.end" type="datetime" style="width: 100%" />
+              <UiDatePicker v-model="form.end" type="datetime" class="date-full" />
             </UiFormItem>
             <UiFormItem v-if="detail?.format === 'ctf'" label="计分模式">
               <UiRadioGroup v-model="form.scoringMode" :disabled="status !== 'scheduled'">
@@ -1065,8 +1074,7 @@ onMounted(async () => {
                 type="datetimerange"
                 start-placeholder="报名开始"
                 end-placeholder="报名截止"
-                style="width: 100%"
-                class="reg-range"
+                class="reg-range date-full"
               />
               <div class="dim">公开赛生效；不启用则报名开放到竞赛结束，截止不得晚于竞赛结束。</div>
             </UiFormItem>
@@ -1081,121 +1089,150 @@ onMounted(async () => {
               >手动结束竞赛</UiButton>
             </UiFormItem>
           </UiForm>
-        </UiCard>
+        </FormSection>
       </UiTabPane>
 
       <!-- 题目 -->
       <UiTabPane label="题目" name="challenges">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>竞赛题目（{{ challenges.length }}）</span>
-              <UiButton type="primary" size="small" @click="openBind">绑定 / 导入题目</UiButton>
-            </div>
+        <DataTablePanel title="竞赛题目" :count="challenges.length" description="进行中不能解绑题目；结束后可移除。">
+          <template #toolbar>
+            <Button type="button" size="sm" @click="openBind">绑定 / 导入题目</Button>
           </template>
-          <UiLoadError v-if="challengesError" compact :message="challengesError" @retry="loadChallenges" class="block" />
-          <UiTable v-else :data="challenges" :loading="challengesLoading" empty-text="尚未绑定题目">
-            <UiTableColumn prop="slug" label="Slug" width="180" show-overflow-tooltip />
-            <UiTableColumn prop="title" label="标题" min-width="160" />
-            <UiTableColumn prop="category" label="分类" width="110" />
-            <UiTableColumn prop="difficulty" label="难度" width="100" />
-            <UiTableColumn prop="score" label="分值" width="80" />
-            <UiTableColumn label="容器" width="80">
+          <EmptyState
+            v-if="challengesError"
+            compact
+            tone="error"
+            title="竞赛题目加载失败"
+            :description="challengesError"
+            action-label="重试"
+            @action="loadChallenges"
+          />
+          <UiTable v-else :data="challenges" :loading="challengesLoading" aria-label="竞赛题目">
+            <UiTableColumn label="题目" min-width="220">
               <template #default="{ row }">
-                <UiTag v-if="row.has_env" size="small" type="success">有</UiTag>
-                <UiTag v-else size="small" type="info">无</UiTag>
+                <span class="cell-title">{{ row.title }}</span>
+                <code class="cell-code">{{ row.slug }}</code>
               </template>
             </UiTableColumn>
-            <UiTableColumn label="操作" width="110" fixed="right">
+            <UiTableColumn label="分类" width="120">
+              <template #default="{ row }">{{ row.category }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="难度" width="100">
               <template #default="{ row }">
-                <UiButton
-                  size="small"
-                  type="danger"
-                  link
-                  :disabled="running"
-                  :loading="unbinding === row.slug"
+                <StatusTag kind="difficulty" :value="row.difficulty" />
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="分值" width="90">
+              <template #default="{ row }">{{ row.score }} 分</template>
+            </UiTableColumn>
+            <UiTableColumn label="容器" width="90">
+              <template #default="{ row }">
+                <span :class="row.has_env ? 'cell-on' : 'cell-muted'">{{ row.has_env ? '支持' : '—' }}</span>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="操作" width="100">
+              <template #default="{ row }">
+                <Button
+                  variant="link"
+                  size="sm"
+                  class="danger-action"
+                  :disabled="running || unbinding === row.slug"
                   @click="unbind(row)"
-                >解绑</UiButton>
+                >
+                  {{ unbinding === row.slug ? '解绑中…' : '解绑' }}
+                </Button>
               </template>
             </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="尚未绑定题目" description="使用上方「绑定 / 导入题目」从题库勾选，或直接填写题目标识。" />
+            </template>
           </UiTable>
-          <p v-if="running" class="dim">竞赛进行中不允许解绑题目</p>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 参赛人员 -->
       <UiTabPane :label="`参赛人员（${partTotal}）`" name="participants">
-        <UiCard shadow="never" class="block">
-          <template #header>
-            <div class="card-head">
-              <span>参赛人员</span>
-              <div v-if="invitational">
-                <UiButton size="small" @click="openRoster">导入身份名册</UiButton>
-                <UiButton size="small" @click="openGenerate">一键生成账号</UiButton>
-                <UiButton type="primary" size="small" @click="openImport">表格导入队伍 / 人员</UiButton>
-              </div>
-            </div>
+        <DataTablePanel title="参赛人员" :count="partTotal" description="邀请赛可导入名册、生成账号或按表格导入；公开赛由用户自助报名。">
+          <template #toolbar>
+            <template v-if="invitational">
+              <Button type="button" variant="outline" size="sm" @click="openRoster">导入身份名册</Button>
+              <Button type="button" variant="outline" size="sm" @click="openGenerate">一键生成账号</Button>
+              <Button type="button" size="sm" @click="openImport">表格导入队伍 / 人员</Button>
+            </template>
           </template>
-          <UiAlert
-            v-if="!invitational"
-            type="info"
-            :closable="false"
-            class="block"
-            title="公开赛无需导入参赛者"
-            description="公开赛展示在竞赛广场，用户自助报名；已报名者开赛后免邀请码直接入场。"
+          <div v-if="!invitational" class="notice">
+            公开赛无需导入参赛者：竞赛展示在竞赛广场，用户自助报名；已报名者开赛后免邀请码直接入场。
+          </div>
+          <EmptyState
+            v-if="partError"
+            compact
+            tone="error"
+            title="参赛人员加载失败"
+            :description="partError"
+            action-label="重试"
+            @action="loadParticipants"
           />
-          <UiLoadError v-if="partError" compact :message="partError" @retry="loadParticipants" class="block" />
-          <UiTable v-else :data="participants" :loading="partLoading" empty-text="尚无参赛人员">
-            <UiTableColumn prop="username" label="用户" width="130" fixed="left" />
-            <UiTableColumn label="姓名" width="110">
+          <UiTable v-else :data="participants" :loading="partLoading" aria-label="参赛人员">
+            <UiTableColumn label="账号" width="140">
+              <template #default="{ row }"><span class="cell-title">{{ row.username }}</span></template>
+            </UiTableColumn>
+            <UiTableColumn label="姓名" width="120">
               <template #default="{ row }">
                 <span v-if="rosterByUser[row.user_id]?.has_profile">{{ rosterByUser[row.user_id]?.real_name }}</span>
-                <span v-else class="dim">未填写</span>
+                <span v-else class="cell-muted">未填写</span>
               </template>
             </UiTableColumn>
-            <UiTableColumn label="学校 / 单位" min-width="150">
-              <template #default="{ row }">{{ rosterByUser[row.user_id]?.school || '-' }}</template>
+            <UiTableColumn label="学校 / 单位" min-width="160">
+              <template #default="{ row }">{{ rosterByUser[row.user_id]?.school || '—' }}</template>
             </UiTableColumn>
             <UiTableColumn label="学号" width="120">
-              <template #default="{ row }">{{ rosterByUser[row.user_id]?.student_no || '-' }}</template>
+              <template #default="{ row }">{{ rosterByUser[row.user_id]?.student_no || '—' }}</template>
             </UiTableColumn>
             <UiTableColumn label="队伍" width="140">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
             </UiTableColumn>
-            <UiTableColumn prop="invite_code" label="邀请码" width="160">
-              <template #default="{ row }"><code>{{ row.invite_code }}</code></template>
+            <UiTableColumn label="邀请码" width="160">
+              <template #default="{ row }"><code class="cell-code">{{ row.invite_code }}</code></template>
             </UiTableColumn>
-            <UiTableColumn label="已入场" width="90">
+            <UiTableColumn label="已入场" width="100">
               <template #default="{ row }">
-                <UiTag :type="row.entered ? 'success' : 'info'" size="small">{{ row.entered ? '是' : '否' }}</UiTag>
+                <StatusTag kind="competition" :value="row.entered ? 'running' : 'scheduled'" :label="row.entered ? '已入场' : '未入场'" />
               </template>
             </UiTableColumn>
-            <UiTableColumn label="入场时间" width="160">
-              <template #default="{ row }">{{ fmt(row.entered_at) }}</template>
+            <UiTableColumn label="入场时间" width="170">
+              <template #default="{ row }"><span class="cell-muted">{{ fmt(row.entered_at) }}</span></template>
             </UiTableColumn>
             <UiTableColumn label="最近 IP" width="130">
-              <template #default="{ row }">{{ row.last_ip || '-' }}</template>
+              <template #default="{ row }"><span class="cell-muted">{{ row.last_ip || '—' }}</span></template>
             </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="尚无参赛人员" description="邀请赛可一键生成账号或导入表格名单。" />
+            </template>
           </UiTable>
-          <UiPagination
-            background
-            layout="total, prev, pager, next"
-            :total="partTotal"
-            :page-size="20"
-            v-model:current-page="partPage"
-            @current-change="loadParticipants"
-            class="pager"
-          />
-        </UiCard>
-        <UiCard v-if="!partError" shadow="never">
-          <template #header><span>队伍总览（{{ teams.length }}）</span></template>
-          <UiTable :data="teams" :loading="partLoading" empty-text="暂无队伍">
-            <UiTableColumn prop="team_name" label="队伍" width="160" />
-            <UiTableColumn label="成员" min-width="200">
+          <template v-if="partTotal > 20" #footer>
+            <UiPagination
+              v-model:current-page="partPage"
+              background
+              layout="total, prev, pager, next"
+              :total="partTotal"
+              :page-size="20"
+              @current-change="loadParticipants"
+            />
+          </template>
+        </DataTablePanel>
+        <DataTablePanel v-if="!partError" class="detail-subpanel" title="队伍总览" :count="teams.length">
+          <UiTable :data="teams" :loading="partLoading" aria-label="队伍总览">
+            <UiTableColumn label="队伍" width="180">
+              <template #default="{ row }"><span class="cell-title">{{ row.team_name }}</span></template>
+            </UiTableColumn>
+            <UiTableColumn label="成员" min-width="220">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
             </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="暂无队伍" description="导入名单时填写队伍名称即可自动组队。" />
+            </template>
           </UiTable>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 证书（赛后按排名/分数签发） -->
@@ -1205,95 +1242,134 @@ onMounted(async () => {
 
       <!-- 容器 -->
       <UiTabPane label="容器" name="instances">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>竞赛容器（{{ instTotal }}）</span>
-              <UiButton size="small" @click="loadInstances">刷新</UiButton>
-            </div>
+        <DataTablePanel title="竞赛容器" :count="instTotal" description="参赛者打开的容器环境；超时会自动回收。">
+          <template #toolbar>
+            <Button type="button" variant="outline" size="sm" @click="loadInstances">刷新</Button>
           </template>
-          <UiLoadError v-if="instError" compact :message="instError" @retry="loadInstances" class="block" />
-          <UiTable v-else :data="instances" :loading="instLoading" empty-text="暂无竞赛容器">
-            <UiTableColumn prop="id" label="ID" width="70" fixed="left" />
-            <UiTableColumn prop="username" label="用户" width="120" />
-            <UiTableColumn prop="challenge_title" label="题目" min-width="160" />
-            <UiTableColumn prop="status" label="状态" width="100" />
-            <UiTableColumn label="Endpoint" min-width="150">
-              <template #default="{ row }"><code v-if="row.endpoint">{{ row.endpoint }}</code><span v-else class="dim">-</span></template>
-            </UiTableColumn>
-            <UiTableColumn label="创建时间" width="160">
-              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-            </UiTableColumn>
-          </UiTable>
-          <UiPagination
-            background
-            layout="total, prev, pager, next"
-            :total="instTotal"
-            :page-size="20"
-            v-model:current-page="instPage"
-            @current-change="loadInstances"
-            class="pager"
+          <EmptyState
+            v-if="instError"
+            compact
+            tone="error"
+            title="竞赛容器加载失败"
+            :description="instError"
+            action-label="重试"
+            @action="loadInstances"
           />
-        </UiCard>
+          <UiTable v-else :data="instances" :loading="instLoading" aria-label="竞赛容器">
+            <UiTableColumn label="参赛者" width="140">
+              <template #default="{ row }"><span class="cell-title">{{ row.username }}</span></template>
+            </UiTableColumn>
+            <UiTableColumn label="题目" min-width="200">
+              <template #default="{ row }">{{ row.challenge_title }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="状态" width="110">
+              <template #default="{ row }"><StatusTag kind="container" :value="row.status" /></template>
+            </UiTableColumn>
+            <UiTableColumn label="访问地址" min-width="180">
+              <template #default="{ row }">
+                <code v-if="row.endpoint" class="cell-code">{{ row.endpoint }}</code>
+                <span v-else class="cell-muted">尚未分配</span>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="创建时间" width="170">
+              <template #default="{ row }"><span class="cell-muted">{{ fmt(row.created_at) }}</span></template>
+            </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="暂无竞赛容器" description="参赛者打开题目环境后会出现在这里。" />
+            </template>
+          </UiTable>
+          <template v-if="instTotal > 20" #footer>
+            <UiPagination
+              v-model:current-page="instPage"
+              background
+              layout="total, prev, pager, next"
+              :total="instTotal"
+              :page-size="20"
+              @current-change="loadInstances"
+            />
+          </template>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 反作弊 -->
       <UiTabPane :label="`反作弊${detail?.stats.warnings ? `（${detail.stats.warnings}）` : ''}`" name="warnings">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>反作弊警告（提交跨队 flag / 来源 IP 异常）</span>
-              <UiButton size="small" @click="loadWarnings">刷新</UiButton>
-            </div>
+        <DataTablePanel title="反作弊警告" :count="warnings.length" description="提交跨队 flag、来源 IP 异常等赛务风险记录。">
+          <template #toolbar>
+            <Button type="button" variant="outline" size="sm" @click="loadWarnings">刷新</Button>
           </template>
-          <UiLoadError v-if="warningsError" compact :message="warningsError" @retry="loadWarnings" class="block" />
-          <UiTable v-else :data="warnings" :loading="warningsLoading" empty-text="暂无警告">
-            <UiTableColumn label="时间" width="160" fixed="left">
-              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+          <EmptyState
+            v-if="warningsError"
+            compact
+            tone="error"
+            title="警告记录加载失败"
+            :description="warningsError"
+            action-label="重试"
+            @action="loadWarnings"
+          />
+          <UiTable v-else :data="warnings" :loading="warningsLoading" aria-label="反作弊警告">
+            <UiTableColumn label="时间" width="170">
+              <template #default="{ row }"><span class="cell-muted">{{ fmt(row.created_at) }}</span></template>
             </UiTableColumn>
-            <UiTableColumn label="类型" width="110">
+            <UiTableColumn label="类型" width="130">
               <template #default="{ row }">
-                <UiTag :type="warningType(row.kind)" size="small">{{ warningLabel(row.kind) }}</UiTag>
+                <span class="warning-chip" :data-tone="warningType(row.kind) === 'danger' ? 'danger' : 'warning'">
+                  {{ warningLabel(row.kind) }}
+                </span>
               </template>
             </UiTableColumn>
-            <UiTableColumn prop="username" label="人员" width="120" />
-            <UiTableColumn label="队伍" width="140">
+            <UiTableColumn label="参赛者" width="130">
+              <template #default="{ row }"><span class="cell-title">{{ row.username }}</span></template>
+            </UiTableColumn>
+            <UiTableColumn label="队伍" width="150">
               <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
             </UiTableColumn>
-            <UiTableColumn prop="reason" label="原因" min-width="240" show-overflow-tooltip />
+            <UiTableColumn label="原因" min-width="260">
+              <template #default="{ row }"><span class="cell-muted">{{ row.reason }}</span></template>
+            </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="暂无警告" description="出现跨队 flag 或异常来源时，记录会出现在这里。" />
+            </template>
           </UiTable>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
-      <!-- WP（按题目分组） -->
-      <UiTabPane label="WP 提交情况" name="writeups">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>
-                比赛结束后按题目提交 WP（单位 = 题目 × 队伍/个人，已提交
-                {{ writeups.length }} 份）
-              </span>
-              <UiButton size="small" @click="loadWriteups">刷新</UiButton>
-            </div>
+      <!-- 解题报告（按题目分组） -->
+      <UiTabPane label="解题报告" name="writeups">
+        <DataTablePanel
+          title="解题报告提交情况"
+          :count="writeups.length"
+          description="比赛结束后按题目提交，一份报告对应一支队伍或个人；可下载附带压缩包。"
+        >
+          <template #toolbar>
+            <Button type="button" variant="outline" size="sm" @click="loadWriteups">刷新</Button>
           </template>
-          <UiLoadError v-if="writeupsError" compact :message="writeupsError" @retry="loadWriteups" class="block" />
-          <div v-else-if="writeupsLoading" class="wp-skeleton" role="status" aria-label="正在加载 WP">
+          <EmptyState
+            v-if="writeupsError"
+            compact
+            tone="error"
+            title="解题报告加载失败"
+            :description="writeupsError"
+            action-label="重试"
+            @action="loadWriteups"
+          />
+          <div v-else-if="writeupsLoading" class="wp-skeleton" role="status" aria-label="正在加载解题报告">
             <i v-for="n in 4" :key="n" class="sk-line" />
           </div>
-          <div v-else>
+          <div v-else class="wp-body">
             <template v-if="writeupsByChallenge.length">
               <div v-for="group in writeupsByChallenge" :key="group.title" class="wp-group">
-                <h4>{{ group.title }}（{{ group.items.length }} 份）</h4>
-                <UiTable :data="group.items" size="small" empty-text="暂无提交">
-                  <UiTableColumn label="队伍/选手" width="160">
+                <h3 class="wp-group__title">{{ group.title }}（{{ group.items.length }} 份）</h3>
+                <UiTable :data="group.items" aria-label="解题报告提交">
+                  <UiTableColumn label="队伍 / 选手" width="170">
                     <template #default="{ row }">{{ row.team_name ?? '（个人）' }}</template>
                   </UiTableColumn>
-                  <UiTableColumn prop="username" label="最近修改人" width="120" />
-                  <UiTableColumn label="提交时间" width="170">
-                    <template #default="{ row }">{{ fmt(row.submitted_at) }}</template>
+                  <UiTableColumn label="最近修改人" width="130">
+                    <template #default="{ row }"><span class="cell-title">{{ row.username }}</span></template>
                   </UiTableColumn>
-                  <UiTableColumn label="zip" width="110">
+                  <UiTableColumn label="提交时间" width="170">
+                    <template #default="{ row }"><span class="cell-muted">{{ fmt(row.submitted_at) }}</span></template>
+                  </UiTableColumn>
+                  <UiTableColumn label="压缩包" width="140">
                     <template #default="{ row }">
                       <UiLink
                         v-if="row.zip_name"
@@ -1303,92 +1379,126 @@ onMounted(async () => {
                       >
                         {{ row.zip_name }}
                       </UiLink>
-                      <span v-else class="dim">—</span>
+                      <span v-else class="cell-muted">—</span>
                     </template>
                   </UiTableColumn>
-                  <UiTableColumn label="操作" width="80">
+                  <UiTableColumn label="操作" width="90">
                     <template #default="{ row }">
-                      <UiButton size="small" type="primary" link @click="viewing = row">查看</UiButton>
+                      <Button variant="link" size="sm" @click="viewing = row">查看</Button>
                     </template>
                   </UiTableColumn>
                 </UiTable>
-                <p v-if="wpMissing(group.items[0].challenge_id).length" class="dim wp-missing">
+                <p v-if="wpMissing(group.items[0].challenge_id).length" class="wp-missing">
                   未提交：{{ wpMissing(group.items[0].challenge_id).join('、') }}
                 </p>
               </div>
             </template>
-            <UiEmpty v-else description="暂无 WP 提交" />
+            <EmptyState
+              v-else
+              compact
+              title="暂无解题报告"
+              description="比赛结束后，参赛者可在竞赛页按题目提交解题报告。"
+            />
           </div>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 排行榜 -->
       <UiTabPane label="排行榜" name="leaderboard">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>竞赛排行榜</span>
-              <div class="card-actions">
-                <UiRadioGroup v-model="boardMode" size="small" @change="onBoardModeChange">
-                  <UiRadioButton value="team">战队榜</UiRadioButton>
-                  <UiRadioButton value="individual">个人榜</UiRadioButton>
-                </UiRadioGroup>
-                <UiButton size="small" :loading="boardExporting" @click="exportBoard">导出 CSV</UiButton>
-              </div>
-            </div>
+        <DataTablePanel title="竞赛排行榜" :count="board.length" description="按得分与附加分排序，可切换战队榜或个人榜并导出。">
+          <template #toolbar>
+            <UiRadioGroup v-model="boardMode" size="small" @change="onBoardModeChange">
+              <UiRadioButton value="team">战队榜</UiRadioButton>
+              <UiRadioButton value="individual">个人榜</UiRadioButton>
+            </UiRadioGroup>
+            <Button type="button" variant="outline" size="sm" :disabled="boardExporting" @click="exportBoard">
+              {{ boardExporting ? '导出中…' : '导出 CSV' }}
+            </Button>
           </template>
-          <UiLoadError v-if="boardError" compact :message="boardError" @retry="loadBoard" class="block" />
-          <UiTable v-else :data="board" :loading="boardLoading" empty-text="暂无成绩">
-            <UiTableColumn prop="rank" label="名次" width="80" fixed="left" />
-            <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="140">
-              <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
+          <EmptyState
+            v-if="boardError"
+            compact
+            tone="error"
+            title="排行榜加载失败"
+            :description="boardError"
+            action-label="重试"
+            @action="loadBoard"
+          />
+          <UiTable v-else :data="board" :loading="boardLoading" aria-label="竞赛排行榜">
+            <UiTableColumn label="名次" width="80">
+              <template #default="{ row }"><span class="board-rank">{{ row.rank }}</span></template>
             </UiTableColumn>
-            <UiTableColumn label="成员" min-width="180">
+            <UiTableColumn :label="boardMode === 'team' ? '队伍' : '选手'" min-width="150">
+              <template #default="{ row }"><span class="cell-title">{{ row.team_name ?? '—' }}</span></template>
+            </UiTableColumn>
+            <UiTableColumn label="成员" min-width="200">
               <template #default="{ row }">{{ row.members.join('、') }}</template>
             </UiTableColumn>
-            <UiTableColumn prop="score" label="得分" width="100" />
-            <UiTableColumn prop="bonus" label="附加分" width="90" />
-            <UiTableColumn prop="solved_count" label="解题数" width="90" />
-            <UiTableColumn label="最近通关" width="160">
-              <template #default="{ row }">{{ fmt(row.last_solve_at) }}</template>
+            <UiTableColumn label="得分" width="100">
+              <template #default="{ row }"><span class="board-score">{{ row.score }}</span></template>
             </UiTableColumn>
+            <UiTableColumn label="附加分" width="100">
+              <template #default="{ row }">{{ row.bonus }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="解题数" width="100">
+              <template #default="{ row }">{{ row.solved_count }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="最近通关" width="170">
+              <template #default="{ row }"><span class="cell-muted">{{ fmt(row.last_solve_at) }}</span></template>
+            </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="暂无成绩" description="竞赛开始且有人通关后，排行榜会自动生成。" />
+            </template>
           </UiTable>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 附加分（CTF） -->
       <UiTabPane v-if="detail?.format === 'ctf'" label="附加分" name="adjustments">
-        <UiCard shadow="never">
-          <template #header>
-            <div class="card-head">
-              <span>附加分明细（{{ adjustments.length }}）</span>
-              <UiButton type="primary" size="small" @click="openAdjustment">追加附加分</UiButton>
-            </div>
+        <DataTablePanel
+          title="附加分明细"
+          :count="adjustments.length"
+          description="附加分只追加、不修改，直接计入个人或队伍总分；正向合计受附加分上限约束。"
+        >
+          <template #toolbar>
+            <Button type="button" size="sm" @click="openAdjustment">追加附加分</Button>
           </template>
-          <p class="dim">
-            附加分为 append-only 记录，直接计入个人/队伍总分；正向合计受「附加分上限」约束。
-          </p>
-          <UiLoadError v-if="adjustmentsError" compact :message="adjustmentsError" @retry="loadAdjustments" class="block" />
-          <UiTable v-else :data="adjustments" :loading="adjustmentsLoading" empty-text="暂无附加分">
-            <UiTableColumn label="选手" min-width="120">
-              <template #default="{ row }">{{ row.username ?? `#${row.user_id}` }}</template>
-            </UiTableColumn>
-            <UiTableColumn label="队伍" min-width="120">
-              <template #default="{ row }">{{ row.team_name ?? '-' }}</template>
-            </UiTableColumn>
-            <UiTableColumn label="分值" width="90">
+          <EmptyState
+            v-if="adjustmentsError"
+            compact
+            tone="error"
+            title="附加分明细加载失败"
+            :description="adjustmentsError"
+            action-label="重试"
+            @action="loadAdjustments"
+          />
+          <UiTable v-else :data="adjustments" :loading="adjustmentsLoading" aria-label="附加分明细">
+            <UiTableColumn label="选手" min-width="130">
               <template #default="{ row }">
-                <UiTag :type="row.points > 0 ? 'success' : 'danger'" size="small">
-                  {{ row.points > 0 ? '+' : '' }}{{ row.points }}
-                </UiTag>
+                <span class="cell-title">{{ row.username ?? `#${row.user_id}` }}</span>
               </template>
             </UiTableColumn>
-            <UiTableColumn prop="reason" label="原因" min-width="220" show-overflow-tooltip />
-            <UiTableColumn label="时间" width="160">
-              <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+            <UiTableColumn label="队伍" min-width="130">
+              <template #default="{ row }">{{ row.team_name ?? '—' }}</template>
             </UiTableColumn>
+            <UiTableColumn label="分值" width="100">
+              <template #default="{ row }">
+                <span class="points-chip" :data-positive="row.points > 0 ? 'true' : undefined">
+                  {{ row.points > 0 ? '+' : '' }}{{ row.points }}
+                </span>
+              </template>
+            </UiTableColumn>
+            <UiTableColumn label="原因" min-width="240">
+              <template #default="{ row }">{{ row.reason }}</template>
+            </UiTableColumn>
+            <UiTableColumn label="时间" width="170">
+              <template #default="{ row }"><span class="cell-muted">{{ fmt(row.created_at) }}</span></template>
+            </UiTableColumn>
+            <template #empty>
+              <EmptyState compact title="暂无附加分记录" description="AI 附加分或其他赛务调整会记录在这里。" />
+            </template>
           </UiTable>
-        </UiCard>
+        </DataTablePanel>
       </UiTabPane>
 
       <!-- 晋级（仅邀请赛；来源 CTF/AWD/考试排名 → 本场参赛名单） -->
@@ -1406,7 +1516,7 @@ onMounted(async () => {
   <UiDialog v-model="showAdjustment" title="追加附加分" width="520px">
     <UiForm label-width="90px">
       <UiFormItem label="参赛选手">
-        <UiSelect v-model="adjustmentForm.userId" filterable placeholder="选择选手" style="width: 100%">
+        <UiSelect v-model="adjustmentForm.userId" filterable placeholder="选择选手" class="field-full">
           <UiOption
             v-for="p in adjustmentCandidates"
             :key="p.user_id"
@@ -1780,10 +1890,10 @@ onMounted(async () => {
     </template>
   </UiDialog>
 
-  <!-- WP 查看 -->
+  <!-- 解题报告查看 -->
   <UiDialog
     :model-value="viewing !== null"
-    :title="`WP：${viewing?.challenge_title ?? ''} · ${viewing?.team_name ?? viewing?.username ?? ''}`"
+    :title="`解题报告：${viewing?.challenge_title ?? ''} · ${viewing?.team_name ?? viewing?.username ?? ''}`"
     width="680px"
     @close="viewing = null"
   >
@@ -1805,28 +1915,139 @@ onMounted(async () => {
 
 <style scoped>
 .reg-range { margin-top: var(--space-2); }
-.head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-.hint { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 0; }
-.stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-3) 0 var(--space-5); }
-.stat {
-  min-width: 96px; padding: var(--space-3) var(--space-4); text-align: center;
-  border: 1px solid var(--border); border-radius: 6px;
-  display: flex; flex-direction: column; gap: var(--space-1);
+.date-full,
+.field-full { width: 100%; }
+.config-form { max-width: 560px; }
+.hint {
+  margin-top: 0;
+  margin-bottom: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-normal);
 }
-.stat b { font-size: var(--text-xl); }
-.stat span { color: var(--muted-foreground); font-size: var(--text-xs); }
-.stat.warn b { color: var(--destructive); }
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-.card-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.detail-tabs :deep([data-slot='tabs-list']) {
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  gap: var(--space-6);
+}
+.detail-tabs :deep([data-slot='tabs-trigger']) {
+  min-height: 40px;
+  padding: var(--space-2) 0;
+  border-radius: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  box-shadow: none;
+}
+.detail-tabs :deep([data-slot='tabs-trigger'][data-state='active']) {
+  background: transparent;
+  color: var(--action-primary);
+  box-shadow: inset 0 -2px 0 var(--action-primary);
+}
+.detail-subpanel { margin-top: var(--space-4); }
+.notice {
+  margin: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-relaxed);
+}
+.cell-title {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cell-code {
+  display: block;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+.cell-muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+.cell-on {
+  color: var(--status-success);
+  font-size: var(--text-meta);
+}
+.warning-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--status-warning) 28%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--status-warning) 10%, var(--bg-surface));
+  color: var(--status-warning);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.warning-chip[data-tone='danger'] {
+  border-color: color-mix(in srgb, var(--status-danger) 26%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 8%, var(--bg-surface));
+  color: var(--status-danger);
+}
+.points-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 24px;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--status-danger) 8%, var(--bg-surface));
+  color: var(--status-danger);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.points-chip[data-positive='true'] {
+  background: color-mix(in srgb, var(--status-success) 10%, var(--bg-surface));
+  color: var(--status-success);
+}
+.board-rank {
+  color: var(--text-tertiary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.board-score {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .qualification-actions { margin-top: var(--space-3); }
-.cert-subtitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); font-weight: 600; }
-.cert-code-link { color: var(--accent-foreground); text-underline-offset: 3px; text-decoration: underline; }
+.cert-subtitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-caption); font-weight: 600; }
+.cert-code-link { color: var(--action-subtle-fg); text-underline-offset: 3px; text-decoration: underline; }
 .cert-subtitle:first-child { margin-top: 0; }
 .qualification-history { margin-top: var(--space-5); }
-.qualification-history h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
+.qualification-history h4 { margin: 0 0 var(--space-2); font-size: var(--text-caption); }
 .block { margin-bottom: var(--space-5); }
-.dim { color: var(--muted-foreground); font-size: var(--text-xs); }
-.pager { margin-top: var(--space-4); }
+.dim { color: var(--text-tertiary); font-size: var(--text-meta); }
 .bind-mode { margin-bottom: var(--space-3); }
 .pick-filters { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); flex-wrap: wrap; }
 .pick-q { width: 240px; max-width: 100%; }
@@ -1838,17 +2059,18 @@ onMounted(async () => {
 .stage-del { margin-left: var(--space-3); }
 .member-chip {
   display: inline-block; margin: 0 var(--space-1) var(--space-1) 0; padding: 0 var(--space-1);
-  background: var(--muted); border-radius: 3px;
+  background: var(--bg-subtle); border-radius: var(--radius-control);
 }
 .stage-actions { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-3); }
 .stage-actions .ui-button { margin-left: 0; }
 .stage-table { margin-bottom: var(--space-1); }
 .stage-errs { display: flex; align-items: flex-start; gap: var(--space-1); }
-.stage-errs span { color: var(--destructive); font-size: var(--text-xs); line-height: 1.4; }
+.stage-errs span { color: var(--status-danger); font-size: var(--text-meta); line-height: var(--leading-normal); }
 .wp { white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
-.wp-group { margin-bottom: var(--space-6); }
-.wp-group h4 { margin: 0 0 var(--space-2); }
-.wp-missing { margin: var(--space-1) 0 0; }
+.wp-body { display: grid; gap: var(--space-4); padding: var(--space-4); }
+.wp-group { display: grid; gap: var(--space-2); }
+.wp-group__title { color: var(--text-primary); font-size: var(--text-caption); font-weight: 600; }
+.wp-missing { margin: var(--space-1) 0 0; color: var(--text-tertiary); font-size: var(--text-meta); }
 .wp-dialog-meta { margin: 0 0 var(--space-2); }
 .wp-dialog-zip { margin-left: var(--space-4); }
 
