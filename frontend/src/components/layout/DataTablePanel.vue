@@ -78,7 +78,7 @@ withDefaults(defineProps<{
   justify-content: center;
   min-width: 20px;
   height: 20px;
-  padding-inline: 6px;
+  padding-inline: var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-secondary);

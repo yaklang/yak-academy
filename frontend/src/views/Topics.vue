@@ -194,7 +194,7 @@ onMounted(async () => {
 }
 
 .topic-card__kind {
-  padding: 2px var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--action-subtle);
   color: var(--action-subtle-fg);

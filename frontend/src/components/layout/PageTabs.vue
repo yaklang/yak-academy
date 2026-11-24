@@ -70,7 +70,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string | number] }>()
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  padding: 10px 0 12px;
+  padding: var(--space-2) 0 var(--space-3);
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   font-size: var(--text-caption);
@@ -118,7 +118,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string | number] }>()
 
   .page-tabs__item {
     min-height: 44px;
-    padding-block: 12px;
+    padding-block: var(--space-3);
   }
 }
 </style>

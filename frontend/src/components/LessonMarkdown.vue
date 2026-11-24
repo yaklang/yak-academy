@@ -184,7 +184,7 @@ async function onClick(event: MouseEvent) {
 }
 .lesson-md :deep(.external-link)::after {
   content: '↗';
-  margin-left: 2px;
+  margin-left: var(--space-1);
   font-size: var(--text-xs);
 }
 .lesson-md :deep(blockquote) {
@@ -202,11 +202,11 @@ async function onClick(event: MouseEvent) {
   border-top: 1px solid var(--border);
 }
 .lesson-md :deep(code) {
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
   background: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: var(--text-meta);
 }
 .lesson-md :deep(.code-shell) {
   margin: var(--space-5) 0;

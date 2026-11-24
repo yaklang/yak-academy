@@ -20,6 +20,33 @@ function lineOf(source, index) {
   return source.slice(0, index).split('\n').length
 }
 
+// `!important` is the only reliable way to neutralise transition/animation
+// durations declared inside components, so the reduced-motion reset is an
+// intentional exception rather than a legacy escape hatch.
+function inReducedMotionBlock(source, index) {
+  const marker = '@media (prefers-reduced-motion: reduce)'
+  let cursor = source.indexOf(marker)
+  while (cursor !== -1 && cursor < index) {
+    const open = source.indexOf('{', cursor)
+    if (open === -1 || open > index) break
+    let depth = 0
+    let close = -1
+    for (let i = open; i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1
+      else if (source[i] === '}') {
+        depth -= 1
+        if (depth === 0) {
+          close = i
+          break
+        }
+      }
+    }
+    if (close === -1 || index < close) return true
+    cursor = source.indexOf(marker, close)
+  }
+  return false
+}
+
 function add(rule, file, source, index, message) {
   if (writeBaseline) {
     found[rule].add(file)
@@ -38,6 +65,7 @@ for (const file of walk('src')) {
     add('hex', file, css, match.index, `raw colour ${match[0]}`)
   }
   for (const match of css.matchAll(/!important/g)) {
+    if (inReducedMotionBlock(css, match.index)) continue
     add('important', file, css, match.index, '!important')
   }
   if (file.endsWith('.vue')) {

@@ -153,7 +153,7 @@ onMounted(load)
   position: absolute;
   inset: 12px;
   border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
-  border-radius: calc(var(--radius-lg) - 6px);
+  border-radius: var(--radius-sm);
   pointer-events: none;
 }
 .cert-seal {
@@ -175,7 +175,7 @@ onMounted(load)
 }
 .cert-heading {
   margin: 0 0 var(--space-3);
-  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-size: var(--text-display);
   font-weight: 700;
   line-height: 1.15;
 }
@@ -228,11 +228,11 @@ onMounted(load)
 }
 @media print {
   .cert-topbar,
-  .cert-actions { display: none !important; }
-  .cert-page { background: #fff; }
+  .cert-actions { display: none; }
+  .cert-page { background: var(--print-bg); }
   .cert-body { width: 100%; padding: 0; }
   .cert-paper {
-    border: 2px solid #111;
+    border: 2px solid var(--print-ink);
     box-shadow: none;
     border-radius: 0;
     break-inside: avoid;

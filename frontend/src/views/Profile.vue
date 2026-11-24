@@ -695,7 +695,7 @@ onMounted(() => {
 
   .fact {
     flex-wrap: wrap;
-    row-gap: 2px;
+    row-gap: var(--space-1);
   }
 
   .profile-panel {
