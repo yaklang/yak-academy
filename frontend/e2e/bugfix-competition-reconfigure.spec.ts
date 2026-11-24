@@ -37,7 +37,7 @@ test.describe('回归：竞赛手动结束与结束后重排', () => {
     await expect(row).toContainText('进行中', { timeout: 15_000 })
     // 修复前：列表行没有「结束」按钮（只有隐蔽的改 end_time），此处超时即红
     await row.getByRole('button', { name: '结束', exact: true }).click()
-    const box = page.locator('[role=alertdialog]')
+    const box = page.locator('[data-slot=dialog-content]')
     await expect(box).toContainText('手动结束竞赛')
     await box.getByRole('button', { name: '结束竞赛' }).click()
     // 立即生效：成功提示 + 行状态翻转为已结束 + 结束按钮随状态消失
