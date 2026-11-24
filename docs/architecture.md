@@ -1,6 +1,6 @@
 # yak-academy 架构设计文档
 
-> 版本：v0.7（Phase 3 完成 + 三赛制竞赛域（CTF/AWD/考试）+ 晋级/证书/实名名册 + PostgreSQL 并发基线 + 部署约定）
+> 版本：v0.8（Phase 3 完成 + 三赛制竞赛域（CTF/AWD/考试）+ 晋级/证书/实名名册 + PostgreSQL 并发基线 + 微信注册（唯一自助入口）与历史账号找回 + 部署约定）
 > 本文档是项目的完整设计源。约束的执行摘要位于 `.agents/skills/`，两者冲突时以本文档为准。
 
 ## 1. 背景与对标分析
@@ -32,9 +32,11 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 │           竞赛入口按 format 分发 CTF / AWD / 在线考试视图          │
 │   管理端：教程/题目/容器/竞赛/用户；竞赛详情按 format 分发         │
 │           CTF 详情 / AWD 控制台 / 考试管理，晋级与证书面板共享      │
+│           （用户管理为只读画像表格；建号入口在微信注册与邀请赛     │
+│            「一键生成账号」；角色是账号固有属性）                  │
 ├────────────────────────────────────────────────────────────┤
 │ 服务层  backend/internal/api  REST + JWT + RBAC 中间件        │
-│   ├─ auth        登录 / JWT / 两档角色 RBAC / 自助注册与找回密码│
+│   ├─ auth        登录 / JWT / 两档角色 RBAC / 微信注册与找回密码│
 │   ├─ content     教程包上传→解析→校验→入库→发布（五步管线）    │
 │   ├─ challenge   Challenge/Flag/Hint 业务（题目独立资源）      │
 │   ├─ judge       异步判题 worker（恒时比较、动态计分、反作弊）  │
@@ -63,11 +65,11 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 - 两档角色：`student`（普通人，仅学习端）/ `admin`（管理员，管理端全部能力）；普通人前端不显示管理入口。
 - 路由注册时声明所需角色，中间件统一执行；历史 `teacher` 启动迁移降为 `student`。
 - **账号编码（学号式）**：每号分配唯一编码 `YA{YY}-{NNNNN}`（建号年两位 + 年内序号 1~99999 零填充，如 `YA26-00042`），建号入口统一在 `userRepo.Create`（同年前缀字典序 MAX+1 分配，唯一冲突重试）；序号按建号年分组互不挤占。旧库迁移按 created_at 年分组回填（幂等，起始取该年已有最大序号+1）；部分唯一索引（`account_code <> ''`）兼容旧空值行。编码是用户对外可报读的稳定标识（区别于可读用户名），邀请赛导入表格、用户管理搜索均支持按编码引用/检索。
-- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/邮箱/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走邀请赛一键生成或自助注册。
-- **自助注册（邮箱验证码为主通道）**：登录页提供注册入口，流程为 `POST /auth/email/code`（邮箱发码，公开）→ `POST /auth/register`（凭 code 建号，公开，角色固定 student，禁止自选角色）。验证码 6 位、5 分钟有效、核销一次性；同邮箱 60 秒限频、10 分钟内最多 3 次。`EmailSender` 为投递抽象：管理端「系统设置 → 邮件服务」保存 SMTP 配置后立即热加载（支持 starttls / implicit TLS / none）；环境变量 `ACADEMY_SMTP_*` 仅作为首次启动默认值，数据库配置优先。未配置/停用时非严格模式用开发投递器写服务日志，严格模式返回 501（生产必须配置 SMTP，不在生产日志中暴露验证码）。邮箱作为注册凭据与找回依据，不参与登录（登录仍为用户名 + 密码）；重复邮箱注册拒绝。旧版 `POST /auth/sms/code` + `phone` 注册保留兼容，`User.phone` 字段继续保留给已有手机号账号，不做数据迁移。
+- **登录画像（管理端用户管理）**：登录成功 best-effort 写 `last_login_at`；不活跃判定 = `COALESCE(last_login_at, created_at)` 早于 now−6 个月（从未登录的账号按注册时间起算，SQL 绑定参数方言中立）。`GET /admin/users` 提供 `q`（用户名/编码/邮箱/手机号子串）/ `role` / `active` / `no_solves`（从未有判定通过的提交）过滤，与表格内标记同口径；管理端用户管理页为画像表格（不活跃 ∩ 从未解题可组合过滤）+ 行内「重置密码」，建号走微信注册或邀请赛一键生成。
+- **微信注册/登录（唯一自助入口）**：登录页不提供手机号/邮箱自助注册。流程为 `GET /auth/wechat/status`（能力探测）→ `GET /auth/wechat/start`（返回微信 `authorize_url` 并写入签名 state 会话 Cookie）→ 微信授权页回跳前端 `/login?code&state` → `POST /auth/wechat/callback`（校验 state Cookie 后换微信身份、查找或建号、签发应用 JWT）。两种官方模式：`official_account`（公众号网页授权 `snsapi_userinfo`，可用免费测试号联调）与 `open_platform`（开放平台网站应用扫码 `snsapi_login`）；`ACADEMY_WECHAT_MOCK=1` 仅供本地/E2E 模拟（严格模式禁止）。state 为 HMAC-SHA256 签名会话 + 随机 nonce，HttpOnly + SameSite=Lax，10 分钟有效且一次性（防登录 CSRF/重放）；JWT 只经 JSON 响应体返回，绝不放进 URL。微信账号按 openid（优先）或 unionid（兜底）归并，首次授权自动建号（角色固定 student，用户名由昵称生成、冲突追加稳定后缀），`PasswordHash` 为空即 `password_set=false`——此类账号只能微信登录，管理员重置密码后才可密码登录。历史账号（邮箱/手机号）继续用用户名密码登录；手机号/邮箱字段仅为历史数据保留，不参与登录。
 - **运行期统一设置（管理端系统设置）**：可热更新的服务参数存 `system_settings` 表（一行一个配置域，Value 为域内 JSON），当前提供 SMTP 域：`GET/PUT /admin/settings/smtp` 读取/保存，`POST /admin/settings/smtp/test` 发送测试邮件。保存时先构造投递器再落库，成功后原子替换 `DynamicEmailSender`，无需重启；配置非法不写入、不切换，旧配置继续服务。SMTP 密码使用 AES-256-GCM 加密落库（随机 nonce，密钥由 JWT secret 经 HKDF-SHA256 按域分离派生），API 只返回 `has_password`、永不回显；JWT secret 轮换后旧密码不可解密，设置页会提示重新填写。每次保存/测试写 `admin_audit_logs`（不含密码）。
-- **验证码回显（仅本地演示）**：默认关闭。本地联调/E2E 可设 `ACADEMY_SHOW_VERIFICATION_CODE=1`（旧变量 `ACADEMY_SMS_SHOW_CODE` 兼容）让发码响应携带验证码原文；`ACADEMY_STRICT=1` 时该开关必须关闭，否则拒绝启动，避免任意请求方读取注册/找回验证码。
-- **找回密码/找回账号（邮箱主通道，手机号兼容）**：登录页「找回账号」入口，流程为 `POST /auth/password-reset/code`（发码，公开；限频策略与注册发码一致）→ `POST /auth/password-reset`（凭 code 重置密码，公开）。请求体 `email` 与 `phone` 必须且只能填一个：新账号走邮箱，未绑定邮箱的旧账号可继续用手机号。验证码按**用途隔离**（`SmsCode.purpose` = register / password_reset，发码与核销同用途比对，注册码不可用于重置、反之亦然；限频窗口也按用途独立计数）。重置成功返回用户名与账号编码——忘记用户名的学员凭邮箱（旧账号可凭手机号）一并找回（「找回账号」）；密码更新与本人改密/管理员重置同语义：bcrypt 更新 + `TokenInvalidBefore` 推进（该账号全部已签发 token 立即失效），不自动登录（回登录页用新密码登录）。未注册目标发码即拒（422）；竞赛批量建号未绑定邮箱/手机号，此类账号走管理端用户管理「重置密码」（`POST /admin/users/{id}/reset-password`，不校验旧密码，同样全量失效 token，预填平台初始密码 123456 可改）。
+- **验证码回显（仅本地演示）**：默认关闭。本地联调/E2E 可设 `ACADEMY_SHOW_VERIFICATION_CODE=1`（旧变量 `ACADEMY_SMS_SHOW_CODE` 兼容）让找回密码发码响应携带验证码原文；`ACADEMY_STRICT=1` 时该开关必须关闭，否则拒绝启动。
+- **找回密码/找回账号（仅历史账号）**：登录页「找回账号」入口，流程为 `POST /auth/password-reset/code`（发码，公开）→ `POST /auth/password-reset`（凭 code 重置密码，公开）。请求体 `email` 与 `phone` 必须且只能填一个；两者都是历史账号凭据，微信/竞赛批量建号没有绑定值，无法自助找回。验证码 6 位、5 分钟有效、核销一次性；按**用途隔离**（`SmsCode.purpose` = password_reset）。重置成功返回用户名与账号编码——忘记用户名的历史账号可凭邮箱/手机号一并找回；密码更新与本人改密/管理员重置同语义：bcrypt 更新 + `TokenInvalidBefore` 推进（该账号全部已签发 token 立即失效），不自动登录（回登录页用新密码登录）。未注册目标发码即拒（422）；微信注册账号与竞赛批量建号走管理端用户管理「重置密码」（`POST /admin/users/{id}/reset-password`，不校验旧密码，同样全量失效 token，预填平台初始密码 123456 可改）——密码一旦设置，`password_set` 变 true，该账号即可用用户名密码登录。
 
 ### 3.2 content — 教程包管线
 
@@ -239,11 +241,11 @@ ExamPaper(competition 1:1, duration, total, pass_score)
 
 | 方法与路径 | 角色 | 说明 |
 |---|---|---|
-| `POST /auth/login` | 公开 | 登录换 JWT |
-| `POST /auth/email/code` | 公开 | 注册邮箱发验证码（主通道；限频返回 retry_after） |
-| `POST /auth/sms/code` | 公开 | 旧版手机号注册发验证码（兼容保留） |
-| `POST /auth/register` | 公开 | 凭邮箱/手机号验证码建号（角色固定 student）并签发 token |
-| `POST /auth/password-reset/code` | 公开 | 找回密码发验证码（邮箱主通道、手机号兼容；限频返回 retry_after） |
+| `POST /auth/login` | 公开 | 登录换 JWT（历史账号/管理员） |
+| `GET /auth/wechat/status` | 公开 | 微信登录能力探测（enabled/mock/mode） |
+| `GET /auth/wechat/start` | 公开 | 发起微信网页授权，返回 authorize_url 并写 state 会话 Cookie |
+| `POST /auth/wechat/callback` | 公开 | 校验 state 后换微信身份、建号/登录并签发 JWT |
+| `POST /auth/password-reset/code` | 公开 | 历史账号找回密码发验证码（限频返回 retry_after） |
 | `POST /auth/password-reset` | 公开 | 凭验证码重置密码，返回用户名与账号编码（找回账号） |
 | `GET /me` | student | 当前用户与角色 |
 | `GET /topics` / `GET /topics/{slug}` | student | 主题列表/详情（含 Room 列表） |
@@ -271,7 +273,7 @@ ExamPaper(competition 1:1, duration, total, pass_score)
 | `GET /admin/challenges/{slug}` | admin | 读取单题完整定义（上传 JSON 同构，管理端行内编辑回填用；含完整 flag 列表） |
 | `DELETE /admin/challenges/{slug}` | admin | 删除题目（级联 flags/hints） |
 | `GET /admin/users` | admin | 用户管理表格：`q`（用户名/账号编码/邮箱/手机号子串）/`role`/`active`/`no_solves` 过滤，条目附 active（6 个月口径）与 solved_any 标记 |
-| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（建号入口在邀请赛一键生成与自助注册；API 保留供账号运维） |
+| `POST /admin/users` / `PATCH /admin/users/{id}/roles` | admin | 用户建号/改角色（建号入口在微信注册与邀请赛一键生成；API 保留供账号运维） |
 | `POST /admin/users/{id}/reset-password` | admin | 重置用户密码（不校验旧密码，目标用户全部 token 失效；未绑定邮箱/手机号的账号找回入口） |
 | `POST /admin/competitions` 等 `/admin/competitions/*` | admin | 竞赛管理：CRUD（创建选 kind/format/scoring_mode/报名窗口，kind/format 不可改）/题目绑定/参赛者导入/名册 CSV/晋级预览与应用/证书预览签发与 CSV/容器总览/反作弊警告/WP/双榜 |
 | `DELETE /admin/competitions/{id}` | admin | 删除竞赛（running 422 拒绝；级联清除参赛者/名册/晋级/证书/题目绑定/提交/WP/AWD/考试数据/容器记录，事件历史保留） |
@@ -326,7 +328,7 @@ E2E 已抓出两个生产 bug（release_at 跨时区字典序泄漏未发布题�
 - **Phase 1** ✅ 已完成：架构文档 + skill 体系 + 可编译骨架。
 - **Phase 2** ✅ 已完成：最小闭环——真实登录、内容包上传与发布（版本化/回滚/归档）、Room 浏览、提交与异步判题（恒时比较 + 动态计分 + 持久 pending 队列）、事件派生积分/进度/排行榜。
 - **Phase 3** ✅ 已完成：题目环境容器化（docker CLI 驱动、单容器约束、TTL reaper、实例 flag、管理端容器总览）、服务端自动判定（检测点回调 + 哨兵答案复用判题管线）、徽章（计算型读模型，进度/积分/路径的实时投影，零新表零新事件）。
-- **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与邀请赛锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与自助注册（当前为邮箱验证码主通道 + SMTP 投递，旧手机号通道兼容保留）。
+- **Phase 3.5** ✅ 已完成：竞赛系统（赛程状态机、题目绑定、参赛者批量导入自动建号、邀请码入场与邀请赛锁定、竞赛内做题复用 judge 管线、跨队反作弊、CompetitionScore 派生双榜、ended 后 WP 提交）与微信注册/登录（公众号网页授权 + 开放平台网站扫码，唯一自助入口；历史邮箱/手机号账号保留找回密码）。
 - **Phase 3.6** ✅ 已完成：内置训练集（基于 yaklang vulinbox 靶场引擎的 11 题精选集，管理端一键导入/更新，共享基础镜像 [flaggateway 入口层 + 上游二进制] + instance 判定：每实例唯一 flag，靶机内 /flag.txt 与带按题门禁的 GET /flag、authz 题命令模拟接口 cat flag.txt，跨题捷径均已封死）；扩展为教程 + 题目：4 专题 11 篇 Yakit 教程一教程对一题（`tutorial_slug` 1:1 注入，教程先于题目落库、直接 upsert 无 draft/publish）。
 - **Phase 3.7** ✅ 已完成：ACM 编程题源码判定（对齐 ICPC 出题/判题模型）：题目包 zip `judge` 段 + `testdata/` 数据组（`acm_judges`/`judge_testdata` 表），学生提交 yak 源码，`CodeEngine`（`ACADEMY_YAK_BIN`）逐组运行对拍（token 化比对、时限、逐组全跑），`Submission.verdict` 判定结果（ac/wa/tle/re/internal_error）随 `submission.judged` 事件下发，计分/首通/反作弊复用既有管线；样例组专端点下发，管理端编辑支持元数据维护（judge 段不带数据组 = 保留库内数据）。**部分得分制**：数据组配分（`judge.testdata[].score` 内联 / `testdata/scores.json` / 管理端编辑弹窗），部分通过按权重折算得分（未配置 = 全有全无），详情页逐组结论反馈（`Submission.groups` + 事件 `groups`）。
 - **Phase 3.8** ✅ 已完成：ACM 自测运行（动态执行框，custom invocation）：题目详情页内置 CodeMirror 6 编辑器（Go 语法近似 yak 高亮）+ 运行面板，对样例组或自定义 stdin 异步运行当前源码（202 票据 + 轮询，与判题共用 `CodeEngine` 与题目时限）；运营态与判定/事件流完全隔离（无 Submission、无事件、不计分），样例模式服务端比对期望输出，票据进程内存 + TTL 10 分钟；引擎未装配创建即 422（与提交判定的 internal_error 路径区分）；判题引擎管理端化——题目管理 ACM tab 状态卡可从 yaklang 官方 OSS 异步下载 yak 二进制（约 220MB，进度轮询、完成即换装无需重启、重启自动探测复用，见 §3.4 引擎装配与管理）。
