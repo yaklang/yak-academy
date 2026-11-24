@@ -50,6 +50,15 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Design gate
+        run: npm run check:design
+
+      - name: Page census
+        run: npm run check:census
+
+      - name: Copy gate
+        run: npm run check:copy
+
       - name: Unit tests
         run: npm test
 

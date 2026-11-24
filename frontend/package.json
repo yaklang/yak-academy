@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "check:design": "node scripts/check-design.mjs",
+    "check:census": "node scripts/check-page-census.mjs",
+    "check:copy": "node scripts/check-copy.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {

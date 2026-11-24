@@ -1,0 +1,74 @@
+{
+  "hex": [
+    "src/views/CertificateVerify.vue",
+    "src/views/Landing.vue",
+    "src/views/Login.vue"
+  ],
+  "important": [
+    "src/components/CipherReveal.vue",
+    "src/styles/base.css",
+    "src/styles/primitives.css",
+    "src/views/CertificateVerify.vue",
+    "src/views/Leaderboard.vue"
+  ],
+  "inline-style": [
+    "src/views/admin/AuditLogs.vue",
+    "src/views/admin/CompetitionDetail.vue",
+    "src/views/admin/awd/AwdAdmin.vue"
+  ],
+  "spacing": [
+    "src/components/LessonMarkdown.vue",
+    "src/components/competition/CompetitionOverview.vue",
+    "src/components/layout/DataTablePanel.vue",
+    "src/components/layout/FormField.vue",
+    "src/components/layout/PageTabs.vue",
+    "src/components/layout/StatusTag.vue",
+    "src/styles/primitives.css",
+    "src/views/ChallengeDetail.vue",
+    "src/views/CompetitionHome.vue",
+    "src/views/Landing.vue",
+    "src/views/Login.vue",
+    "src/views/Profile.vue",
+    "src/views/Topics.vue",
+    "src/views/Training.vue",
+    "src/views/admin/Challenges.vue",
+    "src/views/competition/exam/ExamParticipant.vue"
+  ],
+  "font-size": [
+    "src/components/LessonMarkdown.vue",
+    "src/components/competition/CompetitionOverview.vue",
+    "src/components/competition/CompetitionScoreChart.vue",
+    "src/layouts/AdminLayout.vue",
+    "src/styles/primitives.css",
+    "src/views/CertificateVerify.vue",
+    "src/views/ChallengeDetail.vue",
+    "src/views/CompetitionHome.vue",
+    "src/views/Landing.vue",
+    "src/views/Login.vue",
+    "src/views/Profile.vue",
+    "src/views/Topics.vue",
+    "src/views/competition/awd/AwdParticipant.vue",
+    "src/views/competition/exam/ExamParticipant.vue"
+  ],
+  "radius": [
+    "src/components/CapabilityRadar.vue",
+    "src/components/LessonMarkdown.vue",
+    "src/components/competition/CompetitionOverview.vue",
+    "src/views/Badges.vue",
+    "src/views/CertificateVerify.vue",
+    "src/views/ChallengeDetail.vue",
+    "src/views/CompetitionHome.vue",
+    "src/views/Landing.vue",
+    "src/views/Leaderboard.vue",
+    "src/views/Login.vue",
+    "src/views/Profile.vue",
+    "src/views/RoomDetail.vue",
+    "src/views/TopicDetail.vue",
+    "src/views/Topics.vue",
+    "src/views/Training.vue",
+    "src/views/admin/Challenges.vue",
+    "src/views/admin/CompetitionDetail.vue",
+    "src/views/admin/Containers.vue",
+    "src/views/admin/ContentPackages.vue"
+  ]
+}
