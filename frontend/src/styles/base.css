@@ -130,3 +130,18 @@ html,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Icon-only actions need a 44px hit area on touch screens; text buttons keep
+   their compact height because their width already exceeds the target. */
+@media (max-width: 767px) {
+  button[data-size^='icon'],
+  [role='button'][data-size^='icon'],
+  [data-slot='button'][data-size^='icon'] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+[data-sonner-toaster] {
+  --width: min(356px, calc(100vw - 32px));
+}

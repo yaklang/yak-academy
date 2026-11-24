@@ -5,8 +5,7 @@
 // （CHECKPOINT_URL，服务端直判），通关状态无需用户手动提交。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { renderMarkdownHtml } from '@/lib/markdown'
 import { notify, dialogs } from '@/lib/notifications'
 import { formatTime } from '@/lib/format'
 import {
@@ -174,9 +173,7 @@ const runOutcomeTag = computed(() => {
   return v.outcome === 'ok' ? ('success' as const) : v.outcome === 'tle' ? ('warning' as const) : ('danger' as const)
 })
 
-const renderedDescription = computed(() =>
-  DOMPurify.sanitize(marked.parse(challenge.value?.description_md ?? '') as string),
-)
+const renderedDescription = computed(() => renderMarkdownHtml(challenge.value?.description_md))
 
 // 管理端教程预览路由是 /admin/tutorials/...（题库侧 /training 两端同名，可共用）。
 const tutorialBase = computed(() => (route.path.startsWith('/admin') ? '/admin/tutorials' : '/topics'))
@@ -528,7 +525,7 @@ onUnmounted(() => {
               提交 yak 源码：对 {{ challenge.judge!.testdata_count }} 组数据逐组运行（时限 {{ challenge.judge!.time_limit_s }}s/组），
               全部通过才算 AC；配置了组分的题目按通过组折算得分。
             </p>
-            <p v-if="engineMissing" class="notice" data-tone="warning" role="alert">
+            <p v-if="engineMissing" class="notice engine-missing" data-tone="warning" role="alert">
               判题引擎未配置：提交代码与自测运行暂不可用，请联系管理员配置（ACADEMY_YAK_BIN）。
             </p>
             <div class="lib-policy">
@@ -590,7 +587,7 @@ onUnmounted(() => {
 
           <p
             v-if="result"
-            class="notice"
+            class="notice result-notice"
             :data-tone="result.status === 'correct' ? 'success' : 'danger'"
             :role="result.status === 'correct' ? 'status' : 'alert'"
           >{{ resultTitle }}</p>

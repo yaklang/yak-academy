@@ -10,9 +10,9 @@ test.describe('回归：题目详情难度与分类标签', () => {
   test('难度显示中文「入门」而不是 apprentice（回归：英文 slug 泄露）', async ({ page }) => {
     await loginAsStudent(page)
     await page.goto('/training/crypto-caesar-shift')
-    const tags = page.locator('.tags')
+    const tags = page.locator('.page-header')
     await expect(tags.getByText('入门', { exact: true })).toBeVisible()
     await expect(tags.getByText('apprentice', { exact: true })).toHaveCount(0)
-    await expect(tags.getByText('密码学', { exact: true })).toBeVisible()
+    await expect(tags.getByText('密码学')).toBeVisible()
   })
 })

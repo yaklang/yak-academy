@@ -11,7 +11,7 @@ const { resolved } = useTheme()
 </script>
 
 <template>
-  <Toaster :theme="resolved" position="top-right" :close-button="true" :visible-toasts="3" />
+  <Toaster :theme="resolved" position="top-right" :close-button="false" :visible-toasts="3" />
   <AlertDialog :open="!!confirmation" @update:open="value => { if (!value) finishConfirmation(false) }">
     <AlertDialogContent class="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md overflow-y-auto">
       <AlertDialogHeader>

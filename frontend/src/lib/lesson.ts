@@ -1,5 +1,6 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { demoteHeadings } from './markdown'
 
 export interface LessonTocItem {
   id: string
@@ -24,6 +25,8 @@ export function buildLesson(rawMarkdown: string, title?: string): LessonRender {
   if (first?.tagName === 'H1' && title?.trim() && first.textContent?.trim() === title.trim()) {
     first.remove()
   }
+  // 正文标题统一降一级：页面标题是唯一 h1，正文从 h2 开始。
+  demoteHeadings(root)
 
   const toc: LessonTocItem[] = []
   root.querySelectorAll('h2, h3').forEach((node, index) => {

@@ -11,7 +11,7 @@ const { challenge: C } = E2E
 async function submitFlag(page: Page, flag: string) {
   await page.getByPlaceholder('输入 flag').fill(flag)
   await page.getByRole('button', { name: '提交', exact: true }).click()
-  await expect(page.locator('.result')).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.result-notice')).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('题目全链路', () => {
@@ -22,9 +22,10 @@ test.describe('题目全链路', () => {
     // 平铺行 + 分类 chip（中文映射）可见
     await page.getByRole('link', { name: '题库', exact: true }).click()
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.locator('.row', { hasText: C.title })).toBeVisible()
-    await expect(page.locator('.cat-chip', { hasText: '密码学' })).toBeVisible()
-    await page.getByRole('link', { name: C.title }).click()
+    const trainingRow = page.locator('[data-slot=table] tr', { hasText: C.title })
+    await expect(trainingRow).toBeVisible()
+    await expect(trainingRow).toContainText('密码学')
+    await trainingRow.click()
     await expect(page).toHaveURL(new RegExp(`/training/${C.slug}`))
 
     // 详情渲染描述与提示折叠
@@ -38,11 +39,11 @@ test.describe('题目全链路', () => {
 
     // 错 flag：判定不通过
     await submitFlag(page, 'flag{totally_wrong}')
-    await expect(page.locator('.result')).toContainText('判定不通过')
+    await expect(page.locator('.result-notice')).toContainText('判定不通过')
 
     // 对 flag：通关 + 结算一次（50 分）
     await submitFlag(page, C.flag)
-    await expect(page.locator('.result')).toContainText(/得分 \d+/)
+    await expect(page.locator('.result-notice')).toContainText(/得分 \d+/)
     await expect(page.getByText('已通关', { exact: true })).toBeVisible()
 
     // 解锁提示：通关后才有积分可扣（0 分学生解锁付费提示被 422 拒绝，
@@ -70,14 +71,14 @@ test.describe('题目全链路', () => {
     await expect(row).toContainText(String(C.score - C.hintCost + acmBonus))
 
     // 徽章：first_solve（初试锋芒）点亮
-    await page.getByRole('link', { name: '徽章' }).click()
-    const badge = page.locator('.badge', { hasText: '初试锋芒' })
-    await expect(badge).toHaveClass(/earned/)
+    await page.getByRole('navigation', { name: '页面导航' }).getByRole('link', { name: '徽章', exact: true }).click()
+    const badge = page.locator('.badge-card', { hasText: '初试锋芒' })
+    await expect(badge).toHaveAttribute('data-earned', 'true')
 
     // 重复提交正确 flag：判对但不重复计分
     await page.goto(`/training/${C.slug}`)
     await submitFlag(page, C.flag)
-    await expect(page.locator('.result')).toContainText('不重复计分')
+    await expect(page.locator('.result-notice')).toContainText('不重复计分')
   })
 
   test('附件题：学生端凭 JWT 下载附件', async ({ page }) => {
@@ -144,7 +145,7 @@ test.describe('题目全链路', () => {
     await loginAsStudent(page)
     await page.goto('/training')
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.getByRole('link', { name: editedTitle })).toBeVisible()
+    await expect(page.locator('.challenge-title', { hasText: editedTitle })).toBeVisible()
 
     // 还原标题（后续用例与种子常量依赖初始标题）
     await loginAsAdmin(page)

@@ -5,7 +5,7 @@ import { E2E } from './fixtures/consts'
 test.use({ reducedMotion: 'reduce' })
 const widths = [320, 390, 768, 1024, 1440]
 async function theme(page: Page, value: 'light' | 'dark') {
-  await page.getByRole('button', { name: '切换主题', exact: true }).click()
+  await page.getByRole('button', { name: '切换主题', exact: true }).first().click()
   await page.getByRole('menuitemradio', { name: value === 'light' ? '浅色模式' : '深色模式', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', value)
   await page.keyboard.press('Escape')
@@ -26,10 +26,8 @@ test('公开首页与登录/注册/找回页面在两种主题和五种宽度下
         await expect(page.locator('#landing-title')).toBeVisible()
         await fits(page, width)
         await expect(page.getByRole('link', { name: '开始学习', exact: true })).toBeVisible()
-        // 首页雨幕画布随视口重建，宽高必须非零（画布塌陷 = 背景动效退化）。
-        const canvasSize = await page.locator('.hero-rain canvas').evaluate((el: HTMLCanvasElement) => ({ width: el.width, height: el.height }))
-        expect(canvasSize.width).toBeGreaterThan(0)
-        expect(canvasSize.height).toBeGreaterThan(0)
+        // 首页是静态品牌排版：不加载 canvas/装饰动画，宽高只由内容决定。
+        await expect(page.locator('canvas')).toHaveCount(0)
         await page.getByRole('link', { name: '开始学习', exact: true }).click()
         await expect(page.getByRole('textbox', { name: '用户名', exact: true })).toBeVisible()
         await fits(page, width)
@@ -58,9 +56,14 @@ test('学习端、管理表格和编辑弹窗在明暗模式窄屏下保持可�
       for (const path of ['/learn', '/training', '/admin/panel/users', '/admin/panel/challenges']) {
         await test.step(`${mode} ${width}px ${path}`, async () => {
           await page.goto(path)
-          await expect(page.locator('main h2').first()).toBeVisible()
+          await expect(page.locator('main h1').first()).toBeVisible()
           await fits(page, width)
-          if (path.startsWith('/admin') && width < 1024) await expect(page.getByRole('button', { name: '打开管理导航' })).toBeVisible()
+          if (path.startsWith('/admin') && width < 1024) {
+            await page.getByRole('button', { name: '打开导航', exact: true }).click()
+            await expect(page.getByRole('dialog')).toContainText('管理端导航')
+            await page.keyboard.press('Escape')
+            await expect(page.getByRole('dialog')).not.toBeVisible()
+          }
         })
       }
     }

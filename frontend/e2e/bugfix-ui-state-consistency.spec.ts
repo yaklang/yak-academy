@@ -23,8 +23,8 @@ test.describe('回归：数据页加载、错误与移动端状态一致性', ()
     })
     await page.goto('/training?bank=ctf')
 
-    await expect(page.locator('.training-skeleton')).toBeVisible()
-    const score = page.locator('.score').first()
+    await expect(page.locator('.ui-data-table .table-skeleton-bar').first()).toBeVisible()
+    const score = page.locator('.challenge-score').first()
     await expect(score).toBeVisible()
     await expect(score).toHaveText(/分/)
 
@@ -49,7 +49,7 @@ test.describe('回归：数据页加载、错误与移动端状态一致性', ()
     fail = false
     await alert.getByRole('button', { name: '重试' }).click()
     await expect(alert).toHaveCount(0)
-    await expect(page.locator('.badge').first()).toBeVisible()
+    await expect(page.locator('.badge-card').first()).toBeVisible()
   })
 
   test('邮箱表格加载期显示占位行、不闪空态，且单页不渲染分页器（回归：空态闪烁/单页分页）', async ({ page }) => {
@@ -66,9 +66,9 @@ test.describe('回归：数据页加载、错误与移动端状态一致性', ()
     await page.goto('/mailbox')
     const table = page.locator('.ui-data-table')
     await expect(table.locator('.table-skeleton-bar').first()).toBeVisible()
-    await expect(table.getByText('暂无邮件')).toHaveCount(0)
+    await expect(table.getByText('还没有邮件')).toHaveCount(0)
 
-    await expect(table.getByText('暂无邮件')).toBeVisible()
+    await expect(table.getByText('还没有邮件')).toBeVisible()
     await expect(page.getByRole('navigation', { name: '分页' })).toHaveCount(0)
   })
 
@@ -87,9 +87,8 @@ test.describe('回归：数据页加载、错误与移动端状态一致性', ()
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
 
     const table = page.locator('.ui-data-table')
-    await expect(table.getByText(E2E.challenge.slug)).toBeVisible()
-    const slugCell = table.locator(`td[title="${E2E.challenge.slug}"]`)
-    await expect(slugCell).toHaveCount(1)
+    // 标识列完整展示（长值与标题同行换行，不再依赖悬停 tooltip）
+    await expect(table.locator('.challenge-code', { hasText: E2E.challenge.slug })).toHaveCount(1)
 
     delayNext = true
     await page.getByRole('tab', { name: 'ACM 题目' }).click()

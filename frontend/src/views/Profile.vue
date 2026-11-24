@@ -543,6 +543,13 @@ onMounted(() => {
   height: 14px;
 }
 
+@media (max-width: 767px) {
+  .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 .profile-bio {
   display: grid;
   gap: var(--space-2);

@@ -24,7 +24,7 @@ test.describe('回归：热加载脚本使用引擎真实钩子', () => {
 
     // 用户路径：打开配套教程页读脚本（与既有 spec 同用普通端教程路由）
     await page.goto('/topics/yakit-module-mastery/rooms/yakit-mall-chain')
-    const heading = page.locator('h2', { hasText: '业务链攻击：1 分钱买下商城商品' })
+    const heading = page.getByRole('heading', { level: 1, name: /业务链攻击：1 分钱买下商城商品/ })
     await expect(heading).toBeVisible()
 
     // 两处代码块（模块介绍 + 详细步骤）都是可直接照抄的 beforeRequest 脚本
