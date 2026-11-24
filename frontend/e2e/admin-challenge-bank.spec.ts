@@ -15,8 +15,8 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await loginAsAdmin(page)
     await page.goto('/admin/panel/challenges')
 
-    // 默认即内置训练 tab（带「只读」角标），一键导入入口在位
-    await expect(page.locator('.tab-label', { hasText: '内置训练' })).toBeVisible()
+    // 默认即内置训练 tab，一键导入入口在位
+    await expect(page.getByRole('tab', { name: '内置训练' })).toBeVisible()
     await expect(page.getByRole('button', { name: '导入内置训练（vulinbox）' })).toBeVisible()
 
     // 只读：管理动作全收口（上传工具栏、行内编辑/删除、可见性开关）
@@ -43,7 +43,7 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(table.locator('tr', { hasText: C.attachSlug })).toBeVisible()
 
     // 搜索（400ms 防抖后服务端前缀匹配）：标题「凯撒」只剩凯撒一行
-    await page.getByPlaceholder('搜索 slug / 标题 / 分类（前缀匹配）').fill('凯撒')
+    await page.getByPlaceholder('搜索标识 / 标题 / 分类（前缀匹配）').fill('凯撒')
     await expect(table.locator('tr', { hasText: C.linkedSlug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
@@ -51,17 +51,17 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     // vulinbox 镜像状态卡只属于内置训练 tab：管理 tab 下不显示
     await expect(page.locator('.image-card')).toHaveCount(0)
 
-    // 筛选条内下拉按 DOM 序：分类 / 难度 / 来源（内置 tab 无来源项）
-    const selects = page.locator('.filter-bar [role=combobox]')
+    // 筛选条：分类 / 难度 / 来源（内置 tab 无来源项）。
+    const categorySelect = page.getByRole('combobox', { name: '分类' })
+    const difficultySelect = page.getByRole('combobox', { name: '难度' })
+    const sourceSelect = page.getByRole('combobox', { name: '来源' })
     // 分类筛选：cryptography 同样收敛到凯撒
-    await selects.nth(0).click()
-    await page.locator('[role=option]', { hasText: 'cryptography' }).click()
+    await categorySelect.selectOption('cryptography')
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
 
-    // 难度筛选（与分类叠加）：expert 与种子（apprentice）不相交 → 空表
-    await selects.nth(1).click()
-    await page.locator('[role=option]', { hasText: 'expert' }).click()
+    // 难度筛选（与分类叠加）：expert 与种子（入门）不相交 → 空表
+    await difficultySelect.selectOption('expert')
     await expect(table.locator('[data-slot=table-empty]')).toBeVisible()
 
     // 清除筛选：关键字+分类+难度一次回到全量
@@ -69,12 +69,10 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
     await expect(table.locator('tr', { hasText: C.linkedSlug })).toBeVisible()
     await expect(table.locator('tr', { hasText: C.attachSlug })).toBeVisible()
 
-    // 来源筛选：CTF tab 只含管理员上传题，筛「内置题集」恒空（内置集 bank=tutorial）
-    await selects.nth(2).click()
-    await page.locator('[role=option]', { hasText: '来源：内置题集' }).click()
+    // 来源筛选：CTF tab 只含管理员上传题，筛「内置题集」恒空
+    await sourceSelect.selectOption('yes')
     await expect(table.locator('[data-slot=table-empty]')).toBeVisible()
-    await selects.nth(2).click()
-    await page.locator('[role=option]', { hasText: '来源：管理员上传' }).click()
+    await sourceSelect.selectOption('no')
     await expect(table.locator('tr', { hasText: C.slug })).toBeVisible()
   })
 
@@ -85,12 +83,11 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
 
     // global-setup 上传的 ACM 种子包在列；CTF 种子（flag 判定）不落入本 tab，
     // 上传工具栏在位（题库可管理）
-    //（el-upload 包装层也带 button 角色，断言锚定内部真实按钮避免 strict 冲突）
     const table = page.locator('.chal-table')
     await expect(table.locator('tr', { hasText: E2E.acm.slug })).toBeVisible()
     await expect(table.locator('tr', { hasText: C.slug })).toHaveCount(0)
     await expect(table.locator('tr', { hasText: C.attachSlug })).toHaveCount(0)
-    await expect(page.locator('button.ui-button', { hasText: '选择 challenge.json' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '选择 challenge.json' })).toBeVisible()
   })
 
   test('ACM tab：yak 判题引擎状态卡（OSS 下载入口，不触发真实下载）', async ({ page }) => {
@@ -111,7 +108,7 @@ test.describe('题目管理：题库 tab 与搜索筛选', () => {
 
     // 下载为后台任务（约 220MB）：只走确认弹窗文案，不点「开始下载」
     await card.getByRole('button', { name: '从 OSS 下载引擎' }).click()
-    const dialog = page.locator('[role=alertdialog]')
+    const dialog = page.locator('[data-slot=dialog-content]')
     await expect(dialog).toContainText('yak 引擎二进制')
     await expect(dialog).toContainText('220MB')
     await dialog.getByRole('button', { name: '取消' }).click()

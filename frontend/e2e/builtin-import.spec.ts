@@ -19,7 +19,7 @@ test.describe('内置训练一键导入', () => {
     const imageCard = page.locator('.image-card')
     await expect(imageCard).toBeVisible()
     if (process.env.E2E_DOCKER !== '1') {
-      await expect(imageCard).toContainText('驱动：未启用（noop，环境启动 501）')
+      await expect(imageCard).toContainText('驱动：未启用')
       await expect(imageCard).toContainText('镜像未构建（需 Docker）')
       await expect(imageCard).toContainText('yak-academy/vulinbox:latest')
       await expect(imageCard.getByRole('button', { name: '从 OSS 构建镜像' })).toBeDisabled()
@@ -44,39 +44,38 @@ test.describe('内置训练一键导入', () => {
     // 行内展示配套教程信息（一教程对一题的关联在列表即露出）
     await loginAsStudent(page)
     await page.getByRole('link', { name: '题库', exact: true }).click()
-    await expect(page.locator('.row', { hasText: 'SSRF 基础：让服务器替你访问内网接口' })).toBeVisible()
-    await expect(page.locator('.cat-chip', { hasText: 'SSRF' })).toBeVisible()
-    await expect(page.locator('.cat-chip', { hasText: 'JWT' })).toBeVisible()
-    await expect(page.locator('.row', { hasText: '配套教程：' }).first()).toBeVisible()
+    const trainingTable = page.locator('[data-slot=table]')
+    await expect(trainingTable.locator('tr', { hasText: 'SSRF 基础：让服务器替你访问内网接口' })).toBeVisible()
+    await expect(trainingTable).toContainText('SSRF')
+    await expect(trainingTable).toContainText('JWT')
+    await expect(trainingTable).toContainText('配套教程：')
 
-    // CTF tab 只见管理员上传的种子题（凯撒密码），内置题集不混入（无 SSRF chip）；
+    // CTF tab 只见管理员上传的种子题（凯撒密码），内置题集不混入（无 SSRF 分类）；
     // ACM tab 只见 global-setup 上传的 ACM 种子编程题（源码判定题）
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.locator('.row', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
-    await expect(page.locator('.cat-chip', { hasText: 'SSRF' })).toHaveCount(0)
+    await expect(trainingTable.locator('tr', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
+    await expect(page.getByText('SSRF', { exact: true })).toHaveCount(0)
     await page.getByRole('tab', { name: 'ACM 题目' }).click()
-    await expect(page.locator('.row', { hasText: E2E.acm.title })).toBeVisible()
-    await expect(page.locator('.cat-chip', { hasText: 'SSRF' })).toHaveCount(0)
+    await expect(trainingTable.locator('tr', { hasText: E2E.acm.title })).toBeVisible()
+    await expect(page.getByText('SSRF', { exact: true })).toHaveCount(0)
 
-    // 「是否内置」过滤（服务端，过滤条上唯一下拉）：教程题目 tab 全是内置
+    // 「是否内置」过滤（服务端）：教程题目 tab 全是内置
     // （筛上传为空），CTF tab 全是上传（筛内置为空）——题集归属互不稀释。
+    const sourceFilter = page.getByRole('combobox', { name: '来源' })
     await page.getByRole('tab', { name: '教程题目' }).click()
-    await expect(page.locator('.row', { hasText: 'SSRF 基础：让服务器替你访问内网接口' })).toBeVisible()
-    await page.locator('.filters [role=combobox]').nth(0).click()
-    await page.locator('[role=option]', { hasText: '来源：管理员上传' }).click()
-    await expect(page.locator('.row')).toHaveCount(0)
+    await expect(trainingTable.locator('tr', { hasText: 'SSRF 基础：让服务器替你访问内网接口' })).toBeVisible()
+    await sourceFilter.selectOption('no')
+    await expect(page.getByTestId('training-empty')).toBeVisible()
     // 过滤条件跨 tab 保留：CTF tab 仍按「管理员上传」筛出种子题
     await page.getByRole('tab', { name: 'CTF 题目' }).click()
-    await expect(page.locator('.row', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
-    await page.locator('.filters [role=combobox]').nth(0).click()
-    await page.locator('[role=option]', { hasText: '来源：内置题集' }).click()
-    await expect(page.locator('.row')).toHaveCount(0)
+    await expect(trainingTable.locator('tr', { hasText: '凯撒密码：找回偏移量' })).toBeVisible()
+    await sourceFilter.selectOption('yes')
+    await expect(page.getByTestId('training-empty')).toBeVisible()
 
     // 题目可进详情（教程题目 tab 恢复「全部」后进入内置题）
     await page.getByRole('tab', { name: '教程题目' }).click()
-    await page.locator('.filters [role=combobox]').nth(0).click()
-    await page.locator('[role=option]', { hasText: '来源：全部' }).click()
-    await page.getByRole('link', { name: 'SSRF 基础：让服务器替你访问内网接口' }).click()
+    await sourceFilter.selectOption('')
+    await trainingTable.locator('tr', { hasText: 'SSRF 基础：让服务器替你访问内网接口' }).click()
     await expect(page).toHaveURL(/\/training\/vulinbox-ssrf-basic$/)
     await expect(
       page.getByRole('heading', { name: 'SSRF 基础：让服务器替你访问内网接口' }),
@@ -91,9 +90,9 @@ test.describe('内置训练一键导入', () => {
 
     // 教程首页出现内置专题（与 global-setup 上传的种子教程包并存）
     await page.getByRole('link', { name: '教程', exact: true }).click()
-    await expect(page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
-    await expect(page.locator('.topic-link', { hasText: 'SQL 注入实战' })).toBeVisible()
-    await page.locator('.topic-link', { hasText: 'Yakit 上手与流量操控' }).click()
+    await expect(page.locator('.topic-card', { hasText: 'Yakit 上手与流量操控' })).toBeVisible()
+    await expect(page.locator('.topic-card', { hasText: 'SQL 注入实战' })).toBeVisible()
+    await page.locator('.topic-card', { hasText: 'Yakit 上手与流量操控' }).click()
     await expect(page.locator('.tree-item', { hasText: 'Web Fuzzer 第一个请求' })).toBeVisible()
   })
 })
