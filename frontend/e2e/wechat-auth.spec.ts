@@ -15,7 +15,7 @@ test.describe('微信注册/登录', () => {
     await page.goto('/login')
     // 首屏先显示「正在检查微信登录…」，status 返回后才变成可用按钮（冷启动
     // 首个模块编译较慢，放宽等待时间）。
-    const wechatButton = page.locator('.auth-wechat')
+    const wechatButton = page.locator('.login-wechat__button')
     await expect(wechatButton).toHaveText('微信扫码注册 / 登录', { timeout: 15_000 })
     await expect(wechatButton).toBeEnabled()
     await expect(page.getByText('首次使用微信会自动创建账号，无需邮箱/手机号或密码。')).toBeVisible()

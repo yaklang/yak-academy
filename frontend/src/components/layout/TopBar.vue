@@ -196,11 +196,11 @@ const initial = () => props.displayName.slice(0, 1).toUpperCase()
   justify-content: center;
   min-width: 16px;
   height: 16px;
-  padding-inline: 3px;
+  padding-inline: var(--space-1);
   border-radius: var(--radius-pill);
   background: var(--action-primary);
   color: var(--action-primary-fg);
-  font-size: 10px;
+  font-size: var(--text-micro);
   line-height: 1;
 }
 

@@ -223,12 +223,12 @@ async function logout() {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-  margin-left: 272px;
+  margin-left: calc(var(--layout-rail-width) + var(--layout-menu-width));
   transition: margin-left 160ms ease;
 }
 
 .app-shell.is-collapsed .app-body {
-  margin-left: 48px;
+  margin-left: var(--layout-rail-width);
 }
 
 .app-content {

@@ -164,6 +164,8 @@
 
   /* ---- layout ---- */
   --layout-max-width: 1280px;
+  --layout-rail-width: 48px;
+  --layout-menu-width: 224px;
   --public-max-width: 1280px;
   --competition-max-width: 1440px;
 }

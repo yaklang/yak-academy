@@ -1,18 +1,15 @@
 <script setup lang="ts">
 // 登录页：微信扫码是唯一自助注册入口（start → 微信/前端回调 → callback 换应用
 // token，首次授权自动建号）；历史账号与管理员仍可用用户名密码登录；找回密码
-// 仅服务历史邮箱/手机号账号。手机号/邮箱注册入口已下线。
+// 仅服务历史邮箱/手机号账号。页面为静态品牌排版，不加载装饰动画。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle, QrCode, Terminal } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, BookOpen, Check, Eye, EyeOff, Flag, LoaderCircle, QrCode, ScanLine } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import Brand from '@/components/Brand.vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
-import TerminalRain from '@/components/TerminalRain.vue'
-import CipherReveal from '@/components/CipherReveal.vue'
-import ClickSpark from '@/components/ClickSpark.vue'
+import FormField from '@/components/layout/FormField.vue'
+import PublicShell from '@/components/layout/PublicShell.vue'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '../stores/auth'
 import { authApi } from '../api'
@@ -35,8 +32,9 @@ const identifierIsEmail = computed(() => identifier.value.includes('@'))
 const codeLabel = computed(() => (identifierIsEmail.value ? '邮箱验证码' : '短信验证码'))
 const code = ref('')
 const loading = ref(false)
-// 验证码回显（仅本地演示；生产默认关闭）：配置 ACADEMY_SHOW_VERIFICATION_CODE=1
-// 时响应携带原文，内联展示在验证码输入框下方；关闭时请查收邮件/短信。
+// 表单级错误：toast 会消失，登录失败必须留下可读的可见入口。
+const formError = ref('')
+// 验证码回显（仅本地演示；生产默认关闭）。
 const sentCode = ref('')
 // 找回成功回显的账号标识（重置成功后表单切换为结果面板；不自动登录）。
 const recovered = ref<{ username: string; account_code: string } | null>(null)
@@ -58,7 +56,6 @@ const redirect = computed(() => (route.query.redirect as string) || null)
 function errMsg(e: unknown, fallback: string) {
   return e instanceof ApiError ? e.message : fallback
 }
-// 错误信封 message 已由后端统一接入口映射为中文；组件直接透出。
 
 function validEmail(value: string) {
   return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
@@ -83,15 +80,17 @@ function startCountdown(seconds: number) {
     }
   }, 1000)
 }
+
 onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-// 模式切换：清掉上一模式的验证码状态与找回结果，避免串场。
+// 模式切换：清掉上一模式的验证码状态与错误，避免串场。
 function switchMode(m: 'login' | 'forgot') {
   mode.value = m
   sentCode.value = ''
   code.value = ''
+  formError.value = ''
   recovered.value = null
 }
 
@@ -112,13 +111,14 @@ async function handleWechatCallback() {
   const callbackState = route.query.state
   if (typeof callbackCode !== 'string' || typeof callbackState !== 'string') return
   wechatCallbackPending.value = true
+  formError.value = ''
   try {
     const target = await auth.completeWechatLogin(callbackCode, callbackState)
     await auth.fetchMe()
     notify.success('微信登录成功')
     await router.replace(target || redirect.value || '/learn')
   } catch (e) {
-    notify.error(errMsg(e, '微信登录失败，请重新发起'))
+    formError.value = errMsg(e, '微信登录失败，请重新发起')
     await router.replace({ path: '/login', query: redirect.value ? { redirect: redirect.value } : {} })
   } finally {
     wechatCallbackPending.value = false
@@ -126,8 +126,9 @@ async function handleWechatCallback() {
 }
 
 async function startWechat() {
+  formError.value = ''
   if (!wechatAvailable.value) {
-    notify.warning('微信登录暂未配置，请联系管理员')
+    formError.value = '微信登录暂未配置，请联系管理员'
     return
   }
   wechatLoading.value = true
@@ -137,7 +138,7 @@ async function startWechat() {
     // 302 回前端登录页，登录页再调用 callback 换 token。
     window.location.assign(resp.authorize_url)
   } catch (e) {
-    notify.error(errMsg(e, '无法发起微信登录，请稍后再试'))
+    formError.value = errMsg(e, '无法发起微信登录，请稍后再试')
     wechatLoading.value = false
   }
 }
@@ -148,8 +149,9 @@ onMounted(() => {
 })
 
 async function sendCode() {
+  formError.value = ''
   if (!validIdentifier(identifier.value)) {
-    notify.warning('请输入有效邮箱或 11 位大陆手机号')
+    formError.value = '请输入有效邮箱或 11 位大陆手机号'
     return
   }
   sending.value = true
@@ -157,7 +159,6 @@ async function sendCode() {
     const resp = await authApi.sendResetCode(identifierInput())
     startCountdown(resp.retry_after ?? 60)
     if (resp.code) {
-      // 回显模式（仅本地演示开启）：验证码原文随响应返回，页面内联显示。
       sentCode.value = resp.code
     } else {
       notify.success(
@@ -167,16 +168,17 @@ async function sendCode() {
       )
     }
   } catch (e) {
-    notify.error(errMsg(e, '发送失败，请稍后再试'))
+    formError.value = errMsg(e, '发送失败，请稍后再试')
   } finally {
     sending.value = false
   }
 }
 
 async function submit() {
+  formError.value = ''
   if (mode.value === 'login') {
     if (!username.value || !password.value) {
-      notify.warning('请输入用户名和密码')
+      formError.value = '请输入用户名和密码'
       return
     }
     loading.value = true
@@ -185,7 +187,7 @@ async function submit() {
       await auth.fetchMe()
       router.push(redirect.value ?? '/learn')
     } catch (e) {
-      notify.error(errMsg(e, '登录失败'))
+      formError.value = errMsg(e, '登录失败')
     } finally {
       loading.value = false
     }
@@ -193,15 +195,15 @@ async function submit() {
   }
   // 找回账号：历史邮箱/手机号验证码重置密码，成功回显账号，不自动登录。
   if (!validIdentifier(identifier.value)) {
-    notify.warning('请输入有效邮箱或 11 位大陆手机号')
+    formError.value = '请输入有效邮箱或 11 位大陆手机号'
     return
   }
   if (!/^\d{6}$/.test(code.value)) {
-    notify.warning('验证码为 6 位数字')
+    formError.value = '验证码为 6 位数字'
     return
   }
   if (password.value.length < 6) {
-    notify.warning('新密码至少 6 位')
+    formError.value = '新密码至少 6 位'
     return
   }
   loading.value = true
@@ -213,7 +215,7 @@ async function submit() {
     })
     notify.success('密码已重置，原登录状态已全部失效')
   } catch (e) {
-    notify.error(errMsg(e, '重置失败，请稍后再试'))
+    formError.value = errMsg(e, '重置失败，请稍后再试')
   } finally {
     loading.value = false
   }
@@ -221,98 +223,501 @@ async function submit() {
 </script>
 
 <template>
-  <div class="public-container auth-page">
-    <header class="auth-top">
-      <Brand />
-      <div class="public-actions"><RouterLink to="/" class="auth-back"><ArrowLeft :size="16" /><span>返回首页</span></RouterLink><ThemeToggle /></div>
-    </header>
-    <main class="auth-grid">
-      <section class="auth-story" aria-labelledby="auth-story-title">
-        <TerminalRain class="auth-rain" :density=".32" :speed=".85" />
-        <p class="eyebrow"><Terminal :size="14" />LEARNING BY DOING</p>
-        <h1 id="auth-story-title"><CipherReveal text="让每一次动手，" /><br><em><CipherReveal text="都成为下一步的底气。" :duration="700" /></em></h1>
-        <p>从原理到实践，从学习到挑战。<br>在 Yak Academy，积累属于你的安全能力。</p>
-        <div class="auth-signature"><span class="auth-orbit-mark">Y<span>→</span></span><span>EXPLORE. PRACTICE. EVOLVE.</span></div>
+  <PublicShell>
+    <template #actions>
+      <RouterLink to="/" class="login-back">
+        <ArrowLeft aria-hidden="true" />
+        <span>返回首页</span>
+      </RouterLink>
+    </template>
+
+    <div class="login-grid">
+      <section class="login-story" aria-labelledby="auth-story-title">
+        <p class="login-story__badge">YAK ACADEMY</p>
+        <h1 id="auth-story-title" class="login-story__title">
+          让每一次动手，<br>
+          <span>都成为下一步的底气。</span>
+        </h1>
+        <p class="login-story__text">
+          从原理到实践，从学习到挑战。在 Yak Academy，积累属于你的安全能力。
+        </p>
+        <ul class="login-story__points">
+          <li><BookOpen aria-hidden="true" />教程与视频</li>
+          <li><ScanLine aria-hidden="true" />独立实验环境</li>
+          <li><Flag aria-hidden="true" />进度与徽章</li>
+        </ul>
       </section>
-      <section class="auth-form-area" aria-labelledby="auth-form-title">
-        <form class="auth-form" @submit.prevent="submit">
-          <h2 id="auth-form-title" :aria-label="`yak-academy ${mode === 'login' ? '登录' : '找回账号'}`">{{ pageTitle }}</h2>
-          <p class="auth-form-description">{{ recovered ? '请使用新密码，继续你的学习之旅。' : mode === 'login' ? '微信扫码注册或登录；管理员与历史账号可使用用户名密码。' : '仅历史邮箱/手机号账号可重置密码；微信注册账号无需密码。' }}</p>
-          <div v-if="recovered" class="auth-recovered" role="status">
-            <Check :size="28" class="text-accent-foreground" />
-            <p>账号找回成功，原登录状态已全部失效。</p>
-            <dl><dt class="text-muted-foreground">用户名</dt><dd>{{ recovered.username }}</dd><dt class="mt-3 text-muted-foreground">账号编码</dt><dd>{{ recovered.account_code }}</dd></dl>
-            <Button class="auth-submit" type="button" @click="switchMode('login')">返回登录<ArrowRight :size="16" /></Button>
+
+      <section class="login-form-area" aria-labelledby="auth-form-title">
+        <form class="login-form" novalidate @submit.prevent="submit">
+          <h2 id="auth-form-title" class="login-form__title">{{ pageTitle }}</h2>
+          <p class="login-form__description">
+            {{ recovered ? '请使用新密码，继续你的学习之旅。' : mode === 'login' ? '微信扫码注册或登录；管理员与历史账号可使用用户名密码。' : '仅历史邮箱/手机号账号可重置密码；微信注册账号无需密码。' }}
+          </p>
+
+          <div v-if="formError" class="login-form__error" role="alert">
+            {{ formError }}
           </div>
+
+          <div v-if="recovered" class="login-recovered" role="status">
+            <Check class="login-recovered__icon" aria-hidden="true" />
+            <p>账号找回成功，原登录状态已全部失效。</p>
+            <dl class="login-recovered__list">
+              <dt>用户名</dt>
+              <dd>{{ recovered.username }}</dd>
+              <dt>账号编码</dt>
+              <dd>{{ recovered.account_code }}</dd>
+            </dl>
+            <Button class="login-submit" type="button" @click="switchMode('login')">
+              返回登录
+              <ArrowRight aria-hidden="true" />
+            </Button>
+          </div>
+
           <template v-else>
-            <div v-if="mode === 'login'" class="auth-wechat-block">
+            <div v-if="mode === 'login'" class="login-wechat">
               <Button
                 type="button"
-                class="auth-submit auth-wechat"
+                class="login-submit login-wechat__button"
                 :disabled="wechatChecking || wechatLoading || wechatCallbackPending || !wechatAvailable"
                 :aria-busy="wechatLoading || wechatCallbackPending"
                 @click="startWechat"
               >
-                <LoaderCircle v-if="wechatLoading || wechatCallbackPending" :size="18" class="spin" />
-                <QrCode v-else :size="18" />
+                <LoaderCircle v-if="wechatLoading || wechatCallbackPending" class="spin" aria-hidden="true" />
+                <QrCode v-else aria-hidden="true" />
                 {{ wechatCallbackPending ? '正在完成微信登录…' : wechatChecking ? '正在检查微信登录…' : wechatLoading ? '正在跳转微信…' : '微信扫码注册 / 登录' }}
               </Button>
-              <p v-if="!wechatChecking && !wechatAvailable" class="auth-wechat-hint" role="status">微信登录暂未配置，请联系管理员。</p>
-              <p v-else class="auth-wechat-hint">首次使用微信会自动创建账号，无需邮箱/手机号或密码。</p>
-              <div class="auth-divider"><span>或使用账号密码</span></div>
+              <p v-if="!wechatChecking && !wechatAvailable" class="login-wechat__hint" role="status">
+                微信登录暂未配置，请联系管理员。
+              </p>
+              <p v-else class="login-wechat__hint">
+                首次使用微信会自动创建账号，无需邮箱/手机号或密码。
+              </p>
+              <div class="login-divider"><span>或使用账号密码</span></div>
             </div>
-            <div v-if="mode !== 'login'" class="auth-field">
-              <Label for="auth-identifier">邮箱或手机号</Label>
-              <Input id="auth-identifier" v-model="identifier" type="text" autocomplete="username" maxlength="254" placeholder="历史账号绑定的邮箱或手机号" />
+
+            <FormField
+              v-if="mode !== 'login'"
+              label="邮箱或手机号"
+              html-for="auth-identifier"
+              hint="历史账号绑定的邮箱或手机号"
+            >
+              <template #default="{ id, describedby, invalid }">
+                <Input
+                  :id="id"
+                  v-model="identifier"
+                  type="text"
+                  autocomplete="username"
+                  maxlength="254"
+                  placeholder="历史账号绑定的邮箱或手机号"
+                  :aria-describedby="describedby"
+                  :aria-invalid="invalid || undefined"
+                />
+              </template>
+            </FormField>
+
+            <FormField
+              v-if="mode !== 'login'"
+              :label="codeLabel"
+              html-for="auth-code"
+              hint="验证码为 6 位数字，5 分钟内有效"
+            >
+              <template #default="{ id, describedby, invalid }">
+                <div class="login-code-row">
+                  <Input
+                    :id="id"
+                    v-model="code"
+                    placeholder="验证码"
+                    maxlength="6"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    :aria-describedby="describedby"
+                    :aria-invalid="invalid || undefined"
+                  />
+                  <Button type="button" variant="outline" :disabled="countdown > 0 || sending" @click="sendCode">
+                    <LoaderCircle v-if="sending" class="spin" aria-hidden="true" />
+                    {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
+                  </Button>
+                </div>
+              </template>
+            </FormField>
+            <p v-if="sentCode" class="login-hint" role="status" data-testid="verification-code">
+              验证码：<b>{{ sentCode }}</b>（5 分钟内有效，可直接复制填入）
+            </p>
+
+            <FormField
+              v-if="mode === 'login'"
+              label="用户名"
+              html-for="auth-username"
+            >
+              <template #default="{ id }">
+                <Input
+                  :id="id"
+                  v-model="username"
+                  autocomplete="username"
+                  placeholder="请输入用户名"
+                />
+              </template>
+            </FormField>
+
+            <div class="login-field">
+              <div class="login-label-row">
+                <Label for="auth-password">{{ mode === 'forgot' ? '新密码' : '密码' }}</Label>
+                <button
+                  v-if="mode === 'login'"
+                  type="button"
+                  class="login-text-button"
+                  @click="switchMode('forgot')"
+                >
+                  找回账号
+                </button>
+              </div>
+              <div class="login-password">
+                <Input
+                  id="auth-password"
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+                  :placeholder="mode === 'login' ? '请输入密码' : '新密码（至少 6 位）'"
+                />
+                <button
+                  type="button"
+                  class="login-password__toggle"
+                  :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                  :aria-pressed="showPassword"
+                  @click="showPassword = !showPassword"
+                >
+                  <EyeOff v-if="showPassword" aria-hidden="true" />
+                  <Eye v-else aria-hidden="true" />
+                </button>
+              </div>
             </div>
-            <div v-if="mode !== 'login'" class="auth-field">
-              <Label for="auth-code">{{ codeLabel }}</Label>
-              <div class="auth-code-row"><Input id="auth-code" v-model="code" placeholder="验证码" maxlength="6" inputmode="numeric" autocomplete="one-time-code" /><Button type="button" variant="outline" :disabled="countdown > 0 || sending" @click="sendCode"><LoaderCircle v-if="sending" :size="16" class="spin" />{{ countdown > 0 ? `${countdown}s` : '获取验证码' }}</Button></div>
-              <p v-if="sentCode" class="auth-hint" role="status" data-testid="verification-code">验证码：<b>{{ sentCode }}</b>（5 分钟内有效，可直接复制填入）</p>
-            </div>
-            <div v-if="mode === 'login'" class="auth-field">
-              <Label for="auth-username">用户名</Label>
-              <Input id="auth-username" v-model="username" autocomplete="username" placeholder="请输入用户名" />
-            </div>
-            <div class="auth-field">
-              <div class="auth-label-row"><Label for="auth-password">{{ mode === 'forgot' ? '新密码' : '密码' }}</Label><button v-if="mode === 'login'" type="button" class="auth-text-button" @click="switchMode('forgot')">找回账号</button></div>
-              <div class="auth-password"><Input id="auth-password" v-model="password" :type="showPassword ? 'text' : 'password'" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :placeholder="mode === 'login' ? '请输入密码' : '新密码（至少 6 位）'" /><button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :aria-pressed="showPassword" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" /></button></div>
-            </div>
-            <Button type="submit" class="auth-submit" :disabled="loading" :aria-busy="loading"><LoaderCircle v-if="loading" :size="16" class="spin" />{{ mode === 'login' ? '登录' : '重置密码并找回账号' }}<ArrowRight v-if="!loading" :size="16" /></Button>
-            <p v-if="mode === 'login'" class="auth-switch"><span>新用户请使用上方微信注册，自动完成建号与登录。</span></p>
-            <p v-else class="auth-switch"><span>已想起账号？</span><button type="button" class="auth-text-button" @click="switchMode('login')">返回登录</button></p>
-            <p class="auth-support">{{ mode === 'forgot' ? '微信注册账号无需密码；历史邮箱/手机号账号可在此重置，竞赛批量建号请联系管理员。' : '首次参加邀请赛？请使用组织方提供的账号登录。' }}</p>
+
+            <Button type="submit" class="login-submit" :disabled="loading" :aria-busy="loading">
+              <LoaderCircle v-if="loading" class="spin" aria-hidden="true" />
+              {{ mode === 'login' ? '登录' : '重置密码并找回账号' }}
+              <ArrowRight v-if="!loading" aria-hidden="true" />
+            </Button>
+
+            <p v-if="mode === 'login'" class="login-switch">
+              新用户请使用上方微信注册，自动完成建号与登录。
+            </p>
+            <p v-else class="login-switch">
+              已想起账号？
+              <button type="button" class="login-text-button" @click="switchMode('login')">返回登录</button>
+            </p>
+
+            <p class="login-support">
+              {{ mode === 'forgot' ? '微信注册账号无需密码；历史邮箱/手机号账号可在此重置，竞赛批量建号请联系管理员。' : '首次参加邀请赛？请使用组织方提供的账号登录。' }}
+            </p>
           </template>
         </form>
       </section>
-    </main>
-    <footer class="auth-footer"><span>学以致用，知行合一。</span><span>© {{ new Date().getFullYear() }} Yak Academy</span></footer>
-    <!-- 点击火花仅在公开页生效（fixed 画布随组件挂载） -->
-    <ClickSpark />
-  </div>
+    </div>
+  </PublicShell>
 </template>
 
 <style scoped>
-/* 品牌故事区的矩阵雨：铺满左侧栏，文字层压上方。
-   ::before 用面板色向左渐隐雨幕，避免正文压在字符上影响可读性。 */
-.auth-story { position: relative; }
-.auth-story::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--panel) 90%, transparent) 0%, color-mix(in srgb, var(--panel) 76%, transparent) 52%, transparent 82%);
+.login-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
 }
-.auth-rain { position: absolute; inset: 0; z-index: 0; border-radius: inherit; mask-image: radial-gradient(ellipse at 70% 40%, #000 30%, transparent 78%); }
-.auth-story > .eyebrow, .auth-story > h1, .auth-story > p:not(.eyebrow), .auth-story > .auth-signature { position: relative; z-index: 2; }
-.auth-story h1 .cipher-mask { color: var(--accent-foreground); }
-.auth-wechat-block { display: grid; gap: 10px; }
-.auth-wechat { margin-top: 0; }
-.auth-wechat-hint { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
-.auth-divider { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted-foreground); font-size: 12px; }
-.auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--border); }
+
+.login-back:hover {
+  color: var(--text-primary);
+}
+
+.login-back :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.login-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 560px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-overlay);
+  overflow: clip;
+}
+
+.login-story {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-12);
+  background: var(--bg-subtle);
+}
+
+.login-story__badge {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.login-story__title {
+  color: var(--text-primary);
+  font-size: var(--text-display);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.login-story__title span {
+  color: var(--action-primary);
+}
+
+.login-story__text {
+  max-width: 34ch;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: var(--leading-relaxed);
+}
+
+.login-story__points {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.login-story__points li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.login-story__points :deep(svg) {
+  width: 16px;
+  height: 16px;
+  color: var(--action-primary);
+}
+
+.login-form-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10) var(--space-8);
+  background: var(--bg-surface);
+}
+
+.login-form {
+  display: grid;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-form__title {
+  color: var(--text-primary);
+  font-size: var(--text-page);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.login-form__description {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+}
+
+.login-form__error {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--status-danger) 8%, var(--bg-surface));
+  color: var(--status-danger);
+  font-size: var(--text-caption);
+  line-height: var(--leading-normal);
+}
+
+.login-field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.login-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.login-text-button {
+  color: var(--action-subtle-fg);
+  font-size: var(--text-caption);
+  text-underline-offset: 4px;
+}
+
+.login-text-button:hover {
+  text-decoration: underline;
+}
+
+.login-password {
+  position: relative;
+}
+
+.login-password :deep(input) {
+  padding-right: var(--space-12);
+}
+
+.login-password__toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--text-secondary);
+}
+
+.login-password__toggle :deep(svg) {
+  width: 17px;
+  height: 17px;
+}
+
+.login-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.login-submit {
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-2);
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.login-wechat {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.login-wechat__button {
+  margin-top: 0;
+}
+
+.login-wechat__hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+
+.login-hint {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--action-subtle);
+  color: var(--action-subtle-fg);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.login-switch {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: center;
+}
+
+.login-support {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  line-height: var(--leading-relaxed);
+}
+
+.login-recovered {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.login-recovered__icon {
+  width: 28px;
+  height: 28px;
+  color: var(--status-success);
+}
+
+.login-recovered__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.login-recovered__list dt {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.login-recovered__list dd {
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  font-weight: 500;
+}
+
+@media (max-width: 1023px) {
+  .login-grid {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .login-story {
+    padding: var(--space-8);
+  }
+
+  .login-form-area {
+    padding: var(--space-8);
+  }
+}
+
 @media (max-width: 767px) {
-  .auth-rain { opacity: .6; }
+  .login-story {
+    gap: var(--space-3);
+    padding: var(--space-5);
+  }
+
+  .login-story__points {
+    display: none;
+  }
+
+  .login-form-area {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .login-back span {
+    display: none;
+  }
 }
 </style>
