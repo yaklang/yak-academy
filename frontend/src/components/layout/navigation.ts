@@ -99,3 +99,11 @@ export function isNavItemActive(item: NavItem, path: string): boolean {
 export function activeSection(nav: NavSection[], path: string): NavSection | undefined {
   return nav.find((section) => section.items.some((item) => isNavItemActive(item, path)))
 }
+
+export function activeItem(nav: NavSection[], path: string): NavItem | undefined {
+  for (const section of nav) {
+    const item = section.items.find((entry) => isNavItemActive(entry, path))
+    if (item) return item
+  }
+  return undefined
+}

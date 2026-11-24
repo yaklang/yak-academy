@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/sheet'
 import SidebarNav from './SidebarNav.vue'
 import TopBar from './TopBar.vue'
-import { activeSection, isNavItemActive, type NavSection } from './navigation'
+import { activeItem, activeSection, isNavItemActive, type NavSection } from './navigation'
 
 const props = withDefaults(defineProps<{
   nav: NavSection[]
@@ -38,7 +38,7 @@ const displayName = computed(() => auth.user?.username ?? '')
 const roleLabel = computed(() => (auth.user?.global_role === 'admin' ? '管理员' : '学员'))
 const canAdmin = computed(() => auth.user?.global_role === 'admin')
 const modeLabel = computed(() => (adminMode.value ? '管理端' : '学习端'))
-const sectionLabel = computed(() => activeSection(props.nav, route.path)?.label ?? props.nav[0]?.label ?? '')
+const sectionLabel = computed(() => activeItem(props.nav, route.path)?.label ?? activeSection(props.nav, route.path)?.label ?? props.nav[0]?.label ?? '')
 
 const xp = ref<number | null>(null)
 const completedRooms = ref<number | null>(null)

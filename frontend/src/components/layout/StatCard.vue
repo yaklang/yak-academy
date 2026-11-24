@@ -9,6 +9,7 @@ withDefaults(defineProps<{
   hint?: string
   suffix?: string
   icon?: Component
+  valueTestId?: string
   tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
 }>(), {
   tone: 'neutral',
@@ -21,7 +22,7 @@ withDefaults(defineProps<{
       <span class="stat-card__label">{{ label }}</span>
       <component :is="icon" v-if="icon" class="stat-card__icon" aria-hidden="true" />
     </div>
-    <p class="stat-card__value">
+    <p class="stat-card__value" :data-testid="valueTestId">
       {{ value }}<small v-if="suffix" class="stat-card__suffix">{{ suffix }}</small>
     </p>
     <p v-if="hint" class="stat-card__hint">{{ hint }}</p>

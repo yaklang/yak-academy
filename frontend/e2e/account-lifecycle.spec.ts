@@ -18,9 +18,9 @@ test.describe('账号生命周期', () => {
     await page.getByRole('menuitem', { name: '账号信息' }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
     const dialog = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
-    await dialog.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill(E2E.student.password)
+    await dialog.locator('.form-field').filter({ hasText: '当前密码' }).locator('input').fill(E2E.student.password)
     await dialog.getByPlaceholder('至少 6 位').fill('stu-e2e-pass-2')
-    await dialog.locator('.ui-form-item').filter({ hasText: '确认新密码' }).locator('input').fill('stu-e2e-pass-2')
+    await dialog.locator('.form-field').filter({ hasText: '确认新密码' }).locator('input').fill('stu-e2e-pass-2')
     await dialog.getByRole('button', { name: '确认修改' }).click()
 
     // 前端登出回登录页（改密吊销全部旧会话）
@@ -50,9 +50,9 @@ test.describe('账号生命周期', () => {
     await page.getByRole('menuitem', { name: '账号信息' }).click()
     await page.getByRole('button', { name: '修改密码' }).click()
     const d2 = page.locator('[data-slot=dialog-content]', { hasText: '修改密码' })
-    await d2.locator('.ui-form-item').filter({ hasText: '当前密码' }).locator('input').fill('stu-e2e-pass-2')
+    await d2.locator('.form-field').filter({ hasText: '当前密码' }).locator('input').fill('stu-e2e-pass-2')
     await d2.getByPlaceholder('至少 6 位').fill(E2E.student.password)
-    await d2.locator('.ui-form-item').filter({ hasText: '确认新密码' }).locator('input').fill(E2E.student.password)
+    await d2.locator('.form-field').filter({ hasText: '确认新密码' }).locator('input').fill(E2E.student.password)
     await d2.getByRole('button', { name: '确认修改' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
     // 恢复后验证初始密码可登录（下个用例与后续 spec 依赖它）
