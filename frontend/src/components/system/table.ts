@@ -1,5 +1,5 @@
 import { computed, defineComponent, h, ref, type PropType, type SlotsType, type VNode } from 'vue'
-import { Inbox } from '@lucide/vue'
+import { Inbox, ArrowDown, ArrowUp, ChevronsUpDown } from '@lucide/vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -13,7 +13,7 @@ type ColumnSlot = (scope: { row: any; $index: number; column: Record<string, any
 
 export const UiTableColumn = defineComponent({
   name: 'UiTableColumn',
-  props: { prop: String, label: String, type: String, width: [Number, String], minWidth: [Number, String], fixed: [String, Boolean], selectable: Function, showOverflowTooltip: Boolean, align: String },
+  props: { prop: String, label: String, type: String, width: [Number, String], minWidth: [Number, String], fixed: [String, Boolean], selectable: Function, showOverflowTooltip: Boolean, align: String, sortable: Boolean },
   slots: Object as SlotsType<{ default: ColumnSlot; header: ColumnSlot }>,
   setup() { return () => null },
 })
@@ -35,8 +35,25 @@ function isTruncated(settings: Record<string, any>) {
 
 export const UiTable = defineComponent({
   name: 'UiTable', inheritAttrs: false,
-  props: { data: { type: Array as PropType<any[]>, default: () => [] }, rowKey: [String, Function], rowClassName: [String, Function], emptyText: String, maxHeight: [Number, String], border: Boolean, stripe: Boolean, size: String, height: [Number, String], loading: Boolean, loadingRows: { type: Number, default: 5 } },
-  emits: ['selection-change', 'row-click'],
+  props: {
+    data: { type: Array as PropType<any[]>, default: () => [] },
+    rowKey: [String, Function],
+    rowClassName: [String, Function],
+    emptyText: String,
+    maxHeight: [Number, String],
+    border: Boolean,
+    stripe: Boolean,
+    size: String,
+    height: [Number, String],
+    loading: Boolean,
+    loadingRows: { type: Number, default: 5 },
+    // 无障碍与密度：选择框标签按页面语义生成；可点击行支持键盘激活。
+    selectionLabel: { type: String, default: '选择本页全部' },
+    rowClickable: Boolean,
+    stickyHeader: Boolean,
+    sort: Object as PropType<{ prop: string; order: 'asc' | 'desc' } | null>,
+  },
+  emits: ['selection-change', 'row-click', 'sort-change'],
   setup(props, { attrs, slots, emit, expose }) {
     const selected = ref(new Set<unknown>())
     const keyFor = (row: any) => typeof props.rowKey === 'function' ? props.rowKey(row) : props.rowKey ? row[props.rowKey] : row
@@ -80,27 +97,45 @@ export const UiTable = defineComponent({
         refreshing ? h('div', { class: 'table-loading-note', role: 'status' }, '正在刷新…') : null,
         h(Table as any, { 'aria-label': attrs['aria-label'] || '数据列表', class: 'text-sm' }, {
           default: () => [
-            h(TableHeader, {}, { default: () => h(TableRow, { class: 'hover:bg-transparent' }, { default: () => columns.map(column => {
+            h(TableHeader, { class: props.stickyHeader ? 'sticky top-0 z-20 bg-muted' : undefined }, { default: () => h(TableRow, { class: 'hover:bg-transparent' }, { default: () => columns.map(column => {
               const settings = column.props ?? {}
               const selectableRows = settings.type === 'selection' ? props.data.filter((row, index) => canSelect(column, row, index)) : []
               const checkedRows = selectableRows.filter(row => selected.value.has(keyFor(row)))
-              return h(TableHead, { scope: 'col', class: cn('h-11 whitespace-nowrap bg-muted/50 px-4 font-medium text-muted-foreground', fixedClass(column)), style: columnStyle(column) }, {
-                default: () => settings.type === 'selection' ? h(Checkbox as any, {
-                  'aria-label': '选择本页全部题目', disabled: selectableRows.length === 0,
-                  modelValue: checkedRows.length === 0 ? false : checkedRows.length === selectableRows.length ? true : 'indeterminate',
-                  'onUpdate:modelValue': (value: boolean | string) => {
-                    const next = new Set(selected.value)
-                    for (const row of selectableRows) { if (value === true) next.add(keyFor(row)); else next.delete(keyFor(row)) }
-                    selected.value = next
-                    emit('selection-change', props.data.filter(row => next.has(keyFor(row))))
-                  },
-                }) : slotOf(column, 'header')?.({ row: null, $index: -1, column: settings }) ?? settings.label,
-              })
+              const sortOrder = settings.sortable && settings.prop && props.sort && props.sort.prop === settings.prop ? props.sort.order : 'none'
+              const headerSlot = () => slotOf(column, 'header')?.({ row: null, $index: -1, column: settings }) ?? settings.label
+              const headerContent = settings.type === 'selection' ? h(Checkbox as any, {
+                'aria-label': props.selectionLabel, disabled: selectableRows.length === 0,
+                modelValue: checkedRows.length === 0 ? false : checkedRows.length === selectableRows.length ? true : 'indeterminate',
+                'onUpdate:modelValue': (value: boolean | string) => {
+                  const next = new Set(selected.value)
+                  for (const row of selectableRows) { if (value === true) next.add(keyFor(row)); else next.delete(keyFor(row)) }
+                  selected.value = next
+                  emit('selection-change', props.data.filter(row => next.has(keyFor(row))))
+                },
+              }) : settings.sortable && settings.prop ? h('button', {
+                type: 'button',
+                class: 'inline-flex items-center gap-1 rounded-sm text-left hover:text-foreground focus-visible:outline-none',
+                onClick: () => emit('sort-change', { prop: settings.prop, order: sortOrder === 'asc' ? 'desc' : 'asc' }),
+              }, [
+                headerSlot(),
+                h(sortOrder === 'none' ? ChevronsUpDown : sortOrder === 'asc' ? ArrowUp : ArrowDown, { class: 'size-3.5 shrink-0', 'aria-hidden': true }),
+              ]) : headerSlot()
+              return h(TableHead, {
+                scope: 'col',
+                'aria-sort': settings.sortable ? (sortOrder === 'asc' ? 'ascending' : sortOrder === 'desc' ? 'descending' : 'none') : undefined,
+                class: cn('h-11 whitespace-nowrap bg-muted/50 px-4 font-medium text-muted-foreground', fixedClass(column)), style: columnStyle(column),
+              }, { default: () => headerContent })
             }) }) }),
             h(TableBody, {}, { default: () => showSkeleton ? skeletonRows : props.data.length ? props.data.map((row, index) => h(TableRow, {
               key: keyFor(row) as any, 'data-state': selected.value.has(keyFor(row)) ? 'selected' : undefined,
-              class: cn('ui-data-row', typeof props.rowClassName === 'function' ? props.rowClassName({ row, rowIndex: index }) : props.rowClassName),
+              tabindex: props.rowClickable ? 0 : undefined,
+              class: cn('ui-data-row', props.rowClickable && 'cursor-pointer', typeof props.rowClassName === 'function' ? props.rowClassName({ row, rowIndex: index }) : props.rowClassName),
               onClick: () => emit('row-click', row),
+              onKeydown: props.rowClickable ? (event: KeyboardEvent) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                emit('row-click', row)
+              } : undefined,
             }, { default: () => columns.map(column => {
               const settings = column.props ?? {}
               const truncate = isTruncated(settings) && settings.type == null
@@ -112,7 +147,7 @@ export const UiTable = defineComponent({
                   'onUpdate:modelValue': (value: boolean | string) => changeSelection(row, value === true),
                 }) : settings.type === 'index' ? index + 1 : slotOf(column, 'default')?.({ row, $index: index, column: settings }) ?? cellValue(row, settings.prop),
               })
-            }) })) : h(TableRow, {}, { default: () => h(TableCell, { colspan: Math.max(1, columns.length), class: 'h-36 text-center' }, { default: () => h('div', { class: 'table-empty', 'data-slot': 'table-empty' }, [h(Inbox, { class: 'size-6 text-muted-foreground/60', 'aria-hidden': true }), h('p', {}, props.emptyText || '暂无数据')]) }) }) }),
+            }) })) : h(TableRow, {}, { default: () => h(TableCell, { colspan: Math.max(1, columns.length), class: 'h-36 text-center' }, { default: () => slots.empty?.() ?? h('div', { class: 'table-empty', 'data-slot': 'table-empty' }, [h(Inbox, { class: 'size-6 text-muted-foreground/60', 'aria-hidden': true }), h('p', {}, props.emptyText || '暂无数据')]) }) }) }),
           ],
         }),
       ])

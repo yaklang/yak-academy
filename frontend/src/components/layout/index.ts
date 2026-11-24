@@ -1,5 +1,6 @@
 export { default as PageHeader } from './PageHeader.vue'
 export { default as PageTabs } from './PageTabs.vue'
+export { default as DataTablePanel } from './DataTablePanel.vue'
 export { default as EmptyState } from './EmptyState.vue'
 export { default as StatCard } from './StatCard.vue'
 export { default as MetricStrip } from './MetricStrip.vue'

@@ -921,10 +921,28 @@
 
 .ui-data-table {
   width: 100%;
+  overflow-x: auto;
+}
+
+.ui-data-table table {
+  min-width: 100%;
+}
+
+.ui-data-row {
+  transition: background-color 120ms ease;
+}
+
+.ui-data-row:hover {
+  background: var(--bg-hover);
+}
+
+.ui-data-row[data-state='selected'] {
+  background: var(--action-subtle);
 }
 
 .ui-data-table [data-slot="table-container"] {
   max-width: 100%;
+  overflow-x: auto;
 }
 
 .ui-data-table th {
