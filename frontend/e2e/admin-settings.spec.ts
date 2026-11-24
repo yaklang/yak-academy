@@ -25,8 +25,7 @@ test.describe('系统设置', () => {
     await page.getByLabel('SMTP 用户名').fill('mailer@example.com')
     await page.getByLabel('SMTP 密码 / API Key').fill('e2e-smtp-secret')
     await page.getByLabel('发件人').fill('Yak Academy <no-reply@example.com>')
-    await page.getByLabel('TLS 模式').click()
-    await page.getByRole('option', { name: '隐式 TLS（465）' }).click()
+    await page.getByLabel('TLS 模式').selectOption('implicit')
     await page.getByRole('switch', { name: '启用邮箱验证码投递' }).click()
     await page.getByRole('button', { name: '保存配置' }).click()
 

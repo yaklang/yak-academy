@@ -107,3 +107,58 @@ export function statusMeta(kind: StatusKind, value?: string | null): StatusMeta 
 export function statusLabel(kind: StatusKind, value?: string | null): string {
   return statusMeta(kind, value).label
 }
+
+// 管理端审计动作与对象：后端存英文动作码，界面只显示中文，
+// 未知动作回退到原码以便排障（不是教学内容，不给学员看）。
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  'content.upload': '上传教程包',
+  'content.delete': '删除教程包',
+  'content.publish': '发布教程包',
+  'content.archive': '归档教程包',
+  'content.rollback': '回滚教程包',
+  'challenge.visibility': '调整题目可见性',
+  'challenge.import': '导入题目',
+  'challenge.package_import': '导入题目包',
+  'challenge.delete': '删除题目',
+  'attachment.upload': '上传附件',
+  'attachment.delete': '删除附件',
+  'builtin.import': '导入内置题集',
+  'builtin.image_build': '构建内置镜像',
+  'engine.download': '下载判题引擎',
+  'user.create': '创建账号',
+  'user.roles': '调整账号角色',
+  'user.reset_password': '重置密码',
+  'competition.create': '创建竞赛',
+  'competition.update': '更新竞赛',
+  'competition.end': '结束竞赛',
+  'competition.delete': '删除竞赛',
+  'competition.bind': '绑定题目',
+  'competition.unbind': '解绑题目',
+  'competition.import_participants': '导入参赛者',
+  'topic.update': '更新专题',
+  'instance.destroy': '销毁实例',
+  'backup.create': '创建备份',
+}
+
+const AUDIT_TARGET_LABELS: Record<string, string> = {
+  content: '教程包',
+  package: '教程包',
+  challenge: '题目',
+  attachment: '附件',
+  user: '账号',
+  competition: '竞赛',
+  topic: '专题',
+  instance: '实验实例',
+  backup: '备份',
+  system: '系统',
+}
+
+export function auditActionLabel(value?: string | null): string {
+  return value ? AUDIT_ACTION_LABELS[value] ?? value : '未知操作'
+}
+
+export function auditTargetLabel(value?: string | null): string {
+  return value ? AUDIT_TARGET_LABELS[value] ?? value : '对象'
+}
+
+export const AUDIT_ACTION_OPTIONS = Object.entries(AUDIT_ACTION_LABELS).map(([value, label]) => ({ value, label }))

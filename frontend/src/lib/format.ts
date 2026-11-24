@@ -32,3 +32,12 @@ export function formatTime(value: string | null | undefined): string {
   const date = parse(value)
   return date ? timeFormat.format(date) : '-'
 }
+
+// 文件大小：管理端备份/附件/镜像共用同一种写法，避免 KB/MB 精度各页不同。
+export function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes < 0) return '—'
+  if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(2)} GB`
+  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(2)} MB`
+  if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(1)} KB`
+  return `${bytes} B`
+}
