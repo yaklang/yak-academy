@@ -6,7 +6,13 @@ export interface VerificationCodeResponse { ok: boolean; retry_after?: number; c
 // 找回密码的账号标识：历史账号邮箱或旧账号手机号，必须二选一。
 export interface AccountIdentifier { email?: string; phone?: string }
 // 微信网页授权：status 判断部署是否可用；start 返回跳转地址；callback 换应用 JWT。
-export interface WechatStatus { enabled: boolean; mock: boolean; mode: '' | 'official_account' | 'open_platform' }
+export interface WechatStatus {
+  enabled: boolean
+  mock: boolean
+  // Mock 模式是否提供管理员模拟登录（需显式配置既有 admin 账号）。
+  mock_admin: boolean
+  mode: '' | 'official_account' | 'open_platform'
+}
 export interface WechatStartResponse { authorize_url: string }
 export interface WechatCallbackResponse extends TokenResponse { redirect: string }
 // account_code：学号式账号编码（YA{YY}-{NNNNN}，建号时按年分配；旧库迁移行可能为空串）。
@@ -385,8 +391,14 @@ export const authApi = {
   // 微信是唯一自助注册入口：status → start（拿授权地址，整页跳转）→
   // 微信回调到登录页后 callback 换应用 token（首次自动建号）。
   wechatStatus: () => http.get<WechatStatus>('/auth/wechat/status'),
-  wechatStart: (redirect?: string) =>
-    http.get<WechatStartResponse>(`/auth/wechat/start${redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''}`),
+  // as=admin 仅在 Mock 模式且服务端配置了管理员模拟账号时有效。
+  wechatStart: (redirect?: string, asAdmin = false) => {
+    const params = new URLSearchParams()
+    if (redirect) params.set('redirect', redirect)
+    if (asAdmin) params.set('as', 'admin')
+    const query = params.toString()
+    return http.get<WechatStartResponse>(`/auth/wechat/start${query ? `?${query}` : ''}`)
+  },
   wechatCallback: (code: string, state: string) =>
     http.post<WechatCallbackResponse>('/auth/wechat/callback', { code, state }),
   // 找回密码发码（历史账号）：email / phone 二选一；限频返回 200 + retry_after。

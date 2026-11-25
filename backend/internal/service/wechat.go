@@ -308,7 +308,10 @@ type wechatStateSession struct {
 	Nonce      string `json:"n"`
 	Redirect   string `json:"r"`
 	MockOpenID string `json:"m,omitempty"`
-	ExpiresAt  int64  `json:"e"`
+	// MockAdmin 为真时回调登录配置的管理员账号，而不是按 MockOpenID 建号。
+	// 只会在 Mock 模式且显式配置 mockAdminUsername 时写入并签名。
+	MockAdmin bool  `json:"a,omitempty"`
+	ExpiresAt int64 `json:"e"`
 }
 
 // WechatStartResult 发起微信授权的结果：前端跳转 authorize_url；state_cookie
@@ -327,12 +330,16 @@ type WechatAuthService struct {
 	users       repo.UserRepo
 	oauth       *WechatOAuthClient
 	stateSecret []byte
-	now         func() time.Time
+	// mockAdminUsername 仅用于 Mock 管理员模拟登录：指向一个既有 admin 账号。
+	// 为空 = 不提供管理员模拟入口；真实微信模式永远不会使用。
+	mockAdminUsername string
+	now               func() time.Time
 }
 
-func NewWechatAuthService(users repo.UserRepo, oauth *WechatOAuthClient, stateSecret []byte) *WechatAuthService {
+func NewWechatAuthService(users repo.UserRepo, oauth *WechatOAuthClient, stateSecret []byte, mockAdminUsername string) *WechatAuthService {
 	return &WechatAuthService{
-		users: users, oauth: oauth, stateSecret: stateSecret, now: time.Now,
+		users: users, oauth: oauth, stateSecret: stateSecret,
+		mockAdminUsername: strings.TrimSpace(mockAdminUsername), now: time.Now,
 	}
 }
 
@@ -345,9 +352,17 @@ func (s *WechatAuthService) Mode() string {
 	return s.oauth.Mode()
 }
 
+// MockAdminEnabled Mock 模式是否提供管理员模拟登录入口。必须同时满足：
+// Mock 开启 + 显式配置了管理员账号名。绝不按角色推断或默认提权。
+func (s *WechatAuthService) MockAdminEnabled() bool {
+	return s != nil && s.Mock() && s.mockAdminUsername != ""
+}
+
 // Start 发起微信授权：生成随机 nonce 与签名 state 会话；redirect 只允许站内
 // 绝对路径（防 open redirect）。Mock 模式直接跳回前端登录页。
-func (s *WechatAuthService) Start(redirect, mockID string) (WechatStartResult, error) {
+// asAdmin 仅 Mock 模式 + 配置了 mockAdminUsername 时有效：授权回调后登录
+// 该既有管理员账号，而不是按微信身份建 student 账号。
+func (s *WechatAuthService) Start(redirect, mockID string, asAdmin bool) (WechatStartResult, error) {
 	if !s.Enabled() {
 		return WechatStartResult{}, errNotImplemented("wechat login not configured")
 	}
@@ -358,15 +373,18 @@ func (s *WechatAuthService) Start(redirect, mockID string) (WechatStartResult, e
 	if err != nil {
 		return WechatStartResult{}, err
 	}
+	if asAdmin && !s.MockAdminEnabled() {
+		return WechatStartResult{}, fmt.Errorf("%w: mock admin login is not enabled", ErrValidation)
+	}
 	nonce, err := randomHex(32)
 	if err != nil {
 		return WechatStartResult{}, err
 	}
 	session := wechatStateSession{
-		Nonce: nonce, Redirect: redirect,
+		Nonce: nonce, Redirect: redirect, MockAdmin: asAdmin,
 		ExpiresAt: s.now().Add(WechatStateTTL).Unix(),
 	}
-	if s.Mock() {
+	if s.Mock() && !asAdmin {
 		mockID = strings.TrimSpace(mockID)
 		if mockID == "" {
 			mockID, err = randomHex(12)
@@ -409,6 +427,9 @@ func (s *WechatAuthService) Authenticate(ctx context.Context, code, state, state
 	}
 	if subtle.ConstantTimeCompare([]byte(session.Nonce), []byte(state)) != 1 {
 		return nil, "", ErrWechatStateInvalid
+	}
+	if session.MockAdmin {
+		return s.authenticateMockAdmin(ctx, session.Redirect)
 	}
 	var identity WechatIdentity
 	if s.Mock() {
@@ -470,6 +491,25 @@ func (s *WechatAuthService) parseState(value string) (wechatStateSession, error)
 		return wechatStateSession{}, ErrWechatStateInvalid
 	}
 	return session, nil
+}
+
+// authenticateMockAdmin 登录配置的既有管理员账号。只在 Mock 模式 + 显式
+// 配置了 mockAdminUsername 时可达；运行期再次校验账号存在且确为 admin，
+// 避免配置漂移（账号被降级/改名）后静默拿到管理员 token。
+func (s *WechatAuthService) authenticateMockAdmin(ctx context.Context, redirect string) (*model.User, string, error) {
+	if !s.MockAdminEnabled() {
+		return nil, "", ErrWechatStateInvalid
+	}
+	user, err := s.users.FindByUsername(ctx, s.mockAdminUsername)
+	if err != nil {
+		log.Printf("wechat mock admin account %q unavailable: %v", s.mockAdminUsername, err)
+		return nil, "", ErrWechatAuthFailed
+	}
+	if user.GlobalRole.Normalize() != model.GlobalRoleAdmin {
+		log.Printf("wechat mock admin account %q is not an admin", s.mockAdminUsername)
+		return nil, "", ErrWechatAuthFailed
+	}
+	return user, redirect, nil
 }
 
 // findOrCreateUser 按 openid 优先、unionid 次之查找；都没有则创建 student 账号。

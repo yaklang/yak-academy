@@ -30,6 +30,7 @@ description: yak-academy 两档角色权限模型约束。涉及用户、角色�
 | 竞赛广场（GET /competitions，仅公开赛）、公开赛自助报名（POST /competitions/{id}/register，幂等）与入场 | student（登录即可） |
 | 找回密码/找回账号（/auth/password-reset*，仅历史邮箱/手机号账号；返回用户名与账号编码） | 公开（验证码即凭证） |
 | 微信注册/登录（/auth/wechat/status|start|callback，首次授权自动建 student 账号） | 公开（state Cookie 防 CSRF） |
+| Mock 管理员模拟登录（start?as=admin，仅 Mock + 显式配置既有 admin 账号；生产严格模式禁止） | 公开（受控开发/演示专用，仍然必须显式开启） |
 | 环境检测点回调（容器内 checker） | 公开（checkpoint token 鉴权） |
 | 上传/发布教程包、题目管理、容器、用户管理（GET /admin/users 过滤画像、POST /admin/users/{id}/reset-password 重置密码）、系统设置（SMTP 配置读写与测试） | admin |
 | 竞赛管理（创建选 public/invitational、参赛者导入与一键生成账号——仅邀请赛） | admin |

@@ -4,7 +4,7 @@
 // 仅服务历史邮箱/手机号账号。页面为静态品牌排版，不加载装饰动画。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, BookOpen, Check, Eye, EyeOff, Flag, LoaderCircle, QrCode, ScanLine } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, BookOpen, Check, Eye, EyeOff, Flag, LoaderCircle, QrCode, ScanLine, ShieldCheck } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,6 +41,11 @@ const recovered = ref<{ username: string; account_code: string } | null>(null)
 
 // 微信登录状态：未配置时按钮禁用并提示管理员；本地/E2E mock 也可用。
 const wechatAvailable = ref(false)
+const wechatMock = ref(false)
+// Mock 管理员入口：服务端显式配置了既有 admin 账号时才展示。
+const wechatMockAdmin = ref(false)
+// 正在发起的是哪种身份登录（决定按钮文案与 spinner 位置）。
+const wechatRole = ref<'student' | 'admin'>('student')
 const wechatChecking = ref(true)
 const wechatLoading = ref(false)
 const wechatCallbackPending = ref(false)
@@ -96,9 +101,14 @@ function switchMode(m: 'login' | 'forgot') {
 
 async function checkWechat() {
   try {
-    wechatAvailable.value = (await authApi.wechatStatus()).enabled
+    const status = await authApi.wechatStatus()
+    wechatAvailable.value = status.enabled
+    wechatMock.value = status.mock
+    wechatMockAdmin.value = status.mock_admin
   } catch {
     wechatAvailable.value = false
+    wechatMock.value = false
+    wechatMockAdmin.value = false
   } finally {
     wechatChecking.value = false
   }
@@ -125,15 +135,18 @@ async function handleWechatCallback() {
   }
 }
 
-async function startWechat() {
+async function startWechat(asAdmin = false) {
   formError.value = ''
   if (!wechatAvailable.value) {
     formError.value = '微信登录暂未配置，请联系管理员'
     return
   }
+  wechatRole.value = asAdmin ? 'admin' : 'student'
   wechatLoading.value = true
   try {
-    const resp = await authApi.wechatStart(redirect.value ?? '/learn')
+    // Mock 管理员入口登录既有 admin 账号；普通入口仍按微信身份建学员账号。
+    const target = redirect.value ?? (asAdmin ? '/admin' : '/learn')
+    const resp = await authApi.wechatStart(target, asAdmin)
     // 外部授权页必须整页跳转（fetch 无法携带微信登录态）；回调由服务端
     // 302 回前端登录页，登录页再调用 callback 换 token。
     window.location.assign(resp.authorize_url)
@@ -281,14 +294,33 @@ async function submit() {
                 class="login-submit login-wechat__button"
                 :disabled="wechatChecking || wechatLoading || wechatCallbackPending || !wechatAvailable"
                 :aria-busy="wechatLoading || wechatCallbackPending"
-                @click="startWechat"
+                @click="startWechat()"
               >
                 <LoaderCircle v-if="wechatLoading || wechatCallbackPending" class="spin" aria-hidden="true" />
                 <QrCode v-else aria-hidden="true" />
-                {{ wechatCallbackPending ? '正在完成微信登录…' : wechatChecking ? '正在检查微信登录…' : wechatLoading ? '正在跳转微信…' : '微信扫码注册 / 登录' }}
+                {{ wechatCallbackPending ? '正在完成微信登录…' : wechatChecking ? '正在检查微信登录…' : wechatLoading ? '正在跳转…' : wechatMock ? '模拟微信登录（学员）' : '微信扫码注册 / 登录' }}
+              </Button>
+              <Button
+                v-if="wechatMockAdmin"
+                type="button"
+                variant="outline"
+                class="login-submit login-wechat__admin"
+                :disabled="wechatChecking || wechatLoading || wechatCallbackPending"
+                :aria-busy="wechatLoading && wechatRole === 'admin'"
+                @click="startWechat(true)"
+              >
+                <LoaderCircle v-if="wechatLoading && wechatRole === 'admin'" class="spin" aria-hidden="true" />
+                <ShieldCheck v-else aria-hidden="true" />
+                {{ wechatLoading && wechatRole === 'admin' ? '正在以管理员身份登录…' : '以管理员身份模拟登录' }}
               </Button>
               <p v-if="!wechatChecking && !wechatAvailable" class="login-wechat__hint" role="status">
                 微信登录暂未配置，请联系管理员。
+              </p>
+              <p v-else-if="wechatMock && wechatMockAdmin" class="login-wechat__hint">
+                本地模拟登录，不会访问微信：学员入口自动建号，管理员入口使用已配置的管理员账号。
+              </p>
+              <p v-else-if="wechatMock" class="login-wechat__hint">
+                本地模拟登录，不会访问微信；首次登录会自动创建学员账号。
               </p>
               <p v-else class="login-wechat__hint">
                 首次使用微信会自动创建账号，无需邮箱/手机号或密码。
@@ -608,7 +640,8 @@ async function submit() {
   gap: var(--space-2);
 }
 
-.login-wechat__button {
+.login-wechat__button,
+.login-wechat__admin {
   margin-top: 0;
 }
 

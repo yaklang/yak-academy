@@ -15,6 +15,7 @@ import (
 	"github.com/yaklang/yak-academy/backend/internal/config"
 	"github.com/yaklang/yak-academy/backend/internal/db"
 	"github.com/yaklang/yak-academy/backend/internal/eventbus"
+	"github.com/yaklang/yak-academy/backend/internal/model"
 	"github.com/yaklang/yak-academy/backend/internal/repo"
 	"github.com/yaklang/yak-academy/backend/internal/safego"
 	"github.com/yaklang/yak-academy/backend/internal/service"
@@ -104,6 +105,20 @@ func main() {
 	authSvc.SetRevocationRepo(repo.NewTokenRevocationRepo(gdb))
 	if err := authSvc.EnsureAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Fatalf("ensure admin: %v", err)
+	}
+	// Mock 管理员入口是显式提权：必须同时开启 Mock，且账号已存在且确为 admin。
+	// 配错直接拒绝启动，避免“登录后才发现不是管理员”或把普通账号提权。
+	if cfg.WechatMockAdminUsername != "" {
+		if !cfg.WechatMock {
+			log.Fatalf("ACADEMY_WECHAT_MOCK_ADMIN_USERNAME requires ACADEMY_WECHAT_MOCK=1")
+		}
+		mockAdmin, err := userRepo.FindByUsername(ctx, cfg.WechatMockAdminUsername)
+		if err != nil {
+			log.Fatalf("wechat mock admin account %q: %v", cfg.WechatMockAdminUsername, err)
+		}
+		if mockAdmin.GlobalRole.Normalize() != model.GlobalRoleAdmin {
+			log.Fatalf("wechat mock admin account %q is not an admin", cfg.WechatMockAdminUsername)
+		}
 	}
 	challengeSvc := service.NewChallengeService(challengeRepo, submissionRepo, eventRepo, scoreRepo, bus)
 	challengeSvc.SetAttachmentStore(repo.NewChallengeAttachmentRepo(gdb), cfg.AttachmentsDir)
@@ -250,9 +265,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("wechat oauth: %v", err)
 	}
-	wechatSvc := service.NewWechatAuthService(userRepo, wechatOAuth, []byte(cfg.JWTSecret))
+	wechatSvc := service.NewWechatAuthService(userRepo, wechatOAuth, []byte(cfg.JWTSecret), cfg.WechatMockAdminUsername)
 	if wechatOAuth.Enabled() {
-		log.Printf("wechat login: enabled (mode=%s mock=%v)", wechatOAuth.Mode(), wechatOAuth.Mock())
+		log.Printf("wechat login: enabled (mode=%s mock=%v mock_admin=%v)",
+			wechatOAuth.Mode(), wechatOAuth.Mock(), wechatSvc.MockAdminEnabled())
 	} else {
 		log.Println("wechat login: disabled (set ACADEMY_WECHAT_APP_ID/SECRET/REDIRECT_URL; self-service registration unavailable)")
 	}

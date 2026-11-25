@@ -98,6 +98,8 @@ export default defineConfig({
         // 微信是唯一自助注册入口：E2E 走本地 mock（不访问微信），授权页
         // 直接回跳前端登录页，登录页再把 code/state 交回后端建号/登录。
         ACADEMY_WECHAT_MOCK: '1',
+        // Mock 管理员模拟登录绑定到 global-setup 播种的 admin 账号。
+        ACADEMY_WECHAT_MOCK_ADMIN_USERNAME: 'admin',
         ACADEMY_WECHAT_REDIRECT_URL: `${baseURL}/login`,
         ACADEMY_PUBLIC_URL: apiURL,
         // 实例 endpoint 对外主机名（docker project）：localhost 而非 127.0.0.1，
