@@ -285,11 +285,14 @@ func (h *Handlers) respondCodeSent(w http.ResponseWriter, code string, retryAfte
 func (h *Handlers) wechatStatus(w http.ResponseWriter, _ *http.Request) {
 	enabled := h.Wechat != nil && h.Wechat.Enabled()
 	mock := h.Wechat != nil && h.Wechat.Mock()
+	mockAdmin := h.Wechat != nil && h.Wechat.MockAdminEnabled()
 	mode := ""
 	if h.Wechat != nil {
 		mode = h.Wechat.Mode()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "mock": mock, "mode": mode})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": enabled, "mock": mock, "mock_admin": mockAdmin, "mode": mode,
+	})
 }
 
 // wechatStart 发起微信授权：返回 authorize_url，前端整页跳转；state 写
@@ -307,7 +310,12 @@ func (h *Handlers) wechatStart(w http.ResponseWriter, req *http.Request) {
 			mockID = cookie.Value
 		}
 	}
-	result, err := h.Wechat.Start(req.URL.Query().Get("redirect"), mockID)
+	as := strings.TrimSpace(req.URL.Query().Get("as"))
+	if as != "" && as != "admin" {
+		writeError(w, errValidation)
+		return
+	}
+	result, err := h.Wechat.Start(req.URL.Query().Get("redirect"), mockID, as == "admin")
 	if err != nil {
 		mapError(w, err)
 		return

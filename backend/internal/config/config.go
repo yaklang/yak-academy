@@ -109,6 +109,10 @@ type Config struct {
 	WechatScope string
 	// WechatMock 本地/E2E 模拟微信回调（不访问微信，直接建号）；严格模式禁止。
 	WechatMock bool
+	// WechatMockAdminUsername Mock 模式下的管理员模拟登录账号：必须是已存在
+	// 的 admin 账号（通常即 ACADEMY_ADMIN_USERNAME）。为空 = 不提供管理员
+	// 模拟入口；非 Mock 或严格模式下设置会被拒绝。仅限受控的开发/演示环境。
+	WechatMockAdminUsername string
 
 	// Strict 生产严格模式（ACADEMY_STRICT=1）：启动时拒绝开发默认/弱凭据
 	// （StrictViolations）。compose 部署已用 :? 强制变量存在，但显式设置
@@ -195,8 +199,10 @@ func Load() *Config {
 		WechatMode:           getenv("ACADEMY_WECHAT_MODE", "official_account"),
 		WechatScope:          getenv("ACADEMY_WECHAT_SCOPE", ""),
 		WechatMock:           getenvBool("ACADEMY_WECHAT_MOCK"),
-		Strict:               getenvBool("ACADEMY_STRICT"),
-		WriteupsStoreKind:    getenv("ACADEMY_WRITEUPS_STORE", "fs"),
+		// Mock 管理员入口是显式绑定：只有配置了账号名才启用，绝不默认提权。
+		WechatMockAdminUsername: strings.TrimSpace(getenv("ACADEMY_WECHAT_MOCK_ADMIN_USERNAME", "")),
+		Strict:                  getenvBool("ACADEMY_STRICT"),
+		WriteupsStoreKind:       getenv("ACADEMY_WRITEUPS_STORE", "fs"),
 		WriteupsS3: S3Options{
 			Endpoint:  os.Getenv("ACADEMY_WRITEUPS_S3_ENDPOINT"),
 			Region:    getenv("ACADEMY_WRITEUPS_S3_REGION", "us-east-1"),

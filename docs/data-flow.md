@@ -152,7 +152,7 @@ POST /challenges/{slug}/hints/{hintId}/unlock
 FE(未登录)              API                    wechat SVC          repo/DB
    │  GET /auth/wechat/status                                        │
    ├──────────────────────────────────→│ enabled/mock/mode（未配置 → 前端  │
-   │  200 {enabled, mock, mode}         │ 禁用按钮并提示联系管理员）          │
+   │  200 {enabled,mock,mock_admin,mode}│ 禁用按钮并提示联系管理员）          │
    │←──────────────────────────────────┤                                   │
    │  GET /auth/wechat/start?redirect=/profile                         │
    ├──────────────────────────────────→│ 随机 nonce + HMAC-SHA256 签名       │
@@ -180,6 +180,7 @@ FE(未登录)              API                    wechat SVC          repo/DB
 要点：
 - **两种官方模式**：`official_account`（公众号网页授权 `snsapi_userinfo`，可用免费测试号联调）与 `open_platform`（开放平台网站应用扫码 `snsapi_login`）；`ACADEMY_WECHAT_MODE` 选择，空配置 = 未启用。
 - **Mock 仅本地/E2E**：`ACADEMY_WECHAT_MOCK=1` 直接回跳登录页并建号，不访问微信；`ACADEMY_STRICT=1` 时该开关必须关闭。`ACADEMY_WECHAT_REDIRECT_URL` 必须与微信后台配置的授权回调域一致，指向**前端登录页**。
+- **Mock 管理员入口（显式提权，默认关闭）**：`ACADEMY_WECHAT_MOCK_ADMIN_USERNAME` 绑定一个既有 admin 账号后，登录页多出「以管理员身份模拟登录」；`start?as=admin` 在签名 state 中记录该意图，回调直接登录绑定账号（再次校验其确为 admin），不创建学员账号。未配置、非 Mock、账号不存在/被降级时一律拒绝；生产严格模式禁止 Mock。
 - **state 防 CSRF**：随机 nonce + HMAC-SHA256 签名会话存 HttpOnly + SameSite=Lax Cookie，10 分钟有效；回调时恒时比对并立即清除（重放/伪造一律 401）。JWT 只经 JSON 响应体返回，避免 token 泄漏进日志/Referer。
 - **账号归并**：openid 优先（唯一索引，空值不占用），unionid 兜底（同主体多应用互通）；用户名由微信昵称生成，重名追加稳定后缀，昵称不足 3 字符时补后缀而非丢弃。
 - **无密码账号**：`PasswordHash` 为空，`GET /me` 返回 `password_set=false`；密码登录 401、本人改密 422，资料页隐藏改密入口并显示「微信登录」标签。管理员重置密码后即可密码登录。

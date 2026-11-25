@@ -56,6 +56,17 @@ func TestVerificationShowCodeDefault(t *testing.T) {
 	}
 }
 
+func TestLoadWechatMockAdminUsername(t *testing.T) {
+	t.Setenv("ACADEMY_WECHAT_MOCK_ADMIN_USERNAME", "  admin  ")
+	if got := Load().WechatMockAdminUsername; got != "admin" {
+		t.Fatalf("WechatMockAdminUsername = %q, want trimmed admin", got)
+	}
+	t.Setenv("ACADEMY_WECHAT_MOCK_ADMIN_USERNAME", "")
+	if got := Load().WechatMockAdminUsername; got != "" {
+		t.Fatalf("WechatMockAdminUsername = %q, want empty", got)
+	}
+}
+
 func TestLoadSMTPEnvs(t *testing.T) {
 	t.Setenv("ACADEMY_SMTP_ADDR", "smtp.example.com:587")
 	t.Setenv("ACADEMY_SMTP_USERNAME", "mailer@example.com")

@@ -1768,6 +1768,8 @@ paths:
       description: >
         返回当前部署是否已配置微信网页授权。enabled=false 时 /auth/wechat/start
         返回 501；mock=true 仅本地/E2E（ACADEMY_WECHAT_MOCK=1，严格模式禁止）。
+        mock_admin=true 表示 Mock 模式已显式绑定既有 admin 账号，登录页可展示
+        管理员模拟入口（ACADEMY_WECHAT_MOCK_ADMIN_USERNAME）。
       responses:
         '200':
           description: OK
@@ -1775,10 +1777,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [enabled, mock, mode]
+                required: [enabled, mock, mock_admin, mode]
                 properties:
                   enabled: { type: boolean }
                   mock: { type: boolean, description: 本地模拟微信回调（生产必须 false） }
+                  mock_admin:
+                    type: boolean
+                    description: Mock 模式是否提供管理员模拟登录（显式绑定既有 admin 账号）
                   mode: { type: string, enum: ['', official_account, open_platform] }
 
   /auth/wechat/start:
@@ -1792,6 +1797,8 @@ paths:
         /auth/wechat/callback 校验，防登录 CSRF。公众号网页授权使用
         oauth2/authorize + snsapi_userinfo；开放平台网站应用使用 qrconnect +
         snsapi_login。redirect 只允许站内绝对路径，禁止外站 URL。
+        as=admin 仅 ACADEMY_WECHAT_MOCK=1 且配置了
+        ACADEMY_WECHAT_MOCK_ADMIN_USERNAME 时有效：回调登录该既有 admin 账号。
       parameters:
         - name: redirect
           in: query
@@ -1801,6 +1808,10 @@ paths:
           in: query
           schema: { type: string, maxLength: 64 }
           description: 仅 ACADEMY_WECHAT_MOCK=1 时生效，本地/E2E 模拟稳定微信身份
+        - name: as
+          in: query
+          schema: { type: string, enum: [admin] }
+          description: 仅 Mock 模式有效；admin = 登录显式配置的既有管理员账号（开发/演示用）
       responses:
         '200':
           description: OK
@@ -1827,8 +1838,10 @@ paths:
         微信回调回到前端登录页后，前端把 code/state 提交到此接口。服务端校验
         state Cookie（nonce 恒时比对 + HMAC 签名 + 10 分钟过期）→ 调用微信
         access_token/userinfo → 按 openid（其次 unionid）查找账号，首次登录自动
-        创建 student 账号（无密码，密码登录不可用）。成功返回应用 JWT，不把
-        token 放进 URL。state Cookie 一次性，成功后即清除。
+        创建 student 账号（无密码，密码登录不可用）。Mock 模式以 as=admin 发起的
+        state 会话会校验并登录 ACADEMY_WECHAT_MOCK_ADMIN_USERNAME 指定的既有
+        admin 账号，不创建学员账号。成功返回应用 JWT，不把 token 放进 URL。
+        state Cookie 一次性，成功后即清除。
       requestBody:
         required: true
         content:

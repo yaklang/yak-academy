@@ -83,6 +83,9 @@ services:
       ACADEMY_WECHAT_MODE: ${ACADEMY_WECHAT_MODE:-official_account}
       ACADEMY_WECHAT_SCOPE: ${ACADEMY_WECHAT_SCOPE:-}
       ACADEMY_WECHAT_MOCK: ${ACADEMY_WECHAT_MOCK:-} # 仅本地/E2E 模拟；严格模式禁止
+      # Mock 管理员模拟登录（仅 Mock 生效）：绑定已存在的 admin 账号名。
+      # 设置后访问登录页的人可直接获得管理员权限，仅限受控开发/内网演示。
+      ACADEMY_WECHAT_MOCK_ADMIN_USERNAME: ${ACADEMY_WECHAT_MOCK_ADMIN_USERNAME:-}
       # 生产严格模式：开启后启动即校验凭据强度（JWT secret ≥32 字符且非内置默认、
       # 初始管理员密码 ≥12 字符且非内置默认、验证码回显与微信 mock 必须关闭），
       # 不达标拒绝启动。生产部署建议恒开。

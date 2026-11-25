@@ -25,7 +25,7 @@ type wechatTestEnv struct {
 	now    time.Time
 }
 
-func newWechatTestEnv(t *testing.T, cfg WechatOAuthConfig) *wechatTestEnv {
+func newWechatTestEnv(t *testing.T, cfg WechatOAuthConfig, mockAdminUsername ...string) *wechatTestEnv {
 	t.Helper()
 	gdb, err := gorm.Open(sqlite.Open("file:wechattest-"+time.Now().Format("150405.000000000")+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -46,7 +46,11 @@ func newWechatTestEnv(t *testing.T, cfg WechatOAuthConfig) *wechatTestEnv {
 		users: repo.NewUserRepo(gdb), oauth: oauth,
 		now: time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC),
 	}
-	env.wechat = NewWechatAuthService(env.users, oauth, []byte("wechat-state-secret"))
+	adminUsername := ""
+	if len(mockAdminUsername) > 0 {
+		adminUsername = mockAdminUsername[0]
+	}
+	env.wechat = NewWechatAuthService(env.users, oauth, []byte("wechat-state-secret"), adminUsername)
 	env.wechat.now = func() time.Time { return env.now }
 	env.auth = NewAuthService(env.users, "test-secret")
 	return env
@@ -115,7 +119,7 @@ func TestWechatMockFlowCreatesAndReusesUser(t *testing.T) {
 	env := newWechatTestEnv(t, mockWechatConfig())
 	ctx := context.Background()
 
-	start, err := env.wechat.Start("/training", "e2e-openid-1")
+	start, err := env.wechat.Start("/training", "e2e-openid-1", false)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -154,7 +158,7 @@ func TestWechatMockFlowCreatesAndReusesUser(t *testing.T) {
 		t.Fatal("wechat user must expose password_set=false")
 	}
 
-	start2, err := env.wechat.Start("", "e2e-openid-1")
+	start2, err := env.wechat.Start("", "e2e-openid-1", false)
 	if err != nil {
 		t.Fatalf("start again: %v", err)
 	}
@@ -169,7 +173,7 @@ func TestWechatMockFlowCreatesAndReusesUser(t *testing.T) {
 		t.Fatalf("same wechat identity created different users: %d vs %d", user.ID, again.ID)
 	}
 
-	start3, err := env.wechat.Start("", "e2e-openid-2")
+	start3, err := env.wechat.Start("", "e2e-openid-2", false)
 	if err != nil {
 		t.Fatalf("start third: %v", err)
 	}
@@ -187,7 +191,7 @@ func TestWechatMockFlowCreatesAndReusesUser(t *testing.T) {
 func TestWechatStateValidation(t *testing.T) {
 	env := newWechatTestEnv(t, mockWechatConfig())
 	ctx := context.Background()
-	start, err := env.wechat.Start("", "e2e-openid")
+	start, err := env.wechat.Start("", "e2e-openid", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,10 +207,97 @@ func TestWechatStateValidation(t *testing.T) {
 	}
 }
 
+// TestWechatMockAdminLoginUsesConfiguredAdmin Mock 管理员入口必须显式绑定
+// 既有 admin 账号：回调直接签发该账号，不创建新的微信学员账号。
+func TestWechatMockAdminLoginUsesConfiguredAdmin(t *testing.T) {
+	env := newWechatTestEnv(t, mockWechatConfig(), "admin")
+	ctx := context.Background()
+	admin := &model.User{Username: "admin", GlobalRole: model.GlobalRoleAdmin}
+	if err := env.users.Create(ctx, admin); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	if !env.wechat.MockAdminEnabled() {
+		t.Fatal("mock admin should be enabled when account is configured")
+	}
+
+	start, err := env.wechat.Start("/admin", "", true)
+	if err != nil {
+		t.Fatalf("start mock admin: %v", err)
+	}
+	if start.MockID != "" {
+		t.Fatalf("mock admin start returned MockID %q, want empty", start.MockID)
+	}
+	user, redirect, err := env.wechat.Authenticate(ctx, "mock", start.State, start.StateCookie)
+	if err != nil {
+		t.Fatalf("authenticate mock admin: %v", err)
+	}
+	if user.ID != admin.ID || user.GlobalRole.Normalize() != model.GlobalRoleAdmin {
+		t.Fatalf("mock admin user = id %d role %q, want seeded admin %d", user.ID, user.GlobalRole, admin.ID)
+	}
+	if redirect != "/admin" {
+		t.Fatalf("redirect = %q, want /admin", redirect)
+	}
+}
+
+// TestWechatMockAdminRequiresExplicitConfiguration 未配置管理员账号或非 Mock
+// 模式时，管理员入口必须拒绝，不能按角色猜测或默认提权。
+func TestWechatMockAdminRequiresExplicitConfiguration(t *testing.T) {
+	env := newWechatTestEnv(t, mockWechatConfig())
+	if env.wechat.MockAdminEnabled() {
+		t.Fatal("mock admin must be disabled without a configured account")
+	}
+	if _, err := env.wechat.Start("", "", true); !errors.Is(err, ErrValidation) {
+		t.Fatalf("mock admin without account = %v, want ErrValidation", err)
+	}
+
+	real, err := NewWechatOAuthClient(WechatOAuthConfig{
+		AppID: "id", AppSecret: "secret", RedirectURL: "https://academy.example.com/login",
+	})
+	if err != nil {
+		t.Fatalf("real client: %v", err)
+	}
+	realSvc := NewWechatAuthService(env.users, real, []byte("secret"), "admin")
+	if realSvc.MockAdminEnabled() {
+		t.Fatal("mock admin must be disabled outside mock mode")
+	}
+	if _, err := realSvc.Start("", "", true); !errors.Is(err, ErrValidation) {
+		t.Fatalf("real-mode admin start = %v, want ErrValidation", err)
+	}
+}
+
+// TestWechatMockAdminRejectsNonAdminAccount 配置漂移（账号被降级/改名）时
+// 回调必须失败，不能因为用户名命中就签发 admin token。
+func TestWechatMockAdminRejectsNonAdminAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seed *model.User
+	}{
+		{"missing account", nil},
+		{"student account", &model.User{Username: "mock-admin", GlobalRole: model.GlobalRoleStudent}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newWechatTestEnv(t, mockWechatConfig(), "mock-admin")
+			ctx := context.Background()
+			if tc.seed != nil {
+				if err := env.users.Create(ctx, tc.seed); err != nil {
+					t.Fatalf("seed user: %v", err)
+				}
+			}
+			start, err := env.wechat.Start("", "", true)
+			if err != nil {
+				t.Fatalf("start mock admin: %v", err)
+			}
+			if _, _, err := env.wechat.Authenticate(ctx, "mock", start.State, start.StateCookie); !errors.Is(err, ErrWechatAuthFailed) {
+				t.Fatalf("authenticate = %v, want ErrWechatAuthFailed", err)
+			}
+		})
+	}
+}
+
 func TestWechatStartRejectsOpenRedirect(t *testing.T) {
 	env := newWechatTestEnv(t, mockWechatConfig())
 	for _, target := range []string{"https://evil.example.com", "//evil.example.com", "/\\evil"} {
-		if _, err := env.wechat.Start(target, "id"); !errors.Is(err, ErrValidation) {
+		if _, err := env.wechat.Start(target, "id", false); !errors.Is(err, ErrValidation) {
 			t.Fatalf("redirect %q = %v, want ErrValidation", target, err)
 		}
 	}

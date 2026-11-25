@@ -16,9 +16,9 @@ test.describe('微信注册/登录', () => {
     // 首屏先显示「正在检查微信登录…」，status 返回后才变成可用按钮（冷启动
     // 首个模块编译较慢，放宽等待时间）。
     const wechatButton = page.locator('.login-wechat__button')
-    await expect(wechatButton).toHaveText('微信扫码注册 / 登录', { timeout: 15_000 })
+    await expect(wechatButton).toHaveText('模拟微信登录（学员）', { timeout: 15_000 })
     await expect(wechatButton).toBeEnabled()
-    await expect(page.getByText('首次使用微信会自动创建账号，无需邮箱/手机号或密码。')).toBeVisible()
+    await expect(page.getByText(/学员入口自动建号，管理员入口使用已配置的管理员账号/)).toBeVisible()
 
     await wechatButton.click()
     // 模拟授权页把 code/state 回跳到登录页；登录页完成 callback 后进入 /learn。
@@ -38,6 +38,7 @@ test.describe('微信注册/登录', () => {
     expect(await statusResp.json()).toMatchObject({
       enabled: true,
       mock: true,
+      mock_admin: true,
       mode: 'official_account',
     })
 
