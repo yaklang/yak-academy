@@ -122,7 +122,11 @@ onMounted(load)
   --lesson-reading-width: 780px;
   --lesson-toc-width: 220px;
   --lesson-gutter: var(--space-10, 40px);
-  max-width: calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter, 40px));
+  /* 外壳给直系子元素也声明了 max-width: 100%（同为 0,2,0 特异度），而
+     懒加载布局与路由 chunk 的样式注入顺序不固定：用 max-width 会在注入
+     顺序反转时被外壳规则覆盖，阅读壳层被拉满整页。显式 width 不参与
+     该特异度竞争，任何注入顺序下都保持阅读宽度。 */
+  width: min(100%, calc(var(--lesson-reading-width) + var(--lesson-toc-width) + var(--lesson-gutter, 40px)));
   margin-inline: auto;
 }
 
