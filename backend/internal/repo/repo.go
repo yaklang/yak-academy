@@ -168,6 +168,12 @@ type ChallengeRepo interface {
 	FindACM(ctx context.Context, challengeID uint) (*model.ACMJudge, error)
 	// FindTestdata 查测试数据组（按组名排序；样例与隐藏组都返回，可见性由 service 过滤）。
 	FindTestdata(ctx context.Context, challengeID uint) ([]model.JudgeTestdata, error)
+	// UpsertQuestion 保存基础题作答定义（按 challenge_id 1:1 upsert）。
+	UpsertQuestion(ctx context.Context, q *model.ChallengeQuestion) error
+	// FindQuestion 查基础题作答定义（无则 gorm.ErrRecordNotFound）。
+	FindQuestion(ctx context.Context, challengeID uint) (*model.ChallengeQuestion, error)
+	// DeleteQuestion 删除基础题作答定义（题目改型/删除时清理，幂等）。
+	DeleteQuestion(ctx context.Context, challengeID uint) error
 }
 
 // ChallengeListFilter 题库列表过滤：Bank 空 = 全部题库 tab；IsBuiltin nil = 不限来源；

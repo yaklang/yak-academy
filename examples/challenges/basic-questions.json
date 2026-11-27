@@ -1,0 +1,71 @@
+[
+  {
+    "slug": "basic-http-401-meaning",
+    "title": "HTTP 401 状态码的含义",
+    "category": "web-basics",
+    "difficulty": "apprentice",
+    "description_md": "客户端访问受保护资源但没有提供有效身份凭证时，服务器通常返回哪个状态码？",
+    "score": 10,
+    "bank": "basic",
+    "question": {
+      "type": "single",
+      "options": [
+        { "key": "A", "text": "200 OK" },
+        { "key": "B", "text": "401 Unauthorized" },
+        { "key": "C", "text": "403 Forbidden" },
+        { "key": "D", "text": "500 Internal Server Error" }
+      ],
+      "answer": "B",
+      "explanation": "401 表示请求缺少有效认证信息；403 表示身份已确认但无权访问该资源。"
+    }
+  },
+  {
+    "slug": "basic-safe-http-methods",
+    "title": "哪些 HTTP 方法是安全方法",
+    "category": "web-basics",
+    "difficulty": "apprentice",
+    "description_md": "按 RFC 7231 的定义，下列哪些 HTTP 方法属于「安全方法」（不改变服务器状态）？",
+    "score": 20,
+    "bank": "basic",
+    "question": {
+      "type": "multiple",
+      "options": [
+        { "key": "A", "text": "GET" },
+        { "key": "B", "text": "HEAD" },
+        { "key": "C", "text": "POST" },
+        { "key": "D", "text": "DELETE" }
+      ],
+      "answer": ["A", "B"],
+      "explanation": "GET 与 HEAD 是只读的安全方法；POST 与 DELETE 会改变服务器状态。"
+    }
+  },
+  {
+    "slug": "basic-https-encrypts-body",
+    "title": "HTTPS 是否加密请求正文",
+    "category": "web-basics",
+    "difficulty": "apprentice",
+    "description_md": "判断：HTTPS 会对 HTTP 请求与响应的正文进行加密传输。",
+    "score": 10,
+    "bank": "basic",
+    "question": {
+      "type": "truefalse",
+      "answer": true,
+      "explanation": "TLS 在传输层加密整个 HTTP 报文（含请求行、头与正文），但不改变应用层语义。"
+    }
+  },
+  {
+    "slug": "basic-sql-injection-tautology",
+    "title": "SQL 注入：恒真条件",
+    "category": "sql-injection",
+    "difficulty": "apprentice",
+    "description_md": "登录表单的 SQL 由字符串拼接而成。请填写一个能让 `WHERE username = '<输入>' AND password = '...'` 恒为真的经典注入片段（只填写引号内的部分）。",
+    "score": 30,
+    "bank": "basic",
+    "question": {
+      "type": "fill",
+      "answer": ["' OR 1=1 --", "' or 1=1 --"],
+      "match": { "case_sensitive": false, "trim": true, "regex": false },
+      "explanation": "闭合单引号后追加恒真条件 OR 1=1，再用 -- 注释掉后续密码校验。"
+    }
+  }
+]

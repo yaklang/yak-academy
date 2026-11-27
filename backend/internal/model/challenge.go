@@ -11,6 +11,12 @@ const (
 	// ChallengeCode ACM 编程题：提交 yak 源码，judge worker 用引擎对每组测试数据
 	// 运行比对（对齐 ICPC 模型），不比对 flag。判定配置在 ACMJudge/JudgeTestdata 表。
 	ChallengeCode ChallengeType = "code"
+	// 基础题（训练场专用）：作答定义在 ChallengeQuestion 表。多选支持等权部分分，
+	// 但部分分只做作答反馈，不计入 XP/排行榜（event-sourcing-rules skill）。
+	ChallengeSingle    ChallengeType = "single"
+	ChallengeMultiple  ChallengeType = "multiple"
+	ChallengeTrueFalse ChallengeType = "truefalse"
+	ChallengeFill      ChallengeType = "fill"
 )
 
 // FlagMode flag 作用域：shared=题目级共享；instance=每容器实例唯一。
@@ -21,7 +27,7 @@ const (
 	FlagModeInstance FlagMode = "instance"
 )
 
-// ChallengeBank 题库 tab 分类（题库页 教程题目/CTF 题目/ACM 题目）。
+// ChallengeBank 题库 tab 分类（题库页 教程题目/CTF 题目/ACM 题目/基础题）。
 type ChallengeBank string
 
 const (
@@ -31,6 +37,8 @@ const (
 	BankCTF ChallengeBank = "ctf"
 	// BankACM ACM 题目。
 	BankACM ChallengeBank = "acm"
+	// BankBasic 基础题（单选/多选/判断/填空；训练场专用，禁止绑定 CTF 竞赛）。
+	BankBasic ChallengeBank = "basic"
 )
 
 // Challenge 独立题目资源（管理员经 challenge.json / challenge.yml 上传）。
@@ -40,7 +48,7 @@ type Challenge struct {
 	Slug     string `gorm:"uniqueIndex;size:128" json:"slug"`
 	Title    string `gorm:"size:256" json:"title"`
 	Category string `gorm:"index;size:128" json:"category"` // 分类 slug，题库页分组键
-	// Bank 题库 tab（tutorial/ctf/acm）；历史行迁移时由列默认值补 tutorial。
+	// Bank 题库 tab（tutorial/ctf/acm/basic）；历史行迁移时由列默认值补 tutorial。
 	Bank       ChallengeBank `gorm:"index;size:16;default:tutorial" json:"bank"`
 	Difficulty Difficulty    `gorm:"size:16" json:"difficulty"`
 	// Description 题目描述 Markdown（背景/任务目标）。
@@ -135,6 +143,25 @@ type Hint struct {
 	Title       string `gorm:"size:128" json:"title"`
 	Content     string `json:"content"`
 	Cost        int    `json:"cost"` // 扣减积分
+}
+
+// ChallengeQuestion 基础题（单选/多选/判断/填空）的作答定义，与 Challenge 1:1。
+// 仅在 Challenge.Type 为 single/multiple/truefalse/fill 时存在；与 Flag、ACMJudge 互斥。
+// AnswerJSON 是标准答案，永不进入学生端 DTO（管理端完整定义接口除外）。
+type ChallengeQuestion struct {
+	ID          uint `gorm:"primaryKey" json:"-"`
+	ChallengeID uint `gorm:"uniqueIndex" json:"-"`
+	// OptionsJSON 选项：[{"key":"A","text":"..."}]；判断/填空为空数组。
+	OptionsJSON string `gorm:"type:text" json:"-"`
+	// AnswerJSON 标准答案：single "A"；multiple ["A","C"]；truefalse true；
+	// fill ["答案1","答案2"]（多个可接受答案）。
+	AnswerJSON string `gorm:"type:text" json:"-"`
+	// MatchJSON 填空匹配策略：{"case_sensitive":false,"trim":true,"regex":false}；
+	// 其他题型为空串。默认值在 service 层规范化后显式落库。
+	MatchJSON   string    `gorm:"type:text" json:"-"`
+	Explanation string    `gorm:"type:text" json:"-"`
+	CreatedAt   time.Time `json:"-"`
+	UpdatedAt   time.Time `json:"-"`
 }
 
 // SubmissionStatus 提交状态：pending → correct/incorrect（异步判定）。

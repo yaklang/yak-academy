@@ -30,7 +30,7 @@ export async function logout(page: Page) {
 // 管理员上传的种子题都在 CTF 题目 tab。
 export async function switchAdminChallengeBank(
   page: Page,
-  tab: '内置训练' | 'CTF 题目' | 'ACM 题目',
+  tab: '内置训练' | 'CTF 题目' | 'ACM 题目' | '基础题',
 ) {
   await page.getByRole('tab', { name: tab }).click()
 }

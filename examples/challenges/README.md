@@ -59,3 +59,14 @@ zip -r sqli-login-bypass.zip sqli-login-bypass
 1. 纯题目在训练场只渲染「flag 提交框」（无容器控制条），提交即判分
 2. hints 扣分解锁（cost 5/10）对纯题目同样生效
 3. 解题后重复提交不重复计分（分值只结算一次）
+
+## 样例：`basic-questions.json`（基础题：单选/多选/判断/填空）
+
+单个 JSON 数组文件，管理页选择后批量导入四道「基础题」tab 的题目（`bank: basic`），无需容器、Dockerfile 或 testdata：
+
+1. 单选：`question.type=single` + `options` + 单个 `answer` key
+2. 多选：`question.type=multiple` + `answer` 为 key 数组（等权部分分，部分分不计 XP）
+3. 判断：`question.type=truefalse` + 布尔 `answer`
+4. 填空：`question.type=fill` + 字符串/字符串数组答案，可选 `match`（默认忽略大小写、去除首尾空白）
+
+基础题仅出现在训练场，不能绑定 CTF 竞赛；全对才通关并按题目分值计分。

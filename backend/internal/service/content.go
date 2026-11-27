@@ -735,7 +735,9 @@ type challengeJSON struct {
 	// nil = flag 判定题（static/regex）。数据组可经包 zip 的 testdata/ 目录
 	// 装配（challenge.json 直传无 zip 时必须内联携带全部数据）。
 	Judge *judgeJSON `json:"judge"`
-	Env   struct {
+	// Question 基础题（单选/多选/判断/填空）定义；与 judge、challenge 三选一互斥。
+	Question *questionJSON `json:"question"`
+	Env      struct {
 		Image string `json:"image"`
 		Port  int    `json:"port"`
 	} `json:"env"`
@@ -771,9 +773,36 @@ type judgeTestData struct {
 	Score int `json:"score" yaml:"score"`
 }
 
+// questionJSON 基础题定义（challenge.json question 段 / challenge.yml 同构）。
+// Answer 用 any 兼容 JSON 与 YAML 的标量/数组/布尔；规范化时再转 RawMessage。
+type questionJSON struct {
+	Type        string              `json:"type" yaml:"type"`
+	Options     []QuestionOption    `json:"options" yaml:"options"`
+	Answer      any                 `json:"answer" yaml:"answer"`
+	Match       *questionMatchInput `json:"match" yaml:"match"`
+	Explanation string              `json:"explanation" yaml:"explanation"`
+}
+
+// buildQuestionDefinition 把上传 DTO 规范化为落库行与判题 spec。
+func buildQuestionDefinition(where string, q *questionJSON) (*model.ChallengeQuestion, *questionSpec, error) {
+	if q == nil {
+		return nil, nil, fmt.Errorf("%w: %s: question is required", ErrValidation, where)
+	}
+	raw, err := json.Marshal(q.Answer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w: question.answer: %v", where, ErrValidation, err)
+	}
+	typ := model.ChallengeType(strings.TrimSpace(q.Type))
+	row, spec, err := normalizeQuestionDefinition(typ, q.Options, raw, q.Match, q.Explanation)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", where, err)
+	}
+	return row, spec, nil
+}
+
 // UploadChallenges 解析并导入题目定义 JSON（单对象或数组）。
 // 逐题校验、整体拒绝（单题失败全部不入库）；slug 冲突视为 upsert（重传更新）。
-// 普通上传禁入教程题库（bank 仅 ctf/acm）；内置导入走 allowTutorialBank=true
+// 普通上传禁入教程题库（bank 仅 ctf/acm/basic）；内置导入走 allowTutorialBank=true
 // 的内部路径注入 tutorial（见 builtin.go）。
 func (s *ContentService) UploadChallenges(ctx context.Context, raw []byte) (imported int, slugs []string, err error) {
 	return s.uploadChallenges(ctx, raw, false)
@@ -810,10 +839,23 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 		for _, h := range c.Hints {
 			hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
 		}
+		// 判定定义三选一：question（基础题）/ judge（ACM 编程题）/ challenge（flag 题）。
+		typ := c.Challenge.Type
+		var question *model.ChallengeQuestion
+		if c.Question != nil {
+			q, _, err := buildQuestionDefinition(c.Slug, c.Question)
+			if err != nil {
+				return 0, nil, err
+			}
+			question = q
+			typ = model.ChallengeType(strings.TrimSpace(c.Question.Type))
+		} else if c.Judge != nil {
+			typ = model.ChallengeCode
+		}
 		chal := &model.Challenge{
 			Slug: c.Slug, Title: c.Title, Category: c.Category, Difficulty: c.Difficulty,
-			Bank:        s.resolveUploadBank(ctx, c.Slug, c.Bank),
-			Description: c.DescriptionMD, Type: c.Challenge.Type, Score: c.Score,
+			Bank:        s.resolveUploadBank(ctx, c.Slug, c.Bank, question != nil, c.Judge != nil),
+			Description: c.DescriptionMD, Type: typ, Score: c.Score,
 			FlagMode: resolveFlagMode(c.FlagMode), Image: c.Env.Image, Port: c.Env.Port,
 			Links: linksJSON(c.Links), TutorialSlug: c.TutorialSlug,
 		}
@@ -821,7 +863,6 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 		var acm *model.ACMJudge
 		var testdata []model.JudgeTestdata
 		if c.Judge != nil {
-			chal.Type = model.ChallengeCode
 			acm = &model.ACMJudge{
 				Engine: c.Judge.Engine, TimeLimitS: c.Judge.TimeLimitS,
 				MemoryLimitMB: c.Judge.MemoryLimitMB,
@@ -899,7 +940,11 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 				testdata = carried
 			}
 		}
-		flags := []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
+		// 只有 flag 判定题写 Flag 行；code/基础题的判定数据在各自专用表。
+		var flags []model.Flag
+		if c.Question == nil && c.Judge == nil {
+			flags = []model.Flag{{Type: c.Challenge.Type, Value: c.Challenge.Flag}}
+		}
 		if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 			return 0, nil, err
 		}
@@ -908,6 +953,14 @@ func (s *ContentService) uploadChallenges(ctx context.Context, raw []byte, allow
 			if err := s.challenge.challenges.UpsertACM(ctx, acm, testdata); err != nil {
 				return 0, nil, err
 			}
+		}
+		if question != nil {
+			question.ChallengeID = chal.ID
+			if err := s.challenge.UpsertQuestion(ctx, question); err != nil {
+				return 0, nil, err
+			}
+		} else if err := s.challenge.DeleteQuestion(ctx, chal.ID); err != nil {
+			return 0, nil, err
 		}
 		slugs = append(slugs, c.Slug)
 	}
@@ -937,9 +990,10 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	if !slugPattern.MatchString(c.Category) {
 		return fmt.Errorf("%w: %s: category must match [a-z0-9-]+", ErrValidation, where)
 	}
-	if c.Bank != "" && c.Bank != model.BankCTF && c.Bank != model.BankACM &&
+	// 题库白名单：ctf/acm/basic；tutorial 仅内置导入路径（其 bank 由导入器注入）。
+	if c.Bank != "" && c.Bank != model.BankCTF && c.Bank != model.BankACM && c.Bank != model.BankBasic &&
 		!(allowTutorialBank && c.Bank == model.BankTutorial) {
-		return fmt.Errorf("%w: %s: bank must be ctf or acm (tutorial 题库专属内置题集)", ErrValidation, where)
+		return fmt.Errorf("%w: %s: bank must be ctf, acm or basic (tutorial 题库专属内置题集)", ErrValidation, where)
 	}
 	if err := validateDifficulty(c.Difficulty); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrValidation, where, err)
@@ -947,21 +1001,57 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 	if c.Score < 0 {
 		return fmt.Errorf("%w: %s: score must be non-negative", ErrValidation, where)
 	}
-	// 判定定义二选一：judge 段（ACM 编程题）或 challenge 段（flag 判定题）。
-	if c.Judge != nil {
-		if c.Challenge.Type != "" || c.Challenge.Flag != "" {
-			return fmt.Errorf("%w: %s: judge and challenge are mutually exclusive", ErrValidation, where)
+	// 判定定义三选一：question（基础题）/ judge（ACM 编程题）/ challenge（flag 题）。
+	hasFlag := c.Challenge.Type != "" || c.Challenge.Flag != ""
+	hasJudge := c.Judge != nil
+	hasQuestion := c.Question != nil
+	defs := 0
+	if hasFlag {
+		defs++
+	}
+	if hasJudge {
+		defs++
+	}
+	if hasQuestion {
+		defs++
+	}
+	if defs > 1 {
+		return fmt.Errorf("%w: %s: question, judge and challenge are mutually exclusive", ErrValidation, where)
+	}
+
+	if hasQuestion {
+		if c.Bank != "" && c.Bank != model.BankBasic {
+			return fmt.Errorf("%w: %s: basic questions must use bank=basic", ErrValidation, where)
 		}
+		if c.FlagMode != "" && resolveFlagMode(c.FlagMode) != model.FlagModeShared {
+			return fmt.Errorf("%w: %s: basic questions do not support flag_mode", ErrValidation, where)
+		}
+		if c.Env.Image != "" || c.Env.Port != 0 {
+			return fmt.Errorf("%w: %s: basic questions do not support env", ErrValidation, where)
+		}
+		if strings.TrimSpace(c.DescriptionMD) == "" {
+			return fmt.Errorf("%w: %s: description_md is required for basic questions", ErrValidation, where)
+		}
+		if _, _, err := buildQuestionDefinition(c.Slug, c.Question); err != nil {
+			return err
+		}
+	} else if hasJudge {
 		if c.Bank != "" && c.Bank != model.BankACM {
 			return fmt.Errorf("%w: %s: judge section requires bank=acm", ErrValidation, where)
 		}
-		if c.Bank == model.BankCTF {
-			return fmt.Errorf("%w: %s: judge section requires bank=acm", ErrValidation, where)
+		if c.FlagMode != "" && resolveFlagMode(c.FlagMode) != model.FlagModeShared {
+			return fmt.Errorf("%w: %s: judge section does not support flag_mode", ErrValidation, where)
+		}
+		if c.Env.Image != "" || c.Env.Port != 0 {
+			return fmt.Errorf("%w: %s: judge section does not support env", ErrValidation, where)
 		}
 		if err := validateJudgeJSON(where, c.Judge); err != nil {
 			return err
 		}
 	} else {
+		if c.Bank == model.BankBasic {
+			return fmt.Errorf("%w: %s: bank=basic requires a question section", ErrValidation, where)
+		}
 		switch c.Challenge.Type {
 		case model.ChallengeStatic:
 		case model.ChallengeRegex:
@@ -974,26 +1064,26 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 		if c.Challenge.Flag == "" {
 			return fmt.Errorf("%w: %s: challenge.flag is required", ErrValidation, where)
 		}
-	}
-	mode := resolveFlagMode(c.FlagMode)
-	if c.FlagMode != "" && mode != model.FlagModeShared && mode != model.FlagModeInstance {
-		return fmt.Errorf("%w: %s: flag_mode must be shared or instance", ErrValidation, where)
-	}
-	// env 段可选；出现则 image 必填、port 合法（1-65535）——与教程包 env 规则一致。
-	if c.Env.Image != "" || c.Env.Port != 0 {
-		if c.Env.Image == "" {
-			return fmt.Errorf("%w: %s: env.image is required when env is present", ErrValidation, where)
+		mode := resolveFlagMode(c.FlagMode)
+		if c.FlagMode != "" && mode != model.FlagModeShared && mode != model.FlagModeInstance {
+			return fmt.Errorf("%w: %s: flag_mode must be shared or instance", ErrValidation, where)
 		}
-		if c.Env.Port < 1 || c.Env.Port > 65535 {
-			return fmt.Errorf("%w: %s: env.port must be 1-65535", ErrValidation, where)
+		// env 段可选；出现则 image 必填、port 合法（1-65535）——与教程包 env 规则一致。
+		if c.Env.Image != "" || c.Env.Port != 0 {
+			if c.Env.Image == "" {
+				return fmt.Errorf("%w: %s: env.image is required when env is present", ErrValidation, where)
+			}
+			if c.Env.Port < 1 || c.Env.Port > 65535 {
+				return fmt.Errorf("%w: %s: env.port must be 1-65535", ErrValidation, where)
+			}
 		}
-	}
-	if mode == model.FlagModeInstance {
-		if c.Env.Image == "" || c.Env.Port < 1 {
-			return fmt.Errorf("%w: %s: flag_mode=instance requires env.image and env.port", ErrValidation, where)
-		}
-		if !strings.Contains(c.Challenge.Flag, "{token}") {
-			return fmt.Errorf("%w: %s: instance flag template must contain {token}", ErrValidation, where)
+		if mode == model.FlagModeInstance {
+			if c.Env.Image == "" || c.Env.Port < 1 {
+				return fmt.Errorf("%w: %s: flag_mode=instance requires env.image and env.port", ErrValidation, where)
+			}
+			if !strings.Contains(c.Challenge.Flag, "{token}") {
+				return fmt.Errorf("%w: %s: instance flag template must contain {token}", ErrValidation, where)
+			}
 		}
 	}
 	for _, h := range c.Hints {
@@ -1008,10 +1098,6 @@ func (s *ContentService) validateChallengeJSON(i int, c challengeJSON, seen map[
 		if !strings.HasPrefix(l.URL, "http://") && !strings.HasPrefix(l.URL, "https://") {
 			return fmt.Errorf("%w: %s: links[%d].url must be http(s)", ErrValidation, where, i)
 		}
-	}
-	// bank=acm 但没带 judge 段：ACM 题必须是编程题（对齐「ACM 不通过 flag 判定」）。
-	if c.Bank == model.BankACM && c.Judge == nil && c.Challenge.Type == "" {
-		return fmt.Errorf("%w: %s: bank=acm requires a judge section (code problems only)", ErrValidation, where)
 	}
 	return nil
 }
@@ -1081,9 +1167,16 @@ func resolveFlagMode(m model.FlagMode) model.FlagMode {
 // resolveUploadBank 上传路径的题库归置：显式指定（仅 ctf/acm，校验已拒 tutorial）
 // 原样生效；缺省时更新保留原值、新建默认 ctf——教程题目 tab 专属内置题集，
 // 普通上传不得进入（内置导入在 builtin.go 显式注入 tutorial）。
-func (s *ContentService) resolveUploadBank(ctx context.Context, slug string, b model.ChallengeBank) model.ChallengeBank {
+func (s *ContentService) resolveUploadBank(ctx context.Context, slug string, b model.ChallengeBank, question, code bool) model.ChallengeBank {
+	// 基础题固定归 basic；编程题缺省归 acm（与「judge 段要求 bank=acm」一致）。
+	if question {
+		return model.BankBasic
+	}
 	if b != "" {
 		return b
+	}
+	if code {
+		return model.BankACM
 	}
 	if existing, err := s.challenge.challenges.FindBySlug(ctx, slug); err == nil && existing.Bank != "" {
 		return existing.Bank
@@ -1198,7 +1291,9 @@ type challengeYML struct {
 			Sample bool   `yaml:"sample"`
 		} `yaml:"testdata"`
 	} `yaml:"judge"`
-	Hints []struct {
+	// Question 基础题定义（与 judge、flags 三选一互斥；不需要 Dockerfile/testdata）。
+	Question *questionJSON `yaml:"question"`
+	Hints    []struct {
 		Title   string `yaml:"title"`
 		Content string `yaml:"content"`
 		Cost    int    `yaml:"cost"`
@@ -1304,17 +1399,28 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 	for _, h := range cj.Hints {
 		hints = append(hints, model.Hint{Title: h.Title, Content: h.Content, Cost: h.Cost})
 	}
+	typ := cj.Challenge.Type
+	var question *model.ChallengeQuestion
+	if cj.Question != nil {
+		q, _, err := buildQuestionDefinition(cj.Slug, cj.Question)
+		if err != nil {
+			return 0, nil, err
+		}
+		question = q
+		typ = model.ChallengeType(strings.TrimSpace(cj.Question.Type))
+	} else if cj.Judge != nil {
+		typ = model.ChallengeCode
+	}
 	chal := &model.Challenge{
 		Slug: cj.Slug, Title: cj.Title, Category: cj.Category, Difficulty: cj.Difficulty,
-		Bank:        s.resolveUploadBank(ctx, cj.Slug, cj.Bank),
-		Description: cj.DescriptionMD, Type: cj.Challenge.Type, Score: cj.Score,
+		Bank:        s.resolveUploadBank(ctx, cj.Slug, cj.Bank, question != nil, cj.Judge != nil),
+		Description: cj.DescriptionMD, Type: typ, Score: cj.Score,
 		FlagMode: resolveFlagMode(cj.FlagMode), Image: cj.Env.Image, Port: cj.Env.Port,
 		Links: linksJSON(cj.Links), TutorialSlug: cj.TutorialSlug,
 	}
-	flags := []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
-	if cj.Judge != nil {
-		chal.Type = model.ChallengeCode
-		flags = nil
+	var flags []model.Flag
+	if cj.Question == nil && cj.Judge == nil {
+		flags = []model.Flag{{Type: cj.Challenge.Type, Value: cj.Challenge.Flag}}
 	}
 	if err := s.challenge.UpsertChallenge(ctx, chal, flags, hints); err != nil {
 		return 0, nil, err
@@ -1335,6 +1441,14 @@ func (s *ContentService) UploadChallengePackage(ctx context.Context, zipBytes []
 		if err := s.challenge.challenges.UpsertACM(ctx, acm, testdata); err != nil {
 			return 0, nil, err
 		}
+	}
+	if question != nil {
+		question.ChallengeID = chal.ID
+		if err := s.challenge.UpsertQuestion(ctx, question); err != nil {
+			return 0, nil, err
+		}
+	} else if err := s.challenge.DeleteQuestion(ctx, chal.ID); err != nil {
+		return 0, nil, err
 	}
 	return 1, []string{cj.Slug}, nil
 }
@@ -1463,9 +1577,22 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 	out.FlagMode = y.FlagMode
 	out.TutorialSlug = y.TutorialSlug
 	out.Links = y.Links
-	flagType := model.ChallengeType(y.Type)
-	if flagType == "" {
-		flagType = model.ChallengeStatic
+	// hints 对所有题型统一装配（旧实现 judge 分支提前 return，ACM 包 hints 会丢失）。
+	for _, h := range y.Hints {
+		content := h.Content
+		title := h.Title
+		if title == "" {
+			title = "提示"
+		}
+		out.Hints = append(out.Hints, struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+			Cost    int    `json:"cost"`
+		}{Title: title, Content: content, Cost: h.Cost})
+	}
+	// 基础题：原样透传 question 段，由 validateChallengeJSON 统一校验/规范化。
+	if y.Question != nil {
+		out.Question = y.Question
 	}
 	// ACM judge 段：转 challengeJSON 的 judge 定义（数据内容待包内 testdata/ 装配）。
 	if y.Judge != nil {
@@ -1479,36 +1606,29 @@ func challengeYMLToJSON(y challengeYML) (challengeJSON, error) {
 			t := &y.Judge.Testdata[i]
 			out.Judge.Testdata = append(out.Judge.Testdata, judgeTestData{Name: t.Name, Sample: t.Sample})
 		}
-		return out, nil
 	}
-	if len(y.Flags) == 0 {
+	if len(y.Flags) > 0 {
+		// 首个 flag 作为判定答案（v1 单 flag）。
+		f := y.Flags[0]
+		flagType := model.ChallengeType(y.Type)
+		if flagType == "" {
+			flagType = model.ChallengeStatic
+		}
+		if f.Type != "" {
+			flagType = model.ChallengeType(f.Type)
+		}
+		out.Challenge.Type = flagType
+		out.Challenge.Flag = f.Content
+	} else if y.Question == nil && y.Judge == nil {
 		return out, fmt.Errorf("%w: flags required in challenge.yml", ErrValidation)
 	}
-	// 首个 flag 作为判定答案（v1 单 flag）。
-	f := y.Flags[0]
-	if f.Type != "" {
-		flagType = model.ChallengeType(f.Type)
-	}
-	out.Challenge.Type = flagType
-	out.Challenge.Flag = f.Content
-	if y.Image != "" && y.Image != "null" {
+	// 容器环境只属于 flag 题；question/judge 由校验器拒绝 env。
+	if y.Question == nil && y.Judge == nil && y.Image != "" && y.Image != "null" {
 		out.Env.Image = y.Image
 		out.Env.Port = y.Port
 		if out.Env.Port == 0 {
 			out.Env.Port = 80
 		}
-	}
-	for _, h := range y.Hints {
-		content := h.Content
-		title := h.Title
-		if title == "" {
-			title = "提示"
-		}
-		out.Hints = append(out.Hints, struct {
-			Title   string `json:"title"`
-			Content string `json:"content"`
-			Cost    int    `json:"cost"`
-		}{Title: title, Content: content, Cost: h.Cost})
 	}
 	return out, nil
 }

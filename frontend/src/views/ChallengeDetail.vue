@@ -3,7 +3,7 @@
 // 容器环境生命周期与 flag 提交都集中在这里（列表页只做浏览）。
 // 环境运行中时轮询详情：题目内置 checker 经检测点回调自动判定
 // （CHECKPOINT_URL，服务端直判），通关状态无需用户手动提交。
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { renderMarkdownHtml } from '@/lib/markdown'
 import { notify, dialogs } from '@/lib/notifications'
@@ -11,9 +11,10 @@ import { formatTime } from '@/lib/format'
 import {
   trainingApi, instanceApi, downloadAttachment,
   type AdminLabInstance, type ChallengeDetail, type CodeRunView, type JudgeSample, type LabInstance,
-  CATEGORY_LABELS, DIFFICULTY_LABELS, verdictLabels,
+  CATEGORY_LABELS, DIFFICULTY_LABELS, QUESTION_TYPE_LABELS, verdictLabels,
 } from '../api'
 import type { ApiError } from '../api/client'
+import { emptyQuestionDraft, serializeQuestionAnswer, type QuestionDraft } from '../lib/question'
 import CodeEditor from '../components/CodeEditor.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import EmptyState from '@/components/layout/EmptyState.vue'
@@ -58,7 +59,14 @@ const instance = ref<LabInstance | null>(null)
 const instanceLoading = ref(false)
 
 const { submitting, polling, result, submit: submitPoll } = useSubmissionPoll(() => {
-  if (challenge.value) challenge.value.solved = true
+  if (!challenge.value) return
+  challenge.value.solved = true
+  // 基础题的解析只在通关后下发：重新拉详情替换本地对象。
+  if (challenge.value.question) {
+    trainingApi.detail(challenge.value.slug)
+      .then((detail) => { challenge.value = detail })
+      .catch(() => {})
+  }
 })
 
 // 提交时是否已通关：重复提交判对不重复计分（结算只有一次），文案需要区分。
@@ -68,6 +76,42 @@ const solvedBeforeSubmit = ref(false)
 const isCode = computed(() => !!challenge.value?.judge)
 const samples = ref<JudgeSample[]>([])
 const source = ref('')
+
+// 基础题（question 段存在）：单选/多选/判断/填空作答，提交时序列化为答案 JSON。
+const question = computed(() => challenge.value?.question ?? null)
+const isQuestion = computed(() => !!question.value)
+const questionDraft = reactive<QuestionDraft>(emptyQuestionDraft())
+const questionAnswer = computed(() =>
+  question.value ? serializeQuestionAnswer(question.value.type, questionDraft) : null,
+)
+
+function resetQuestionDraft() {
+  Object.assign(questionDraft, emptyQuestionDraft())
+}
+
+function toggleQuestionOption(key: string, checked: boolean) {
+  if (checked) {
+    if (!questionDraft.multiple.includes(key)) questionDraft.multiple.push(key)
+  } else {
+    questionDraft.multiple = questionDraft.multiple.filter((k) => k !== key)
+  }
+}
+
+const questionBadge = computed(() => {
+  if (!question.value) return ''
+  return `基础题 · ${QUESTION_TYPE_LABELS[question.value.type]}`
+})
+
+const questionOptions = computed(() => question.value?.options ?? [])
+
+const fillMatchHint = computed(() => {
+  const match = question.value?.match
+  if (question.value?.type !== 'fill' || !match) return ''
+  const parts = [match.case_sensitive ? '区分大小写' : '不区分大小写']
+  if (match.trim) parts.push('忽略首尾空白')
+  if (match.regex) parts.push('支持正则匹配')
+  return parts.join(' · ')
+})
 
 // 库策略（防高危库执行）：白名单/黑名单由服务端随 judge 段下发——
 // 编辑器补全过滤（CodeEditor libPolicy）与题面库标签同源；提交/自测
@@ -221,6 +265,7 @@ async function load() {
   loading.value = true
   loadError.value = ''
   challenge.value = null
+  resetQuestionDraft()
   try {
     challenge.value = await trainingApi.detail(slug())
     if (challenge.value.has_env) loadInstance()
@@ -333,7 +378,11 @@ async function extendInstance() {
 
 function submit() {
   if (!challenge.value) return
-  const payload = isCode.value ? source.value : answer.value
+  const payload = isQuestion.value
+    ? questionAnswer.value
+    : isCode.value
+      ? source.value
+      : answer.value
   if (!payload) return
   solvedBeforeSubmit.value = challenge.value.solved
   submitPoll(challenge.value.slug, payload)
@@ -341,12 +390,16 @@ function submit() {
 
 // 结算模型：题目分值只结算一次，重复判对 score=0；提示扣费按账号永久（不退回）。
 // ACM 编程题附带 verdict 文案（wa/tle/re/internal_error）；部分得分制下部分
-// 通过组也写入 score（verdict 非 ac 但得分 > 0）。
+// 通过组也写入 score（verdict 非 ac 但得分 > 0）。基础题多选部分分同样 score>0
+// 但 status=incorrect，仅作答反馈、不计积分。
 const resultTitle = computed(() => {
   if (!result.value) return ''
   if (result.value.status !== 'correct') {
     if (result.value.score > 0 && result.value.groups?.length) {
       return `部分通过，得分 ${result.value.score}（未全部通过，题目未通关；补齐失败组后重新提交）`
+    }
+    if (result.value.score > 0) {
+      return `部分正确，得分 ${result.value.score}（全对后通关；部分分不计积分）`
     }
     if (result.value.verdict) return `判定不通过：${verdictLabels[result.value.verdict]}`
     return '判定不通过'
@@ -354,6 +407,11 @@ const resultTitle = computed(() => {
   if (result.value.score > 0) return `判定通过，得分 ${result.value.score}`
   return solvedBeforeSubmit.value ? '判定通过——本题分值已结算过，重复提交不重复计分' : '判定通过（本题 0 分）'
 })
+
+// 部分分（ACM 通过部分数据组 / 多选部分正确）用警示色，而不是判错的危险色。
+const resultPartial = computed(
+  () => !!result.value && result.value.status !== 'correct' && result.value.score > 0,
+)
 
 const unlockingId = ref<number | null>(null)
 
@@ -412,6 +470,7 @@ onUnmounted(() => {
         <span v-if="challenge.judge" class="challenge-badge">
           编程题 · {{ challenge.judge.time_limit_s }}s / {{ challenge.judge.memory_limit_mb }}MB
         </span>
+        <span v-if="isQuestion" class="challenge-badge">{{ questionBadge }}</span>
       </template>
       <template v-if="challenge.tutorial_slug && challenge.tutorial_topic_slug" #actions>
         <Button variant="outline" as-child>
@@ -425,6 +484,11 @@ onUnmounted(() => {
     <div class="challenge-layout">
       <article class="challenge-main">
         <div class="description" v-html="renderedDescription" />
+
+        <section v-if="challenge.question?.explanation" class="challenge-block" aria-labelledby="explanation-title">
+          <h2 id="explanation-title" class="challenge-block__title">解析</h2>
+          <p class="explanation-text">{{ challenge.question.explanation }}</p>
+        </section>
 
         <section v-if="samples.length" class="challenge-block" aria-labelledby="samples-title">
           <h2 id="samples-title" class="challenge-block__title">样例数据</h2>
@@ -517,7 +581,11 @@ onUnmounted(() => {
           </div>
 
           <p v-if="challenge.solved" class="notice" data-tone="success" role="status">
-            {{ isCode ? '本题已通关（分值已结算）。仍可重复提交源码验证，重复判对不再计分。' : '本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。' }}
+            {{ isCode
+              ? '本题已通关（分值已结算）。仍可重复提交源码验证，重复判对不再计分。'
+              : isQuestion
+                ? '本题已通关（分值已结算）。仍可重新作答，重复答对不再计分。'
+                : '本题已通关（分值已结算）。仍可重复提交 flag 验证，重复判对不再计分。' }}
           </p>
 
           <template v-if="isCode">
@@ -580,6 +648,62 @@ onUnmounted(() => {
             </Button>
           </template>
 
+          <template v-else-if="isQuestion">
+            <p class="solve-hint">
+              {{ question?.type === 'multiple'
+                ? '选择所有正确选项后提交；多选按等权部分分反馈（仅作答反馈，不计积分），全对才通关。'
+                : question?.type === 'fill'
+                  ? '填写答案后提交，全对才通关。'
+                  : '选择答案后提交，答对即通关。' }}
+            </p>
+            <UiRadioGroup
+              v-if="question?.type === 'single'"
+              v-model="questionDraft.single"
+              class="question-options"
+              aria-label="选择一个答案"
+            >
+              <UiRadio v-for="option in questionOptions" :key="option.key" :value="option.key">
+                <span class="question-option__key">{{ option.key }}</span>{{ option.text }}
+              </UiRadio>
+            </UiRadioGroup>
+            <div v-else-if="question?.type === 'multiple'" class="question-options">
+              <UiCheckbox
+                v-for="option in questionOptions"
+                :key="option.key"
+                :model-value="questionDraft.multiple.includes(option.key)"
+                @update:model-value="(checked) => toggleQuestionOption(option.key, checked)"
+              >
+                <span class="question-option__key">{{ option.key }}</span>{{ option.text }}
+              </UiCheckbox>
+            </div>
+            <UiRadioGroup
+              v-else-if="question?.type === 'truefalse'"
+              v-model="questionDraft.truefalse"
+              class="question-options"
+              aria-label="判断对错"
+            >
+              <UiRadio :value="true">正确</UiRadio>
+              <UiRadio :value="false">错误</UiRadio>
+            </UiRadioGroup>
+            <div v-else class="question-fill">
+              <Input
+                v-model="questionDraft.fill"
+                placeholder="输入答案"
+                :disabled="polling"
+                @keyup.enter="submit"
+              />
+              <p v-if="fillMatchHint" class="question-match-hint">{{ fillMatchHint }}</p>
+            </div>
+            <Button
+              class="solve-submit"
+              :disabled="!questionAnswer"
+              :loading="submitting || polling"
+              @click="submit"
+            >
+              提交答案
+            </Button>
+          </template>
+
           <div v-else class="submit-row">
             <Input v-model="answer" placeholder="输入 flag" :disabled="polling" @keyup.enter="submit" />
             <Button :disabled="!answer" :loading="submitting || polling" @click="submit">提交</Button>
@@ -588,7 +712,7 @@ onUnmounted(() => {
           <p
             v-if="result"
             class="notice result-notice"
-            :data-tone="result.status === 'correct' ? 'success' : 'danger'"
+            :data-tone="result.status === 'correct' ? 'success' : resultPartial ? 'warning' : 'danger'"
             :role="result.status === 'correct' ? 'status' : 'alert'"
           >{{ resultTitle }}</p>
 
@@ -759,6 +883,51 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-size: var(--text-section);
   font-weight: 600;
+}
+
+.explanation-text {
+  max-width: 72ch;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+}
+
+.question-options {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.question-options :deep(label) {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+
+.question-options :deep(label:hover) {
+  border-color: var(--border-strong, var(--border));
+  background: var(--bg-subtle);
+}
+
+.question-option__key {
+  display: inline-block;
+  min-width: 1.5em;
+  margin-right: var(--space-2);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.question-fill {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.question-match-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
 }
 
 .sample-group + .sample-group {

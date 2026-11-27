@@ -379,8 +379,16 @@ components:
         category: { type: string, description: 分类 slug（题库页分组键） }
         bank:
           type: string
-          enum: [tutorial, ctf, acm]
-          description: 题库 tab（tutorial=教程题目，专属内置题集，仅一键导入写入；ctf=CTF 题目，上传缺省；acm=ACM 题目）
+          enum: [tutorial, ctf, acm, basic]
+          description: |
+            题库 tab（tutorial=教程题目，专属内置题集，仅一键导入写入；ctf=CTF 题目，上传缺省；
+            acm=ACM 题目；basic=基础题，单选/多选/判断/填空，仅训练场可用，禁止绑定 CTF 竞赛）。
+        type:
+          type: string
+          enum: [static, regex, code, single, multiple, truefalse, fill]
+          description: |
+            判定类型（多态）：static/regex=flag 题；code=ACM 编程题；
+            single/multiple/truefalse/fill=基础题（训练场专用）。
         is_builtin: { type: boolean, description: 是否来自官方内置训练题集（一键导入标记；普通上传不改动） }
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         score: { type: integer }
@@ -419,6 +427,12 @@ components:
         - type: object
           properties:
             description_md: { type: string, description: 题目描述 Markdown（背景/任务目标） }
+            question:
+              allOf:
+                - $ref: '#/components/schemas/QuestionView'
+              description: |
+                基础题视图（仅 bank=basic 的 single/multiple/truefalse/fill 返回）。
+                不含标准答案；explanation 仅在当前用户已通关时下发。
             judge:
               type: object
               nullable: true
@@ -474,10 +488,56 @@ components:
         cost: { type: integer }
         unlocked: { type: boolean, enum: [true] }
         score: { type: integer, description: 解锁后的当前积分 }
+    QuestionOption:
+      type: object
+      required: [key, text]
+      properties:
+        key: { type: string, description: '选项 key（大写字母/数字，1-8 位）' }
+        text: { type: string, description: '选项文本（<=500 字）' }
+    QuestionMatch:
+      type: object
+      description: 填空匹配策略（仅 fill；缺省 trim=true、case_sensitive=false、regex=false）
+      properties:
+        case_sensitive: { type: boolean, default: false }
+        trim: { type: boolean, default: true }
+        regex: { type: boolean, default: false, description: 'true 时每个可接受答案按正则匹配' }
+    QuestionView:
+      type: object
+      description: 基础题学生端视图（不含标准答案；解析仅通关后返回）
+      properties:
+        type:
+          type: string
+          enum: [single, multiple, truefalse, fill]
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/QuestionOption' }
+        match:
+          $ref: '#/components/schemas/QuestionMatch'
+          description: 仅填空题返回匹配策略
+        explanation: { type: string, description: 解析（仅已通关时返回，未通关为空） }
+    QuestionJSON:
+      type: object
+      description: |
+        基础题定义（challenge.json question 段 / challenge.yml 同构）。
+        与 challenge、judge 三选一互斥；基础题只能 bank=basic，不支持 env/flag_mode。
+      required: [type, answer]
+      properties:
+        type: { type: string, enum: [single, multiple, truefalse, fill] }
+        options:
+          type: array
+          description: 单选/多选必填 2-26 个；判断/填空不允许
+          items: { $ref: '#/components/schemas/QuestionOption' }
+        answer:
+          description: 'single: "A"；multiple: ["A","C"]；truefalse: true；fill: "答案" 或 ["答案1","答案2"]'
+        match:
+          $ref: '#/components/schemas/QuestionMatch'
+          description: 仅填空题可用
+        explanation: { type: string, description: 解析（可选，<=16KiB；学生通关后可见） }
     ChallengeJSON:
       type: object
       description: |
         题目定义 JSON（兼容批量导入的固定格式，单对象或对象数组）。
+        判定定义三选一互斥：challenge（flag 题）/ judge（ACM 编程题）/ question（基础题）。
         带容器环境的题目推荐改用 challenge 包 zip（challenge.yml + Dockerfile + docker-compose.yml）。
       required: [slug, title, category, difficulty, score]
       properties:
@@ -486,12 +546,13 @@ components:
         category: { type: string }
         bank:
           type: string
-          enum: [ctf, acm]
+          enum: [ctf, acm, basic]
           default: ctf
           description: |
-            题库 tab。上传路径仅可选 ctf / acm（传 tutorial 一律 422——教程题目 tab
-            专属官方内置题集，仅 POST /admin/challenges/builtin 一键导入写入）。
-            缺省：新建题默认 ctf；重传已有题保留原值。
+            题库 tab。上传路径仅可选 ctf / acm / basic（传 tutorial 一律 422——教程题目
+            tab 专属官方内置题集，仅 POST /admin/challenges/builtin 一键导入写入）。
+            question 段存在时必须是 basic（缺省自动归 basic），且仅训练场可用、禁止绑定
+            CTF 竞赛。缺省：新建题默认 ctf；重传已有题保留原值。
         difficulty: { type: string, enum: [apprentice, practitioner, expert] }
         description_md: { type: string }
         score: { type: integer }
@@ -499,20 +560,26 @@ components:
           type: string
           enum: [shared, instance]
           default: shared
-          description: "shared=题目级共享 flag；instance=每容器实例唯一（模板含 {token}，须有 env）"
+          description: "shared=题目级共享 flag；instance=每容器实例唯一（模板含 {token}，须有 env）；基础题/编程题不允许 instance"
         challenge:
           type: object
           required: [type, flag]
           description: |
-            flag 判定定义（static/regex）。ACM 编程题（judge 段存在）不判定 flag，
-            challenge 段整体省略；否则必填。
+            flag 判定定义（static/regex）。ACM 编程题（judge 段）与基础题（question 段）
+            不判定 flag，challenge 段整体省略；否则必填。
           properties:
             type: { type: string, enum: [static, regex] }
             flag: { type: string, description: "instance 模式下为含 {token} 的模板" }
+        question:
+          allOf:
+            - $ref: '#/components/schemas/QuestionJSON'
+          description: |
+            基础题定义（bank=basic 必填；与 challenge / judge 互斥）。
+            单选/多选/判断/填空四种题型；不支持 env，不接受 flag 判定。
         judge:
           type: object
           description: |
-            ACM 编程题判定定义（bank=acm 必填；ctf 题出现该段一律 422）。
+            ACM 编程题判定定义（bank=acm 必填；flag 题/基础题出现该段一律 422）。
             ACM 题不通过 flag 判定——学生提交 yak 源码，judge worker 用引擎执行
             并对拍测试数据（对齐 ICPC 模型：样例 + 隐藏数据逐组运行、token 忽略
             行尾空白比对、时限/内存限制、AC/WA/TLE/RE 判定）。题目包 zip 中
@@ -581,6 +648,7 @@ components:
       type: object
       description: |
         实训常用题目包（zip）。必含 challenge.yml；带容器时还必含 Dockerfile 与 docker-compose.yml。
+        基础题（challenge.yml 带 question 段、bank=basic）不需要 Dockerfile / docker-compose.yml / testdata。
         ACM 编程题（challenge.yml 带 judge 段）包内以 testdata/ 目录携带数据文件：
         testdata/<组名>.in 输入、testdata/<组名>.answer 期望输出（对齐 ICPC .in/.ans
         惯例，期望输出用 .answer 避开构建工具对 .ans 的误处理），组名建议 01/02/03
@@ -2473,7 +2541,7 @@ paths:
       parameters:
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, default: 20 } }
-        - { name: bank, in: query, description: 题库 tab（tutorial=内置题集；缺省 = 全部）, schema: { type: string, enum: [tutorial, ctf, acm] } }
+        - { name: bank, in: query, description: 题库 tab（tutorial=内置题集；basic=基础题；缺省 = 全部）, schema: { type: string, enum: [tutorial, ctf, acm, basic] } }
         - { name: builtin, in: query, description: 是否内置题集（缺省 = 全部）, schema: { type: boolean } }
       responses:
         '200':
@@ -2711,8 +2779,8 @@ paths:
           schema: { type: string }
         - name: bank
           in: query
-          description: 题库 tab 过滤（ctf / acm / tutorial）
-          schema: { type: string, enum: [ctf, acm, tutorial] }
+          description: 题库 tab 过滤（ctf / acm / tutorial / basic）
+          schema: { type: string, enum: [ctf, acm, tutorial, basic] }
         - name: category
           in: query
           description: 分类 slug 精确匹配
@@ -3000,16 +3068,22 @@ paths:
                   slug: { type: string }
                   title: { type: string }
                   category: { type: string }
-                  bank: { type: string, enum: [tutorial, ctf, acm] }
+                  bank: { type: string, enum: [tutorial, ctf, acm, basic] }
                   difficulty: { type: string, enum: [apprentice, practitioner, expert] }
                   description_md: { type: string }
                   score: { type: integer }
                   flag_mode: { type: string, enum: [shared, instance] }
                   challenge:
                     type: object
+                    description: flag 判定段（基础题/编程题回填时为空对象）
                     properties:
                       type: { type: string, enum: [static, regex] }
                       flag: { type: string, description: 'flags[0]，表单回填用' }
+                  question:
+                    allOf:
+                      - $ref: '#/components/schemas/QuestionJSON'
+                    nullable: true
+                    description: 基础题定义回填（含标准答案；非基础题为 null）。与 challenge / judge 三选一。
                   judge:
                     type: object
                     nullable: true

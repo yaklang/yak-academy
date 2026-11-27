@@ -79,13 +79,42 @@ export interface Paged<T> { total: number; page: number; page_size: number; item
 export interface RoomSummary { slug: string; title: string; difficulty: 'apprentice' | 'practitioner' | 'expert' }
 export interface TopicDetail extends Topic { rooms: RoomSummary[] }
 // 题库 tab（bank）：教程题目 = 内置题集专属（仅一键导入写入，上传传 tutorial 一律 422）；
-// CTF（上传缺省）/ ACM 为管理员上传题库。
-export type ChallengeBank = 'tutorial' | 'ctf' | 'acm'
+// CTF（上传缺省）/ ACM / 基础题 为管理员上传题库。
+export type ChallengeBank = 'tutorial' | 'ctf' | 'acm' | 'basic'
 export type ChallengeDifficulty = 'apprentice' | 'practitioner' | 'expert'
 export const BANK_LABELS: Record<ChallengeBank, string> = {
   tutorial: '教程题目',
   ctf: 'CTF 题目',
   acm: 'ACM 题目',
+  basic: '基础题',
+}
+// 训练 Challenge 判定类型：static/regex=flag 题；code=ACM 编程题；
+// single/multiple/truefalse/fill=基础题（bank=basic，仅训练场，禁止进 CTF 竞赛）。
+export type ChallengeType = 'static' | 'regex' | 'code' | 'single' | 'multiple' | 'truefalse' | 'fill'
+export type QuestionType = 'single' | 'multiple' | 'truefalse' | 'fill'
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  single: '单选',
+  multiple: '多选',
+  truefalse: '判断',
+  fill: '填空',
+}
+export interface QuestionOption { key: string; text: string }
+// 填空匹配策略（缺省 trim=true、case_sensitive=false、regex=false）。
+export interface QuestionMatch { case_sensitive?: boolean; trim?: boolean; regex?: boolean }
+// 基础题学生端视图：不含标准答案；explanation 仅通关后下发。
+export interface QuestionView {
+  type: QuestionType
+  options?: QuestionOption[]
+  match?: QuestionMatch
+  explanation?: string
+}
+// challenge.json / challenge.yml 的 question 段（管理端导入与回填同构，含答案）。
+export interface QuestionJSON {
+  type: QuestionType
+  options?: QuestionOption[]
+  answer: string | string[] | boolean
+  match?: QuestionMatch
+  explanation?: string
 }
 export const DIFFICULTY_LABELS: Record<ChallengeDifficulty, string> = {
   apprentice: '入门',
@@ -130,6 +159,7 @@ export interface TrainingItem {
   title: string
   category: string
   bank: ChallengeBank
+  type?: ChallengeType
   is_builtin: boolean
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   score: number
@@ -193,6 +223,7 @@ export interface CodeRunView {
 export interface ChallengeDetail extends TrainingItem {
   description_md: string
   judge?: JudgeConfig | null
+  question?: QuestionView | null
   hints: Hint[]
   attachments: ChallengeAttachment[]
 }
@@ -217,14 +248,16 @@ export interface ChallengeJSON {
   slug: string
   title: string
   category: string
-  // 题库 tab；缺省 tutorial（教程题目/内部题库）。
+  // 题库 tab；缺省 ctf（带 question 段时自动归 basic）。
   bank?: ChallengeBank
   difficulty: 'apprentice' | 'practitioner' | 'expert'
   description_md?: string
   score: number
   // flag 作用域：shared=题目级共享（默认）；instance=每实例唯一（flag 为含 {token} 的模板，必须配 env）。
   flag_mode?: 'shared' | 'instance'
-  challenge: { type: 'static' | 'regex'; flag: string }
+  // 判定定义三选一：challenge（flag）/ judge（ACM）/ question（基础题）。
+  challenge?: { type: 'static' | 'regex'; flag: string }
+  question?: QuestionJSON | null
   judge?: JudgeJSON | null
   env?: { image: string; port: number }
   hints?: ChallengeHintInput[]
@@ -234,12 +267,14 @@ export interface ChallengeJSON {
 // 管理端单题完整定义（GET /admin/challenges/{slug}，编辑回填用）：
 // 与上传 JSON 同构，另含完整 flag 值列表（题目包 zip 可多 flag，表单只回填首个）。
 // ACM 编程题：challenge 段为空对象、judge 段回填（testdata 仅 name/sample 引用）。
+// 基础题：challenge 段为空对象、question 段回填（含标准答案）。
 export interface ChallengeFullJSON extends ChallengeJSON {
   bank: ChallengeBank
   flag_mode: 'shared' | 'instance'
   flags: string[]
   challenge: { type: 'static' | 'regex'; flag: string }
   judge?: JudgeJSON | null
+  question?: QuestionJSON | null
 }
 export interface AdminLabInstance {
   id: number

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -82,8 +83,8 @@ func (s *TopicService) GetTopic(ctx context.Context, topicSlug string) (*TopicDe
 // RoomDetail Room 详情视图：文字/视频教程正文 + 可选关联题目 slug。
 // 题目是独立资源，Room 不再内嵌 Lab；有关联题目时仅返回 slug 供前端跳转。
 type RoomDetail struct {
-	Room       *model.Room
-	Challenge  *model.Challenge // 关联题目（tutorial_slug 指向本 Room），可为 nil
+	Room      *model.Room
+	Challenge *model.Challenge // 关联题目（tutorial_slug 指向本 Room），可为 nil
 }
 
 func (s *TopicService) GetRoomDetail(ctx context.Context, topicSlug, roomSlug string) (*RoomDetail, error) {
@@ -118,36 +119,50 @@ func (s *TopicService) FindChallengeBySlug(ctx context.Context, slug string) (*m
 
 // TrainingItem 题库条目：独立题目资源的列表视角（含当前用户状态与可选教程关联）。
 type TrainingItem struct {
-	ID            uint             `json:"id"`
-	Slug          string           `json:"slug"`
-	Title         string           `json:"title"`
-	Category      string           `json:"category"`
-	Bank          string           `json:"bank"`
-	IsBuiltin     bool             `json:"is_builtin"`
-	Difficulty    model.Difficulty `json:"difficulty"`
-	Score         int              `json:"score"`
-	Solved        bool             `json:"solved"`
-	HasEnv        bool             `json:"has_env"`
+	ID       uint   `json:"id"`
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+	Category string `json:"category"`
+	Bank     string `json:"bank"`
+	// Type 判定类型（static/regex/code/single/multiple/truefalse/fill）。
+	Type       model.ChallengeType `json:"type"`
+	IsBuiltin  bool                `json:"is_builtin"`
+	Difficulty model.Difficulty    `json:"difficulty"`
+	Score      int                 `json:"score"`
+	Solved     bool                `json:"solved"`
+	HasEnv     bool                `json:"has_env"`
 	// IsVisible/ReleaseAt 可见性状态（管理端列表展示与编辑回显；学生端行恒为可见）。
-	IsVisible     bool             `json:"is_visible"`
-	ReleaseAt     *time.Time       `json:"release_at"`
+	IsVisible     bool                  `json:"is_visible"`
+	ReleaseAt     *time.Time            `json:"release_at"`
 	Links         []model.ChallengeLink `json:"links"`
-	TutorialSlug  string           `json:"tutorial_slug"`
-	TutorialTitle string           `json:"tutorial_title"`
+	TutorialSlug  string                `json:"tutorial_slug"`
+	TutorialTitle string                `json:"tutorial_title"`
 	// TutorialTopicSlug 关联教程所属 topic（前端 Room 详情路由需要 topic 段）。
-	TutorialTopicSlug string         `json:"tutorial_topic_slug"`
+	TutorialTopicSlug string `json:"tutorial_topic_slug"`
 }
 
 // ChallengeDetail 题目详情（训练场点入页）：描述 markdown + hints（未解锁正文为空）。
 type ChallengeDetail struct {
 	TrainingItem
-	DescriptionMD string          `json:"description_md"`
-	Hints         []HintView      `json:"hints"`
+	DescriptionMD string     `json:"description_md"`
+	Hints         []HintView `json:"hints"`
 	// Attachments 附件列表（api 层从 ChallengeService 拼装，学生凭 JWT 下载）。
 	Attachments []AttachmentView `json:"attachments"`
 	// Judge ACM 编程题判定配置（flag 判定题为 nil；数据内容不下发，
 	// 样例经 ListJudgeSamples 提供）。
 	Judge *JudgeConfigView `json:"judge"`
+	// Question 基础题作答视图（仅单选/多选/判断/填空；不含标准答案）。
+	Question *QuestionView `json:"question"`
+}
+
+// QuestionView 基础题学生端视图：选项与匹配策略公开，标准答案永不下发；
+// 解析仅在已通关后返回。
+type QuestionView struct {
+	Type    model.ChallengeType `json:"type"`
+	Options []QuestionOption    `json:"options"`
+	Match   *QuestionMatch      `json:"match,omitempty"`
+	// Explanation 解析（仅已通关时非空）。
+	Explanation string `json:"explanation,omitempty"`
 }
 
 // JudgeConfigView ACM 判定配置的学生端视图（不含测试数据内容）。
@@ -203,7 +218,7 @@ func bankOrDefault(b model.ChallengeBank) model.ChallengeBank {
 func toTrainingItem(c model.Challenge) TrainingItem {
 	return TrainingItem{
 		ID: c.ID, Slug: c.Slug, Title: c.Title, Category: c.Category,
-		Bank: string(bankOrDefault(c.Bank)), IsBuiltin: c.IsBuiltin,
+		Bank: string(bankOrDefault(c.Bank)), Type: c.Type, IsBuiltin: c.IsBuiltin,
 		Difficulty: c.Difficulty, Score: c.Score, HasEnv: c.Image != "",
 		IsVisible: c.IsVisible, ReleaseAt: c.ReleaseAt,
 		Links: parseLinks(c.Links), TutorialSlug: c.TutorialSlug,
@@ -310,6 +325,11 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 		Hints:         toHintViews(hints, unlocked),
 		DescriptionMD: chal.Description,
 	}
+	solved := false
+	if ok, err := s.submissions.HasCorrect(ctx, userID, chal.ID, 0); err == nil {
+		solved = ok
+	}
+	detail.Solved = solved
 	// ACM 编程题：判定配置随详情下发（数据内容不下发）。
 	if chal.Type == model.ChallengeCode {
 		if conf, err := s.challenges.FindACM(ctx, chal.ID); err == nil {
@@ -325,8 +345,25 @@ func (s *TopicService) GetChallengeDetail(ctx context.Context, userID uint, slug
 			}
 		}
 	}
-	if solved, err := s.submissions.HasCorrect(ctx, userID, chal.ID, 0); err == nil {
-		detail.Solved = solved
+	// 基础题：选项/匹配策略随详情下发；标准答案不下发，解析仅通关后返回。
+	if isObjectiveChallengeType(chal.Type) {
+		row, err := s.challenges.FindQuestion(ctx, chal.ID)
+		if err != nil {
+			return nil, fmt.Errorf("challenge %s: load question: %w", chal.Slug, err)
+		}
+		spec, err := parseQuestionSpec(chal.Type, row)
+		if err != nil {
+			return nil, fmt.Errorf("challenge %s: %w", chal.Slug, err)
+		}
+		view := &QuestionView{Type: chal.Type, Options: spec.Options}
+		if chal.Type == model.ChallengeFill {
+			match := spec.Match
+			view.Match = &match
+		}
+		if solved {
+			view.Explanation = spec.Explanation
+		}
+		detail.Question = view
 	}
 	// enrichTutorial 按值传切片，这里原地拼回（单题场景）。
 	items := []TrainingItem{detail.TrainingItem}

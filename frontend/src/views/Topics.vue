@@ -30,6 +30,7 @@ const quickBanks: Array<{ bank: ChallengeBank; desc: string }> = [
   { bank: 'tutorial', desc: '教程配套练习，读完章节即刻上手' },
   { bank: 'ctf', desc: '独立夺旗挑战，按类型与难度筛选' },
   { bank: 'acm', desc: '算法题目训练，在线判题即时反馈' },
+  { bank: 'basic', desc: '单选、多选、判断与填空，即时判分' },
 ]
 
 async function load() {

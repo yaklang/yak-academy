@@ -23,6 +23,7 @@ import {
   adminChallengeApi,
   CATEGORY_LABELS,
   DIFFICULTY_LABELS,
+  QUESTION_TYPE_LABELS,
   type AdminChallengeQuery,
   type BuiltinImageStatus,
   type ChallengeAttachment,
@@ -33,10 +34,18 @@ import {
   type ChallengeJSON,
   type ChallengeLink,
   type JudgeJSON,
+  type QuestionJSON,
+  type QuestionOption,
+  type QuestionType,
   type TrainingItem,
   type YakEngineStatus,
 } from '../../api'
-import { downloadSampleChallenge, parseChallengeJSON, validateChallenge } from '../../admin/challengeFormat'
+import {
+  downloadSampleBasicQuestions,
+  downloadSampleChallenge,
+  parseChallengeJSON,
+  validateChallenge,
+} from '../../admin/challengeFormat'
 import { LIB_DESC } from '../../components/yakVocab'
 
 // 库白名单候选（教学常用库 + 中文说明；可手输其他 yaklang 库名，
@@ -52,8 +61,8 @@ const loadError = ref('')
 const uploading = ref(false)
 const specVisible = ref(false)
 
-// ===== 题库 tab（内置只读；CTF/ACM 可管理）=====
-type AdminTab = 'builtin' | 'ctf' | 'acm'
+// ===== 题库 tab（内置只读；CTF/ACM/基础题 可管理）=====
+type AdminTab = 'builtin' | 'ctf' | 'acm' | 'basic'
 const activeTab = ref<AdminTab>('builtin')
 // 内置 tab 按来源聚合（is_builtin=true，不限 bank——内置集语义上是随平台
 // 分发的一套，不该被 bank 二次切分）。
@@ -61,12 +70,14 @@ const TAB_META: Record<AdminTab, { bank?: ChallengeBank; builtin: boolean; hint:
   builtin: { builtin: true, hint: '内置训练集随平台分发，只读展示；更新与清理经「导入内置训练」按目录整体进行。' },
   ctf: { bank: 'ctf', builtin: false, hint: 'CTF 题目：flag 提交判定（明文或正则），可选容器环境。' },
   acm: { bank: 'acm', builtin: false, hint: 'ACM 题目：算法编程题，上传时题库选择 ACM。' },
+  basic: { bank: 'basic', builtin: false, hint: '基础题：单选/多选/判断/填空，即时判分；仅训练场可用，不能绑定 CTF 竞赛。' },
 }
 
 const tabs = [
   { label: '内置训练', value: 'builtin' },
   { label: 'CTF 题目', value: 'ctf' },
   { label: 'ACM 题目', value: 'acm' },
+  { label: '基础题', value: 'basic' },
 ]
 
 // ===== 搜索 / 筛选（随 tab 与分页联动；关键字 400ms 防抖）=====
@@ -146,15 +157,18 @@ const editLoading = ref('')
 // 教程题库为内置题集专属：行内编辑该类题时锁定题库选择，
 // 提交省略 bank（后端缺省 = 保留原值），避免把内置题挤出教程题目 tab。
 const bankLocked = ref(false)
+// 判定方式三选一：flag 提交 / 代码判题（ACM）/ 基础题（客观题）。
+type FormMode = 'flag' | 'code' | 'question'
 const form = reactive({
   slug: '',
   title: '',
   category: '',
   bank: 'ctf' as ChallengeBank,
+  mode: 'flag' as FormMode,
   difficulty: 'apprentice' as ChallengeJSON['difficulty'],
   score: 100,
   flag_mode: 'shared' as Required<ChallengeJSON>['flag_mode'],
-  type: 'static' as ChallengeJSON['challenge']['type'],
+  type: 'static' as NonNullable<ChallengeJSON['challenge']>['type'],
   flag: '',
   has_env: false,
   image: '',
@@ -164,7 +178,51 @@ const form = reactive({
   hints: [] as ChallengeHintInput[],
   links: [] as ChallengeLink[],
   judge: null as JudgeJSON | null,
+  // 基础题（question 段）
+  questionType: 'single' as QuestionType,
+  options: [] as QuestionOption[],
+  answerSingle: '',
+  answerMultiple: [] as string[],
+  answerTrueFalse: true,
+  fillAnswers: [''] as string[],
+  matchCaseSensitive: false,
+  matchTrim: true,
+  matchRegex: false,
+  explanation: '',
 })
+
+function defaultQuestionOptions(): QuestionOption[] {
+  return [
+    { key: 'A', text: '' },
+    { key: 'B', text: '' },
+  ]
+}
+
+function defaultJudge(): JudgeJSON {
+  return { engine: 'yak', time_limit_s: 2, memory_limit_mb: 128, allowed_libs: [], testdata: [] }
+}
+
+function buildQuestionPayload(): QuestionJSON {
+  const q: QuestionJSON = { type: form.questionType, answer: '' }
+  if (form.questionType === 'single') {
+    q.options = form.options.map((o) => ({ key: o.key.trim(), text: o.text.trim() }))
+    q.answer = form.answerSingle.trim()
+  } else if (form.questionType === 'multiple') {
+    q.options = form.options.map((o) => ({ key: o.key.trim(), text: o.text.trim() }))
+    q.answer = [...form.answerMultiple].sort()
+  } else if (form.questionType === 'truefalse') {
+    q.answer = form.answerTrueFalse
+  } else {
+    q.answer = form.fillAnswers.map((a) => a.trim()).filter(Boolean)
+    q.match = {
+      case_sensitive: form.matchCaseSensitive,
+      trim: form.matchTrim,
+      regex: form.matchRegex,
+    }
+  }
+  if (form.explanation.trim()) q.explanation = form.explanation.trim()
+  return q
+}
 
 // 表单 → 规范化题目 JSON。bankLocked（编辑内置 tutorial 题）时省略 bank。
 function buildPayload(): ChallengeJSON {
@@ -174,22 +232,27 @@ function buildPayload(): ChallengeJSON {
     category: form.category.trim(),
     difficulty: form.difficulty,
     score: form.score,
-    flag_mode: form.flag_mode,
   } as Partial<ChallengeJSON>
-  if (form.judge) {
+  if (form.mode === 'question') {
+    payload.question = buildQuestionPayload()
+  } else if (form.mode === 'code') {
+    const judge = form.judge ?? defaultJudge()
     payload.judge = {
       engine: 'yak',
-      time_limit_s: form.judge.time_limit_s,
-      memory_limit_mb: form.judge.memory_limit_mb,
-      allowed_libs: form.judge.allowed_libs ?? [],
-      testdata: form.judge.testdata.map((t) => ({ name: t.name, sample: t.sample, score: t.score ?? 0 })),
+      time_limit_s: judge.time_limit_s,
+      memory_limit_mb: judge.memory_limit_mb,
+      allowed_libs: judge.allowed_libs ?? [],
+      testdata: judge.testdata.map((t) => ({ name: t.name, sample: t.sample, score: t.score ?? 0 })),
     }
   } else {
     payload.challenge = { type: form.type, flag: form.flag.trim() }
   }
-  if (!bankLocked.value) payload.bank = form.bank
+  if (!bankLocked.value) payload.bank = form.mode === 'question' ? 'basic' : form.bank
+  if (form.mode !== 'question') {
+    payload.flag_mode = form.flag_mode
+    if (form.has_env && form.image.trim()) payload.env = { image: form.image.trim(), port: form.port }
+  }
   if (form.description_md.trim()) payload.description_md = form.description_md
-  if (form.has_env && form.image.trim()) payload.env = { image: form.image.trim(), port: form.port }
   if (form.tutorial_slug.trim()) payload.tutorial_slug = form.tutorial_slug.trim()
   payload.hints = form.hints
     .filter((h) => h.title || h.content)
@@ -209,9 +272,10 @@ function fillForm(chal: ChallengeJSON) {
   form.slug = chal.slug ?? ''
   form.title = chal.title ?? ''
   form.category = chal.category ?? ''
-  // 教程题目 tab 专属内置题集：上传只允许 ctf/acm，其余（tutorial/空）归 ctf。
+  // 教程题目 tab 专属内置题集：上传只允许 ctf/acm/basic，其余（tutorial/空）归 ctf。
   bankLocked.value = chal.bank === 'tutorial'
-  form.bank = chal.bank === 'acm' ? 'acm' : chal.bank === 'tutorial' ? 'tutorial' : 'ctf'
+  form.bank =
+    chal.bank === 'acm' || chal.bank === 'basic' || chal.bank === 'tutorial' ? chal.bank : 'ctf'
   form.difficulty = chal.difficulty ?? 'apprentice'
   form.score = chal.score ?? 100
   form.flag_mode = chal.flag_mode ?? 'shared'
@@ -235,6 +299,111 @@ function fillForm(chal: ChallengeJSON) {
   form.tutorial_slug = chal.tutorial_slug ?? ''
   form.hints = (chal.hints ?? []).map((h) => ({ ...h }))
   form.links = (chal.links ?? []).map((l) => ({ ...l }))
+
+  const q = chal.question ?? null
+  form.mode = q ? 'question' : form.judge ? 'code' : 'flag'
+  form.questionType = q?.type ?? 'single'
+  form.options = q?.options?.length
+    ? q.options.map((o) => ({ key: o.key, text: o.text }))
+    : defaultQuestionOptions()
+  form.answerSingle = typeof q?.answer === 'string' ? q.answer : ''
+  form.answerMultiple = Array.isArray(q?.answer)
+    ? q.answer.filter((k): k is string => typeof k === 'string')
+    : []
+  form.answerTrueFalse = typeof q?.answer === 'boolean' ? q.answer : true
+  const fill = Array.isArray(q?.answer)
+    ? q.answer.filter((a): a is string => typeof a === 'string')
+    : typeof q?.answer === 'string'
+      ? [q.answer]
+      : []
+  form.fillAnswers = fill.length ? fill : ['']
+  form.matchCaseSensitive = q?.match?.case_sensitive ?? false
+  form.matchTrim = q?.match?.trim ?? true
+  form.matchRegex = q?.match?.regex ?? false
+  form.explanation = q?.explanation ?? ''
+  // 导入 JSON 缺省 bank 时按判定方式归位（question→basic / judge→acm）。
+  onModeChange()
+}
+
+// 判定方式切换：题库随模式自动归位（基础题 -> basic；ACM -> acm；flag -> ctf）。
+function onModeChange() {
+  if (form.mode === 'question') {
+    if (!bankLocked.value) form.bank = 'basic'
+    form.flag_mode = 'shared'
+    form.has_env = false
+    if (!form.options.length) form.options = defaultQuestionOptions()
+    onQuestionTypeChange(form.questionType)
+  } else if (form.mode === 'code') {
+    if (!form.judge) form.judge = defaultJudge()
+    if (!bankLocked.value && (form.bank === 'basic' || form.bank === 'ctf')) form.bank = 'acm'
+  } else if (!bankLocked.value && (form.bank === 'basic' || form.bank === 'acm')) {
+    form.bank = 'ctf'
+  }
+}
+
+// 题型切换：为单选补默认答案，清理与新题型不再匹配的答案。
+function onQuestionTypeChange(type: QuestionType) {
+  if (type === 'single') {
+    if (!form.options.length) form.options = defaultQuestionOptions()
+    if (!form.options.some((o) => o.key === form.answerSingle)) {
+      form.answerSingle = form.options[0]?.key ?? 'A'
+    }
+  } else if (type === 'multiple') {
+    if (!form.options.length) form.options = defaultQuestionOptions()
+    form.answerMultiple = form.answerMultiple.filter((key) =>
+      form.options.some((o) => o.key === key),
+    )
+  } else if (type === 'fill' && !form.fillAnswers.length) {
+    form.fillAnswers = ['']
+  }
+}
+
+function addQuestionOption() {
+  const used = new Set(form.options.map((o) => o.key.trim()))
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+  let key = alphabet.find((k) => !used.has(k))
+  if (!key) {
+    let n = 1
+    while (used.has(String(n))) n++
+    key = String(n)
+  }
+  form.options.push({ key, text: '' })
+}
+
+function removeQuestionOption(index: number) {
+  const [removed] = form.options.splice(index, 1)
+  if (!removed) return
+  if (form.answerSingle === removed.key) form.answerSingle = ''
+  form.answerMultiple = form.answerMultiple.filter((key) => key !== removed.key)
+}
+
+function toggleMultipleAnswer(key: string, checked: boolean) {
+  if (checked) {
+    if (!form.answerMultiple.includes(key)) form.answerMultiple.push(key)
+  } else {
+    form.answerMultiple = form.answerMultiple.filter((k) => k !== key)
+  }
+}
+
+function addFillAnswer() {
+  form.fillAnswers.push('')
+}
+
+function removeFillAnswer(index: number) {
+  form.fillAnswers.splice(index, 1)
+  if (!form.fillAnswers.length) form.fillAnswers = ['']
+}
+
+// 判定方式/题型的展示辅助。
+function questionTypeLabel(row: TrainingItem) {
+  if (row.type === 'single' || row.type === 'multiple' || row.type === 'truefalse' || row.type === 'fill') {
+    return `基础题 · ${QUESTION_TYPE_LABELS[row.type]}`
+  }
+  if (row.type === 'code') return '代码判题'
+  if (row.type === 'static' || row.type === 'regex') return 'flag 提交'
+  if (row.bank === 'acm') return '代码判题'
+  if (row.bank === 'basic') return '基础题'
+  return 'flag 提交'
 }
 
 function addHint() {
@@ -274,16 +443,24 @@ async function onImport(file: File) {
   }
   const chal = list[0]
   if (chal.bank === 'tutorial') {
-    notify.warning({ message: '教程题库为内置题集专属：该文件声明的题库不再接受上传，将按表单所选题库（CTF/ACM）入库', duration: 5000 })
+    notify.warning({ message: '教程题库为内置题集专属：该文件声明的题库不再接受上传，将按判定方式归入对应题库', duration: 5000 })
   }
   const errors = validateChallenge(chal)
+  if (errors.some((err) => err.includes('三选一互斥'))) {
+    // 冲突的判定段无法在同构表单中同时表达；直接拦截，避免保存时静默丢弃其一。
+    notify.error({
+      message: '题目判定定义冲突：question / judge / challenge 三选一，请修改文件后重新选择',
+      duration: 6000,
+    })
+    return false
+  }
   if (errors.length) {
     notify.warning({ message: `题目格式有 ${errors.length} 处问题，请在弹窗中修正后上传`, duration: 3500 })
   }
   fillForm(chal)
   if (bankLocked.value) {
     bankLocked.value = false
-    form.bank = 'ctf'
+    form.bank = form.mode === 'question' ? 'basic' : form.mode === 'code' ? 'acm' : 'ctf'
   }
   editExistingSlug.value = ''
   editSourceFile.value = file.name
@@ -592,8 +769,13 @@ function onEmptyAction() {
   } else if (readonlyTab.value) {
     builtinConfirmOpen.value = true
   } else {
-    downloadSampleChallenge()
+    onDownloadSample()
   }
+}
+
+function onDownloadSample() {
+  if (activeTab.value === 'basic') downloadSampleBasicQuestions()
+  else downloadSampleChallenge()
 }
 
 onMounted(() => {
@@ -607,7 +789,7 @@ onUnmounted(stopEnginePolling)
 <template>
   <PageHeader
     title="题目管理"
-    description="维护内置题集、CTF 题目与 ACM 题目；上传、可见性、附件与配套教程都在这一个页面完成。"
+    description="维护内置题集、CTF 题目、ACM 题目与基础题；上传、可见性、附件与配套教程都在这一个页面完成。"
   >
     <template #badges>
       <span v-if="total" class="head-count">共 {{ total }} 题</span>
@@ -623,7 +805,7 @@ onUnmounted(stopEnginePolling)
         <Button type="button" variant="outline" @click="specVisible = !specVisible">
           {{ specVisible ? '收起格式规范' : '查看格式规范' }}
         </Button>
-        <Button type="button" variant="outline" @click="downloadSampleChallenge">下载样例 JSON</Button>
+        <Button type="button" variant="outline" @click="onDownloadSample">下载样例 JSON</Button>
         <UiUpload
           :show-file-list="false"
           accept=".zip,application/zip"
@@ -661,12 +843,13 @@ onUnmounted(stopEnginePolling)
         <tr><td>题目标识</td><td>是</td><td>全站唯一，小写字母、数字与连字符</td></tr>
         <tr><td>标题</td><td>是</td><td>学员看到的题目名称</td></tr>
         <tr><td>分类</td><td>是</td><td>小写字母、数字与连字符，用于筛选</td></tr>
-        <tr><td>题库</td><td>否</td><td>CTF 或 ACM；教程题库为内置题集专属</td></tr>
+        <tr><td>题库</td><td>否</td><td>CTF / ACM / 基础题；教程题库为内置题集专属</td></tr>
         <tr><td>难度</td><td>是</td><td>入门 / 进阶 / 专家</td></tr>
         <tr><td>分值</td><td>是</td><td>非负整数</td></tr>
-        <tr><td>描述</td><td>否</td><td>Markdown 正文</td></tr>
-        <tr><td>flag 判定</td><td>二选一</td><td>明文或正则，作用域为共享或每实例唯一</td></tr>
-        <tr><td>容器环境</td><td>否</td><td>镜像与端口</td></tr>
+        <tr><td>描述</td><td>基础题必填</td><td>Markdown 正文</td></tr>
+        <tr><td>判定方式</td><td>三选一</td><td>flag 提交（明文/正则）、代码判题（ACM）、基础题（单选/多选/判断/填空）</td></tr>
+        <tr><td>基础题答案</td><td>基础题必填</td><td>单选 key / 多选 key 数组 / 判断布尔值 / 填空文本（可多个）</td></tr>
+        <tr><td>容器环境</td><td>否</td><td>镜像与端口（仅 flag 题可用）</td></tr>
         <tr><td>提示</td><td>否</td><td>标题、内容与花费积分</td></tr>
         <tr><td>外链</td><td>否</td><td>名称与 URL</td></tr>
         <tr><td>关联教程</td><td>否</td><td>填写教程标识</td></tr>
@@ -816,6 +999,11 @@ onUnmounted(stopEnginePolling)
           <StatusTag kind="difficulty" :value="row.difficulty" />
         </template>
       </UiTableColumn>
+      <UiTableColumn label="判定" min-width="120">
+        <template #default="{ row }">
+          <span class="challenge-muted">{{ questionTypeLabel(row) }}</span>
+        </template>
+      </UiTableColumn>
       <UiTableColumn label="分值" width="80">
         <template #default="{ row }">
           <span class="challenge-score">{{ row.score }} 分</span>
@@ -912,13 +1100,22 @@ onUnmounted(stopEnginePolling)
         <UiFormItem label="分类" required>
           <UiInput v-model="form.category" placeholder="例如 sql-injection" />
         </UiFormItem>
+        <UiFormItem label="判定方式" required>
+          <UiSelect v-model="form.mode" :disabled="bankLocked" @change="onModeChange">
+            <UiOption value="flag" label="flag 提交" />
+            <UiOption value="code" label="代码判题（ACM）" />
+            <UiOption value="question" label="基础题（客观题）" />
+          </UiSelect>
+          <div class="form-hint">flag 题、ACM 编程题、基础题三选一</div>
+        </UiFormItem>
         <UiFormItem label="题库">
-          <UiSelect v-model="form.bank" :disabled="bankLocked">
+          <UiSelect v-model="form.bank" :disabled="bankLocked || form.mode === 'question'">
             <UiOption v-if="bankLocked" value="tutorial" label="教程题目（内置，不可改）" />
             <UiOption value="ctf" label="CTF 题目" />
             <UiOption value="acm" label="ACM 题目" />
+            <UiOption value="basic" label="基础题" />
           </UiSelect>
-          <div class="form-hint">教程题库为内置题集专属，经「导入内置训练」写入</div>
+          <div class="form-hint">基础题自动归「基础题」题库；教程题库经「导入内置训练」写入</div>
         </UiFormItem>
         <UiFormItem label="难度" required>
           <UiSelect v-model="form.difficulty">
@@ -934,7 +1131,7 @@ onUnmounted(stopEnginePolling)
           <UiInput v-model="form.tutorial_slug" placeholder="可选，填写教程标识" />
         </UiFormItem>
         <!-- ACM 编程题：判定配置回填；测试数据经题目包 zip 维护，组分值可在此调整 -->
-        <template v-if="form.judge">
+        <template v-if="form.judge && form.mode === 'code'">
           <UiFormItem label="判定引擎">
             <UiTag>代码判题（yak）</UiTag>
             <div class="form-hint">
@@ -984,7 +1181,7 @@ onUnmounted(stopEnginePolling)
             </div>
           </UiFormItem>
         </template>
-        <template v-else>
+        <template v-else-if="form.mode === 'flag'">
           <UiFormItem label="判定类型" required>
             <UiSelect v-model="form.type">
               <UiOption value="static" label="明文 flag" />
@@ -1001,16 +1198,102 @@ onUnmounted(stopEnginePolling)
             </UiSelect>
           </UiFormItem>
         </template>
+        <template v-else>
+          <UiFormItem label="题型" required>
+            <UiSelect v-model="form.questionType" @change="onQuestionTypeChange">
+              <UiOption value="single" label="单选" />
+              <UiOption value="multiple" label="多选" />
+              <UiOption value="truefalse" label="判断" />
+              <UiOption value="fill" label="填空" />
+            </UiSelect>
+          </UiFormItem>
+          <UiFormItem label="解析">
+            <UiInput v-model="form.explanation" placeholder="可选；学员通关后展示" />
+          </UiFormItem>
+          <UiFormItem
+            v-if="form.questionType === 'single' || form.questionType === 'multiple'"
+            label="选项与答案"
+            required
+            class="form-span"
+          >
+            <div class="question-options">
+              <div v-for="(option, index) in form.options" :key="index" class="question-option-row">
+                <UiInput
+                  v-model="option.key"
+                  maxlength="8"
+                  aria-label="选项 key"
+                  class="question-option-key"
+                />
+                <UiInput
+                  v-model="option.text"
+                  :aria-label="`选项 ${option.key} 文本`"
+                  placeholder="选项文本"
+                  class="question-option-text"
+                />
+                <UiRadioGroup
+                  v-if="form.questionType === 'single'"
+                  v-model="form.answerSingle"
+                  class="question-option-pick"
+                >
+                  <UiRadio :value="option.key" :aria-label="`将 ${option.key} 设为正确答案`">正确答案</UiRadio>
+                </UiRadioGroup>
+                <UiCheckbox
+                  v-else
+                  :model-value="form.answerMultiple.includes(option.key)"
+                  :aria-label="`将 ${option.key} 设为正确答案`"
+                  @update:model-value="(checked) => toggleMultipleAnswer(option.key, checked)"
+                >
+                  正确答案
+                </UiCheckbox>
+                <UiButton type="danger" link @click="removeQuestionOption(index)">删除</UiButton>
+              </div>
+              <UiButton size="small" :disabled="form.options.length >= 26" @click="addQuestionOption">
+                添加选项
+              </UiButton>
+              <div class="form-hint">
+                单选/多选需 2–26 个选项，key 用大写字母/数字；勾选「正确答案」的选项参与判分。
+              </div>
+            </div>
+          </UiFormItem>
+          <UiFormItem v-else-if="form.questionType === 'truefalse'" label="正确答案" required>
+            <UiRadioGroup v-model="form.answerTrueFalse">
+              <UiRadio :value="true">正确</UiRadio>
+              <UiRadio :value="false">错误</UiRadio>
+            </UiRadioGroup>
+          </UiFormItem>
+          <UiFormItem v-else label="可接受答案" required class="form-span">
+            <div class="fill-answers">
+              <div v-for="(_, index) in form.fillAnswers" :key="index" class="fill-answer-row">
+                <UiInput
+                  v-model="form.fillAnswers[index]"
+                  :aria-label="`可接受答案 ${index + 1}`"
+                  placeholder="例如 Paris"
+                />
+                <UiButton type="danger" link @click="removeFillAnswer(index)">删除</UiButton>
+              </div>
+              <UiButton size="small" @click="addFillAnswer">添加答案</UiButton>
+              <div class="match-switches">
+                <UiCheckbox v-model="form.matchCaseSensitive">区分大小写</UiCheckbox>
+                <UiCheckbox v-model="form.matchTrim">忽略首尾空白</UiCheckbox>
+                <UiCheckbox v-model="form.matchRegex">按正则匹配</UiCheckbox>
+              </div>
+              <div class="form-hint">
+                填空全对才通关；多选部分正确仅作作答反馈，不计积分。
+              </div>
+            </div>
+          </UiFormItem>
+        </template>
       </div>
-      <UiFormItem label="容器环境">
+      <UiFormItem v-if="form.mode !== 'question'" label="容器环境">
         <UiSwitch v-model="form.has_env" aria-label="启用容器环境" />
         <template v-if="form.has_env">
           <UiInput v-model="form.image" placeholder="镜像，例如 nginx:alpine；自定义镜像请走题目包 zip" class="env-image" />
           <UiInputNumber v-model="form.port" :min="1" :max="65535" controls-position="right" />
         </template>
       </UiFormItem>
-      <UiFormItem label="描述 Markdown">
+      <UiFormItem label="描述 Markdown" :required="form.mode === 'question'">
         <UiInput v-model="form.description_md" type="textarea" :rows="6" class="mono" />
+        <div v-if="form.mode === 'question'" class="form-hint">基础题的题面与作答说明写在这里（必填）。</div>
       </UiFormItem>
       <UiFormItem label="提示">
         <div class="hints">
@@ -1471,6 +1754,45 @@ onUnmounted(stopEnginePolling)
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.form-span {
+  grid-column: 1 / -1;
+}
+
+.question-options,
+.fill-answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.question-option-row,
+.fill-answer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.question-option-key {
+  width: 5rem;
+  flex: none;
+}
+
+.question-option-text {
+  flex: 1 1 14rem;
+}
+
+.question-option-pick {
+  flex: none;
+}
+
+.match-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .hint-row {

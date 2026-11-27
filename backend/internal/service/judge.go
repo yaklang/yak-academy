@@ -120,7 +120,8 @@ func (s *JudgeService) submitScoped(ctx context.Context, userID, challengeID, co
 	if answer == autoAnswer {
 		return nil, fmt.Errorf("%w: reserved answer", ErrValidation)
 	}
-	if err := s.checkCodeSubmit(ctx, userID, challengeID, answer); err != nil {
+	normalized, err := s.checkSubmit(ctx, userID, challengeID, answer)
+	if err != nil {
 		return nil, err
 	}
 	sub := &model.Submission{
@@ -129,7 +130,7 @@ func (s *JudgeService) submitScoped(ctx context.Context, userID, challengeID, co
 		CompetitionID: competitionID,
 		ExamAttemptID: examAttemptID,
 		SourceIP:      sourceIP,
-		Answer:        answer,
+		Answer:        normalized,
 		Status:        model.SubmissionPending,
 	}
 	if err := s.submissions.Create(ctx, sub); err != nil {
@@ -153,35 +154,48 @@ func (s *JudgeService) submitScoped(ctx context.Context, userID, challengeID, co
 	return sub, nil
 }
 
-// checkCodeSubmit ACM 题提交前置校验：源码大小上限 + 同题并发判定去重。
-// flag 判定题（type != code）零成本直通。
-func (s *JudgeService) checkCodeSubmit(ctx context.Context, userID, challengeID uint, answer string) error {
+// checkSubmit 提交前置校验并规范化答案：
+//   - ACM 编程题：源码大小上限 + 库策略 + 同题并发判定去重；
+//   - 基础题：JSON 形状/选项 key/答案长度校验，返回规范 JSON；
+//   - flag 题：原样直通。
+func (s *JudgeService) checkSubmit(ctx context.Context, userID, challengeID uint, answer string) (string, error) {
 	chal, err := s.challenges.FindByID(ctx, challengeID)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if isObjectiveChallengeType(chal.Type) {
+		row, err := s.challenges.FindQuestion(ctx, challengeID)
+		if err != nil {
+			return "", fmt.Errorf("%w: question definition missing", ErrValidation)
+		}
+		spec, err := parseQuestionSpec(chal.Type, row)
+		if err != nil {
+			return "", err
+		}
+		return normalizeObjectiveSubmission(chal.Type, spec, answer)
 	}
 	if chal.Type != model.ChallengeCode {
-		return nil
+		return answer, nil
 	}
 	if len(answer) > maxCodeSource {
-		return fmt.Errorf("%w: source exceeds %d KiB limit", ErrValidation, maxCodeSource>>10)
+		return "", fmt.Errorf("%w: source exceeds %d KiB limit", ErrValidation, maxCodeSource>>10)
 	}
 	// 库策略拦截（受理前静态扫描）：黑名单库（exec/file 等）或题目白名单外的库
 	// 一律 422，不进入引擎执行（yak_libpolicy.go）。配置行读取失败时放行——
 	// 数据不一致由 judgeCode 判 internal_error 兜底，不在此处引入新失败面。
 	if conf, err := s.challenges.FindACM(ctx, challengeID); err == nil {
 		if err := checkYakLibPolicy(answer, parseAllowedLibs(conf.AllowedLibs)); err != nil {
-			return err
+			return "", err
 		}
 	}
 	pending, err := s.submissions.HasPendingCode(ctx, userID, challengeID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if pending {
-		return fmt.Errorf("%w: a previous code submission is still being judged", ErrValidation)
+		return "", fmt.Errorf("%w: a previous code submission is still being judged", ErrValidation)
 	}
-	return nil
+	return answer, nil
 }
 
 // GetSubmission 查询判定结果（属主校验：仅本人可查，他人 404）。
@@ -303,6 +317,33 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 		s.judgeCode(ctx, sub, chal)
 		return
 	}
+	// 基础题：worker 内按选项/答案判定；部分分只写 submission 反馈，不进入派生表。
+	if isObjectiveChallengeType(chal.Type) {
+		result, err := s.judgeObjective(ctx, sub, chal)
+		if err != nil {
+			log.Printf("judge: objective %d: %v", sub.ID, err)
+			s.finish(ctx, sub, model.SubmissionIncorrect, 0)
+			return
+		}
+		if !result.correct {
+			// 已通关后不再展示部分分（分值已结算，避免误导）。
+			if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID, sub.CompetitionID); err == nil && solved {
+				result.earned = 0
+			}
+			s.finish(ctx, sub, model.SubmissionIncorrect, result.earned)
+			return
+		}
+		// 全对：走与 flag 题一致的首通/重复通关语义。
+		if solved, err := s.submissions.HasCorrect(ctx, sub.UserID, sub.ChallengeID, sub.CompetitionID); err == nil && solved {
+			s.finish(ctx, sub, model.SubmissionCorrect, 0)
+			return
+		}
+		s.finish(ctx, sub, model.SubmissionCorrect, result.fullScore)
+		if chal.TutorialSlug != "" {
+			s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
+		}
+		return
+	}
 	// 哨兵答案 = 检测点回调判定通过，跳过 flag 比对直接判对
 	// （真实 flag 比对仅服务端内存与 DB，哨兵不泄露任何可用答案）。
 	correct := sub.Answer == autoAnswer
@@ -345,6 +386,34 @@ func (s *JudgeService) judge(ctx context.Context, submissionID uint) {
 	if chal.TutorialSlug != "" {
 		s.AppendRoomCompleted(ctx, sub.UserID, chal.TutorialSlug)
 	}
+}
+
+// objectiveJudgeResult 基础题判定结果：correct=全对；earned=部分分（仅反馈）；
+// fullScore=当前动态题分（全对时结算）。
+type objectiveJudgeResult struct {
+	correct   bool
+	earned    int
+	fullScore int
+}
+
+// judgeObjective 基础题判定：读作答定义并按当前动态分计算全对/部分分。
+// 判题在 worker 内完成（event-sourcing-rules：提交路径禁止同步判定）。
+func (s *JudgeService) judgeObjective(ctx context.Context, sub *model.Submission, chal *model.Challenge) (objectiveJudgeResult, error) {
+	row, err := s.challenges.FindQuestion(ctx, chal.ID)
+	if err != nil {
+		return objectiveJudgeResult{}, fmt.Errorf("load question: %w", err)
+	}
+	spec, err := parseQuestionSpec(chal.Type, row)
+	if err != nil {
+		return objectiveJudgeResult{}, err
+	}
+	fullScore, err := s.dynamicScore(ctx, sub.ChallengeID, sub.CompetitionID)
+	if err != nil {
+		log.Printf("judge: objective dynamic score: %v", err)
+		fullScore = chal.Score
+	}
+	correct, earned := gradeObjective(chal.Type, spec, sub.Answer, fullScore)
+	return objectiveJudgeResult{correct: correct, earned: earned, fullScore: fullScore}, nil
 }
 
 // judgeCode ACM 编程题判定：逐组运行引擎对拍测试数据（不再 lazy 首败即停

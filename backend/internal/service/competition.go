@@ -513,6 +513,9 @@ func (s *CompetitionService) bindBySlugs(ctx context.Context, id uint, slugs []s
 		if err != nil {
 			return nil, mapRecordNotFound(err)
 		}
+		if isObjectiveChallengeType(chal.Type) {
+			return nil, fmt.Errorf("%w: basic questions are not supported in competitions", ErrValidation)
+		}
 		ids = append(ids, chal.ID)
 	}
 	added, err := s.comps.BindChallenges(ctx, id, ids)
@@ -1649,6 +1652,9 @@ func (s *CompetitionService) SubmitFlag(ctx context.Context, judge *JudgeService
 	chal, err := s.challenges.FindBySlug(ctx, slug)
 	if err != nil {
 		return nil, mapRecordNotFound(err)
+	}
+	if isObjectiveChallengeType(chal.Type) {
+		return nil, fmt.Errorf("%w: basic questions are not supported in competitions", ErrValidation)
 	}
 	bound, err := s.comps.ListBoundChallengeIDs(ctx, id)
 	if err != nil {

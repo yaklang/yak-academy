@@ -105,4 +105,34 @@ export const E2E = {
     title: 'E2E 引擎启动时限题（yak）',
     correctSource: 'println(42)',
   },
+  // 基础题种子（global-setup 经管理 API 上传，bank=basic）：
+  // 单选/多选/判断/填空覆盖学员作答、判分与部分分旅程。
+  // 多选 answer=[A,C]、题面 20 分：只选 A 的部分得分为 (20*1+1)/2 = 10。
+  basic: {
+    single: {
+      slug: 'basic-e2e-single',
+      title: 'E2E 基础题：401 状态码',
+      score: 10,
+      wrongText: '403 Forbidden',
+      rightText: '401 Unauthorized',
+    },
+    multiple: {
+      slug: 'basic-e2e-multiple',
+      title: 'E2E 基础题：安全 HTTP 方法',
+      score: 20,
+      partialScore: 10,
+    },
+    truefalse: {
+      slug: 'basic-e2e-truefalse',
+      title: 'E2E 基础题：HTTPS 加密正文',
+      score: 10,
+    },
+    fill: {
+      slug: 'basic-e2e-fill',
+      title: 'E2E 基础题：巴黎',
+      score: 30,
+      submitted: '  PARIS  ',
+    },
+    importedSlug: 'basic-e2e-imported',
+  },
 } as const

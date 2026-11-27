@@ -90,6 +90,86 @@ export default async function globalSetup(): Promise<void> {
       '上传附件',
     )
 
+    // 基础题种子（bank=basic，四种题型）：管理端 tab/回填、学员作答、
+    // 多选部分分与填空匹配旅程的稳定锚点。
+    const B = E2E.basic
+    await must(
+      ctx.post('/api/v1/admin/challenges', {
+        headers: auth,
+        data: [
+          {
+            slug: B.single.slug,
+            title: B.single.title,
+            category: 'web-basics',
+            difficulty: 'apprentice',
+            description_md: '客户端未提供有效认证信息时，服务器通常返回哪个状态码？',
+            score: B.single.score,
+            bank: 'basic',
+            question: {
+              type: 'single',
+              options: [
+                { key: 'A', text: '200 OK' },
+                { key: 'B', text: '401 Unauthorized' },
+                { key: 'C', text: '403 Forbidden' },
+              ],
+              answer: 'B',
+              explanation: '401 表示请求缺少有效认证信息；403 表示已认证但无权访问。',
+            },
+          },
+          {
+            slug: B.multiple.slug,
+            title: B.multiple.title,
+            category: 'web-basics',
+            difficulty: 'apprentice',
+            description_md: '下列哪些 HTTP 方法属于「安全方法」（不改变服务器状态）？',
+            score: B.multiple.score,
+            bank: 'basic',
+            question: {
+              type: 'multiple',
+              options: [
+                { key: 'A', text: 'GET' },
+                { key: 'B', text: 'POST' },
+                { key: 'C', text: 'HEAD' },
+                { key: 'D', text: 'DELETE' },
+              ],
+              answer: ['A', 'C'],
+              explanation: 'GET 与 HEAD 是只读的安全方法；POST 与 DELETE 会改变服务器状态。',
+            },
+          },
+          {
+            slug: B.truefalse.slug,
+            title: B.truefalse.title,
+            category: 'web-basics',
+            difficulty: 'apprentice',
+            description_md: '判断：HTTPS 会对 HTTP 请求与响应的正文进行加密传输。',
+            score: B.truefalse.score,
+            bank: 'basic',
+            question: {
+              type: 'truefalse',
+              answer: true,
+              explanation: 'TLS 在传输层加密整个 HTTP 报文。',
+            },
+          },
+          {
+            slug: B.fill.slug,
+            title: B.fill.title,
+            category: 'web-basics',
+            difficulty: 'apprentice',
+            description_md: '法国的首都是哪座城市？（答案忽略大小写与首尾空白）',
+            score: B.fill.score,
+            bank: 'basic',
+            question: {
+              type: 'fill',
+              answer: ['Paris'],
+              match: { case_sensitive: false, trim: true, regex: false },
+              explanation: '巴黎（Paris）是法国首都。',
+            },
+          },
+        ],
+      }),
+      '上传基础题种子',
+    )
+
     const zip = await readFile(path.join(e2eDir, 'fixtures', 'tutorial-package.zip'))
     await must(
       ctx.post('/api/v1/content/packages', {
