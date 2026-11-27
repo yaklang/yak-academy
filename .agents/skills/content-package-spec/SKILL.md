@@ -1,6 +1,6 @@
 ---
 name: content-package-spec
-description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内容上传、zip 解析、Markdown front matter、challenge.json/challenge.yml 题目定义（含 ACM judge 段与 testdata/ 数据组）、内容版本化或发布状态机时必须加载。
+description: yak-academy 教程包与题目 JSON 格式唯一规范。涉及内容上传、zip 解析、Markdown front matter、challenge.json/challenge.yml 题目定义（含 ACM judge 段与 testdata/ 数据组、基础题 question 段）、内容版本化或发布状态机时必须加载。
 ---
 
 # 教程包与题目 JSON 规范（管理员上传是内容的唯一来源）
@@ -63,13 +63,15 @@ package.zip
 | `description` | Markdown 描述 |
 | `type` + `flags` | flag 匹配类型 static/regex；取首个 flag |
 | `judge` | ACM 编程题判定段（与 `type`+`flags` 互斥，要求 `bank: acm`），见下 |
+| `question` | 基础题定义（与 `type`+`flags`、`judge` 三选一互斥，要求 `bank: basic`；不需要 Dockerfile/compose/testdata），见 D 节 |
 | `flag_mode` | `shared`（默认，题目级共享）/ `instance`（每实例唯一，模板含 `{token}`） |
 | `image` + `port` | 可选容器；`image: .` 落库为 `yak-academy/<slug>:latest` 且**上传时 docker build** |
-| `hints` / `tutorial_slug` / `bank` | 可选；bank = 题库 tab（**上传仅 ctf/acm**，缺省 ctf），见 B 节 |
+| `hints` / `tutorial_slug` / `bank` | 可选；bank = 题库 tab（**上传仅 ctf/acm/basic**，缺省 ctf），见 B 节 |
 
 - `flag_mode: instance` **必须**同时声明容器（image/port）；模板示例：`flag{lab-{token}}`。
 - `image: .`：平台解压构建上下文并 `docker build -t yak-academy/<slug>:latest`；Docker 不可用 → 422，禁止悬空 tag。
 - 远程镜像（非 `.`）不构建，仍要求包内含 Dockerfile + compose（文档/本地复现用）。
+- **基础题包**（`challenge.yml` 带 `question` 段）：不声明容器，不要求 Dockerfile / docker-compose.yml / testdata/，仅需 `challenge.yml` 与可选题面附件；`bank` 必须为 `basic`（缺省自动归 basic）。
 - **`judge` 段（编程题，对齐 ICPC 源码判定模型，禁止用 flag 验证 ACM 题）**：学生提交 yak 源码，引擎**逐组全跑** `testdata/` 比对输出（token 级空白不敏感，每组结论独立），全部通过才 ac；verdict = ac/wa/tle/re/internal_error（非 ac 时取首个失败组的 verdict）。字段：`engine: yak`、`time_limit_s`（1-60，**只计用户代码执行段**——引擎注入起止标记计时，yak 冷启动/退出滞留不占时限，出题按算法复杂度配即可）、`memory_limit_mb`（16-512，缺省 128）、`allowed_libs`（可选，yak 标准库白名单数组；空/缺省 = 允许全部非黑名单库；值必须属于 yaklang Import 注册的 135 库宇宙，未知库名/黑名单库/重复项 → 422）、`testdata` 组名列表（`sample: true` 的组学生端可见，经 `GET /challenges/{slug}/judge/samples`）。**库策略拦截**：提交与自测受理前做标识符级静态扫描，源码引用黑名单库（exec/cli/ssh/file 等高危库，全局禁用）或白名单外库 → 422 点名违规库，不进引擎——出题时按「用到什么库就配什么白名单」收紧攻击面。**部分得分制**：每组可配 `score` 分值——内联 `judge.testdata[].score` 或包 zip `testdata/scores.json`（组名 → 分值映射，合并于数据文件配对之后、引用不存在的组/负值 → 422），分值全 0（未配置）= 全有全无（全过才得分）；配分时得分按通过组权重折算题面分，管理端编辑弹窗可维护分值。`testdata/` 目录每组 `<组名>.in` + `<组名>.answer` 成对（单侧缺失 → 422）；组名 `^[a-z0-9][a-z0-9-]*$` 且唯一。`judge` 与 `image`/`env` 容器段互斥。**元数据维护语义**：管理端编辑弹窗保存 judge 段不带数据组 = 保留库内已有 testdata（仅更新时限/分值/白名单/元数据）；新建编程题必须携带数据组。判题引擎由 `ACADEMY_YAK_BIN` 配置门控，未配置时题目详情 judge 段随发 `engine_available: false`，前端禁用提交/自测入口并提示（服务端兜底：提交判 internal_error、自测受理 422；见 remote-deploy/架构文档）。参考样例：`examples/challenges/acm-yak-a-plus-b/`。
 
 ### C. 内置训练集（vulinbox 教程 + 题目，仅经管理端一键导入）
@@ -105,16 +107,40 @@ package.zip
 }
 ```
 
-- 必填：`slug`/`title`/`category`/`difficulty`/`score`/`challenge`；`description_md`/`env`/`hints`/`tutorial_slug`/`flag_mode`/`bank` 可选。
-- `bank`：`ctf`（缺省）/ `acm`——题库页 tab 分组键。**`tutorial` 为教程题目 tab 专属，保留给内置题集**：上传显式传 `tutorial` 一律 422；缺省时新建默认 `ctf`、重传保留原值。`bank: acm` 的题**必须**带 `judge` 段（编程题），不得走 `challenge` flag 判定。
+- 必填：`slug`/`title`/`category`/`difficulty`/`score`，以及判定段三选一——`challenge`（flag）/ `judge`（ACM）/ `question`（基础题）；`description_md`（基础题必填）/`env`/`hints`/`tutorial_slug`/`flag_mode`/`bank` 可选。判定段同时出现多个一律 422。
+- `bank`：`ctf`（缺省）/ `acm` / `basic`——题库页 tab 分组键。**`tutorial` 为教程题目 tab 专属，保留给内置题集**：上传显式传 `tutorial` 一律 422；缺省时新建默认 `ctf`（带 `question` 段则归 `basic`）、重传保留原值。`bank: acm` 的题**必须**带 `judge` 段（编程题），不得走 `challenge` flag 判定；`question` 段**必须** `bank: basic`（显式传入其他 bank 一律 422），且基础题**禁止绑定 CTF 竞赛**。
 - `is_builtin` 不是上传字段：它是导入来源标记，仅 `POST /admin/challenges/builtin` 置 true（题库页「是否内置」过滤依据），普通上传/编辑 upsert 不触碰、也不清除。
 - `challenge.type`：`static`（明文 flag）/ `regex`（可编译正则）。
-- `judge`（可选，与 `challenge` 互斥）：字段同 A 节（engine/time_limit_s/memory_limit_mb），但**直传 JSON 须内联数据组**——`testdata: [{name, input, output, sample?}]`，`input`/`output` 必填（管理端「元数据维护不带数据组」语义仅存在于编辑保存路径，A 节 zip 由 `testdata/` 目录装配）。
+- `judge`（可选，与 `challenge`、`question` 互斥）：字段同 A 节（engine/time_limit_s/memory_limit_mb），但**直传 JSON 须内联数据组**——`testdata: [{name, input, output, sample?}]`，`input`/`output` 必填（管理端「元数据维护不带数据组」语义仅存在于编辑保存路径，A 节 zip 由 `testdata/` 目录装配）。
+- `question`（可选，与 `challenge`、`judge` 互斥，要求 `bank: basic`）：基础题定义，见 D 节。
 - `flag_mode`：`shared`|`instance`；`instance` 时 flag 为含 `{token}` 的模板，且必须有 env。
 - `env` 整段可选；**要么都填要么都不填**。image 非空即 `has_env: true`。
 - `hints[].cost` 非负；解锁走 `hint.unlocked` 事件扣分（见 event-sourcing-rules）。
 - 批量数组逐题校验、**单题失败整体不入库**；slug 重复 = 更新（upsert）。
 - 题目难度枚举与教程一致（apprentice/practitioner/expert），禁止其他值。
+
+### D. 基础题（`question` 段，`bank: basic`，仅训练场）
+
+`challenge.json` 与 `challenge.yml` 的 `question` 段同构：
+
+```json
+"question": {
+  "type": "multiple",
+  "options": [{"key": "A", "text": "选项一"}, {"key": "B", "text": "选项二"}, {"key": "C", "text": "选项三"}],
+  "answer": ["A", "C"],
+  "match": {"case_sensitive": false, "trim": true, "regex": false},
+  "explanation": "通关后展示的解析（可选）"
+}
+```
+
+- 题型与答案形状：`single` → 单个选项 key 字符串；`multiple` → 非空且无重复的 key 数组（落库排序）；`truefalse` → 布尔值；`fill` → 字符串或字符串数组（去首尾空白、去重，至少 1 项非空）。
+- `options`：`single`/`multiple` 必填 2–26 个；key 匹配 `^[A-Z0-9]{1,8}$` 且唯一；text 1–500 字。`truefalse`/`fill` 不允许 `options`。
+- `match`（仅 `fill`）：缺省 `trim=true`、`case_sensitive=false`、`regex=false`；`regex=true` 时每个可接受答案必须是可编译正则（忽略大小写时按 `(?i)` 编译）。
+- `explanation`：可选，≤16KiB；学生端仅通关后下发，答案字段永不进入学生 DTO。
+- 基础题不支持 `env` 与 `flag_mode=instance`；`hints`/`links`/`tutorial_slug` 可用。`description_md` 必填。
+- 判定：单选/判断/填空全对 → `correct` 并按动态分结算；多选等权部分分 `full × max(0, 选对-选错) / 正确项总数`（下限 0）→ `status=incorrect` + `score>0`，**仅作答反馈，不计 XP/排行榜**；只有全对才通关，通关后重复提交部分分归零。基础题**禁止绑定 CTF 竞赛**。
+
+参考样例（不自动加载）：`examples/challenges/basic-questions.json`。
 
 ## AWD 服务包（独立资源，不是题目/教程）
 

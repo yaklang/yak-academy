@@ -89,8 +89,9 @@ yak-academy 是一个安全实训平台，提供安全教程（文字+视频）�
 
 - 题目以自有 `slug` 为主键入口，管理员经实训常用题目包 zip（`challenge.yml` + 容器文件）或兼容 challenge.json 上传：**upsert 即生效**（slug 重复 = 更新），不走 draft/publish 管线（版本化仍属教程包机制）。
 - `category` 为自由分类 slug（题库分组键）；`description_md` 承载背景与任务目标。
-- `bank`（tutorial/ctf/acm）：题库页三 tab（教程题目/CTF 题目/ACM 题目）的分组键。**教程题目 tab 专属官方内置题集**——上传路径仅接受 ctf/acm（显式 tutorial 一律 422），缺省时新建默认 ctf、重传保留原值；内置导入统一注入 tutorial（历史误入 tutorial 的上传题由迁移改判 ctf）。`is_builtin` 为导入来源标记——仅内置导入置 true（`MarkBuiltin`），普通上传/编辑 upsert 不触碰（学生端 `GET /challenges` 按 bank/builtin 过滤）。
-- Challenge 多态 `type` 列（v1：static / regex flag）。
+- `bank`（tutorial/ctf/acm/basic）：题库页四 tab（教程题目/CTF 题目/ACM 题目/基础题）的分组键。**教程题目 tab 专属官方内置题集**——上传路径仅接受 ctf/acm/basic（显式 tutorial 一律 422），缺省时新建默认 ctf（带 question 段则归 basic）、重传保留原值；内置导入统一注入 tutorial（历史误入 tutorial 的上传题由迁移改判 ctf）。`is_builtin` 为导入来源标记——仅内置导入置 true（`MarkBuiltin`），普通上传/编辑 upsert 不触碰（学生端 `GET /challenges` 按 bank/builtin 过滤）。
+- Challenge 多态 `type` 列：static / regex（flag 题）、code（ACM 编程题）、single / multiple / truefalse / fill（基础题）。判定定义三选一互斥：`challenge`（flag）/ `judge`（ACM）/ `question`（基础题），同时出现一律 422。
+- **基础题（bank=basic）**：客观题定义落 `challenge_questions` 1:1 表（options/answer/match/explanation，答案列永不进入学生 DTO），**仅训练场可用**——`basic` 题禁止绑定 CTF 竞赛（绑定与提交入口双拒），考试客观题继续使用独立的 `ExamQuestion`，两域不混用。单选/多选/判断即时判定；多选采用等权部分分（`full × max(0, 选对-选错) / 正确项总数`，下限 0），填空默认 trim + 忽略大小写、可配多答案与正则。**部分分仅作作答反馈**：`status=incorrect` + `score>0`，`submission.judged` 仍为 `correct=false`，积分/排行榜派生器跳过；只有全对才通关并按动态分结算，通关后重复提交部分分归零。题目包 zip 的 `challenge.yml` 支持同构 `question` 段且不要求 Dockerfile/testdata。
 - Flag 比较使用恒时比较（逐字符 XOR），防时序侧信道。
 - `tutorial_slug` 可选关联教程 Room：题目详情给"配套教程"入口，Room 详情反查给"前往题目"入口；纯题目（不关联）合法。
 - Hint 扣分解锁：详情页折叠；`POST .../hints/{id}/unlock` 写 `hint.unlocked` 事件，派生器扣分；未解锁正文不返回。
