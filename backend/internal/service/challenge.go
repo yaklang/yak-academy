@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,9 +59,9 @@ func (s *ChallengeService) SetAttachmentStore(repo repo.ChallengeAttachmentRepo,
 // clearRelease=true 时清空定时（立即语义）——需要三态（不改/清空/设值），
 // 单 *time.Time 无法区分「清空」与「不改」。
 type VisibilityUpdate struct {
-	IsVisible     *bool
-	ReleaseAt     *time.Time
-	ClearRelease  bool
+	IsVisible    *bool
+	ReleaseAt    *time.Time
+	ClearRelease bool
 }
 
 // SetVisibility 管理端可见性/定时发布更新。内置训练集题目拒绝（422）：
@@ -98,6 +99,21 @@ func (s *ChallengeService) UpsertChallenge(ctx context.Context, c *model.Challen
 	return s.challenges.Upsert(ctx, c, flags, hints)
 }
 
+// UpsertQuestion 保存基础题作答定义（内容导入路径调用；与 Flag/ACMJudge 互斥）。
+func (s *ChallengeService) UpsertQuestion(ctx context.Context, q *model.ChallengeQuestion) error {
+	return s.challenges.UpsertQuestion(ctx, q)
+}
+
+// FindQuestion 查基础题作答定义（管理端回填/判题读取）。
+func (s *ChallengeService) FindQuestion(ctx context.Context, challengeID uint) (*model.ChallengeQuestion, error) {
+	return s.challenges.FindQuestion(ctx, challengeID)
+}
+
+// DeleteQuestion 清理基础题作答定义（题目改型为 flag/code 时调用，幂等）。
+func (s *ChallengeService) DeleteQuestion(ctx context.Context, challengeID uint) error {
+	return s.challenges.DeleteQuestion(ctx, challengeID)
+}
+
 // MarkBuiltin 批量改写题目来源标记（内置题集导入置 true；返回受影响行数）。
 // 普通上传路径不经此方法，管理端编辑内置题不会丢失来源标记。
 func (s *ChallengeService) MarkBuiltin(ctx context.Context, slugs []string, builtin bool) (int64, error) {
@@ -107,22 +123,24 @@ func (s *ChallengeService) MarkBuiltin(ctx context.Context, slugs []string, buil
 // ChallengeFullJSON 管理端单题完整定义（GET /admin/challenges/{slug}），
 // 与上传 JSON 同构供编辑回填；flag 值仅在 admin 路由暴露（上传时管理员本就提供）。
 type ChallengeFullJSON struct {
-	Slug          string                `json:"slug"`
-	Title         string                `json:"title"`
-	Category      string                `json:"category"`
-	Bank          model.ChallengeBank   `json:"bank"`
-	Difficulty    model.Difficulty      `json:"difficulty"`
-	DescriptionMD string                `json:"description_md"`
-	Score         int                   `json:"score"`
-	FlagMode      model.FlagMode        `json:"flag_mode"`
-	Challenge     fullJSONJudge         `json:"challenge"`
+	Slug          string              `json:"slug"`
+	Title         string              `json:"title"`
+	Category      string              `json:"category"`
+	Bank          model.ChallengeBank `json:"bank"`
+	Difficulty    model.Difficulty    `json:"difficulty"`
+	DescriptionMD string              `json:"description_md"`
+	Score         int                 `json:"score"`
+	FlagMode      model.FlagMode      `json:"flag_mode"`
+	Challenge     fullJSONJudge       `json:"challenge"`
 	// Judge ACM 判定段（编程题回填；flag 判定题为 null）。组名/样例标记供
 	// 元数据编辑往返；测试数据内容不回填（管理端经包 zip 维护，重存走保留语义）。
-	Judge         *fullJSONJudgeSection `json:"judge"`
-	Env           *fullJSONEnv          `json:"env"`
-	Hints         []fullJSONHint        `json:"hints"`
-	Links         []model.ChallengeLink `json:"links"`
-	TutorialSlug  string                `json:"tutorial_slug"`
+	Judge *fullJSONJudgeSection `json:"judge"`
+	// Question 基础题作答定义（基础题回填；含标准答案，仅 admin 路由暴露）。
+	Question     *fullJSONQuestion     `json:"question"`
+	Env          *fullJSONEnv          `json:"env"`
+	Hints        []fullJSONHint        `json:"hints"`
+	Links        []model.ChallengeLink `json:"links"`
+	TutorialSlug string                `json:"tutorial_slug"`
 	// Flags 完整 flag 值列表（题目包 zip 可多 flag）；表单单 flag 用 Challenge.Flag=flags[0]，
 	// 多 flag 时前端需提示保存只保留表单那一个。
 	Flags []string `json:"flags"`
@@ -137,17 +155,26 @@ type fullJSONJudge struct {
 // 编辑保存时 judge 段无数据组 → 后端保留库内测试数据（元数据维护语义；
 // 携带数据组 = 整组替换，score 一并覆写）。
 type fullJSONJudgeSection struct {
-	Engine         string                `json:"engine"`
-	TimeLimitS     int                   `json:"time_limit_s"`
-	MemoryLimitMB  int                   `json:"memory_limit_mb"`
-	AllowedLibs    []string              `json:"allowed_libs"`
-	Testdata       []fullJSONTestdataRef `json:"testdata"`
+	Engine        string                `json:"engine"`
+	TimeLimitS    int                   `json:"time_limit_s"`
+	MemoryLimitMB int                   `json:"memory_limit_mb"`
+	AllowedLibs   []string              `json:"allowed_libs"`
+	Testdata      []fullJSONTestdataRef `json:"testdata"`
 }
 
 type fullJSONTestdataRef struct {
 	Name   string `json:"name"`
 	Sample bool   `json:"sample"`
 	Score  int    `json:"score"`
+}
+
+// fullJSONQuestion 管理端基础题回填（与上传 question 同构；含标准答案）。
+type fullJSONQuestion struct {
+	Type        model.ChallengeType `json:"type"`
+	Options     []QuestionOption    `json:"options"`
+	Answer      json.RawMessage     `json:"answer"`
+	Match       *QuestionMatch      `json:"match"`
+	Explanation string              `json:"explanation"`
 }
 
 type fullJSONEnv struct {
@@ -199,6 +226,26 @@ func (s *ChallengeService) GetFullJSON(ctx context.Context, slug string) (*Chall
 	}
 	if chal.Image != "" {
 		out.Env = &fullJSONEnv{Image: chal.Image, Port: chal.Port}
+	}
+	// 基础题：question 段回填（含标准答案，仅管理端接口）。
+	if isObjectiveChallengeType(chal.Type) {
+		row, err := s.challenges.FindQuestion(ctx, chal.ID)
+		if err != nil {
+			return nil, err
+		}
+		spec, err := parseQuestionSpec(chal.Type, row)
+		if err != nil {
+			return nil, err
+		}
+		out.Challenge = fullJSONJudge{}
+		out.Question = &fullJSONQuestion{
+			Type: chal.Type, Options: spec.Options,
+			Answer: json.RawMessage(spec.AnswerJSON), Explanation: spec.Explanation,
+		}
+		if chal.Type == model.ChallengeFill {
+			match := spec.Match
+			out.Question.Match = &match
+		}
 	}
 	// ACM 编程题：judge 段回填（组名 + 样例标记 + 判定配置）。
 	if chal.Type == model.ChallengeCode {

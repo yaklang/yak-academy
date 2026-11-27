@@ -806,7 +806,8 @@ func (h *Handlers) listChallenges(w http.ResponseWriter, req *http.Request) {
 	user := UserFrom(req.Context())
 	page, pageSize := pageParams(req)
 	bank := req.URL.Query().Get("bank")
-	if bank != "" && bank != string(model.BankTutorial) && bank != string(model.BankCTF) && bank != string(model.BankACM) {
+	if bank != "" && bank != string(model.BankTutorial) && bank != string(model.BankCTF) &&
+		bank != string(model.BankACM) && bank != string(model.BankBasic) {
 		writeError(w, errValidation)
 		return
 	}
@@ -1137,8 +1138,9 @@ func (h *Handlers) adminListChallenges(w http.ResponseWriter, req *http.Request)
 		filter.IsBuiltin = &b
 	}
 	if filter.Bank != "" && filter.Bank != string(model.BankCTF) &&
-		filter.Bank != string(model.BankACM) && filter.Bank != string(model.BankTutorial) {
-		mapError(w, fmt.Errorf("%w: bank must be ctf, acm or tutorial", service.ErrValidation))
+		filter.Bank != string(model.BankACM) && filter.Bank != string(model.BankTutorial) &&
+		filter.Bank != string(model.BankBasic) {
+		mapError(w, fmt.Errorf("%w: bank must be ctf, acm, tutorial or basic", service.ErrValidation))
 		return
 	}
 	items, total, err := h.Topics.AdminListChallenges(req.Context(), filter, (page-1)*pageSize, pageSize)

@@ -276,7 +276,7 @@ func TestUploadChallengesUpsertAndBatch(t *testing.T) {
 }
 
 // 教程题目 tab 专属内置题集，上传路径的题库归属规则：
-// 新建缺省 → ctf；重传缺省 → 保留原值（不漂移不重置）；显式仅接受 ctf/acm，
+// 新建缺省 → ctf；重传缺省 → 保留原值（不漂移不重置）；显式仅接受 ctf/acm/basic，
 // tutorial 一律 422（内置导入在 builtin.go 注入，绕过上传校验）。
 func TestUploadChallengesBankRules(t *testing.T) {
 	svc, gdb := newContentTestService(t)

@@ -411,6 +411,10 @@ func (r *challengeRepo) Delete(ctx context.Context, slug string) error {
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.JudgeTestdata{}).Error; err != nil {
 			return err
 		}
+		// 基础题作答定义随题级联（type=single/multiple/truefalse/fill 专用表）。
+		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.ChallengeQuestion{}).Error; err != nil {
+			return err
+		}
 		// 题目删除后实例行失去引用：一并级联（容器本体由 service 层先销毁）。
 		if err := tx.Where("challenge_id = ?", c.ID).Delete(&model.LabInstance{}).Error; err != nil {
 			return err
@@ -465,6 +469,28 @@ func (r *challengeRepo) FindTestdata(ctx context.Context, challengeID uint) ([]m
 	var list []model.JudgeTestdata
 	err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Order("name").Find(&list).Error
 	return list, err
+}
+
+// UpsertQuestion 保存基础题作答定义（1:1，按 challenge_id 覆盖 options/answer/match/explanation）。
+func (r *challengeRepo) UpsertQuestion(ctx context.Context, q *model.ChallengeQuestion) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "challenge_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"options_json", "answer_json", "match_json", "explanation", "updated_at",
+		}),
+	}).Create(q).Error
+}
+
+func (r *challengeRepo) FindQuestion(ctx context.Context, challengeID uint) (*model.ChallengeQuestion, error) {
+	var q model.ChallengeQuestion
+	if err := r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).First(&q).Error; err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+func (r *challengeRepo) DeleteQuestion(ctx context.Context, challengeID uint) error {
+	return r.db.WithContext(ctx).Where("challenge_id = ?", challengeID).Delete(&model.ChallengeQuestion{}).Error
 }
 
 type challengeAttachmentRepo struct{ db *gorm.DB }
