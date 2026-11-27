@@ -22,6 +22,12 @@ export function useSubmissionPoll(onCorrect?: (sub: Submission) => void) {
             // 分值只结算一次：重复判对 score=0，不显示 +0 分。
             notify.success(sub.score > 0 ? `回答正确！+${sub.score} 分` : '回答正确（本题已结算过，不重复计分）')
             onCorrect?.(sub)
+          } else if (sub.score > 0 && sub.groups?.length) {
+            // ACM 编程题部分通过：已得分但未通关（部分分不计积分）。
+            notify.warning(`部分通过，得 ${sub.score} 分；补齐失败组后可通关`)
+          } else if (sub.score > 0) {
+            // 基础题多选部分正确：仅作答反馈，不计积分。
+            notify.warning(`部分正确，得 ${sub.score} 分（全对后通关；部分分不计积分）`)
           } else if (sub.verdict) {
             // ACM 编程题：verdict 区分代码错误与平台侧失败（internal_error 可重试）。
             notify.error(verdictLabels[sub.verdict])

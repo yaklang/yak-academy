@@ -1,12 +1,23 @@
 // challengeFormat 校验规则锁定测试：前端规则镜像后端 validateChallengeJSON，
 // 两端漂移（难度枚举、instance 约束、env 成对等）会被这里捕获。
 import { describe, expect, it } from 'vitest'
-import { parseChallengeJSON, SAMPLE_CHALLENGE_JSON, validateChallenge } from './challengeFormat'
-import type { ChallengeJSON } from '../api'
+import {
+  parseChallengeJSON,
+  SAMPLE_BASIC_QUESTIONS_JSON,
+  SAMPLE_CHALLENGE_JSON,
+  validateChallenge,
+} from './challengeFormat'
+import type { ChallengeJSON, QuestionJSON } from '../api'
 
 // 以样例为基准做局部覆盖，避免每个用例重复全量字段。
 function base(overrides: Partial<ChallengeJSON> = {}): ChallengeJSON {
   return { ...SAMPLE_CHALLENGE_JSON, ...overrides }
+}
+
+// 基础题样例（单选）作为基准。
+function basic(overrides: Partial<ChallengeJSON> = {}, question: Partial<QuestionJSON> = {}): ChallengeJSON {
+  const sample = SAMPLE_BASIC_QUESTIONS_JSON[0]
+  return { ...sample, ...overrides, question: { ...sample.question!, ...question } }
 }
 
 describe('validateChallenge', () => {
@@ -26,7 +37,7 @@ describe('validateChallenge', () => {
     expect(validateChallenge(base({ difficulty: 'expert' }))).toEqual([])
   })
 
-  it('bank 上传仅可选 ctf/acm，tutorial 为内置题集专属', () => {
+  it('bank 上传仅可选 ctf/acm/basic，tutorial 为内置题集专属', () => {
     // 'web' / 'tutorial' 是故意的非法值，绕过类型层测运行时校验（镜像后端枚举）。
     const bad = 'web' as unknown as ChallengeJSON['bank']
     const tutorial = 'tutorial' as unknown as ChallengeJSON['bank']
@@ -79,7 +90,7 @@ describe('validateChallenge', () => {
 
   it('challenge.type 只允许 static/regex', () => {
     // 同上：'dynamic' 是故意的非法值。
-    const badType = 'dynamic' as unknown as ChallengeJSON['challenge']['type']
+    const badType = 'dynamic' as unknown as NonNullable<ChallengeJSON['challenge']>['type']
     expect(validateChallenge(base({ challenge: { type: badType, flag: 'x' } })).join('\n')).toContain('type')
   })
 
@@ -105,6 +116,62 @@ describe('validateChallenge', () => {
     const errs = validateChallenge(base({ hints: [{ title: '', content: 'x', cost: -1 }] }))
     expect(errs.join('\n')).toContain('hints[0].title')
     expect(errs.join('\n')).toContain('hints[0].cost')
+  })
+
+  it('基础题四种题型样例全部通过校验', () => {
+    for (const sample of SAMPLE_BASIC_QUESTIONS_JSON) {
+      expect(validateChallenge(sample), sample.slug).toEqual([])
+    }
+  })
+
+  it('判定定义三选一互斥：question 不能与 challenge/judge 同时出现', () => {
+    expect(validateChallenge(basic({ challenge: { type: 'static', flag: 'f' } })).join('\n')).toContain('互斥')
+    const judge = { engine: 'yak' as const, time_limit_s: 5, testdata: [{ name: '01' }] }
+    expect(validateChallenge(basic({ judge })).join('\n')).toContain('互斥')
+  })
+
+  it('基础题必须 bank=basic 且不允许容器/instance', () => {
+    expect(validateChallenge(basic({ bank: 'ctf' })).join('\n')).toContain('basic')
+    expect(validateChallenge(basic({ env: { image: 'app:1', port: 80 } })).join('\n')).toContain('容器环境')
+    expect(validateChallenge(basic({ flag_mode: 'instance' })).join('\n')).toContain('flag_mode')
+    expect(validateChallenge(base({ bank: 'basic' })).join('\n')).toContain('question')
+  })
+
+  it('基础题题面描述必填', () => {
+    expect(validateChallenge(basic({ description_md: '   ' })).join('\n')).toContain('description_md')
+  })
+
+  it('选项规则：数量/key 格式/唯一/文本/答案命中', () => {
+    expect(validateChallenge(basic({}, { options: [{ key: 'A', text: 'a' }] })).join('\n')).toContain('2-26')
+    expect(validateChallenge(basic({}, { options: [{ key: 'a', text: 'a' }, { key: 'B', text: 'b' }] })).join('\n')).toContain('key')
+    expect(validateChallenge(basic({}, { options: [{ key: 'A', text: 'a' }, { key: 'A', text: 'b' }] })).join('\n')).toContain('重复')
+    expect(validateChallenge(basic({}, { options: [{ key: 'A', text: '' }, { key: 'B', text: 'b' }] })).join('\n')).toContain('text')
+    expect(validateChallenge(basic({}, { answer: 'Z' })).join('\n')).toContain('不在选项中')
+  })
+
+  it('多选答案：非空数组、元素命中、无重复', () => {
+    expect(validateChallenge(basic({}, { type: 'multiple', answer: [] })).join('\n')).toContain('非空')
+    expect(validateChallenge(basic({}, { type: 'multiple', answer: ['A', 'Z'] })).join('\n')).toContain('不是已声明')
+    expect(validateChallenge(basic({}, { type: 'multiple', answer: ['A', 'A'] })).join('\n')).toContain('重复')
+    expect(validateChallenge(basic({}, { type: 'multiple', answer: ['A', 'C'] }))).toEqual([])
+  })
+
+  it('判断题：不允许 options，答案必须为布尔值', () => {
+    const tf = SAMPLE_BASIC_QUESTIONS_JSON[2]
+    expect(validateChallenge({ ...tf, question: { ...tf.question!, options: [{ key: 'A', text: 'a' }] } }).join('\n')).toContain('不允许选项')
+    expect(validateChallenge({ ...tf, question: { ...tf.question!, answer: 'true' } }).join('\n')).toContain('true 或 false')
+  })
+
+  it('填空题：不允许 options，答案非空，正则必须可编译', () => {
+    const fill = SAMPLE_BASIC_QUESTIONS_JSON[3]
+    expect(validateChallenge({ ...fill, question: { ...fill.question!, options: [{ key: 'A', text: 'a' }] } }).join('\n')).toContain('不允许选项')
+    expect(validateChallenge({ ...fill, question: { ...fill.question!, answer: ['  '] } }).join('\n')).toContain('不能为空')
+    expect(
+      validateChallenge({
+        ...fill,
+        question: { ...fill.question!, answer: ['[unclosed'], match: { regex: true } },
+      }).join('\n'),
+    ).toContain('正则无法编译')
   })
 })
 

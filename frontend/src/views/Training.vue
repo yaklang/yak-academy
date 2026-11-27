@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm']
+const banks: ChallengeBank[] = ['tutorial', 'ctf', 'acm', 'basic']
 const activeBank = ref<ChallengeBank>(banks.includes(route.query.bank as ChallengeBank) ? route.query.bank as ChallengeBank : 'tutorial')
 
 const items = ref<TrainingItem[]>([])
@@ -37,6 +37,7 @@ const emptyHint: Record<ChallengeBank, string> = {
   tutorial: '暂无教程题目',
   ctf: '暂无 CTF 题目',
   acm: '暂无 ACM 题目',
+  basic: '暂无基础题',
 }
 
 function categoryLabel(category: string) {
@@ -83,10 +84,20 @@ const solvedCount = computed(() => items.value.filter((item) => item.solved).len
 const envCount = computed(() => items.value.filter((item) => item.has_env).length)
 const fileCount = computed(() => total.value - envCount.value)
 const tutorialCount = computed(() => items.value.filter((item) => item.tutorial_title).length)
+// 基础题没有容器/附件维度，指标改用平均分值（避免「附件题 = 全部」的误导）。
+const averageScore = computed(() => {
+  if (!items.value.length) return 0
+  return Math.round(items.value.reduce((sum, item) => sum + item.score, 0) / items.value.length)
+})
 
 const base = computed(() => (route.path.startsWith('/admin') ? '/admin' : ''))
 const isAdmin = computed(() => auth.user?.global_role === 'admin')
 const emptyDescription = computed(() => {
+  if (activeBank.value === 'basic') {
+    return isAdmin.value
+      ? '在「题目管理」→「基础题」上传单选/多选/判断/填空题后即可查看。'
+      : '基础题由管理员上传后会自动出现在这里，支持单选、多选、判断与填空。'
+  }
   if (isAdmin.value) {
     return activeBank.value === 'tutorial'
       ? '在「题目管理」一键导入内置训练后即可查看。'
@@ -166,11 +177,14 @@ onMounted(load)
     </template>
   </PageHeader>
 
-  <MetricStrip v-if="!loading && total > 0" :columns="4">
+  <MetricStrip v-if="!loading && total > 0" :columns="activeBank === 'basic' ? 3 : 4">
     <StatCard label="题目总数" :value="total" />
     <StatCard label="已通关" :value="solvedCount" tone="success" />
-    <StatCard label="容器题" :value="envCount" />
-    <StatCard label="附件题" :value="fileCount" />
+    <StatCard v-if="activeBank === 'basic'" label="平均分值" :value="averageScore" />
+    <template v-else>
+      <StatCard label="容器题" :value="envCount" />
+      <StatCard label="附件题" :value="fileCount" />
+    </template>
   </MetricStrip>
 
   <PageTabs
@@ -233,6 +247,7 @@ onMounted(load)
         <template #default="{ row }">
           <span class="challenge-title">{{ row.title }}</span>
           <span v-if="row.tutorial_title" class="challenge-tutorial">配套教程：{{ row.tutorial_title }}</span>
+          <span v-if="row.bank === 'basic'" class="challenge-builtin">客观题</span>
           <span v-if="row.is_builtin" class="challenge-builtin">内置</span>
         </template>
       </UiTableColumn>
